@@ -84,3 +84,8 @@ tagging:
   threshold: 0.35
   max_tags: 30
   fail_ingestion_on_error: false
+  video:
+    enabled: true
+    frame_count: 5
+    merge_min_frames: 2
+    merge_high_confidence: 0.75

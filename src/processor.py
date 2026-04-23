@@ -288,9 +288,6 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
                 f.write(md_content)
 
 
-        conn.commit()
-
-
         source_url = metadata.get('source_url', '')
         index_data = {
             "file_hash": file_hash,
@@ -301,14 +298,12 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
             "visual_embedding": visual_embedding
         }
 
-
-        if sync_index:
-            search_manager.update_indexes(**index_data)
-
         try:
             tag_result = tag_media(vault_path, item_hash=file_hash, config=config)
             if tag_result.status != "ok":
                 log_system("WARNING", "Tagging enrichment did not complete", hash=file_hash, status=tag_result.status, error=tag_result.error)
+                if config.get('tagging', {}).get('fail_ingestion_on_error', False):
+                    raise RuntimeError(tag_result.error or f"tagging ended with status {tag_result.status}")
             else:
                 md_content = generate_markdown(conn, file_hash, asset_rel_path, title=title)
                 if md_content:
@@ -317,6 +312,14 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
                         f.write(md_content)
         except Exception as tag_exc:
             log_system("WARNING", "Tagging enrichment crashed", hash=file_hash, error=str(tag_exc))
+            if config.get('tagging', {}).get('fail_ingestion_on_error', False):
+                raise
+
+        conn.commit()
+
+
+        if sync_index:
+            search_manager.update_indexes(**index_data)
 
         if delete_source:
             filepath.unlink()

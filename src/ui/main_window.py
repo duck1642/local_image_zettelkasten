@@ -405,14 +405,11 @@ class MainWindow(QMainWindow):
         if not self.inspector.item_hash or not self.inspector.asset_path or not self.inspector.asset_path.exists():
             QMessageBox.information(self, "Tagging", "No local asset is selected.")
             return
-        if self.inspector.mime_type.startswith("video/"):
-            QMessageBox.information(self, "Tagging", "The current GUI tag action supports images only.")
-            return
         self.tag_worker = TagWorker(self.inspector.asset_path, self.inspector.item_hash, get_config())
         self.tag_worker.completed.connect(self.tagging_done)
         self.tag_worker.failed.connect(self.tagging_failed)
         self.inspector.set_tagging_busy(True)
-        self.status.showMessage("Tagging selected image...")
+        self.status.showMessage("Tagging selected media...")
         self.tag_worker.start()
         log_ui("INFO", "Qt tagging command started", hash=self.inspector.item_hash, path=str(self.inspector.asset_path))
 

@@ -1,6 +1,6 @@
 import csv
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -8,6 +8,7 @@ from typing import Any
 import numpy as np
 from PIL import Image
 
+from fingerprint import extract_sampled_video_frames
 from logs.logger import log_system
 from utils import MODELS_DIR, TOPICS_DIR, calculate_file_hash, get_config
 from validators import get_mime_type
@@ -27,6 +28,9 @@ class TagResult:
     device: str = ""
     max_tags: int = 0
     error: str = ""
+    media_type: str = "image"
+    sampled_frames: list[dict[str, Any]] = field(default_factory=list)
+    frame_count: int = 0
 
     @property
     def item_hash(self) -> str:
@@ -44,6 +48,10 @@ def tag_media(media_path: str | Path, item_hash: str = None, config: dict = None
     device = tag_config.get("device", "auto")
     threshold = float(tag_config.get("threshold", 0.35))
     max_tags = int(tag_config.get("max_tags", 30))
+    video_config = tag_config.get("video", {})
+    video_frame_count = int(video_config.get("frame_count", 5))
+    merge_min_frames = int(video_config.get("merge_min_frames", 2))
+    merge_high_confidence = float(video_config.get("merge_high_confidence", 0.75))
     if not item_hash and media_path.exists():
         item_hash = calculate_file_hash(media_path)
     item_hash = item_hash or ""
@@ -59,8 +67,13 @@ def tag_media(media_path: str | Path, item_hash: str = None, config: dict = None
         return result
 
     mime_type = get_mime_type(media_path) or ""
-    if not mime_type.startswith("image/"):
-        result = _result(item_hash, media_path, model_repo, device, "", threshold, max_tags, "skipped", error=f"unsupported media type: {mime_type or 'unknown'}")
+    media_type = "video" if mime_type.startswith("video/") else "image" if mime_type.startswith("image/") else "unknown"
+    if media_type == "video" and not video_config.get("enabled", True):
+        result = _result(item_hash, media_path, model_repo, device, "", threshold, max_tags, "skipped", error="video tagging disabled", media_type="video")
+        _write_result(result)
+        return result
+    if media_type == "unknown":
+        result = _result(item_hash, media_path, model_repo, device, "", threshold, max_tags, "skipped", error=f"unsupported media type: {mime_type or 'unknown'}", media_type="unknown")
         _write_result(result)
         return result
 
@@ -74,24 +87,44 @@ def tag_media(media_path: str | Path, item_hash: str = None, config: dict = None
         session = ort.InferenceSession(str(model_path), providers=providers)
         input_meta = session.get_inputs()[0]
         output_meta = session.get_outputs()[0]
-        image_array = _prepare_image(media_path, input_meta.shape)
-        predictions = session.run([output_meta.name], {input_meta.name: image_array})[0][0].astype(float)
         provider = session.get_providers()[0] if session.get_providers() else ""
-        rating, character_tags, tags = _tags_from_predictions(labels, predictions, threshold, max_tags)
+        if media_type == "video":
+            samples = extract_sampled_video_frames(media_path, video_frame_count)
+            if not samples:
+                result = _result(item_hash, media_path, model_repo, device, provider, threshold, max_tags, "failed", error="could not extract video frames", media_type="video")
+                _write_result(result)
+                return result
+            sampled_frames = []
+            for timestamp, image in samples:
+                rating, character_tags, tags = _predict_image_tags(session, input_meta, output_meta, labels, image, threshold, max_tags)
+                sampled_frames.append({
+                    "timestamp": round(float(timestamp), 3),
+                    "rating": rating,
+                    "character_tags": character_tags,
+                    "tags": tags,
+                })
+            rating, character_tags, tags = _merge_frame_tags(sampled_frames, max_tags, merge_min_frames, merge_high_confidence)
+            result = _result(item_hash, media_path, model_repo, device, provider, threshold, max_tags, "ok", rating, character_tags, tags, provider_warning, "video", sampled_frames, len(sampled_frames))
+            _write_result(result)
+            log_system("INFO", "WD video tagger completed", hash=item_hash, path=str(media_path), frame_count=len(sampled_frames), tag_count=len(tags), provider=provider)
+            return result
+        image = Image.open(media_path)
+        image.seek(0)
+        rating, character_tags, tags = _predict_image_tags(session, input_meta, output_meta, labels, image, threshold, max_tags)
         status = "ok"
         error = provider_warning
-        result = _result(item_hash, media_path, model_repo, device, provider, threshold, max_tags, status, rating, character_tags, tags, error)
+        result = _result(item_hash, media_path, model_repo, device, provider, threshold, max_tags, status, rating, character_tags, tags, error, "image")
         _write_result(result)
         log_system("INFO", "WD tagger completed", hash=item_hash, path=str(media_path), tag_count=len(tags), provider=provider)
         return result
     except Exception as exc:
-        result = _result(item_hash, media_path, model_repo, device, "", threshold, max_tags, "failed", error=str(exc))
+        result = _result(item_hash, media_path, model_repo, device, "", threshold, max_tags, "failed", error=str(exc), media_type=media_type)
         _write_result(result)
         log_system("WARNING", "WD tagger failed", hash=item_hash, path=str(media_path), error=str(exc))
         return result
 
 
-def _result(item_hash: str, media_path: Path, model_repo: str, device: str, provider: str, threshold: float, max_tags: int, status: str, rating=None, character_tags=None, tags=None, error: str = "") -> TagResult:
+def _result(item_hash: str, media_path: Path, model_repo: str, device: str, provider: str, threshold: float, max_tags: int, status: str, rating=None, character_tags=None, tags=None, error: str = "", media_type: str = "image", sampled_frames=None, frame_count: int = 0) -> TagResult:
     return TagResult(
         hash=item_hash,
         status=status,
@@ -105,6 +138,9 @@ def _result(item_hash: str, media_path: Path, model_repo: str, device: str, prov
         device=device,
         max_tags=max_tags,
         error=error,
+        media_type=media_type,
+        sampled_frames=sampled_frames or [],
+        frame_count=frame_count,
     )
 
 
@@ -155,11 +191,21 @@ def _providers_for_device(device: str, ort):
     return ["CPUExecutionProvider"], ""
 
 
+def _predict_image_tags(session, input_meta, output_meta, labels: list[dict[str, str]], image: Image.Image, threshold: float, max_tags: int):
+    image_array = _prepare_pil_image(image, input_meta.shape)
+    predictions = session.run([output_meta.name], {input_meta.name: image_array})[0][0].astype(float)
+    return _tags_from_predictions(labels, predictions, threshold, max_tags)
+
+
 def _prepare_image(image_path: Path, input_shape) -> np.ndarray:
-    target_size = _target_size(input_shape)
-    channel_first = len(input_shape) == 4 and input_shape[1] == 3
     image = Image.open(image_path)
     image.seek(0)
+    return _prepare_pil_image(image, input_shape)
+
+
+def _prepare_pil_image(image: Image.Image, input_shape) -> np.ndarray:
+    target_size = _target_size(input_shape)
+    channel_first = len(input_shape) == 4 and input_shape[1] == 3
     image = image.convert("RGBA")
     canvas = Image.new("RGBA", image.size, (255, 255, 255, 255))
     canvas.alpha_composite(image)
@@ -207,6 +253,50 @@ def _tags_from_predictions(labels: list[dict[str, str]], predictions: np.ndarray
     general.sort(key=lambda tag: tag["score"], reverse=True)
     characters.sort(key=lambda tag: tag["score"], reverse=True)
     return rating, characters[:max_tags], general[:max_tags]
+
+
+def _merge_frame_tags(sampled_frames: list[dict[str, Any]], max_tags: int, merge_min_frames: int, merge_high_confidence: float):
+    rating = None
+    for frame in sampled_frames:
+        frame_rating = frame.get("rating")
+        if frame_rating and (rating is None or frame_rating.get("score", 0) > rating.get("score", 0)):
+            rating = frame_rating
+    characters = _merge_tag_group(sampled_frames, "character_tags", max_tags, merge_min_frames, merge_high_confidence)
+    tags = _merge_tag_group(sampled_frames, "tags", max_tags, merge_min_frames, merge_high_confidence)
+    return rating, characters, tags
+
+
+def _merge_tag_group(sampled_frames: list[dict[str, Any]], key: str, max_tags: int, merge_min_frames: int, merge_high_confidence: float):
+    merged = {}
+    for frame in sampled_frames:
+        seen = set()
+        for tag in frame.get(key) or []:
+            name = tag.get("name") or tag.get("display_name") or ""
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            item = merged.setdefault(name, {
+                "name": tag.get("name", name),
+                "display_name": tag.get("display_name") or str(name).replace("_", " "),
+                "scores": [],
+                "frame_count": 0,
+            })
+            item["scores"].append(float(tag.get("score", 0)))
+            item["frame_count"] += 1
+    results = []
+    for item in merged.values():
+        best_score = max(item["scores"]) if item["scores"] else 0.0
+        if item["frame_count"] < merge_min_frames and best_score < merge_high_confidence:
+            continue
+        avg_score = sum(item["scores"]) / len(item["scores"])
+        results.append({
+            "name": item["name"],
+            "display_name": item["display_name"],
+            "score": round(float(avg_score), 6),
+            "frame_count": item["frame_count"],
+        })
+    results.sort(key=lambda tag: (tag["frame_count"], tag["score"]), reverse=True)
+    return results[:max_tags]
 
 
 def load_tag_cache(item_hash: str) -> dict:

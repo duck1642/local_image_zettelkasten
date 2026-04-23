@@ -211,7 +211,7 @@ class InspectorView(QFrame):
         wd_layout.addWidget(self.tags_wrap)
         wd_layout.addWidget(self.tags_empty)
 
-        self.tag_button = QPushButton("Tag Image")
+        self.tag_button = QPushButton("Tag Media")
         self.tag_button.clicked.connect(self.tag_requested.emit)
         self.tag_button.setEnabled(False)
         self.save_button = QPushButton("Save Changes")
@@ -461,12 +461,12 @@ class InspectorView(QFrame):
         self.refresh_empty_states()
 
     def update_tag_button(self):
-        enabled = bool(self.item_hash and self.asset_path and self.asset_path.exists() and not self.mime_type.startswith("video/"))
+        enabled = bool(self.item_hash and self.asset_path and self.asset_path.exists())
         self.tag_button.setEnabled(enabled)
 
     def set_tagging_busy(self, busy: bool):
-        self.tag_button.setEnabled(not busy and bool(self.item_hash and self.asset_path and self.asset_path.exists() and not self.mime_type.startswith("video/")))
-        self.tag_button.setText("Tagging..." if busy else "Tag Image")
+        self.tag_button.setEnabled(not busy and bool(self.item_hash and self.asset_path and self.asset_path.exists()))
+        self.tag_button.setText("Tagging..." if busy else "Tag Media")
 
     def load_tag_suggestions(self, item_hash: str):
         data = load_tag_cache(item_hash)

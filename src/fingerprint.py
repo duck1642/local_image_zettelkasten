@@ -1,7 +1,10 @@
 
-import subprocess
 import json
+import subprocess
+from io import BytesIO
 from pathlib import Path
+
+from PIL import Image
 
 
 _model = None
@@ -64,11 +67,9 @@ def get_audio_fingerprint(video_path: Path) -> bytes:
     except Exception:
         return b''
 
-def get_visual_embedding(video_path: Path) -> bytes:
+def get_video_duration(video_path: Path) -> float:
 
     try:
-
-
         probe = subprocess.run(
             ['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', str(video_path)],
             capture_output=True,
@@ -79,29 +80,53 @@ def get_visual_embedding(video_path: Path) -> bytes:
             from logs.logger import log_system
             log_system("WARNING", "ffprobe failed - possibly corrupt or unsupported video",
                        file=str(video_path.name), stderr=probe.stderr.strip()[:200])
-            return b''
+            return 0.0
         duration_str = probe.stdout.strip()
-        duration = float(duration_str) if duration_str and duration_str != 'N/A' else 1.0
+        return float(duration_str) if duration_str and duration_str != 'N/A' else 0.0
+    except Exception:
+        return 0.0
 
+def sample_video_timestamps(duration: float, frame_count: int = 5) -> list[float]:
 
-        points = [duration * 0.10, duration * 0.30, duration * 0.50, duration * 0.70, duration * 0.90]
+    if duration <= 0:
+        return []
+    frame_count = max(1, int(frame_count or 5))
+    if frame_count == 5:
+        ratios = [0.10, 0.30, 0.50, 0.70, 0.90]
+    else:
+        step = 0.80 / max(1, frame_count - 1)
+        ratios = [0.10 + (step * index) for index in range(frame_count)]
+    return [max(0.0, min(duration, duration * ratio)) for ratio in ratios]
+
+def extract_video_frame(video_path: Path, timestamp: float) -> Image.Image:
+
+    frame_cmd = [
+        'ffmpeg', '-y', '-ss', f"{timestamp:.3f}", '-i', str(video_path),
+        '-frames:v', '1', '-f', 'image2pipe', '-vcodec', 'png', '-'
+    ]
+    frame_proc = subprocess.run(frame_cmd, capture_output=True, check=True)
+    return Image.open(BytesIO(frame_proc.stdout)).convert('RGB')
+
+def extract_sampled_video_frames(video_path: Path, frame_count: int = 5) -> list[tuple[float, Image.Image]]:
+
+    duration = get_video_duration(video_path)
+    frames = []
+    for timestamp in sample_video_timestamps(duration, frame_count):
+        frames.append((timestamp, extract_video_frame(video_path, timestamp)))
+    return frames
+
+def get_visual_embedding(video_path: Path) -> bytes:
+
+    try:
         model = get_model()
         vectors = []
 
-        from io import BytesIO
         import numpy as np
-        from PIL import Image
-        for ts in points:
-
-            frame_cmd = [
-                'ffmpeg', '-y', '-ss', f"{ts:.3f}", '-i', str(video_path),
-                '-frames:v', '1', '-f', 'image2pipe', '-vcodec', 'png', '-'
-            ]
-            frame_proc = subprocess.run(frame_cmd, capture_output=True, check=True)
-
-            img = Image.open(BytesIO(frame_proc.stdout)).convert('RGB')
+        for _, img in extract_sampled_video_frames(video_path, 5):
             vectors.append(model.encode(img))
 
+        if not vectors:
+            return b''
 
         avg_vector = np.mean(vectors, axis=0)
 
