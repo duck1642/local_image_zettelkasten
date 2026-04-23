@@ -1,0 +1,57 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "local-image-zettelkasten"
+version = "0.1.0"
+description = "Local image and media zettelkasten ingestion, deduplication, and PySide6 UI."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "gallery-dl",
+    "imagehash",
+    "numpy",
+    "pillow",
+    "playwright",
+    "PySide6",
+    "pyyaml",
+    "sentence-transformers",
+    "torch",
+    "tqdm",
+    "watchdog",
+    "yt-dlp",
+]
+
+[project.optional-dependencies]
+windows = [
+    "python-magic-bin",
+]
+unix = [
+    "python-magic",
+]
+
+[project.scripts]
+liz = "core:main"
+liz-gui = "ui.app:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+py-modules = [
+    "core",
+    "external_ingestion",
+    "fingerprint",
+    "md_generator",
+    "processor",
+    "utils",
+    "validators",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["db", "downloaders", "logs", "scripts", "ui", "ui.views"]
+exclude = ["backups", "program", "tools", "tests", "data", "secrets"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
