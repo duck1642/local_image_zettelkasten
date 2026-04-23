@@ -27,6 +27,9 @@ class SettingsView(QWidget):
         self.tagging_device = QComboBox()
         self.tagging_device.addItems(["auto", "cpu", "cuda"])
         self.tagging_device.setCurrentText(tagging.get("device", "auto"))
+        self.tagging_display_source = QComboBox()
+        self.tagging_display_source.addItems(["yaml", "json"])
+        self.tagging_display_source.setCurrentText(tagging.get("display_source", "yaml"))
         self.tagging_threshold = QDoubleSpinBox()
         self.tagging_threshold.setRange(0.0, 1.0)
         self.tagging_threshold.setDecimals(2)
@@ -47,6 +50,7 @@ class SettingsView(QWidget):
         form.addRow("", self.tagging_enabled)
         form.addRow("Tag Model Repo", self.tagging_model_repo)
         form.addRow("Tag Device", self.tagging_device)
+        form.addRow("Tag Display Source", self.tagging_display_source)
         form.addRow("Tag Threshold", self.tagging_threshold)
         form.addRow("Tag Max Tags", self.tagging_max_tags)
         form.addRow("", self.fail_ingestion_on_error)
@@ -76,14 +80,17 @@ class SettingsView(QWidget):
             "platform": self.platform_prefix.text(),
         }
         data["processing"]["flatten_transparency"] = self.flatten_transparency.isChecked()
-        data["tagging"] = {
+        tagging = data.get("tagging", {})
+        tagging.update({
             "enabled": self.tagging_enabled.isChecked(),
             "model_repo": self.tagging_model_repo.text().strip() or "SmilingWolf/wd-vit-tagger-v3",
             "device": self.tagging_device.currentText(),
+            "display_source": self.tagging_display_source.currentText(),
             "threshold": round(float(self.tagging_threshold.value()), 2),
             "max_tags": int(self.tagging_max_tags.value()),
             "fail_ingestion_on_error": self.fail_ingestion_on_error.isChecked(),
-        }
+        })
+        data["tagging"] = tagging
         CONFIG_PATH.write_text(yaml.dump(data, default_flow_style=False, sort_keys=False, allow_unicode=True), encoding="utf-8")
         log_ui("INFO", "Qt settings saved")
         self.saved.emit()

@@ -6,12 +6,12 @@ from PySide6.QtWidgets import QApplication, QFrame, QGridLayout, QHBoxLayout, QL
 
 from db.sqlite_operator import init_database
 from logs.logger import log_ui
-from md_generator import generate_markdown, load_note_topics
+from md_generator import generate_markdown, load_note_topics, load_note_wd_tags
 from tagging import load_tag_cache
 from ui.flow_layout import FlowLayout
 from ui.thumbnail_cache import asset_path_for, preview_pixmap
 from ui.video_widgets import VideoPlayerWidget
-from utils import NOTES_DIR
+from utils import NOTES_DIR, get_config
 
 
 class InspectorView(QFrame):
@@ -269,7 +269,7 @@ class InspectorView(QFrame):
         self.populate_flow(self.tags_flow, [], "suggest")
         self.refresh_empty_states()
         self.tag_button.setEnabled(False)
-        self.tag_button.setText("Tag Image")
+        self.tag_button.setText("Tag Media")
 
     def load_item(self, item_hash: str):
         conn = init_database()
@@ -469,11 +469,13 @@ class InspectorView(QFrame):
         self.tag_button.setText("Tagging..." if busy else "Tag Media")
 
     def load_tag_suggestions(self, item_hash: str):
-        data = load_tag_cache(item_hash)
+        display_source = get_config().get("tagging", {}).get("display_source", "yaml")
+        data = load_note_wd_tags(item_hash) if display_source == "yaml" else load_tag_cache(item_hash)
         log_ui(
             "INFO",
             "Qt tag suggestions load start",
             hash=item_hash,
+            source=display_source,
             cache_status=(data or {}).get("status", "missing"),
             rating_count=1 if (data or {}).get("rating") else 0,
             character_count=len((data or {}).get("character_tags") or []),

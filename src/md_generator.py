@@ -4,7 +4,7 @@ import yaml
 from datetime import datetime
 
 from tagging import wd_frontmatter_fields
-from utils import NOTES_DIR
+from utils import existing_note_path_for
 
 def generate_markdown(conn: sqlite3.Connection, file_hash: str, asset_rel_path: str = None, title: str = "") -> str:
 
@@ -36,7 +36,7 @@ def generate_markdown(conn: sqlite3.Connection, file_hash: str, asset_rel_path: 
         date_added_str = str(date_added)
 
     shard_folder = file_hash[:2]
-    asset_link = asset_rel_path if asset_rel_path else f"../assets/{shard_folder}/{file_hash}{file_extension}"
+    asset_link = asset_rel_path if asset_rel_path else f"../../assets/{shard_folder}/{file_hash}{file_extension}"
 
     is_video = mime_type.startswith('video/')
     asset_type = "video" if is_video else "image"
@@ -77,7 +77,7 @@ def _topics_list(topics: str) -> list[str]:
 
 
 def load_note_frontmatter(file_hash: str) -> dict:
-    path = NOTES_DIR / f"{file_hash}.md"
+    path = existing_note_path_for(file_hash)
     if not path.exists():
         return {}
     try:
@@ -101,3 +101,17 @@ def load_note_topics(file_hash: str, fallback=None) -> list[str]:
     if "topics" in frontmatter:
         return _topics_list(frontmatter.get("topics"))
     return _topics_list(fallback)
+
+
+def load_note_wd_tags(file_hash: str) -> dict:
+    frontmatter = load_note_frontmatter(file_hash)
+    rating = str(frontmatter.get("wd_rating") or "").strip()
+    characters = _topics_list(frontmatter.get("wd_character_tags"))
+    tags = _topics_list(frontmatter.get("wd_tags"))
+    return {
+        "status": "ok" if rating or characters or tags else "missing",
+        "source": "yaml",
+        "rating": {"label": rating} if rating else {},
+        "character_tags": [{"name": tag} for tag in characters],
+        "tags": [{"name": tag} for tag in tags],
+    }

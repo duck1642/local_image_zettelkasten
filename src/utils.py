@@ -80,6 +80,21 @@ def setup_directories():
     ]:
         directory.mkdir(parents=True, exist_ok=True)
 
+def note_path_for(file_hash: str) -> Path:
+
+    return NOTES_DIR / str(file_hash)[:2] / f"{file_hash}.md"
+
+def legacy_note_path_for(file_hash: str) -> Path:
+
+    return NOTES_DIR / f"{file_hash}.md"
+
+def existing_note_path_for(file_hash: str) -> Path:
+
+    sharded_path = note_path_for(file_hash)
+    if sharded_path.exists():
+        return sharded_path
+    return legacy_note_path_for(file_hash)
+
 def validate_config_schema(config: dict):
 
     errors = []
@@ -165,9 +180,16 @@ def get_config() -> dict:
                 'enabled': True,
                 'model_repo': 'SmilingWolf/wd-vit-tagger-v3',
                 'device': 'auto',
+                'display_source': 'yaml',
                 'threshold': 0.35,
                 'max_tags': 30,
-                'fail_ingestion_on_error': False
+                'fail_ingestion_on_error': False,
+                'video': {
+                    'enabled': True,
+                    'frame_count': 5,
+                    'merge_min_frames': 2,
+                    'merge_high_confidence': 0.75
+                }
             }
         }
 

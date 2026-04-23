@@ -81,6 +81,7 @@ tagging:
   enabled: true
   model_repo: "SmilingWolf/wd-vit-tagger-v3"
   device: "auto"
+  display_source: "yaml"
   threshold: 0.35
   max_tags: 30
   fail_ingestion_on_error: false
