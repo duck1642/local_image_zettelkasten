@@ -60,6 +60,17 @@ QPushButton#TransportButton:hover {
 QPushButton#TransportButton:pressed {
     background: #30363d;
 }
+QPushButton#CarouselButton {
+    background: #f0f6fc;
+    border: none;
+    border-radius: 15px;
+    padding: 0;
+    color: #0d1117;
+    font-weight: 700;
+}
+QPushButton#CarouselButton:hover {
+    background: white;
+}
 QSlider::groove:horizontal {
     background: #8b949e;
     height: 3px;
@@ -88,6 +99,15 @@ QLabel#TitleLabel {
     color: #f0f6fc;
     font-weight: 700;
     font-size: 15px;
+}
+QLabel#OverlayBadge {
+    background: #21262d;
+    border: 1px solid #30363d;
+    border-radius: 4px;
+    color: #c9d1d9;
+    padding: 2px 6px;
+    font-size: 10px;
+    font-weight: 600;
 }
 QFrame#Panel {
     background: #161b22;

@@ -1,6 +1,6 @@
 from PySide6.QtCore import QEvent, QTimer, Qt, Signal
 from PySide6.QtGui import QCursor
-from PySide6.QtWidgets import QFrame, QGridLayout, QLabel, QScrollArea, QStackedLayout, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea, QStackedLayout, QVBoxLayout, QWidget
 
 from db.sqlite_operator import init_database
 from logs.logger import log_ui
@@ -44,10 +44,11 @@ class VaultTile(QFrame):
         self.media_stack.addWidget(self.image)
 
         missing = not self.asset_path.exists()
-        label_text = "MISSING" if missing else "VIDEO" if self.is_video else self.item_hash[:8]
+        label_text = "MISSING" if missing else self.item_hash[:12]
         self.label = QLabel(label_text)
         self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.label.setObjectName("MutedLabel")
+        self.label.setToolTip(self.item_hash)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
@@ -114,6 +115,110 @@ class VaultTile(QFrame):
             log_ui("INFO", "Qt vault hover video stopped", hash=self.item_hash)
 
 
+class VaultGroupTile(QFrame):
+    clicked = Signal(str)
+
+    def __init__(self, rows):
+        super().__init__()
+        self.rows = rows
+        self.current_index = 0
+        self.setObjectName("Panel")
+        self.setFixedSize(210, 230)
+        self.setMouseTracking(True)
+
+        self.image = QLabel()
+        self.image.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.image.setFixedHeight(180)
+
+        self.counter = QLabel()
+        self.counter.setObjectName("OverlayBadge")
+        self.counter.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self.prev_button = QPushButton("<")
+        self.prev_button.setObjectName("CarouselButton")
+        self.prev_button.setFixedSize(30, 30)
+        self.prev_button.clicked.connect(self.previous_item)
+        self.prev_button.hide()
+        self.next_button = QPushButton(">")
+        self.next_button.setObjectName("CarouselButton")
+        self.next_button.setFixedSize(30, 30)
+        self.next_button.clicked.connect(self.next_item)
+        self.next_button.hide()
+
+        overlay = QHBoxLayout()
+        overlay.setContentsMargins(8, 0, 8, 0)
+        overlay.addWidget(self.prev_button)
+        overlay.addStretch(1)
+        overlay.addWidget(self.next_button)
+
+        self.media_widget = QWidget()
+        self.media_stack = QStackedLayout(self.media_widget)
+        self.media_stack.setContentsMargins(0, 0, 0, 0)
+        self.media_stack.addWidget(self.image)
+
+        self.label = QLabel()
+        self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.label.setObjectName("MutedLabel")
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.addWidget(self.media_widget)
+        layout.addLayout(overlay)
+        layout.addWidget(self.counter)
+        layout.addWidget(self.label)
+
+        for widget in [self.image, self.media_widget, self.counter, self.prev_button, self.next_button, self.label]:
+            widget.installEventFilter(self)
+        self.update_item()
+
+    def current_row(self):
+        return self.rows[self.current_index]
+
+    def update_item(self):
+        item_hash, extension, mime_type, original_name, source_url = self.current_row()
+        self.image.setPixmap(pixmap_for_item(str(item_hash), extension or "", mime_type or "", 178))
+        self.counter.setText(f"{self.current_index + 1} / {len(self.rows)}")
+        self.label.setText(str(item_hash)[:12])
+        self.label.setToolTip(str(item_hash))
+
+    def previous_item(self):
+        self.current_index = (self.current_index - 1) % len(self.rows)
+        self.update_item()
+
+    def next_item(self):
+        self.current_index = (self.current_index + 1) % len(self.rows)
+        self.update_item()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit(str(self.current_row()[0]))
+        super().mousePressEvent(event)
+
+    def enterEvent(self, event):
+        self.prev_button.show()
+        self.next_button.show()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        QTimer.singleShot(80, self.hide_buttons_if_outside)
+        super().leaveEvent(event)
+
+    def eventFilter(self, watched, event):
+        if event.type() == QEvent.Type.Enter:
+            self.prev_button.show()
+            self.next_button.show()
+        elif event.type() == QEvent.Type.Leave:
+            QTimer.singleShot(80, self.hide_buttons_if_outside)
+        return super().eventFilter(watched, event)
+
+    def hide_buttons_if_outside(self):
+        local_pos = self.mapFromGlobal(QCursor.pos())
+        if self.rect().contains(local_pos):
+            return
+        self.prev_button.hide()
+        self.next_button.hide()
+
+
 class VaultView(QScrollArea):
     item_selected = Signal(str)
 
@@ -144,14 +249,26 @@ class VaultView(QScrollArea):
         cursor = conn.cursor()
         if field and value and field in allowed:
             cursor.execute(
-                f"SELECT hash, file_extension, mime_type, original_filename FROM items WHERE {field} LIKE ? ORDER BY date_added DESC LIMIT 300",
+                f"SELECT hash, file_extension, mime_type, original_filename, source_url FROM items WHERE {field} LIKE ? ORDER BY date_added DESC LIMIT 300",
                 (f"%{value}%",),
             )
         else:
-            cursor.execute("SELECT hash, file_extension, mime_type, original_filename FROM items ORDER BY date_added DESC LIMIT 300")
+            cursor.execute("SELECT hash, file_extension, mime_type, original_filename, source_url FROM items ORDER BY date_added DESC LIMIT 300")
         self.items = cursor.fetchall()
         conn.close()
         log_ui("INFO", "Qt vault widget grid loaded", item_count=len(self.items))
+
+    def display_groups(self):
+        grouped = {}
+        ordered = []
+        for row in self.items:
+            source_url = (row[4] or "").strip()
+            key = source_url if source_url else f"hash:{row[0]}"
+            if key not in grouped:
+                grouped[key] = []
+                ordered.append(key)
+            grouped[key].append(row)
+        return [grouped[key] for key in ordered]
 
     def render_items(self):
         while self.grid.count():
@@ -161,13 +278,17 @@ class VaultView(QScrollArea):
                 widget.deleteLater()
         self.tiles = []
         columns = self.column_count()
-        for index, row in enumerate(self.items):
-            item_hash, extension, mime_type, original_name = row
-            tile = VaultTile(str(item_hash), extension or "", mime_type or "", original_name or "")
+        groups = self.display_groups()
+        for index, rows in enumerate(groups):
+            if len(rows) > 1:
+                tile = VaultGroupTile(rows)
+            else:
+                item_hash, extension, mime_type, original_name, source_url = rows[0]
+                tile = VaultTile(str(item_hash), extension or "", mime_type or "", original_name or "")
             tile.clicked.connect(self.item_selected.emit)
             self.tiles.append(tile)
             self.grid.addWidget(tile, index // columns, index % columns)
-        self.grid.setRowStretch((len(self.items) + columns - 1) // columns, 1)
+        self.grid.setRowStretch((len(groups) + columns - 1) // columns, 1)
         log_ui("INFO", "Qt vault widget grid rendered", item_count=len(self.items), tile_count=len(self.tiles), columns=columns)
 
     def resizeEvent(self, event):
