@@ -67,7 +67,7 @@ def generate_markdown(conn: sqlite3.Connection, file_hash: str, asset_rel_path: 
 """
 
 
-def _topics_list(topics: str) -> list[str]:
+def normalize_topic_list(topics) -> list[str]:
     if not topics:
         return []
     if isinstance(topics, list):
@@ -99,15 +99,15 @@ def load_note_frontmatter(file_hash: str) -> dict:
 def load_note_topics(file_hash: str, fallback=None) -> list[str]:
     frontmatter = load_note_frontmatter(file_hash)
     if "topics" in frontmatter:
-        return _topics_list(frontmatter.get("topics"))
-    return _topics_list(fallback)
+        return normalize_topic_list(frontmatter.get("topics"))
+    return normalize_topic_list(fallback)
 
 
 def load_note_wd_tags(file_hash: str) -> dict:
     frontmatter = load_note_frontmatter(file_hash)
     rating = str(frontmatter.get("wd_rating") or "").strip()
-    characters = _topics_list(frontmatter.get("wd_character_tags"))
-    tags = _topics_list(frontmatter.get("wd_tags"))
+    characters = normalize_topic_list(frontmatter.get("wd_character_tags"))
+    tags = normalize_topic_list(frontmatter.get("wd_tags"))
     return {
         "status": "ok" if rating or characters or tags else "missing",
         "source": "yaml",
