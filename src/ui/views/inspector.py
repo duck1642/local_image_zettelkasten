@@ -1,10 +1,11 @@
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QSizePolicy, QSpacerItem, QStackedLayout, QTextEdit, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QApplication, QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QSizePolicy, QSpacerItem, QStackedLayout, QTextEdit, QVBoxLayout, QWidget
 
 from db.sqlite_operator import init_database
 from logs.logger import log_ui
 from md_generator import generate_markdown
 from PySide6.QtGui import QPixmap
+from tagging import load_tag_cache
 
 from ui.thumbnail_cache import asset_path_for, preview_pixmap
 from ui.video_widgets import VideoPlayerWidget
@@ -13,6 +14,7 @@ from utils import NOTES_DIR
 
 class InspectorView(QFrame):
     saved = Signal()
+    tag_requested = Signal()
     wide_requested = Signal()
     fullscreen_requested = Signal()
 
@@ -62,6 +64,17 @@ class InspectorView(QFrame):
         self.hash_label = QLabel("No selection")
         self.hash_label.setWordWrap(True)
         self.hash_label.setObjectName("MutedLabel")
+        self.copy_hash_button = QPushButton("Copy")
+        self.copy_hash_button.setObjectName("TransportButton")
+        self.copy_hash_button.setFixedHeight(30)
+        self.copy_hash_button.setToolTip("Copy hash")
+        self.copy_hash_button.clicked.connect(self.copy_hash)
+        hash_layout = QHBoxLayout()
+        hash_layout.setContentsMargins(0, 0, 0, 0)
+        hash_layout.addWidget(self.hash_label, 1)
+        hash_layout.addWidget(self.copy_hash_button)
+        self.hash_row = QWidget()
+        self.hash_row.setLayout(hash_layout)
         self.group_counter = QLabel("")
         self.group_counter.setObjectName("MutedLabel")
         self.group_counter.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -85,6 +98,15 @@ class InspectorView(QFrame):
         self.topics_input.setMaximumHeight(90)
         self.platform_label = QLabel("Platform: Unknown")
         self.platform_label.setObjectName("MutedLabel")
+        self.tag_suggestions_label = QLabel("Tag Suggestions")
+        self.tag_suggestions_label.setObjectName("MutedLabel")
+        self.tag_suggestions = QTextEdit()
+        self.tag_suggestions.setReadOnly(True)
+        self.tag_suggestions.setPlaceholderText("No tag suggestions")
+        self.tag_suggestions.setMaximumHeight(120)
+        self.tag_button = QPushButton("Tag Image")
+        self.tag_button.clicked.connect(self.tag_requested.emit)
+        self.tag_button.setEnabled(False)
 
         self.save_button = QPushButton("Save Changes")
         self.save_button.setObjectName("PrimaryButton")
@@ -97,11 +119,14 @@ class InspectorView(QFrame):
         layout.addWidget(self.media_widget)
         layout.addWidget(self.image_controls)
         layout.addWidget(self.group_nav)
-        layout.addWidget(self.hash_label)
+        layout.addWidget(self.hash_row)
         layout.addWidget(self.artist_input)
         layout.addWidget(self.url_input)
         layout.addWidget(self.topics_input)
         layout.addWidget(self.platform_label)
+        layout.addWidget(self.tag_suggestions_label)
+        layout.addWidget(self.tag_suggestions)
+        layout.addWidget(self.tag_button)
         layout.addWidget(self.save_button)
         self.bottom_spacer = QSpacerItem(0, 0, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding)
         layout.addItem(self.bottom_spacer)
@@ -118,12 +143,16 @@ class InspectorView(QFrame):
         self.media_stack.setCurrentWidget(self.preview)
         self.image_controls.setVisible(False)
         self.hash_label.setText("No selection")
+        self.copy_hash_button.setEnabled(False)
         self.group_counter.setText("")
         self.group_nav.setVisible(False)
         self.artist_input.clear()
         self.url_input.clear()
         self.topics_input.clear()
         self.platform_label.setText("Platform: Unknown")
+        self.tag_suggestions.clear()
+        self.tag_button.setEnabled(False)
+        self.tag_button.setText("Tag Image")
 
     def load_item(self, item_hash: str):
         conn = init_database()
@@ -179,10 +208,13 @@ class InspectorView(QFrame):
             self.media_stack.setCurrentWidget(self.preview)
             self.update_image_view_buttons()
         self.hash_label.setText(item_hash)
+        self.copy_hash_button.setEnabled(True)
         self.artist_input.setText(artist or "")
         self.url_input.setText(source_url or "")
         self.topics_input.setPlainText(topics or "")
         self.platform_label.setText(f"Platform: {platform or 'Unknown'}")
+        self.load_tag_suggestions(item_hash)
+        self.update_tag_button()
         grouped = len(self.group_rows) > 1
         self.group_nav.setVisible(grouped)
         self.group_counter.setText(f"{self.group_index + 1} / {len(self.group_rows)}" if grouped else "")
@@ -228,12 +260,15 @@ class InspectorView(QFrame):
         self.media_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding if focused else QSizePolicy.Policy.Fixed)
         for widget in [
             self.image_controls,
-            self.hash_label,
+            self.hash_row,
             self.group_nav,
             self.artist_input,
             self.url_input,
             self.topics_input,
             self.platform_label,
+            self.tag_suggestions_label,
+            self.tag_suggestions,
+            self.tag_button,
             self.save_button,
         ]:
             widget.setVisible(not focused)
@@ -265,6 +300,44 @@ class InspectorView(QFrame):
         self.image_wide_button.setText("X" if self.focus_mode == "wide" else "W")
         self.image_fullscreen_button.setText("X" if self.focus_mode == "fullscreen" else "F")
 
+    def copy_hash(self):
+        if not self.item_hash:
+            return
+        QApplication.clipboard().setText(self.item_hash)
+        log_ui("INFO", "Qt inspector copied hash", hash=self.item_hash)
+
+    def update_tag_button(self):
+        enabled = bool(self.item_hash and self.asset_path and self.asset_path.exists() and not self.mime_type.startswith("video/"))
+        self.tag_button.setEnabled(enabled)
+
+    def set_tagging_busy(self, busy: bool):
+        self.tag_button.setEnabled(not busy and bool(self.item_hash and self.asset_path and self.asset_path.exists() and not self.mime_type.startswith("video/")))
+        self.tag_button.setText("Tagging..." if busy else "Tag Image")
+
+    def load_tag_suggestions(self, item_hash: str):
+        data = load_tag_cache(item_hash)
+        if not data:
+            self.tag_suggestions.setPlainText("No tag suggestions")
+            return
+        status = data.get("status", "unknown")
+        provider = data.get("provider", "")
+        threshold = data.get("threshold", "")
+        rating = data.get("rating") or {}
+        character_tags = data.get("character_tags") or []
+        tags = data.get("tags") or []
+        if status != "ok":
+            error = data.get("error") or "No error text"
+            self.tag_suggestions.setPlainText(f"{status}: {error}")
+            return
+        lines = [f"{provider} | threshold {threshold}"]
+        if rating:
+            lines.append(f"{_score_text(rating)}  rating  {rating.get('label') or rating.get('display_name') or rating.get('name')}".strip())
+        for tag in character_tags[:30]:
+            lines.append(f"{_score_text(tag)}  character  {_display_tag(tag)}".strip())
+        for tag in tags[:30]:
+            lines.append(f"{_score_text(tag)}  general  {_display_tag(tag)}".strip())
+        self.tag_suggestions.setPlainText("\n".join(lines))
+
     def has_active_video(self) -> bool:
         return self.media_stack.currentWidget() is self.video_preview and self.asset_path is not None
 
@@ -291,3 +364,12 @@ class InspectorView(QFrame):
         conn.close()
         log_ui("INFO", "Qt inspector saved", hash=self.item_hash, group_count=len(target_hashes))
         self.saved.emit()
+
+
+def _display_tag(tag: dict) -> str:
+    return str(tag.get("display_name") or tag.get("name") or "").strip()
+
+
+def _score_text(tag: dict) -> str:
+    score = tag.get("score")
+    return f"{float(score):.3f}" if isinstance(score, int | float) else ""

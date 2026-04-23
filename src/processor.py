@@ -309,6 +309,12 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
             tag_result = tag_media(vault_path, item_hash=file_hash, config=config)
             if tag_result.status != "ok":
                 log_system("WARNING", "Tagging enrichment did not complete", hash=file_hash, status=tag_result.status, error=tag_result.error)
+            else:
+                md_content = generate_markdown(conn, file_hash, asset_rel_path, title=title)
+                if md_content:
+                    md_path = NOTES_DIR / f"{file_hash}.md"
+                    with open(md_path, 'w', encoding='utf-8') as f:
+                        f.write(md_content)
         except Exception as tag_exc:
             log_system("WARNING", "Tagging enrichment crashed", hash=file_hash, error=str(tag_exc))
 

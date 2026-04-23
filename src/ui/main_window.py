@@ -6,14 +6,16 @@ from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QLabel, QLineEdit, QMain
 from core import main as run_ingestion
 from db.sqlite_operator import init_database
 from logs.logger import log_ui
+from md_generator import generate_markdown
 from processor import process_file
+from tagging import tag_media
 from ui.views.ingestion import IngestionView
 from ui.views.inspector import InspectorView
 from ui.views.modals import MetadataDialog
 from ui.views.review import ReviewView
 from ui.views.settings import SettingsView
 from ui.views.vault import VaultView
-from utils import QUEUES_DIR, get_config
+from utils import NOTES_DIR, QUEUES_DIR, get_config
 
 
 class IngestionWorker(QThread):
@@ -28,6 +30,23 @@ class IngestionWorker(QThread):
             self.failed.emit(str(exc))
 
 
+class TagWorker(QThread):
+    completed = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, asset_path: Path, item_hash: str, config: dict):
+        super().__init__()
+        self.asset_path = Path(asset_path)
+        self.item_hash = item_hash
+        self.config = config
+
+    def run(self):
+        try:
+            self.completed.emit(tag_media(self.asset_path, item_hash=self.item_hash, config=self.config))
+        except Exception as exc:
+            self.failed.emit(str(exc))
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -35,6 +54,7 @@ class MainWindow(QMainWindow):
         self.config = get_config()
         self.prefixes = self.config.get("ui", {}).get("prefixes", {"command": ">", "platform": "@", "artist": "a:", "tag": "#"})
         self.worker = None
+        self.tag_worker = None
         self.video_mode = "normal"
 
         self.search_input = QLineEdit()
@@ -43,6 +63,8 @@ class MainWindow(QMainWindow):
         self.add_button = QPushButton("Add Files")
         self.add_button.setObjectName("PrimaryButton")
         self.add_button.clicked.connect(self.add_files)
+        self.refresh_button = QPushButton("Refresh")
+        self.refresh_button.clicked.connect(self.refresh_ui)
         self.vault_count_label = QLabel("Showing 0 items")
         self.vault_count_label.setObjectName("MutedLabel")
 
@@ -69,6 +91,7 @@ class MainWindow(QMainWindow):
 
         self.vault_view.item_selected.connect(self.handle_item_selected)
         self.inspector.saved.connect(self.refresh_vault)
+        self.inspector.tag_requested.connect(self.tag_selected_image)
         self.inspector.wide_requested.connect(self.toggle_video_wide)
         self.inspector.fullscreen_requested.connect(self.toggle_video_fullscreen)
         self.review_view.changed.connect(self.refresh_vault)
@@ -77,6 +100,7 @@ class MainWindow(QMainWindow):
         top_layout = QHBoxLayout()
         top_layout.addWidget(self.search_input, 1)
         top_layout.addWidget(self.add_button)
+        top_layout.addWidget(self.refresh_button)
         top_layout.addWidget(self.vault_count_label)
         workspace_layout = QVBoxLayout()
         workspace_layout.addLayout(top_layout)
@@ -150,6 +174,9 @@ class MainWindow(QMainWindow):
                 return
         if event.key() == Qt.Key.Key_Escape and self.video_mode != "normal":
             self.set_video_mode("normal")
+            return
+        if event.key() == Qt.Key.Key_F5:
+            self.refresh_ui()
             return
         super().keyPressEvent(event)
 
@@ -281,6 +308,67 @@ class MainWindow(QMainWindow):
     def refresh_vault(self):
         self.vault_view.refresh()
         self.update_stats()
+
+    def refresh_ui(self):
+        current_hash = self.inspector.item_hash
+        self.vault_view.refresh()
+        if current_hash:
+            conn = init_database()
+            exists = conn.cursor().execute("SELECT 1 FROM items WHERE hash = ?", (current_hash,)).fetchone()
+            conn.close()
+            if exists:
+                self.inspector.load_item(current_hash)
+            else:
+                self.inspector.clear()
+        self.update_stats()
+        self.status.showMessage("UI refreshed.")
+        log_ui("INFO", "Qt UI refreshed", hash=current_hash or "")
+
+    def tag_selected_image(self):
+        if self.tag_worker and self.tag_worker.isRunning():
+            QMessageBox.information(self, "Tagging", "Tagging is already running.")
+            return
+        if not self.inspector.item_hash or not self.inspector.asset_path or not self.inspector.asset_path.exists():
+            QMessageBox.information(self, "Tagging", "No local asset is selected.")
+            return
+        if self.inspector.mime_type.startswith("video/"):
+            QMessageBox.information(self, "Tagging", "The current GUI tag action supports images only.")
+            return
+        self.tag_worker = TagWorker(self.inspector.asset_path, self.inspector.item_hash, get_config())
+        self.tag_worker.completed.connect(self.tagging_done)
+        self.tag_worker.failed.connect(self.tagging_failed)
+        self.inspector.set_tagging_busy(True)
+        self.status.showMessage("Tagging selected image...")
+        self.tag_worker.start()
+        log_ui("INFO", "Qt tagging command started", hash=self.inspector.item_hash, path=str(self.inspector.asset_path))
+
+    def tagging_done(self, result):
+        self.inspector.set_tagging_busy(False)
+        if result.status == "ok":
+            self.rebuild_note(result.item_hash)
+            self.refresh_ui()
+            self.status.showMessage(f"Tagging complete: {result.item_hash}")
+        else:
+            self.refresh_ui()
+            QMessageBox.warning(self, "Tagging", result.error or f"Tagging ended with status: {result.status}")
+            self.status.showMessage(f"Tagging ended with status: {result.status}")
+        log_ui("INFO", "Qt tagging command finished", hash=result.item_hash, status=result.status, error=result.error)
+
+    def tagging_failed(self, message: str):
+        self.inspector.set_tagging_busy(False)
+        QMessageBox.critical(self, "Tagging Error", message)
+        self.status.showMessage("Tagging failed.")
+        log_ui("ERROR", "Qt tagging command failed", error=message)
+
+    def rebuild_note(self, item_hash: str):
+        conn = init_database()
+        try:
+            md_content = generate_markdown(conn, item_hash)
+        finally:
+            conn.close()
+        if md_content:
+            NOTES_DIR.mkdir(parents=True, exist_ok=True)
+            (NOTES_DIR / f"{item_hash}.md").write_text(md_content, encoding="utf-8")
 
     def reload_config(self):
         self.config = get_config()

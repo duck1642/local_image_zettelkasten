@@ -15,17 +15,22 @@ from validators import get_mime_type
 
 @dataclass
 class TagResult:
-    item_hash: str
-    asset_path: str
-    model_repo: str
-    device_requested: str
-    provider: str
-    threshold: float
-    max_tags: int
-    created_at: str
+    hash: str
     status: str
+    model: str
+    threshold: float
+    created_at: str
+    rating: dict[str, Any] | None
+    character_tags: list[dict[str, Any]]
     tags: list[dict[str, Any]]
+    provider: str = ""
+    device: str = ""
+    max_tags: int = 0
     error: str = ""
+
+    @property
+    def item_hash(self) -> str:
+        return self.hash
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -44,18 +49,18 @@ def tag_media(media_path: str | Path, item_hash: str = None, config: dict = None
     item_hash = item_hash or ""
 
     if not tag_config.get("enabled", True):
-        result = _result(item_hash, media_path, model_repo, device, "", threshold, max_tags, "skipped", [], "tagging disabled")
+        result = _result(item_hash, media_path, model_repo, device, "", threshold, max_tags, "skipped", error="tagging disabled")
         _write_result(result)
         return result
 
     if not media_path.exists():
-        result = _result(item_hash, media_path, model_repo, device, "", threshold, max_tags, "failed", [], "media path does not exist")
+        result = _result(item_hash, media_path, model_repo, device, "", threshold, max_tags, "failed", error="media path does not exist")
         _write_result(result)
         return result
 
     mime_type = get_mime_type(media_path) or ""
     if not mime_type.startswith("image/"):
-        result = _result(item_hash, media_path, model_repo, device, "", threshold, max_tags, "skipped", [], f"unsupported media type: {mime_type or 'unknown'}")
+        result = _result(item_hash, media_path, model_repo, device, "", threshold, max_tags, "skipped", error=f"unsupported media type: {mime_type or 'unknown'}")
         _write_result(result)
         return result
 
@@ -72,41 +77,42 @@ def tag_media(media_path: str | Path, item_hash: str = None, config: dict = None
         image_array = _prepare_image(media_path, input_meta.shape)
         predictions = session.run([output_meta.name], {input_meta.name: image_array})[0][0].astype(float)
         provider = session.get_providers()[0] if session.get_providers() else ""
-        tags = _tags_from_predictions(labels, predictions, threshold, max_tags)
+        rating, character_tags, tags = _tags_from_predictions(labels, predictions, threshold, max_tags)
         status = "ok"
         error = provider_warning
-        result = _result(item_hash, media_path, model_repo, device, provider, threshold, max_tags, status, tags, error)
+        result = _result(item_hash, media_path, model_repo, device, provider, threshold, max_tags, status, rating, character_tags, tags, error)
         _write_result(result)
         log_system("INFO", "WD tagger completed", hash=item_hash, path=str(media_path), tag_count=len(tags), provider=provider)
         return result
     except Exception as exc:
-        result = _result(item_hash, media_path, model_repo, device, "", threshold, max_tags, "failed", [], str(exc))
+        result = _result(item_hash, media_path, model_repo, device, "", threshold, max_tags, "failed", error=str(exc))
         _write_result(result)
         log_system("WARNING", "WD tagger failed", hash=item_hash, path=str(media_path), error=str(exc))
         return result
 
 
-def _result(item_hash: str, media_path: Path, model_repo: str, device: str, provider: str, threshold: float, max_tags: int, status: str, tags: list[dict[str, Any]], error: str = "") -> TagResult:
+def _result(item_hash: str, media_path: Path, model_repo: str, device: str, provider: str, threshold: float, max_tags: int, status: str, rating=None, character_tags=None, tags=None, error: str = "") -> TagResult:
     return TagResult(
-        item_hash=item_hash,
-        asset_path=str(media_path),
-        model_repo=model_repo,
-        device_requested=device,
-        provider=provider,
-        threshold=threshold,
-        max_tags=max_tags,
-        created_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        hash=item_hash,
         status=status,
-        tags=tags,
+        model=model_repo,
+        threshold=threshold,
+        created_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        rating=rating,
+        character_tags=character_tags or [],
+        tags=tags or [],
+        provider=provider,
+        device=device,
+        max_tags=max_tags,
         error=error,
     )
 
 
 def _write_result(result: TagResult):
-    if not result.item_hash:
+    if not result.hash:
         return
     TOPICS_DIR.mkdir(parents=True, exist_ok=True)
-    target = TOPICS_DIR / f"{result.item_hash}.json"
+    target = TOPICS_DIR / f"{result.hash}.json"
     target.write_text(json.dumps(result.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8")
 
 
@@ -178,9 +184,9 @@ def _target_size(input_shape) -> int:
     return 448
 
 
-def _tags_from_predictions(labels: list[dict[str, str]], predictions: np.ndarray, threshold: float, max_tags: int) -> list[dict[str, Any]]:
-    category_names = {"9": "rating", "0": "general", "4": "character"}
-    scored = []
+def _tags_from_predictions(labels: list[dict[str, str]], predictions: np.ndarray, threshold: float, max_tags: int):
+    general = []
+    characters = []
     rating = None
     for label, score in zip(labels, predictions):
         category = str(label.get("category", ""))
@@ -188,16 +194,80 @@ def _tags_from_predictions(labels: list[dict[str, str]], predictions: np.ndarray
             "name": label.get("name", ""),
             "display_name": label.get("name", "").replace("_", " "),
             "score": round(float(score), 6),
-            "category": category_names.get(category, category),
         }
         if category == "9":
             if rating is None or item["score"] > rating["score"]:
-                rating = item
+                rating = {"label": item["display_name"], "name": item["name"], "score": item["score"]}
             continue
         if score >= threshold:
-            scored.append(item)
-    scored.sort(key=lambda tag: tag["score"], reverse=True)
-    tags = scored[:max_tags]
-    if rating:
-        tags.insert(0, rating)
-    return tags
+            if category == "4":
+                characters.append(item)
+            else:
+                general.append(item)
+    general.sort(key=lambda tag: tag["score"], reverse=True)
+    characters.sort(key=lambda tag: tag["score"], reverse=True)
+    return rating, characters[:max_tags], general[:max_tags]
+
+
+def load_tag_cache(item_hash: str) -> dict:
+    path = TOPICS_DIR / f"{item_hash}.json"
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    if "hash" not in data and "item_hash" in data:
+        data = _legacy_cache_to_current(data)
+    return data
+
+
+def wd_frontmatter_fields(item_hash: str) -> dict:
+    data = load_tag_cache(item_hash)
+    if data.get("status") != "ok":
+        return {"wd_rating": "", "wd_character_tags": [], "wd_tags": []}
+    rating = data.get("rating") or {}
+    character_tags = data.get("character_tags") or []
+    tags = data.get("tags") or []
+    return {
+        "wd_rating": rating.get("label") or "",
+        "wd_character_tags": [_tag_name(tag) for tag in character_tags if _tag_name(tag)],
+        "wd_tags": [_tag_name(tag) for tag in tags if _tag_name(tag)],
+    }
+
+
+def _tag_name(tag: dict) -> str:
+    return str(tag.get("display_name") or tag.get("name") or "").strip()
+
+
+def _legacy_cache_to_current(data: dict) -> dict:
+    rating = None
+    characters = []
+    tags = []
+    for tag in data.get("tags") or []:
+        category = tag.get("category")
+        item = {
+            "name": tag.get("name", ""),
+            "display_name": tag.get("display_name") or str(tag.get("name", "")).replace("_", " "),
+            "score": tag.get("score", 0),
+        }
+        if category == "rating":
+            rating = {"label": item["display_name"], "name": item["name"], "score": item["score"]}
+        elif category == "character":
+            characters.append(item)
+        else:
+            tags.append(item)
+    return {
+        "hash": data.get("item_hash", ""),
+        "status": data.get("status", "unknown"),
+        "model": data.get("model_repo", ""),
+        "threshold": data.get("threshold", ""),
+        "created_at": data.get("created_at", ""),
+        "rating": rating,
+        "character_tags": characters,
+        "tags": tags,
+        "provider": data.get("provider", ""),
+        "device": data.get("device_requested", ""),
+        "max_tags": data.get("max_tags", 0),
+        "error": data.get("error", ""),
+    }

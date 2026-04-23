@@ -1,3 +1,3 @@
-from tagging.service import TagResult, tag_media
+from tagging.service import TagResult, load_tag_cache, tag_media, wd_frontmatter_fields
 
-__all__ = ["TagResult", "tag_media"]
+__all__ = ["TagResult", "load_tag_cache", "tag_media", "wd_frontmatter_fields"]

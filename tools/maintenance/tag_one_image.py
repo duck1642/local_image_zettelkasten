@@ -39,8 +39,12 @@ def main():
     print(f"provider: {result.provider or 'none'}")
     if result.error:
         print(f"error: {result.error}")
+    if result.rating:
+        print(f"{result.rating['score']:.4f} rating {result.rating['label']}")
+    for tag in result.character_tags[:20]:
+        print(f"{tag['score']:.4f} character {tag.get('display_name', tag['name'])}")
     for tag in result.tags[:20]:
-        print(f"{tag['score']:.4f} {tag['category']} {tag.get('display_name', tag['name'])}")
+        print(f"{tag['score']:.4f} general {tag.get('display_name', tag['name'])}")
     return 0 if result.status in {"ok", "skipped"} else 1
 
 

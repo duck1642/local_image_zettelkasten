@@ -3,6 +3,8 @@ import sqlite3
 import yaml
 from datetime import datetime
 
+from tagging import wd_frontmatter_fields
+
 def generate_markdown(conn: sqlite3.Connection, file_hash: str, asset_rel_path: str = None, title: str = "") -> str:
 
     cursor = conn.cursor()
@@ -49,9 +51,10 @@ def generate_markdown(conn: sqlite3.Connection, file_hash: str, asset_rel_path: 
         "platform": platform or "",
         "artist": source_artist or "",
         "phash": phash or "",
-        "topics": topics or "",
+        "topics": _topics_list(topics),
         "file_format": mime_type or ""
     }
+    frontmatter.update(wd_frontmatter_fields(file_hash))
 
 
     fm_str = yaml.dump(frontmatter, default_flow_style=False, sort_keys=False, allow_unicode=True)
@@ -61,3 +64,12 @@ def generate_markdown(conn: sqlite3.Connection, file_hash: str, asset_rel_path: 
 
 ![]({asset_link})
 """
+
+
+def _topics_list(topics: str) -> list[str]:
+    if not topics:
+        return []
+    if isinstance(topics, list):
+        return [str(topic).strip() for topic in topics if str(topic).strip()]
+    normalized = str(topics).replace("\r", "\n").replace(",", "\n")
+    return [topic.strip() for topic in normalized.split("\n") if topic.strip()]
