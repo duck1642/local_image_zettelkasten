@@ -149,8 +149,7 @@ def _parse_metadata(meta_json: list, original_url: str, download_url: str) -> di
             "source_url": original_url,
             "platform": platform,
             "artist": artist,
-            "title": "",
-            "topics": ""
+            "title": ""
         }
     }
 
@@ -191,8 +190,7 @@ def _minimal_download_info(url: str) -> dict:
             "source_url": original_url,
             "platform": platform,
             "artist": "Unknown",
-            "title": "",
-            "topics": ""
+            "title": ""
         }
     }
 

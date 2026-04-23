@@ -95,6 +95,7 @@ class MainWindow(QMainWindow):
         self.ingestion_view = IngestionView()
         self.settings_view = SettingsView()
         self.stack = QStackedWidget()
+        self.stack.setObjectName("AppSurface")
         self.stack.addWidget(self.vault_view)
         self.stack.addWidget(self.review_view)
         self.stack.addWidget(self.ingestion_view)
@@ -118,9 +119,11 @@ class MainWindow(QMainWindow):
         workspace_layout.addWidget(self.stack, 1)
 
         self.nav_widget = QWidget()
+        self.nav_widget.setObjectName("AppSurface")
         self.nav_widget.setFixedWidth(110)
         self.nav_widget.setLayout(nav_layout)
         self.workspace = QWidget()
+        self.workspace.setObjectName("AppSurface")
         self.workspace.setLayout(workspace_layout)
         self.workspace.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.inspector_host.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
@@ -134,6 +137,7 @@ class MainWindow(QMainWindow):
         self.set_video_mode("normal")
 
         root = QWidget()
+        root.setObjectName("AppSurface")
         root.setLayout(root_layout)
         self.setCentralWidget(root)
         self.status = QStatusBar()
@@ -247,9 +251,7 @@ class MainWindow(QMainWindow):
             self.set_nav_checked(0)
             self.vault_view.filter_by("platform", text[len(self.prefixes["platform"]):].strip())
         elif text.startswith(self.prefixes["tag"]):
-            self.stack.setCurrentIndex(0)
-            self.set_nav_checked(0)
-            self.vault_view.filter_by("topics", text[len(self.prefixes["tag"]):].strip())
+            QMessageBox.information(self, "Search", "Topic search now comes from note frontmatter and is not available in the DB-backed vault filter.")
         else:
             self.stack.setCurrentIndex(0)
             self.set_nav_checked(0)

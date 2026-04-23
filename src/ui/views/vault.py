@@ -227,9 +227,15 @@ class VaultView(QScrollArea):
         super().__init__()
         self.items = []
         self.tiles = []
+        self.setObjectName("AppSurface")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setWidgetResizable(True)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.container = QWidget()
+        self.container.setObjectName("AppSurface")
+        self.container.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.viewport().setObjectName("AppSurface")
+        self.viewport().setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.grid = QGridLayout(self.container)
         self.grid.setContentsMargins(0, 0, 0, 0)
         self.grid.setSpacing(10)
@@ -245,7 +251,7 @@ class VaultView(QScrollArea):
         self.render_items()
 
     def load_items(self, field: str | None = None, value: str | None = None):
-        allowed = {"source_artist", "platform", "original_filename", "topics"}
+        allowed = {"source_artist", "platform", "original_filename"}
         conn = init_database()
         cursor = conn.cursor()
         if field and value and field in allowed:

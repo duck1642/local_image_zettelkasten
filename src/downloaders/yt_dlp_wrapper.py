@@ -230,8 +230,7 @@ def inspect_youtube_community(url: str) -> tuple[bool, dict]:
             "source_url": url,
             "platform": "YouTube",
             "artist": artist,
-            "title": title,
-            "topics": ""
+            "title": title
         }
     }
 
@@ -378,8 +377,7 @@ def download_video(url: str, metadata_info: dict = None) -> tuple[bool, dict]:
                 "source_url": url,
                 "platform": "YouTube",
                 "artist": artist,
-                "title": title,
-                "topics": ""
+                "title": title
             },
             "expected_size": expected_size,
             "session_dir": str(session_dir)

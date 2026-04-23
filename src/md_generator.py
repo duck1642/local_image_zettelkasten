@@ -4,12 +4,13 @@ import yaml
 from datetime import datetime
 
 from tagging import wd_frontmatter_fields
+from utils import NOTES_DIR
 
 def generate_markdown(conn: sqlite3.Connection, file_hash: str, asset_rel_path: str = None, title: str = "") -> str:
 
     cursor = conn.cursor()
     cursor.execute('''
-        SELECT original_filename, mime_type, file_extension, source_url, platform, source_artist, date_added, phash, topics
+        SELECT original_filename, mime_type, file_extension, source_url, platform, source_artist, date_added, phash
         FROM items
         WHERE hash = ?
     ''', (file_hash,))
@@ -19,7 +20,7 @@ def generate_markdown(conn: sqlite3.Connection, file_hash: str, asset_rel_path: 
     if not row:
         return ""
 
-    original_filename, mime_type, file_extension, source_url, platform, source_artist, date_added, phash, topics = row
+    original_filename, mime_type, file_extension, source_url, platform, source_artist, date_added, phash = row
 
 
     if not date_added:
@@ -51,7 +52,7 @@ def generate_markdown(conn: sqlite3.Connection, file_hash: str, asset_rel_path: 
         "platform": platform or "",
         "artist": source_artist or "",
         "phash": phash or "",
-        "topics": _topics_list(topics),
+        "topics": load_note_topics(file_hash),
         "file_format": mime_type or ""
     }
     frontmatter.update(wd_frontmatter_fields(file_hash))
@@ -73,3 +74,30 @@ def _topics_list(topics: str) -> list[str]:
         return [str(topic).strip() for topic in topics if str(topic).strip()]
     normalized = str(topics).replace("\r", "\n").replace(",", "\n")
     return [topic.strip() for topic in normalized.split("\n") if topic.strip()]
+
+
+def load_note_frontmatter(file_hash: str) -> dict:
+    path = NOTES_DIR / f"{file_hash}.md"
+    if not path.exists():
+        return {}
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return {}
+    if not text.startswith("---"):
+        return {}
+    parts = text.split("---", 2)
+    if len(parts) < 3:
+        return {}
+    try:
+        data = yaml.safe_load(parts[1]) or {}
+    except yaml.YAMLError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def load_note_topics(file_hash: str, fallback=None) -> list[str]:
+    frontmatter = load_note_frontmatter(file_hash)
+    if "topics" in frontmatter:
+        return _topics_list(frontmatter.get("topics"))
+    return _topics_list(fallback)

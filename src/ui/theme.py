@@ -1,11 +1,13 @@
 APP_STYLESHEET = """
 QWidget {
-    background: #0d1117;
     color: #c9d1d9;
     font-family: Segoe UI;
     font-size: 12px;
 }
-QMainWindow {
+QMainWindow, QDialog {
+    background: #0d1117;
+}
+QWidget#AppSurface {
     background: #0d1117;
 }
 QLineEdit, QTextEdit, QPlainTextEdit {
@@ -118,8 +120,8 @@ QLineEdit#InfoField {
 QLineEdit#InfoField:focus {
     border-color: #30363d;
 }
-QWidget#TransparentContainer {
-    background: transparent;
+QWidget#TransparentContainer, QWidget[role="TransparentContainer"] {
+    background-color: transparent;
     border: none;
 }
 QLabel#TitleLabel {

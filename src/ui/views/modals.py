@@ -26,8 +26,6 @@ class MetadataDialog(QDialog):
         self.artist_input.setPlaceholderText("Artist")
         self.url_input = QLineEdit()
         self.url_input.setPlaceholderText("Source URL")
-        self.topics_input = QLineEdit()
-        self.topics_input.setPlaceholderText("Topics")
         self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         self.buttons.accepted.connect(self.accept)
         self.buttons.rejected.connect(self.reject)
@@ -38,7 +36,6 @@ class MetadataDialog(QDialog):
         layout.addWidget(self.preview)
         layout.addWidget(self.artist_input)
         layout.addWidget(self.url_input)
-        layout.addWidget(self.topics_input)
         layout.addWidget(self.buttons)
         self.update_state()
 
@@ -49,6 +46,5 @@ class MetadataDialog(QDialog):
         return {
             "artist": self.artist_input.text().strip(),
             "source_url": self.url_input.text().strip(),
-            "topics": self.topics_input.text().strip(),
             "platform": "Manual",
         }

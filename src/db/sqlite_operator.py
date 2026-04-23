@@ -23,7 +23,6 @@ def init_database():
             source_url TEXT,
             platform TEXT,
             source_artist TEXT,
-            topics TEXT,
             phash TEXT,
             audio_hash BLOB,
             visual_embedding BLOB
@@ -53,8 +52,6 @@ def init_database():
         cursor.execute("ALTER TABLE items ADD COLUMN audio_hash BLOB")
     if 'visual_embedding' not in columns:
         cursor.execute("ALTER TABLE items ADD COLUMN visual_embedding BLOB")
-    if 'topics' not in columns:
-        cursor.execute("ALTER TABLE items ADD COLUMN topics TEXT")
 
     conn.commit()
     return conn
@@ -124,7 +121,6 @@ def insert_to_database(conn: sqlite3.Connection, filepath: Path, file_hash: str,
     source_url = metadata.get('source_url', "")
     platform = metadata.get('platform', "")
     source_artist = metadata.get('artist', "")
-    topics = metadata.get('topics', "")
 
     if file_size is None:
         file_size = filepath.stat().st_size
@@ -135,8 +131,8 @@ def insert_to_database(conn: sqlite3.Connection, filepath: Path, file_hash: str,
     cursor = conn.cursor()
     cursor.execute('''
         INSERT OR REPLACE INTO items
-        (hash, original_filename, file_extension, mime_type, size_bytes, date_added, source_url, platform, source_artist, topics, phash, audio_hash, visual_embedding)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (hash, original_filename, file_extension, mime_type, size_bytes, date_added, source_url, platform, source_artist, phash, audio_hash, visual_embedding)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ''', (
         file_hash,
         filepath.name,
@@ -147,7 +143,6 @@ def insert_to_database(conn: sqlite3.Connection, filepath: Path, file_hash: str,
         source_url,
         platform,
         source_artist,
-        topics,
         phash,
         audio_hash,
         visual_embedding

@@ -63,7 +63,7 @@ class VaultModel(QAbstractListModel):
         log_ui("INFO", "Qt vault model updated", item_count=len(self.items))
 
     def refresh_from_db(self, field: str | None = None, value: str | None = None):
-        allowed = {"source_artist", "platform", "original_filename", "topics"}
+        allowed = {"source_artist", "platform", "original_filename"}
         conn = init_database()
         cursor = conn.cursor()
         if field and value and field in allowed:

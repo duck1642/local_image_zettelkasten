@@ -1,10 +1,12 @@
+import re
+
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QPixmap
-from PySide6.QtWidgets import QApplication, QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QSizePolicy, QSpacerItem, QStackedLayout, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QApplication, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QSizePolicy, QSpacerItem, QStackedLayout, QVBoxLayout, QWidget
 
 from db.sqlite_operator import init_database
 from logs.logger import log_ui
-from md_generator import generate_markdown
+from md_generator import generate_markdown, load_note_topics
 from tagging import load_tag_cache
 from ui.flow_layout import FlowLayout
 from ui.thumbnail_cache import asset_path_for, preview_pixmap
@@ -54,30 +56,31 @@ class InspectorView(QFrame):
         self.image_fullscreen_button.setFixedSize(30, 30)
         self.image_fullscreen_button.setToolTip("Fullscreen")
         self.image_fullscreen_button.clicked.connect(self.request_fullscreen)
-        image_controls_layout = QHBoxLayout()
-        image_controls_layout.setContentsMargins(0, 0, 0, 0)
-        image_controls_layout.addStretch(1)
-        image_controls_layout.addWidget(self.image_wide_button)
-        image_controls_layout.addWidget(self.image_fullscreen_button)
-        self.image_controls = QWidget()
-        self.image_controls.setObjectName("TransparentContainer")
-        self.image_controls.setLayout(image_controls_layout)
-        self.image_controls.setVisible(False)
 
         self.group_counter = QLabel("")
         self.group_counter.setObjectName("MutedLabel")
         self.group_counter.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.prev_button = QPushButton("<")
+        self.prev_button.setObjectName("TransportButton")
+        self.prev_button.setFixedSize(34, 34)
         self.prev_button.clicked.connect(self.previous_group_item)
         self.next_button = QPushButton(">")
+        self.next_button.setObjectName("TransportButton")
+        self.next_button.setFixedSize(34, 34)
         self.next_button.clicked.connect(self.next_group_item)
-        group_layout = QHBoxLayout()
-        group_layout.addWidget(self.prev_button)
-        group_layout.addWidget(self.group_counter, 1)
-        group_layout.addWidget(self.next_button)
-        self.group_nav = QWidget()
-        self.group_nav.setObjectName("TransparentContainer")
-        self.group_nav.setLayout(group_layout)
+        self.group_counter.setMinimumWidth(86)
+        self.media_controls = QWidget()
+        self.media_controls.setObjectName("TransparentContainer")
+        self.media_controls.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        media_controls_layout = QHBoxLayout(self.media_controls)
+        media_controls_layout.setContentsMargins(0, 0, 0, 0)
+        media_controls_layout.setSpacing(8)
+        media_controls_layout.addWidget(self.prev_button)
+        media_controls_layout.addWidget(self.group_counter)
+        media_controls_layout.addWidget(self.next_button)
+        media_controls_layout.addStretch(1)
+        media_controls_layout.addWidget(self.image_wide_button)
+        media_controls_layout.addWidget(self.image_fullscreen_button)
 
         self.artist_label = QLabel("Artist")
         self.artist_label.setObjectName("SectionLabel")
@@ -102,22 +105,38 @@ class InspectorView(QFrame):
         self.hash_value.setObjectName("InfoField")
         self.hash_value.setReadOnly(True)
         self.hash_value.setText("No selection")
+        self.hash_value.setMinimumHeight(30)
+        self.hash_value.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
+        self.hash_value.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self.hash_value.setCursorPosition(0)
         self.platform_value = QLabel("Unknown")
         self.platform_value.setObjectName("InfoValue")
+        self.platform_value.setMinimumHeight(30)
+        self.platform_value.setMinimumWidth(52)
+        self.platform_value.setMaximumWidth(72)
+        self.platform_title = QLabel("Platform")
+        self.platform_title.setObjectName("SectionLabel")
+        self.hash_title = QLabel("Hash")
+        self.hash_title.setObjectName("SectionLabel")
         self.copy_hash_button = QPushButton("Copy")
         self.copy_hash_button.setObjectName("TransportButton")
-        self.copy_hash_button.setFixedHeight(28)
+        self.copy_hash_button.setFixedHeight(30)
         self.copy_hash_button.setFixedWidth(42)
         self.copy_hash_button.setToolTip("Copy hash")
         self.copy_hash_button.clicked.connect(self.copy_hash)
         self.summary_panel = QFrame()
         self.summary_panel.setObjectName("Panel")
-        summary_layout = QHBoxLayout(self.summary_panel)
+        summary_layout = QGridLayout(self.summary_panel)
         summary_layout.setContentsMargins(10, 8, 10, 8)
-        summary_layout.setSpacing(12)
-        summary_layout.addWidget(_info_block("Platform", self.platform_value))
-        summary_layout.addWidget(_info_block("Hash", self.hash_value), 1)
-        summary_layout.addWidget(self.copy_hash_button)
+        summary_layout.setHorizontalSpacing(10)
+        summary_layout.setVerticalSpacing(4)
+        summary_layout.addWidget(self.platform_title, 0, 0)
+        summary_layout.addWidget(self.hash_title, 0, 1)
+        summary_layout.addWidget(self.platform_value, 1, 0)
+        summary_layout.addWidget(self.hash_value, 1, 1)
+        summary_layout.addWidget(self.copy_hash_button, 1, 2)
+        summary_layout.setColumnMinimumWidth(0, 52)
+        summary_layout.setColumnStretch(1, 1)
 
         self.topics_panel = QFrame()
         self.topics_panel.setObjectName("Panel")
@@ -127,27 +146,17 @@ class InspectorView(QFrame):
         self.topics_title = QLabel("My Topics")
         self.topics_title.setObjectName("SectionLabel")
         self.topics_wrap = QWidget()
-        self.topics_wrap.setObjectName("TransparentContainer")
+        self.topics_wrap.setObjectName("TopicsWrap")
+        self.topics_wrap.setProperty("role", "TransparentContainer")
+        self.topics_wrap.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.topics_wrap.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         self.topics_flow = FlowLayout(self.topics_wrap, spacing=6)
         self.topics_wrap.setLayout(self.topics_flow)
         self.topics_empty = QLabel("No topics")
         self.topics_empty.setObjectName("MutedLabel")
-        self.topic_input = QLineEdit()
-        self.topic_input.setPlaceholderText("Add topic and press Enter")
-        self.topic_input.returnPressed.connect(self.add_topic_from_input)
-        self.topic_add_button = QPushButton("Add")
-        self.topic_add_button.setObjectName("TransportButton")
-        self.topic_add_button.setFixedHeight(30)
-        self.topic_add_button.clicked.connect(self.add_topic_from_input)
-        topic_input_row = QHBoxLayout()
-        topic_input_row.setContentsMargins(0, 0, 0, 0)
-        topic_input_row.setSpacing(6)
-        topic_input_row.addWidget(self.topic_input, 1)
-        topic_input_row.addWidget(self.topic_add_button)
         topics_layout.addWidget(self.topics_title)
         topics_layout.addWidget(self.topics_wrap)
         topics_layout.addWidget(self.topics_empty)
-        topics_layout.addLayout(topic_input_row)
 
         self.wd_panel = QFrame()
         self.wd_panel.setObjectName("Panel")
@@ -159,7 +168,10 @@ class InspectorView(QFrame):
         self.rating_title = QLabel("Rating")
         self.rating_title.setObjectName("MutedLabel")
         self.rating_wrap = QWidget()
-        self.rating_wrap.setObjectName("TransparentContainer")
+        self.rating_wrap.setObjectName("RatingWrap")
+        self.rating_wrap.setProperty("role", "TransparentContainer")
+        self.rating_wrap.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.rating_wrap.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         self.rating_flow = FlowLayout(self.rating_wrap, spacing=6)
         self.rating_wrap.setLayout(self.rating_flow)
         self.rating_empty = QLabel("No rating")
@@ -167,7 +179,10 @@ class InspectorView(QFrame):
         self.character_title = QLabel("Character Tags")
         self.character_title.setObjectName("MutedLabel")
         self.character_wrap = QWidget()
-        self.character_wrap.setObjectName("TransparentContainer")
+        self.character_wrap.setObjectName("CharacterWrap")
+        self.character_wrap.setProperty("role", "TransparentContainer")
+        self.character_wrap.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.character_wrap.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         self.character_flow = FlowLayout(self.character_wrap, spacing=6)
         self.character_wrap.setLayout(self.character_flow)
         self.character_empty = QLabel("No character tags")
@@ -175,7 +190,10 @@ class InspectorView(QFrame):
         self.tags_title = QLabel("Visual Tags")
         self.tags_title.setObjectName("MutedLabel")
         self.tags_wrap = QWidget()
-        self.tags_wrap.setObjectName("TransparentContainer")
+        self.tags_wrap.setObjectName("TagsWrap")
+        self.tags_wrap.setProperty("role", "TransparentContainer")
+        self.tags_wrap.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.tags_wrap.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         self.tags_flow = FlowLayout(self.tags_wrap, spacing=6)
         self.tags_wrap.setLayout(self.tags_flow)
         self.tags_empty = QLabel("No tags")
@@ -199,20 +217,19 @@ class InspectorView(QFrame):
         self.save_button.clicked.connect(self.save_metadata)
         self.actions = QWidget()
         self.actions.setObjectName("TransparentContainer")
+        self.actions.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         actions_layout = QHBoxLayout(self.actions)
         actions_layout.setContentsMargins(0, 0, 0, 0)
         actions_layout.setSpacing(8)
         actions_layout.addWidget(self.tag_button)
         actions_layout.addWidget(self.save_button)
 
-        self.group_nav.setVisible(False)
         layout = QVBoxLayout(self)
         self.root_layout = layout
         layout.setContentsMargins(18, 18, 18, 18)
         layout.setSpacing(12)
         layout.addWidget(self.media_widget)
-        layout.addWidget(self.image_controls)
-        layout.addWidget(self.group_nav)
+        layout.addWidget(self.media_controls)
         layout.addWidget(self.meta_panel)
         layout.addWidget(self.summary_panel)
         layout.addWidget(self.topics_panel)
@@ -233,15 +250,17 @@ class InspectorView(QFrame):
         self.video_preview.stop()
         self.preview.clear()
         self.media_stack.setCurrentWidget(self.preview)
-        self.image_controls.setVisible(False)
         self.hash_value.setText("No selection")
+        self.hash_value.setCursorPosition(0)
         self.platform_value.setText("Unknown")
         self.copy_hash_button.setEnabled(False)
-        self.group_counter.setText("")
-        self.group_nav.setVisible(False)
+        self.group_counter.setText("1 / 1")
+        self.prev_button.setEnabled(False)
+        self.next_button.setEnabled(False)
+        self.image_wide_button.setEnabled(False)
+        self.image_fullscreen_button.setEnabled(False)
         self.artist_input.clear()
         self.url_input.clear()
-        self.topic_input.clear()
         self.set_topics([])
         self.populate_flow(self.rating_flow, [], "rating")
         self.populate_flow(self.character_flow, [], "suggest")
@@ -254,7 +273,7 @@ class InspectorView(QFrame):
         conn = init_database()
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT hash, file_extension, mime_type, source_url, platform, source_artist, topics FROM items WHERE hash = ?",
+            "SELECT hash, file_extension, mime_type, source_url, platform, source_artist FROM items WHERE hash = ?",
             (item_hash,),
         )
         row = cursor.fetchone()
@@ -266,7 +285,7 @@ class InspectorView(QFrame):
         if source_url:
             cursor.execute(
                 """
-                SELECT hash, file_extension, mime_type, source_url, platform, source_artist, topics
+                SELECT hash, file_extension, mime_type, source_url, platform, source_artist
                 FROM items
                 WHERE source_url = ?
                 ORDER BY date_added ASC
@@ -286,37 +305,37 @@ class InspectorView(QFrame):
             self.clear()
             return
 
-        item_hash, extension, mime_type, source_url, platform, artist, topics = self.group_rows[self.group_index]
+        item_hash, extension, mime_type, source_url, platform, artist = self.group_rows[self.group_index]
         item_hash = str(item_hash)
         self.item_hash = item_hash
         self.mime_type = mime_type or ""
+        self.reset_wd_suggestions()
         asset_path = asset_path_for(item_hash, extension, mime_type)
         self.asset_path = asset_path
         if self.mime_type.startswith("video/") and asset_path.exists():
             self.preview_source_path = None
             self.video_preview.load(asset_path)
             self.media_stack.setCurrentWidget(self.video_preview)
-            self.image_controls.setVisible(False)
         else:
             self.video_preview.stop()
             self.preview_source_path = asset_path if asset_path.exists() else None
             self.update_image_preview()
             self.media_stack.setCurrentWidget(self.preview)
-            self.update_image_view_buttons()
         self.hash_value.setText(item_hash)
+        self.hash_value.setCursorPosition(0)
         self.platform_value.setText(platform or "Unknown")
         self.copy_hash_button.setEnabled(True)
         self.artist_input.setText(artist or "")
         self.url_input.setText(source_url or "")
-        self.topic_input.clear()
-        self.set_topics(_parse_topics(topics))
+        self.set_topics(load_note_topics(item_hash))
         self.load_tag_suggestions(item_hash)
         self.update_tag_button()
         grouped = len(self.group_rows) > 1
-        self.group_nav.setVisible(grouped)
-        self.group_counter.setText(f"{self.group_index + 1} / {len(self.group_rows)}" if grouped else "")
+        self.group_counter.setText(f"{self.group_index + 1} / {len(self.group_rows)}" if grouped else "1 / 1")
         self.prev_button.setEnabled(grouped)
         self.next_button.setEnabled(grouped)
+        self.update_image_view_buttons()
+        self.log_inspector_state("after_load_group_index")
         log_ui("INFO", "Qt inspector loaded", hash=item_hash, asset_path=str(asset_path), exists=asset_path.exists())
 
     def previous_group_item(self):
@@ -361,8 +380,7 @@ class InspectorView(QFrame):
         self.preview.setMaximumHeight(16777215 if focused else 240)
         self.media_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding if focused else QSizePolicy.Policy.Fixed)
         for widget in [
-            self.image_controls,
-            self.group_nav,
+            self.media_controls,
             self.meta_panel,
             self.summary_panel,
             self.topics_panel,
@@ -393,8 +411,11 @@ class InspectorView(QFrame):
             self.preview.setPixmap(preview_pixmap(self.asset_path, self.item_hash, self.mime_type))
 
     def update_image_view_buttons(self):
-        image_active = self.media_stack.currentWidget() is self.preview and self.asset_path is not None and self.asset_path.exists()
-        self.image_controls.setVisible(image_active and self.focus_mode == "normal")
+        previewable = self.asset_path is not None and self.asset_path.exists()
+        image_active = self.media_stack.currentWidget() is self.preview and previewable
+        self.media_controls.setVisible(self.focus_mode == "normal")
+        self.image_wide_button.setEnabled(image_active)
+        self.image_fullscreen_button.setEnabled(image_active)
         self.image_wide_button.setText("X" if self.focus_mode == "wide" else "W")
         self.image_fullscreen_button.setText("X" if self.focus_mode == "fullscreen" else "F")
 
@@ -408,31 +429,15 @@ class InspectorView(QFrame):
         self.topic_values = []
         self.clear_flow(self.topics_flow)
         for topic in topics:
-            self.add_topic_chip(topic)
-        self.refresh_empty_states()
-
-    def add_topic_from_input(self):
-        self.add_topic_chip(self.topic_input.text().strip())
-        self.topic_input.clear()
-
-    def add_topic_chip(self, topic: str):
-        normalized = _normalize_topic(topic)
-        if not normalized or normalized in self.topic_values:
-            self.refresh_empty_states()
-            return
-        self.topic_values.append(normalized)
-        button = QPushButton(normalized)
-        button.setObjectName("EditableChip")
-        button.setToolTip("Click to remove")
-        button.clicked.connect(lambda checked=False, value=normalized, widget=button: self.remove_topic_chip(value, widget))
-        self.topics_flow.addWidget(button)
-        self.refresh_empty_states()
-
-    def remove_topic_chip(self, topic: str, widget: QWidget):
-        if topic in self.topic_values:
-            self.topic_values.remove(topic)
-        widget.setParent(None)
-        widget.deleteLater()
+            normalized = _normalize_topic(topic)
+            if not normalized or normalized in self.topic_values:
+                continue
+            self.topic_values.append(normalized)
+            button = QPushButton(_display_topic(normalized))
+            button.setObjectName("SuggestionChip")
+            button.setToolTip(normalized)
+            button.setCursor(Qt.CursorShape.ArrowCursor)
+            self.topics_flow.addWidget(button)
         self.refresh_empty_states()
 
     def update_tag_button(self):
@@ -445,11 +450,21 @@ class InspectorView(QFrame):
 
     def load_tag_suggestions(self, item_hash: str):
         data = load_tag_cache(item_hash)
+        log_ui(
+            "INFO",
+            "Qt tag suggestions load start",
+            hash=item_hash,
+            cache_status=(data or {}).get("status", "missing"),
+            rating_count=1 if (data or {}).get("rating") else 0,
+            character_count=len((data or {}).get("character_tags") or []),
+            tag_count=len((data or {}).get("tags") or []),
+        )
         if not data or data.get("status") != "ok":
             self.populate_flow(self.rating_flow, [], "rating")
             self.populate_flow(self.character_flow, [], "suggest")
             self.populate_flow(self.tags_flow, [], "suggest")
             self.refresh_empty_states()
+            self.log_inspector_state("after_load_tag_suggestions_empty")
             return
         rating = data.get("rating") or {}
         characters = data.get("character_tags") or []
@@ -464,8 +479,17 @@ class InspectorView(QFrame):
         self.populate_flow(self.character_flow, [{"text": _display_tag(tag), "tooltip": _score_tooltip(tag)} for tag in characters[:24]], "suggest")
         self.populate_flow(self.tags_flow, [{"text": _display_tag(tag), "tooltip": _score_tooltip(tag)} for tag in tags[:36]], "suggest")
         self.refresh_empty_states()
+        self.log_inspector_state("after_load_tag_suggestions")
+
+    def reset_wd_suggestions(self):
+        self.clear_flow(self.rating_flow)
+        self.clear_flow(self.character_flow)
+        self.clear_flow(self.tags_flow)
+        self.refresh_empty_states()
+        self.log_inspector_state("after_reset_wd_suggestions")
 
     def populate_flow(self, flow: FlowLayout, items: list[dict], variant: str):
+        self.log_flow_state("populate_flow_before", flow)
         self.clear_flow(flow)
         for item in items:
             text = str(item.get("text") or "").strip()
@@ -476,20 +500,87 @@ class InspectorView(QFrame):
             button.setToolTip(item.get("tooltip") or text)
             button.setCursor(Qt.CursorShape.ArrowCursor)
             flow.addWidget(button)
+        self.refresh_flow_host(flow)
+        self.log_flow_state("populate_flow_after", flow)
 
     def clear_flow(self, flow: FlowLayout):
+        self.log_flow_state("clear_flow_before", flow)
         while flow.count():
             item = flow.takeAt(0)
             widget = item.widget() if item else None
             if widget:
+                widget.hide()
                 widget.setParent(None)
                 widget.deleteLater()
+        self.refresh_flow_host(flow)
+        self.log_flow_state("clear_flow_after", flow)
+
+    def refresh_flow_host(self, flow: FlowLayout):
+        flow.invalidate()
+        host = flow.parentWidget()
+        if host:
+            host.updateGeometry()
+            host.adjustSize()
+            host.update()
+        self.log_flow_state("refresh_flow_host", flow)
 
     def refresh_empty_states(self):
-        self.topics_empty.setVisible(not self.topic_values)
-        self.rating_empty.setVisible(self.rating_flow.count() == 0)
-        self.character_empty.setVisible(self.character_flow.count() == 0)
-        self.tags_empty.setVisible(self.tags_flow.count() == 0)
+        topics_empty = not self.topic_values
+        rating_empty = self.rating_flow.count() == 0
+        character_empty = self.character_flow.count() == 0
+        tags_empty = self.tags_flow.count() == 0
+        self.topics_empty.setVisible(topics_empty)
+        self.topics_wrap.setVisible(not topics_empty)
+        self.rating_empty.setVisible(rating_empty)
+        self.rating_wrap.setVisible(not rating_empty)
+        self.character_empty.setVisible(character_empty)
+        self.character_wrap.setVisible(not character_empty)
+        self.tags_empty.setVisible(tags_empty)
+        self.tags_wrap.setVisible(not tags_empty)
+        self.log_inspector_state("refresh_empty_states")
+
+    def log_flow_state(self, stage: str, flow: FlowLayout):
+        host = flow.parentWidget()
+        if not host:
+            return
+        geometry = host.geometry()
+        size_hint = host.sizeHint()
+        log_ui(
+            "INFO",
+            "Qt inspector flow state",
+            stage=stage,
+            hash=self.item_hash or "",
+            host=host.objectName() or host.__class__.__name__,
+            visible=host.isVisible(),
+            item_count=flow.count(),
+            child_count=sum(1 for child in host.children() if isinstance(child, QPushButton)),
+            host_width=geometry.width(),
+            host_height=geometry.height(),
+            hint_width=size_hint.width(),
+            hint_height=size_hint.height(),
+        )
+
+    def log_inspector_state(self, stage: str):
+        log_ui(
+            "INFO",
+            "Qt inspector state",
+            stage=stage,
+            hash=self.item_hash or "",
+            topics_visible=self.topics_wrap.isVisible(),
+            rating_visible=self.rating_wrap.isVisible(),
+            characters_visible=self.character_wrap.isVisible(),
+            tags_visible=self.tags_wrap.isVisible(),
+            topics_count=self.topics_flow.count(),
+            rating_count=self.rating_flow.count(),
+            character_count=self.character_flow.count(),
+            tag_count=self.tags_flow.count(),
+            wd_panel_width=self.wd_panel.geometry().width(),
+            wd_panel_height=self.wd_panel.geometry().height(),
+            tags_wrap_width=self.tags_wrap.geometry().width(),
+            tags_wrap_height=self.tags_wrap.geometry().height(),
+            tags_wrap_hint_width=self.tags_wrap.sizeHint().width(),
+            tags_wrap_hint_height=self.tags_wrap.sizeHint().height(),
+        )
 
     def has_active_video(self) -> bool:
         return self.media_stack.currentWidget() is self.video_preview and self.asset_path is not None
@@ -499,14 +590,13 @@ class InspectorView(QFrame):
             return
         artist = self.artist_input.text().strip()
         source_url = self.url_input.text().strip()
-        topics = "\n".join(self.topic_values)
         conn = init_database()
         cursor = conn.cursor()
         target_hashes = [str(row[0]) for row in self.group_rows] if len(self.group_rows) > 1 else [self.item_hash]
         for target_hash in target_hashes:
             cursor.execute(
-                "UPDATE items SET source_artist = ?, source_url = ?, topics = ? WHERE hash = ?",
-                (artist, source_url, topics, target_hash),
+                "UPDATE items SET source_artist = ?, source_url = ? WHERE hash = ?",
+                (artist, source_url, target_hash),
             )
         conn.commit()
         NOTES_DIR.mkdir(parents=True, exist_ok=True)
@@ -522,6 +612,7 @@ class InspectorView(QFrame):
 def _info_block(label_text: str, value_widget: QWidget) -> QWidget:
     widget = QWidget()
     widget.setObjectName("TransparentContainer")
+    widget.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
     layout = QVBoxLayout(widget)
     layout.setContentsMargins(0, 0, 0, 0)
     layout.setSpacing(2)
@@ -534,6 +625,13 @@ def _info_block(label_text: str, value_widget: QWidget) -> QWidget:
 
 def _normalize_topic(topic: str) -> str:
     return " ".join(str(topic).replace(",", " ").split()).strip()
+
+
+def _display_topic(topic: str) -> str:
+    match = re.fullmatch(r"\[([^\]]+)\]\(([^)]+)\)", topic.strip())
+    if match:
+        return match.group(1).strip() or topic
+    return topic
 
 
 def _parse_topics(topics) -> list[str]:
