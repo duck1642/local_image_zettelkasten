@@ -185,6 +185,8 @@ data/
 logs/
 secrets/
 backups/
+docs/
+
 
 *.db
 *.db-shm
