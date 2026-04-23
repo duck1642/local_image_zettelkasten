@@ -434,7 +434,7 @@ class InspectorView(QFrame):
     def update_image_view_buttons(self):
         previewable = self.asset_path is not None and self.asset_path.exists()
         image_active = self.media_stack.currentWidget() is self.preview and previewable
-        self.media_controls.setVisible(self.focus_mode == "normal")
+        self.media_controls.setVisible(image_active and self.focus_mode == "normal")
         self.image_wide_button.setEnabled(image_active)
         self.image_fullscreen_button.setEnabled(image_active)
         self.image_wide_button.setText("X" if self.focus_mode == "wide" else "W")
