@@ -181,6 +181,7 @@ cython_debug/
 .cursorindexingignore
 
 # LIZ runtime/private state
+docs/
 data/
 logs/
 secrets/
