@@ -186,7 +186,6 @@ data/
 logs/
 secrets/
 backups/
-docs/
 
 
 *.db
