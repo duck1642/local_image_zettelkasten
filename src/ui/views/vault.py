@@ -256,11 +256,11 @@ class VaultView(QScrollArea):
         cursor = conn.cursor()
         if field and value and field in allowed:
             cursor.execute(
-                f"SELECT hash, file_extension, mime_type, original_filename, source_url FROM items WHERE {field} LIKE ? ORDER BY date_added DESC LIMIT 300",
+                f"SELECT hash, file_extension, mime_type, original_filename, source_url FROM items WHERE {field} LIKE ? ORDER BY date_added ASC LIMIT 300",
                 (f"%{value}%",),
             )
         else:
-            cursor.execute("SELECT hash, file_extension, mime_type, original_filename, source_url FROM items ORDER BY date_added DESC LIMIT 300")
+            cursor.execute("SELECT hash, file_extension, mime_type, original_filename, source_url FROM items ORDER BY date_added ASC LIMIT 300")
         self.items = cursor.fetchall()
         conn.close()
         log_ui("INFO", "Qt vault widget grid loaded", item_count=len(self.items))

@@ -1,6 +1,6 @@
 import re
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QApplication, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QSizePolicy, QSpacerItem, QStackedLayout, QVBoxLayout, QWidget
 
@@ -34,8 +34,10 @@ class InspectorView(QFrame):
 
         self.preview = QLabel()
         self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.preview.setMinimumSize(0, 0)
         self.preview.setMinimumHeight(220)
         self.preview.setMaximumHeight(240)
+        self.preview.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.video_preview = VideoPlayerWidget()
         self.video_preview.set_view_callbacks(self.request_wide, self.request_fullscreen, lambda: self.focus_mode)
         self.video_preview.setMinimumHeight(220)
@@ -298,6 +300,14 @@ class InspectorView(QFrame):
         conn.close()
         hashes = [str(group_row[0]) for group_row in self.group_rows]
         self.group_index = hashes.index(item_hash) if item_hash in hashes else 0
+        log_ui(
+            "INFO",
+            "Qt inspector group resolved",
+            selected_hash=item_hash,
+            source_url=source_url,
+            ordered_hashes=hashes,
+            group_index=self.group_index,
+        )
         self.load_group_index()
 
     def load_group_index(self):
@@ -374,11 +384,15 @@ class InspectorView(QFrame):
         self.bottom_spacer.changeSize(0, 0, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed if focused else QSizePolicy.Policy.Expanding)
         self.media_widget.setMinimumHeight(0 if fullscreen else 520 if focused else 260)
         self.media_widget.setMaximumHeight(16777215 if focused else 300)
+        self.media_widget.setMinimumWidth(0)
         self.video_preview.setMinimumHeight(0 if fullscreen else 520 if focused else 220)
         self.video_preview.setMaximumHeight(16777215 if focused else 260)
+        self.video_preview.setMinimumWidth(0)
         self.preview.setMinimumHeight(520 if focused else 220)
         self.preview.setMaximumHeight(16777215 if focused else 240)
+        self.preview.setMinimumWidth(0)
         self.media_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding if focused else QSizePolicy.Policy.Fixed)
+        self.preview.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding if focused else QSizePolicy.Policy.Expanding)
         for widget in [
             self.media_controls,
             self.meta_panel,
@@ -390,7 +404,10 @@ class InspectorView(QFrame):
             widget.setVisible(not focused)
         self.video_preview.update_view_buttons()
         self.update_image_view_buttons()
+        self.media_widget.updateGeometry()
+        self.preview.updateGeometry()
         self.update_image_preview()
+        QTimer.singleShot(0, self.update_image_preview)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -402,13 +419,17 @@ class InspectorView(QFrame):
         if self.preview_source_path and self.preview_source_path.exists():
             pixmap = QPixmap(str(self.preview_source_path))
             if not pixmap.isNull():
-                target_size = self.media_widget.size()
+                target_size = self.preview.size()
+                if target_size.width() <= 0 or target_size.height() <= 0:
+                    target_size = self.media_widget.size()
                 if target_size.width() > 0 and target_size.height() > 0:
                     pixmap = pixmap.scaled(target_size, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
                 self.preview.setPixmap(pixmap)
+                self.log_preview_geometry("image_preview_updated")
                 return
         if self.asset_path:
             self.preview.setPixmap(preview_pixmap(self.asset_path, self.item_hash, self.mime_type))
+            self.log_preview_geometry("image_preview_fallback")
 
     def update_image_view_buttons(self):
         previewable = self.asset_path is not None and self.asset_path.exists()
@@ -580,6 +601,24 @@ class InspectorView(QFrame):
             tags_wrap_height=self.tags_wrap.geometry().height(),
             tags_wrap_hint_width=self.tags_wrap.sizeHint().width(),
             tags_wrap_hint_height=self.tags_wrap.sizeHint().height(),
+        )
+
+    def log_preview_geometry(self, stage: str):
+        preview_geometry = self.preview.geometry()
+        media_geometry = self.media_widget.geometry()
+        pixmap = self.preview.pixmap()
+        log_ui(
+            "INFO",
+            "Qt inspector preview geometry",
+            stage=stage,
+            hash=self.item_hash or "",
+            mode=self.focus_mode,
+            media_width=media_geometry.width(),
+            media_height=media_geometry.height(),
+            preview_width=preview_geometry.width(),
+            preview_height=preview_geometry.height(),
+            pixmap_width=(pixmap.width() if pixmap else 0),
+            pixmap_height=(pixmap.height() if pixmap else 0),
         )
 
     def has_active_video(self) -> bool:

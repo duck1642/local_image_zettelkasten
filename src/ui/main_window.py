@@ -91,6 +91,14 @@ class MainWindow(QMainWindow):
         inspector_host_layout.setContentsMargins(0, 0, 0, 0)
         inspector_host_layout.setSpacing(0)
         inspector_host_layout.addWidget(self.inspector_scroll)
+        self.image_focus_host = QWidget()
+        self.image_focus_host.setObjectName("AppSurface")
+        self.image_focus_layout = QVBoxLayout(self.image_focus_host)
+        self.image_focus_layout.setContentsMargins(0, 0, 0, 0)
+        self.image_focus_layout.setSpacing(0)
+        self.image_focus_layout.addStretch(1)
+        self.image_focus_layout.addStretch(1)
+        self.image_focus_host.setVisible(False)
         self.review_view = ReviewView()
         self.ingestion_view = IngestionView()
         self.settings_view = SettingsView()
@@ -129,11 +137,13 @@ class MainWindow(QMainWindow):
         self.inspector_host.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
 
         root_layout = QHBoxLayout()
+        self.root_layout_main = root_layout
         root_layout.setContentsMargins(12, 12, 12, 0)
         root_layout.setSpacing(12)
         root_layout.addWidget(self.nav_widget)
         root_layout.addWidget(self.workspace, 1)
         root_layout.addWidget(self.inspector_host, 0, Qt.AlignmentFlag.AlignRight)
+        root_layout.addWidget(self.image_focus_host, 1)
         self.set_video_mode("normal")
 
         root = QWidget()
@@ -154,16 +164,26 @@ class MainWindow(QMainWindow):
     def set_video_mode(self, mode: str):
         self.video_mode = mode
         focused = mode != "normal"
+        image_focus = focused and self.inspector.media_stack.currentWidget() is self.inspector.preview
+        self.place_inspector_host(image_focus)
         self.nav_widget.setVisible(not focused)
         self.workspace.setVisible(not focused)
         if hasattr(self, "status"):
             self.status.setVisible(mode != "fullscreen")
-        if focused:
+        self.image_focus_host.setVisible(image_focus)
+        self.inspector_host.setVisible(not image_focus)
+        if focused and not image_focus:
             self.inspector_host.setMinimumWidth(640)
             self.inspector_host.setMaximumWidth(16777215)
             self.inspector_host.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
             self.inspector.setMinimumWidth(0)
             self.inspector.setMaximumWidth(16777215)
+        elif focused and image_focus:
+            self.inspector.setMinimumWidth(680)
+            self.inspector.setMaximumWidth(980)
+            self.inspector_host.setMinimumWidth(0)
+            self.inspector_host.setMaximumWidth(0)
+            self.inspector_host.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
         else:
             self.inspector_host.setMinimumWidth(520)
             self.inspector_host.setMaximumWidth(520)
@@ -178,7 +198,35 @@ class MainWindow(QMainWindow):
             self.showFullScreen()
         elif self.isFullScreen():
             self.showNormal()
+        self.log_focus_layout("after_set_video_mode")
         log_ui("INFO", "Qt video layout mode changed", mode=mode)
+
+    def place_inspector_host(self, image_focus: bool):
+        if image_focus:
+            if self.image_focus_layout.indexOf(self.inspector_host) == -1:
+                self.image_focus_layout.insertWidget(1, self.inspector_host, 0, Qt.AlignmentFlag.AlignCenter)
+        else:
+            if self.root_layout_main.indexOf(self.inspector_host) == -1:
+                self.root_layout_main.insertWidget(2, self.inspector_host, 0, Qt.AlignmentFlag.AlignRight)
+
+    def log_focus_layout(self, stage: str):
+        inspector_host_geometry = self.inspector_host.geometry()
+        image_focus_geometry = self.image_focus_host.geometry()
+        inspector_geometry = self.inspector.geometry()
+        log_ui(
+            "INFO",
+            "Qt focus layout geometry",
+            stage=stage,
+            mode=self.video_mode,
+            image_focus_visible=self.image_focus_host.isVisible(),
+            inspector_host_visible=self.inspector_host.isVisible(),
+            inspector_host_width=inspector_host_geometry.width(),
+            inspector_host_height=inspector_host_geometry.height(),
+            image_focus_width=image_focus_geometry.width(),
+            image_focus_height=image_focus_geometry.height(),
+            inspector_width=inspector_geometry.width(),
+            inspector_height=inspector_geometry.height(),
+        )
 
     def keyPressEvent(self, event):
         if self.inspector.has_active_video():
