@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from PySide6.QtCore import QThread, Qt, Signal
+from PySide6.QtCore import QThread, Qt, QTimer, Signal
 from PySide6.QtWidgets import QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMessageBox, QPushButton, QScrollArea, QSizePolicy, QStackedWidget, QStatusBar, QVBoxLayout, QWidget
 
 from core import main as run_ingestion
@@ -91,14 +91,12 @@ class MainWindow(QMainWindow):
         inspector_host_layout.setContentsMargins(0, 0, 0, 0)
         inspector_host_layout.setSpacing(0)
         inspector_host_layout.addWidget(self.inspector_scroll)
-        self.image_focus_host = QWidget()
-        self.image_focus_host.setObjectName("AppSurface")
-        self.image_focus_layout = QVBoxLayout(self.image_focus_host)
-        self.image_focus_layout.setContentsMargins(0, 0, 0, 0)
-        self.image_focus_layout.setSpacing(0)
-        self.image_focus_layout.addStretch(1)
-        self.image_focus_layout.addStretch(1)
-        self.image_focus_host.setVisible(False)
+        self.media_focus_host = QWidget()
+        self.media_focus_host.setObjectName("AppSurface")
+        self.media_focus_layout = QVBoxLayout(self.media_focus_host)
+        self.media_focus_layout.setContentsMargins(0, 0, 0, 0)
+        self.media_focus_layout.setSpacing(10)
+        self.media_focus_host.setVisible(False)
         self.review_view = ReviewView()
         self.ingestion_view = IngestionView()
         self.settings_view = SettingsView()
@@ -143,7 +141,7 @@ class MainWindow(QMainWindow):
         root_layout.addWidget(self.nav_widget)
         root_layout.addWidget(self.workspace, 1)
         root_layout.addWidget(self.inspector_host, 0, Qt.AlignmentFlag.AlignRight)
-        root_layout.addWidget(self.image_focus_host, 1)
+        root_layout.addWidget(self.media_focus_host, 1)
         self.set_video_mode("normal")
 
         root = QWidget()
@@ -162,70 +160,77 @@ class MainWindow(QMainWindow):
         self.set_video_mode("normal" if self.video_mode == "fullscreen" else "fullscreen")
 
     def set_video_mode(self, mode: str):
+        previous_mode = self.video_mode
         self.video_mode = mode
         focused = mode != "normal"
-        image_focus = focused and self.inspector.media_stack.currentWidget() is self.inspector.preview
-        self.place_inspector_host(image_focus)
         self.nav_widget.setVisible(not focused)
         self.workspace.setVisible(not focused)
+        self.inspector_host.setVisible(not focused)
+        self.media_focus_host.setVisible(focused)
+        if focused:
+            self.move_media_to_focus()
+        else:
+            self.restore_media_to_inspector()
         if hasattr(self, "status"):
             self.status.setVisible(mode != "fullscreen")
-        self.image_focus_host.setVisible(image_focus)
-        self.inspector_host.setVisible(not image_focus)
-        if focused and not image_focus:
-            self.inspector_host.setMinimumWidth(640)
-            self.inspector_host.setMaximumWidth(16777215)
-            self.inspector_host.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-            self.inspector.setMinimumWidth(0)
-            self.inspector.setMaximumWidth(16777215)
-        elif focused and image_focus:
-            self.inspector.setMinimumWidth(680)
-            self.inspector.setMaximumWidth(980)
-            self.inspector_host.setMinimumWidth(0)
-            self.inspector_host.setMaximumWidth(0)
-            self.inspector_host.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
-        else:
-            self.inspector_host.setMinimumWidth(520)
-            self.inspector_host.setMaximumWidth(520)
-            self.inspector_host.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
-            self.inspector.setMinimumWidth(0)
-            self.inspector.setMaximumWidth(16777215)
+        self.inspector_host.setMinimumWidth(520)
+        self.inspector_host.setMaximumWidth(520)
+        self.inspector_host.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
+        self.inspector.setMinimumWidth(0)
+        self.inspector.setMaximumWidth(16777215)
         if self.centralWidget() and self.centralWidget().layout():
             self.centralWidget().layout().setContentsMargins(0 if mode == "fullscreen" else 12, 0 if mode == "fullscreen" else 12, 0 if mode == "fullscreen" else 12, 0)
             self.centralWidget().layout().setSpacing(0 if mode == "fullscreen" else 12)
         self.inspector.set_focus_mode(mode)
         if mode == "fullscreen":
             self.showFullScreen()
-        elif self.isFullScreen():
-            self.showNormal()
+        elif previous_mode == "fullscreen":
+            self.exit_fullscreen_window_state()
         self.log_focus_layout("after_set_video_mode")
         log_ui("INFO", "Qt video layout mode changed", mode=mode)
 
-    def place_inspector_host(self, image_focus: bool):
-        if image_focus:
-            if self.image_focus_layout.indexOf(self.inspector_host) == -1:
-                self.image_focus_layout.insertWidget(1, self.inspector_host, 0, Qt.AlignmentFlag.AlignCenter)
-        else:
-            if self.root_layout_main.indexOf(self.inspector_host) == -1:
-                self.root_layout_main.insertWidget(2, self.inspector_host, 0, Qt.AlignmentFlag.AlignRight)
+    def exit_fullscreen_window_state(self):
+        self.setWindowState(self.windowState() & ~Qt.WindowState.WindowFullScreen)
+        self.showNormal()
+        QTimer.singleShot(0, self.showNormal)
+        QTimer.singleShot(50, lambda: self.setWindowState(self.windowState() & ~Qt.WindowState.WindowFullScreen))
+
+    def move_media_to_focus(self):
+        if self.media_focus_layout.indexOf(self.inspector.media_widget) == -1:
+            self.inspector.root_layout.removeWidget(self.inspector.media_widget)
+            self.media_focus_layout.addWidget(self.inspector.media_widget, 1)
+        if self.media_focus_layout.indexOf(self.inspector.media_controls) == -1:
+            self.inspector.root_layout.removeWidget(self.inspector.media_controls)
+            self.media_focus_layout.addWidget(self.inspector.media_controls)
+
+    def restore_media_to_inspector(self):
+        if self.inspector.root_layout.indexOf(self.inspector.media_widget) == -1:
+            self.media_focus_layout.removeWidget(self.inspector.media_widget)
+            self.inspector.root_layout.insertWidget(0, self.inspector.media_widget)
+        if self.inspector.root_layout.indexOf(self.inspector.media_controls) == -1:
+            self.media_focus_layout.removeWidget(self.inspector.media_controls)
+            self.inspector.root_layout.insertWidget(1, self.inspector.media_controls)
 
     def log_focus_layout(self, stage: str):
         inspector_host_geometry = self.inspector_host.geometry()
-        image_focus_geometry = self.image_focus_host.geometry()
+        focus_geometry = self.media_focus_host.geometry()
         inspector_geometry = self.inspector.geometry()
+        media_geometry = self.inspector.media_widget.geometry()
         log_ui(
             "INFO",
             "Qt focus layout geometry",
             stage=stage,
             mode=self.video_mode,
-            image_focus_visible=self.image_focus_host.isVisible(),
+            focus_visible=self.media_focus_host.isVisible(),
             inspector_host_visible=self.inspector_host.isVisible(),
             inspector_host_width=inspector_host_geometry.width(),
             inspector_host_height=inspector_host_geometry.height(),
-            image_focus_width=image_focus_geometry.width(),
-            image_focus_height=image_focus_geometry.height(),
+            focus_width=focus_geometry.width(),
+            focus_height=focus_geometry.height(),
             inspector_width=inspector_geometry.width(),
             inspector_height=inspector_geometry.height(),
+            media_width=media_geometry.width(),
+            media_height=media_geometry.height(),
         )
 
     def keyPressEvent(self, event):

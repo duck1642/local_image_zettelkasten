@@ -329,8 +329,8 @@ class InspectorView(QFrame):
         else:
             self.video_preview.stop()
             self.preview_source_path = asset_path if asset_path.exists() else None
-            self.update_image_preview()
             self.media_stack.setCurrentWidget(self.preview)
+            self.update_image_preview()
         self.hash_value.setText(item_hash)
         self.hash_value.setCursorPosition(0)
         self.platform_value.setText(platform or "Unknown")
@@ -394,7 +394,6 @@ class InspectorView(QFrame):
         self.media_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding if focused else QSizePolicy.Policy.Fixed)
         self.preview.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding if focused else QSizePolicy.Policy.Expanding)
         for widget in [
-            self.media_controls,
             self.meta_panel,
             self.summary_panel,
             self.topics_panel,
@@ -434,7 +433,7 @@ class InspectorView(QFrame):
     def update_image_view_buttons(self):
         previewable = self.asset_path is not None and self.asset_path.exists()
         image_active = self.media_stack.currentWidget() is self.preview and previewable
-        self.media_controls.setVisible(image_active and self.focus_mode == "normal")
+        self.media_controls.setVisible(image_active)
         self.image_wide_button.setEnabled(image_active)
         self.image_fullscreen_button.setEnabled(image_active)
         self.image_wide_button.setText("X" if self.focus_mode == "wide" else "W")
