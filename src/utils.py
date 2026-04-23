@@ -38,6 +38,8 @@ ONLINE_INGEST_DIR = _resolve_path('online_ingest', "data/online_ingest")
 QUEUES_DIR = _resolve_path('queues', "data/queues")
 BATCHES_DIR = _resolve_path('batches', "data/batches")
 SECRETS_DIR = _resolve_path('secrets', "secrets")
+MODELS_DIR = _resolve_path('models', "data/models")
+TOPICS_DIR = _resolve_path('topics', "data/topics")
 
 OUTPUT_DIR = VAULT_DIR
 ASSETS_DIR = OUTPUT_DIR / "assets"
@@ -67,6 +69,8 @@ def setup_directories():
         ONLINE_INGEST_DIR,
         QUEUES_DIR,
         BATCHES_DIR,
+        MODELS_DIR,
+        TOPICS_DIR,
         OUTPUT_DIR,
         ASSETS_DIR,
         NOTES_DIR,
@@ -149,12 +153,22 @@ def get_config() -> dict:
                 'queues': str(QUEUES_DIR),
                 'batches': str(BATCHES_DIR),
                 'secrets': str(SECRETS_DIR),
+                'models': str(MODELS_DIR),
+                'topics': str(TOPICS_DIR),
             },
             'firewall': {
                 'allowed_extensions': ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.jfif', '.mp4', '.webm', '.ogv'],
                 'allowed_mimes': list(DEFAULT_ALLOWED_MIMES)
             },
-            'hash_algorithm': 'sha256'
+            'hash_algorithm': 'sha256',
+            'tagging': {
+                'enabled': True,
+                'model_repo': 'SmilingWolf/wd-vit-tagger-v3',
+                'device': 'auto',
+                'threshold': 0.35,
+                'max_tags': 30,
+                'fail_ingestion_on_error': False
+            }
         }
 
 def calculate_file_hash(filepath: Path, algorithm: str = 'sha256') -> str:

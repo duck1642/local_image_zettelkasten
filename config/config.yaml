@@ -10,6 +10,8 @@ paths:
   queues: "data/queues"
   batches: "data/batches"
   secrets: "secrets"
+  models: "data/models"
+  topics: "data/topics"
 
 firewall:
   allowed_extensions:
@@ -74,3 +76,11 @@ ingestion_concurrency:
     default: # Fallback for unknown platforms
       workers: 1
       jitter_range: [2.0, 4.0]
+
+tagging:
+  enabled: true
+  model_repo: "SmilingWolf/wd-vit-tagger-v3"
+  device: "auto"
+  threshold: 0.35
+  max_tags: 30
+  fail_ingestion_on_error: false

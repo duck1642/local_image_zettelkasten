@@ -20,6 +20,7 @@ from db.sqlite_operator import (
 from db.search_manager import search_manager
 from md_generator import generate_markdown
 from logs.logger import log_activity, log_system
+from tagging import tag_media
 
 def calculate_tiles(filepath: Path, ratio_threshold: float = 3.0) -> list:
 
@@ -303,6 +304,13 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
 
         if sync_index:
             search_manager.update_indexes(**index_data)
+
+        try:
+            tag_result = tag_media(vault_path, item_hash=file_hash, config=config)
+            if tag_result.status != "ok":
+                log_system("WARNING", "Tagging enrichment did not complete", hash=file_hash, status=tag_result.status, error=tag_result.error)
+        except Exception as tag_exc:
+            log_system("WARNING", "Tagging enrichment crashed", hash=file_hash, error=str(tag_exc))
 
         if delete_source:
             filepath.unlink()

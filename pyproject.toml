@@ -10,8 +10,10 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "gallery-dl",
+    "huggingface_hub",
     "imagehash",
     "numpy",
+    "onnxruntime>=1.17.0",
     "pillow",
     "playwright",
     "PySide6",
@@ -29,6 +31,9 @@ windows = [
 ]
 unix = [
     "python-magic",
+]
+gpu = [
+    "onnxruntime-gpu>=1.17.0",
 ]
 
 [project.scripts]
@@ -49,7 +54,7 @@ py-modules = [
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["db", "downloaders", "logs", "scripts", "ui", "ui.views"]
+include = ["db", "downloaders", "logs", "scripts", "tagging", "ui", "ui.views"]
 exclude = ["backups", "program", "tools", "tests", "data", "secrets"]
 
 [tool.ruff]
