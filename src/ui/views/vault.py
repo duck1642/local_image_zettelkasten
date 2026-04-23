@@ -128,28 +128,23 @@ class VaultGroupTile(QFrame):
 
         self.image = QLabel()
         self.image.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.image.setFixedHeight(180)
+        self.image.setFixedHeight(188)
 
         self.counter = QLabel()
         self.counter.setObjectName("OverlayBadge")
         self.counter.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.counter.setFixedHeight(14)
 
         self.prev_button = QPushButton("<")
         self.prev_button.setObjectName("CarouselButton")
-        self.prev_button.setFixedSize(30, 30)
+        self.prev_button.setFixedSize(34, 34)
         self.prev_button.clicked.connect(self.previous_item)
         self.prev_button.hide()
         self.next_button = QPushButton(">")
         self.next_button.setObjectName("CarouselButton")
-        self.next_button.setFixedSize(30, 30)
+        self.next_button.setFixedSize(34, 34)
         self.next_button.clicked.connect(self.next_item)
         self.next_button.hide()
-
-        overlay = QHBoxLayout()
-        overlay.setContentsMargins(8, 0, 8, 0)
-        overlay.addWidget(self.prev_button)
-        overlay.addStretch(1)
-        overlay.addWidget(self.next_button)
 
         self.media_widget = QWidget()
         self.media_stack = QStackedLayout(self.media_widget)
@@ -161,10 +156,16 @@ class VaultGroupTile(QFrame):
         self.label.setObjectName("MutedLabel")
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setContentsMargins(8, 8, 8, 6)
+        layout.setSpacing(3)
         layout.addWidget(self.media_widget)
-        layout.addLayout(overlay)
-        layout.addWidget(self.counter)
+        nav_layout = QHBoxLayout()
+        nav_layout.setContentsMargins(0, 0, 0, 0)
+        nav_layout.setSpacing(4)
+        nav_layout.addWidget(self.prev_button)
+        nav_layout.addWidget(self.counter, 1)
+        nav_layout.addWidget(self.next_button)
+        layout.addLayout(nav_layout)
         layout.addWidget(self.label)
 
         for widget in [self.image, self.media_widget, self.counter, self.prev_button, self.next_button, self.label]:
