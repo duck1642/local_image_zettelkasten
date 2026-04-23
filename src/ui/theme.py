@@ -96,6 +96,32 @@ QSlider::sub-page:horizontal {
 QLabel#MutedLabel {
     color: #8b949e;
 }
+QLabel#SectionLabel {
+    color: #8b949e;
+    font-size: 11px;
+    font-weight: 600;
+}
+QLabel#InfoValue {
+    color: #f0f6fc;
+    font-size: 12px;
+    font-weight: 600;
+}
+QLineEdit#InfoField {
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 4px;
+    padding: 4px 8px;
+    color: #f0f6fc;
+    font-size: 12px;
+    font-weight: 600;
+}
+QLineEdit#InfoField:focus {
+    border-color: #30363d;
+}
+QWidget#TransparentContainer {
+    background: transparent;
+    border: none;
+}
 QLabel#TitleLabel {
     color: #f0f6fc;
     font-weight: 700;
@@ -117,6 +143,38 @@ QFrame#Panel {
 QFrame#Inspector {
     background: #161b22;
     border-left: 1px solid #30363d;
+}
+QPushButton#EditableChip, QPushButton#SuggestionChip, QPushButton#RatingChip {
+    border-radius: 12px;
+    padding: 4px 10px;
+    font-size: 11px;
+}
+QPushButton#EditableChip {
+    background: #21262d;
+    border: 1px solid #484f58;
+    color: #c9d1d9;
+}
+QPushButton#EditableChip:hover {
+    background: #30363d;
+    border-color: #8b949e;
+}
+QPushButton#SuggestionChip {
+    background: #21262d;
+    border: 1px solid #30363d;
+    color: #c9d1d9;
+}
+QPushButton#SuggestionChip:hover {
+    background: #30363d;
+    border-color: #58a6ff;
+}
+QPushButton#RatingChip {
+    background: #2d1f1f;
+    border: 1px solid #6e4040;
+    color: #ffb3ad;
+}
+QPushButton#RatingChip:hover {
+    background: #3a2727;
+    border-color: #a35b5b;
 }
 QListView {
     background: #0d1117;

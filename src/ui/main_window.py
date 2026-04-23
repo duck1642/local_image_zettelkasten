@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from PySide6.QtCore import QThread, Qt, Signal
-from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMessageBox, QPushButton, QStackedWidget, QStatusBar, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMessageBox, QPushButton, QScrollArea, QSizePolicy, QStackedWidget, QStatusBar, QVBoxLayout, QWidget
 
 from core import main as run_ingestion
 from db.sqlite_operator import init_database
@@ -80,6 +80,17 @@ class MainWindow(QMainWindow):
 
         self.vault_view = VaultView()
         self.inspector = InspectorView()
+        self.inspector_scroll = QScrollArea()
+        self.inspector_scroll.setWidgetResizable(True)
+        self.inspector_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.inspector_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        self.inspector_scroll.setWidget(self.inspector)
+        self.inspector_host = QFrame()
+        self.inspector_host.setObjectName("InspectorHost")
+        inspector_host_layout = QVBoxLayout(self.inspector_host)
+        inspector_host_layout.setContentsMargins(0, 0, 0, 0)
+        inspector_host_layout.setSpacing(0)
+        inspector_host_layout.addWidget(self.inspector_scroll)
         self.review_view = ReviewView()
         self.ingestion_view = IngestionView()
         self.settings_view = SettingsView()
@@ -111,13 +122,15 @@ class MainWindow(QMainWindow):
         self.nav_widget.setLayout(nav_layout)
         self.workspace = QWidget()
         self.workspace.setLayout(workspace_layout)
+        self.workspace.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.inspector_host.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
 
         root_layout = QHBoxLayout()
         root_layout.setContentsMargins(12, 12, 12, 0)
         root_layout.setSpacing(12)
         root_layout.addWidget(self.nav_widget)
-        root_layout.addWidget(self.workspace, 3)
-        root_layout.addWidget(self.inspector, 2)
+        root_layout.addWidget(self.workspace, 1)
+        root_layout.addWidget(self.inspector_host, 0, Qt.AlignmentFlag.AlignRight)
         self.set_video_mode("normal")
 
         root = QWidget()
@@ -142,11 +155,17 @@ class MainWindow(QMainWindow):
         if hasattr(self, "status"):
             self.status.setVisible(mode != "fullscreen")
         if focused:
-            self.inspector.setMinimumWidth(640)
+            self.inspector_host.setMinimumWidth(640)
+            self.inspector_host.setMaximumWidth(16777215)
+            self.inspector_host.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+            self.inspector.setMinimumWidth(0)
             self.inspector.setMaximumWidth(16777215)
         else:
-            self.inspector.setMinimumWidth(520)
-            self.inspector.setMaximumWidth(520)
+            self.inspector_host.setMinimumWidth(520)
+            self.inspector_host.setMaximumWidth(520)
+            self.inspector_host.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
+            self.inspector.setMinimumWidth(0)
+            self.inspector.setMaximumWidth(16777215)
         if self.centralWidget() and self.centralWidget().layout():
             self.centralWidget().layout().setContentsMargins(0 if mode == "fullscreen" else 12, 0 if mode == "fullscreen" else 12, 0 if mode == "fullscreen" else 12, 0)
             self.centralWidget().layout().setSpacing(0 if mode == "fullscreen" else 12)
