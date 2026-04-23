@@ -5,8 +5,8 @@ from pathlib import Path
 from typing import Tuple, Optional
 from datetime import datetime
 from utils import (
-    ASSETS_DIR, NOTES_DIR, REVIEW_DIR, calculate_file_hash, calculate_phash,
-    flatten_image, get_normalization_color
+    ASSETS_DIR, REVIEW_DIR, calculate_file_hash, calculate_phash,
+    flatten_image, get_normalization_color, note_path_for
 )
 from fingerprint import (
     get_audio_fingerprint, get_visual_embedding,
@@ -267,7 +267,7 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
         shard_path.mkdir(parents=True, exist_ok=True)
 
         vault_path = shard_path / new_filename
-        asset_rel_path = f"../assets/{shard_folder}/{new_filename}"
+        asset_rel_path = f"../../assets/{shard_folder}/{new_filename}"
 
         file_size = filepath.stat().st_size
 
@@ -283,7 +283,8 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
 
         md_content = generate_markdown(conn, file_hash, asset_rel_path, title=title)
         if md_content:
-            md_path = NOTES_DIR / f"{file_hash}.md"
+            md_path = note_path_for(file_hash)
+            md_path.parent.mkdir(parents=True, exist_ok=True)
             with open(md_path, 'w', encoding='utf-8') as f:
                 f.write(md_content)
 
@@ -307,7 +308,8 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
             else:
                 md_content = generate_markdown(conn, file_hash, asset_rel_path, title=title)
                 if md_content:
-                    md_path = NOTES_DIR / f"{file_hash}.md"
+                    md_path = note_path_for(file_hash)
+                    md_path.parent.mkdir(parents=True, exist_ok=True)
                     with open(md_path, 'w', encoding='utf-8') as f:
                         f.write(md_content)
         except Exception as tag_exc:

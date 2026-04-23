@@ -15,7 +15,7 @@ from ui.views.modals import MetadataDialog
 from ui.views.review import ReviewView
 from ui.views.settings import SettingsView
 from ui.views.vault import VaultView
-from utils import NOTES_DIR, QUEUES_DIR, get_config
+from utils import QUEUES_DIR, get_config, note_path_for
 
 
 class IngestionWorker(QThread):
@@ -438,8 +438,9 @@ class MainWindow(QMainWindow):
         finally:
             conn.close()
         if md_content:
-            NOTES_DIR.mkdir(parents=True, exist_ok=True)
-            (NOTES_DIR / f"{item_hash}.md").write_text(md_content, encoding="utf-8")
+            note_path = note_path_for(item_hash)
+            note_path.parent.mkdir(parents=True, exist_ok=True)
+            note_path.write_text(md_content, encoding="utf-8")
 
     def reload_config(self):
         self.config = get_config()

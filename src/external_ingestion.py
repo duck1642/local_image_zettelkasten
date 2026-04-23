@@ -7,7 +7,7 @@ import time
 import shutil
 import re
 
-from utils import get_config, QUEUES_DIR, ASSETS_DIR, NOTES_DIR
+from utils import get_config, QUEUES_DIR, ASSETS_DIR, existing_note_path_for
 from db.sqlite_operator import init_database
 from db.search_manager import search_manager
 from processor import process_file
@@ -476,7 +476,7 @@ class ExternalIngestor:
                     if asset_path.exists():
                         asset_path.unlink()
 
-                note_path = NOTES_DIR / f"{file_hash}.md"
+                note_path = existing_note_path_for(file_hash)
                 if note_path.exists():
                     note_path.unlink()
 

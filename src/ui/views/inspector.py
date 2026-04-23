@@ -11,7 +11,7 @@ from tagging import load_tag_cache
 from ui.flow_layout import FlowLayout
 from ui.thumbnail_cache import asset_path_for, preview_pixmap
 from ui.video_widgets import VideoPlayerWidget
-from utils import NOTES_DIR, get_config
+from utils import get_config, note_path_for
 
 
 class InspectorView(QFrame):
@@ -639,11 +639,12 @@ class InspectorView(QFrame):
                 (artist, source_url, target_hash),
             )
         conn.commit()
-        NOTES_DIR.mkdir(parents=True, exist_ok=True)
         for target_hash in target_hashes:
             md_content = generate_markdown(conn, target_hash)
             if md_content:
-                (NOTES_DIR / f"{target_hash}.md").write_text(md_content, encoding="utf-8")
+                note_path = note_path_for(target_hash)
+                note_path.parent.mkdir(parents=True, exist_ok=True)
+                note_path.write_text(md_content, encoding="utf-8")
         conn.close()
         log_ui("INFO", "Qt inspector saved", hash=self.item_hash, group_count=len(target_hashes), topic_count=len(self.topic_values))
         self.saved.emit()

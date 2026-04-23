@@ -2,12 +2,18 @@ import argparse
 import re
 import shutil
 import sqlite3
+import sys
 from datetime import datetime
 from pathlib import Path
 
 import yaml
 
-from utils import ASSETS_DIR, DB_PATH, NOTES_DIR, PROJECT_ROOT
+PROJECT_ROOT_PATH = Path(__file__).resolve().parents[2]
+SRC_DIR = PROJECT_ROOT_PATH / "src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
+
+from utils import ASSETS_DIR, DB_PATH, NOTES_DIR, PROJECT_ROOT, note_path_for
 
 
 def asset_path(file_hash: str, file_extension: str) -> Path:
@@ -18,7 +24,7 @@ def load_notes() -> dict:
     notes = {}
     link_pattern = re.compile(r"!\[\]\((.*?)\)")
 
-    for note_path in NOTES_DIR.glob("*.md"):
+    for note_path in NOTES_DIR.rglob("*.md"):
         text = note_path.read_text(encoding="utf-8")
         if not text.startswith("---"):
             continue
@@ -47,7 +53,7 @@ def load_notes() -> dict:
 def load_db_rows(conn: sqlite3.Connection) -> dict:
     cursor = conn.cursor()
     rows = cursor.execute(
-        "SELECT hash, original_filename, file_extension, mime_type, size_bytes, date_added, source_url, platform, source_artist, topics, phash FROM items"
+        "SELECT hash, original_filename, file_extension, mime_type, size_bytes, date_added, source_url, platform, source_artist, phash FROM items"
     ).fetchall()
     return {
         row[0]: {
@@ -60,8 +66,7 @@ def load_db_rows(conn: sqlite3.Connection) -> dict:
             "source_url": row[6],
             "platform": row[7],
             "source_artist": row[8],
-            "topics": row[9],
-            "phash": row[10]
+            "phash": row[9]
         }
         for row in rows
     }
@@ -166,8 +171,8 @@ def insert_note_row(conn: sqlite3.Connection, file_hash: str, note: dict):
     cursor = conn.cursor()
     cursor.execute(
         "INSERT OR REPLACE INTO items "
-        "(hash, original_filename, file_extension, mime_type, size_bytes, date_added, source_url, platform, source_artist, topics, phash, audio_hash, visual_embedding) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "(hash, original_filename, file_extension, mime_type, size_bytes, date_added, source_url, platform, source_artist, phash, audio_hash, visual_embedding) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             file_hash,
             meta.get("filename", asset.name),
@@ -178,7 +183,6 @@ def insert_note_row(conn: sqlite3.Connection, file_hash: str, note: dict):
             meta.get("source_url", ""),
             meta.get("platform", ""),
             meta.get("artist", ""),
-            meta.get("topics", ""),
             meta.get("phash", ""),
             None,
             None
@@ -192,7 +196,7 @@ def repair(conn: sqlite3.Connection, report: dict) -> dict:
     matched_orphans = set()
 
     for row in report["missing_db_assets"]:
-        note_path = NOTES_DIR / f"{row['hash']}.md"
+        note_path = note_path_for(row["hash"])
         if note_path.exists():
             continue
 
