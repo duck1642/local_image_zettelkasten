@@ -122,7 +122,7 @@ class VideoPlayerWidget(QWidget):
         controls.addWidget(self.fullscreen_button)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(6, 6, 6, 6)
         layout.setSpacing(8)
         layout.addWidget(self.video, 1)
         if not compact:

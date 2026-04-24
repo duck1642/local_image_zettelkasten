@@ -21,6 +21,33 @@ QLineEdit, QTextEdit, QPlainTextEdit {
 QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus {
     border-color: #58a6ff;
 }
+QCheckBox {
+    spacing: 8px;
+    color: #c9d1d9;
+}
+QCheckBox::indicator {
+    width: 14px;
+    height: 14px;
+    border: 1px solid #30363d;
+    border-radius: 4px;
+    background: #161b22;
+}
+QCheckBox::indicator:hover {
+    border-color: #58a6ff;
+    background: #21262d;
+}
+QCheckBox::indicator:checked {
+    background: #a371f7;
+    border-color: #bc8cff;
+}
+QCheckBox::indicator:checked:hover {
+    background: #bc8cff;
+    border-color: #d2a8ff;
+}
+QCheckBox::indicator:disabled {
+    background: #0d1117;
+    border-color: #21262d;
+}
 QPushButton {
     background: #161b22;
     border: 1px solid #30363d;
@@ -39,6 +66,12 @@ QPushButton:checked {
 QPushButton#PrimaryButton {
     background: #238636;
     border-color: #238636;
+    color: white;
+    font-weight: 600;
+}
+QPushButton#DirtyButton {
+    background: #9a6700;
+    border-color: #d29922;
     color: white;
     font-weight: 600;
 }
@@ -98,6 +131,14 @@ QSlider::sub-page:horizontal {
 QLabel#MutedLabel {
     color: #8b949e;
 }
+QLabel#SavedLabel {
+    color: #8b949e;
+    font-weight: 600;
+}
+QLabel#DirtyLabel {
+    color: #d29922;
+    font-weight: 700;
+}
 QLabel#SectionLabel {
     color: #8b949e;
     font-size: 11px;
@@ -124,6 +165,11 @@ QWidget#TransparentContainer, QWidget[role="TransparentContainer"] {
     background-color: transparent;
     border: none;
 }
+QWidget#MediaPanel {
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+}
 QLabel#TitleLabel {
     color: #f0f6fc;
     font-weight: 700;
@@ -144,7 +190,12 @@ QFrame#Panel {
 }
 QFrame#Inspector {
     background: #161b22;
-    border-left: 1px solid #30363d;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+}
+QFrame#InspectorHost {
+    background: transparent;
+    border: none;
 }
 QPushButton#EditableChip, QPushButton#SuggestionChip, QPushButton#RatingChip {
     border-radius: 12px;

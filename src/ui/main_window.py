@@ -9,6 +9,7 @@ from md_generator import generate_markdown
 from processor import process_file
 from queue_service import INGESTION_LOCK, QUEUE_LABELS, run_queue
 from tagging import tag_media
+from ui.views.app_logs import AppLogsView
 from ui.views.ingestion import IngestionView
 from ui.views.inspector import InspectorView
 from ui.views.modals import MetadataDialog
@@ -76,7 +77,7 @@ class MainWindow(QMainWindow):
 
         self.nav_buttons = []
         nav_layout = QVBoxLayout()
-        for label, index in [("Vault", 0), ("Review", 1), ("Ingestion", 2), ("Settings", 3)]:
+        for label, index in [("Vault", 0), ("Review", 1), ("Ingestion", 2), ("App Logs", 3), ("Settings", 4)]:
             button = QPushButton(label)
             button.setCheckable(True)
             button.clicked.connect(lambda checked=False, i=index: self.show_view(i))
@@ -105,12 +106,14 @@ class MainWindow(QMainWindow):
         self.media_focus_host.setVisible(False)
         self.review_view = ReviewView()
         self.ingestion_view = IngestionView()
+        self.app_logs_view = AppLogsView()
         self.settings_view = SettingsView()
         self.stack = QStackedWidget()
         self.stack.setObjectName("AppSurface")
         self.stack.addWidget(self.vault_view)
         self.stack.addWidget(self.review_view)
         self.stack.addWidget(self.ingestion_view)
+        self.stack.addWidget(self.app_logs_view)
         self.stack.addWidget(self.settings_view)
 
         self.vault_view.item_selected.connect(self.handle_item_selected)

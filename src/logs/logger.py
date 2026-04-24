@@ -51,6 +51,14 @@ ui_handler.setFormatter(JSONFormatter())
 if not ui_logger.handlers:
     ui_logger.addHandler(ui_handler)
 
+
+ingestion_logger = logging.getLogger("liz_ingestion")
+ingestion_logger.setLevel(logging.INFO)
+ingestion_handler = RotatingFileHandler(LOGS_DIR / "ingestion.log", maxBytes=5*1024*1024, backupCount=3, encoding="utf-8")
+ingestion_handler.setFormatter(JSONFormatter())
+if not ingestion_logger.handlers:
+    ingestion_logger.addHandler(ingestion_handler)
+
 def log_system(level: str, message: str, **kwargs):
 
     with LOG_LOCK:
@@ -76,6 +84,22 @@ def log_ui(level: str, message: str, **kwargs):
             ui_logger.warning(message, extra=extra)
         elif level_upper == "ERROR":
             ui_logger.error(message, extra=extra)
+
+def log_ingestion(level: str, message: str, **kwargs):
+
+    with LOG_LOCK:
+        extra = {"extra_data": kwargs} if kwargs else {}
+        level_upper = level.upper()
+
+        if level_upper == "INFO":
+            ingestion_logger.info(message, extra=extra)
+            system_logger.info(message, extra=extra)
+        elif level_upper == "WARNING":
+            ingestion_logger.warning(message, extra=extra)
+            system_logger.warning(message, extra=extra)
+        elif level_upper == "ERROR":
+            ingestion_logger.error(message, extra=extra)
+            system_logger.error(message, extra=extra)
 
 def log_activity(original_name: str, vault_id: str, platform: str, artist: str, source_url: str = "", timestamp_str: str = None):
 

@@ -1,8 +1,9 @@
-from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QInputDialog, QLabel, QMessageBox, QPlainTextEdit, QPushButton, QSplitter, QVBoxLayout, QWidget
+from PySide6.QtCore import Qt, QTimer, QUrl, Signal
+from PySide6.QtGui import QDesktopServices
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QMessageBox, QPlainTextEdit, QPushButton, QSplitter, QVBoxLayout, QWidget
 
 from logs.logger import LOGS_DIR, log_ui
-from queue_service import QUEUE_LABELS, append_urls, clear_failed, move_failed_urls, parse_urls, queue_counts, read_queue, write_queue
+from queue_service import QUEUE_LABELS, clear_failed, move_failed_urls, parse_urls, queue_counts, queue_path, read_queue, write_queue
 
 
 class IngestionView(QWidget):
@@ -10,7 +11,7 @@ class IngestionView(QWidget):
 
     def __init__(self):
         super().__init__()
-        self.log_file = LOGS_DIR / "system.log"
+        self.log_file = LOGS_DIR / "ingestion.log"
         self.last_size = 0
         self.current_queue = "normal"
         self.dirty = False
@@ -22,9 +23,13 @@ class IngestionView(QWidget):
         self.failed_button = self.queue_button("failed")
         self.ready_label = QLabel("Ready: 0")
         self.ready_label.setObjectName("MutedLabel")
+        self.save_state_label = QLabel("Saved")
+        self.save_state_label.setObjectName("SavedLabel")
 
         self.reload_button = QPushButton("Reload")
         self.reload_button.clicked.connect(self.reload_current)
+        self.open_button = QPushButton("Open")
+        self.open_button.clicked.connect(self.open_current)
         self.save_button = QPushButton("Save")
         self.save_button.clicked.connect(self.save_current)
         self.start_button = QPushButton("Start")
@@ -35,8 +40,6 @@ class IngestionView(QWidget):
         self.editor.setPlaceholderText("Edit queue markdown here...")
         self.editor.textChanged.connect(self.mark_dirty)
 
-        self.append_button = QPushButton("Append URLs")
-        self.append_button.clicked.connect(self.append_urls_dialog)
         self.retry_button = QPushButton("Retry Failed")
         self.retry_button.clicked.connect(self.retry_failed_dialog)
         self.clear_failed_button = QPushButton("Clear Failed")
@@ -51,33 +54,36 @@ class IngestionView(QWidget):
         top.addWidget(self.force_button)
         top.addWidget(self.failed_button)
         top.addWidget(self.ready_label)
+        top.addWidget(self.save_state_label)
         top.addStretch(1)
         top.addWidget(self.reload_button)
+        top.addWidget(self.open_button)
         top.addWidget(self.save_button)
         top.addWidget(self.start_button)
 
         actions = QHBoxLayout()
-        actions.addWidget(self.append_button)
         actions.addWidget(self.retry_button)
         actions.addWidget(self.clear_failed_button)
         actions.addStretch(1)
 
-        editor_frame = QFrame()
-        editor_frame.setObjectName("Panel")
+        editor_frame = QWidget()
+        editor_frame.setObjectName("TransparentContainer")
         editor_layout = QVBoxLayout(editor_frame)
-        editor_layout.setContentsMargins(10, 10, 10, 10)
+        editor_layout.setContentsMargins(0, 10, 0, 10)
         editor_layout.addLayout(top)
         editor_layout.addWidget(self.editor, 1)
         editor_layout.addLayout(actions)
 
-        log_frame = QFrame()
-        log_frame.setObjectName("Panel")
+        log_frame = QWidget()
+        log_frame.setObjectName("TransparentContainer")
         log_layout = QVBoxLayout(log_frame)
-        log_layout.setContentsMargins(10, 10, 10, 10)
+        log_layout.setContentsMargins(0, 10, 0, 10)
         log_layout.addWidget(self.log_text)
 
         splitter = QSplitter()
         splitter.setOrientation(Qt.Orientation.Vertical)
+        splitter.setHandleWidth(0)
+        splitter.setChildrenCollapsible(False)
         splitter.addWidget(editor_frame)
         splitter.addWidget(log_frame)
         splitter.setSizes([520, 240])
@@ -135,6 +141,26 @@ class IngestionView(QWidget):
             return
         self.load_queue(self.current_queue, force=True)
 
+    def open_current(self):
+        if self.dirty:
+            response = QMessageBox.question(
+                self,
+                "Unsaved Queue",
+                "Save changes before opening the queue file?",
+                QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel,
+            )
+            if response == QMessageBox.StandardButton.Cancel:
+                return
+            if response == QMessageBox.StandardButton.Save:
+                self.save_current()
+        path = queue_path(self.current_queue)
+        if not path.exists():
+            read_queue(self.current_queue)
+        opened = QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
+        if not opened:
+            QMessageBox.warning(self, "Open Queue", f"Could not open {path}.")
+        log_ui("INFO", "Qt queue opened externally", queue=self.current_queue, path=str(path), opened=opened)
+
     def save_current(self):
         write_queue(self.current_queue, self.editor.toPlainText())
         self.dirty = False
@@ -147,20 +173,6 @@ class IngestionView(QWidget):
             return
         self.save_current()
         self.start_requested.emit(self.current_queue)
-
-    def append_urls_dialog(self):
-        if self.dirty and not self.maybe_save_before_switch():
-            return
-        text, ok = QInputDialog.getMultiLineText(self, "Append URLs", "URLs:")
-        if not ok:
-            return
-        urls = parse_urls(text)
-        if not urls:
-            QMessageBox.information(self, "Append URLs", "No URLs found.")
-            return
-        append_urls(self.current_queue, urls)
-        self.load_queue(self.current_queue, force=True)
-        log_ui("INFO", "Qt queue URLs appended", queue=self.current_queue, count=len(urls))
 
     def retry_failed_dialog(self):
         if self.dirty and not self.maybe_save_before_switch():
@@ -213,12 +225,19 @@ class IngestionView(QWidget):
             button.setChecked(queue == self.current_queue)
         ready = counts.get("normal", 0) + counts.get("force", 0)
         self.ready_label.setText(f"Ready: {ready}")
+        self.save_state_label.setText("Unsaved changes" if self.dirty else "Saved")
+        self.save_state_label.setObjectName("DirtyLabel" if self.dirty else "SavedLabel")
+        self.save_state_label.style().unpolish(self.save_state_label)
+        self.save_state_label.style().polish(self.save_state_label)
         self.start_button.setEnabled(not self.running and self.current_queue in {"normal", "force"})
         self.retry_button.setEnabled(not self.running and counts.get("failed", 0) > 0)
         self.clear_failed_button.setEnabled(not self.running and counts.get("failed", 0) > 0)
         self.reload_button.setEnabled(not self.running)
+        self.open_button.setEnabled(not self.running)
         self.save_button.setEnabled(not self.running and self.dirty)
-        self.append_button.setEnabled(not self.running)
+        self.save_button.setObjectName("DirtyButton" if self.dirty else "")
+        self.save_button.style().unpolish(self.save_button)
+        self.save_button.style().polish(self.save_button)
         for button in self.queue_buttons.values():
             button.setEnabled(not self.running)
 

@@ -11,7 +11,7 @@ from utils import get_config, QUEUES_DIR, ASSETS_DIR, existing_note_path_for
 from db.sqlite_operator import init_database
 from db.search_manager import search_manager
 from processor import process_file
-from logs.logger import log_system
+from logs.logger import log_ingestion
 
 from downloaders.gallery_dl_wrapper import download_gallery, inspect_gallery
 from downloaders.yt_dlp_wrapper import download_video, inspect_youtube_community
@@ -32,7 +32,7 @@ class ExternalIngestor:
         max_global = self.config.get("ingestion_concurrency", {}).get("global_max_workers", 10)
         if GLOBAL_WORKER_LIMIT is None or GLOBAL_WORKER_LIMIT._value != max_global:
             GLOBAL_WORKER_LIMIT = threading.Semaphore(max_global)
-            log_system("INFO", f"Global Ingestion Semaphore initialized with {max_global} slots.")
+            log_ingestion("INFO", f"Global Ingestion Semaphore initialized with {max_global} slots.")
 
     def run(self) -> dict:
 
@@ -41,7 +41,7 @@ class ExternalIngestor:
 
         if not self.links_file.exists():
             print(f"[ERROR] Links file not found: {self.links_file}")
-            log_system("WARNING", f"Ingestion skipped: {self.links_file.name} not found")
+            log_ingestion("WARNING", f"Ingestion skipped: {self.links_file.name} not found")
             return stats
 
         try:
@@ -50,7 +50,7 @@ class ExternalIngestor:
 
             if not links:
                 print(f"Y No valid links found in {self.links_file.name}.")
-                log_system("INFO", f"Ingestion finished: {self.links_file.name} is empty")
+                log_ingestion("INFO", f"Ingestion finished: {self.links_file.name} is empty")
                 return stats
 
 
@@ -75,7 +75,7 @@ class ExternalIngestor:
                         batch_index_queue.extend(worker_index_data)
                     except Exception as e:
                         print(f"[ERROR] Platform manager for {platform} crashed: {e}")
-                        log_system("ERROR", f"Platform manager crash", platform=platform, error=str(e))
+                        log_ingestion("ERROR", f"Platform manager crash", platform=platform, error=str(e))
 
 
             if batch_index_queue:
@@ -85,7 +85,7 @@ class ExternalIngestor:
                         search_manager.update_indexes(**item)
                 except Exception as sync_e:
                     print(f"as i   RAM Index Sync error (Batch): {sync_e}")
-                    log_system("ERROR", "RAM Sync failed during batch finalization", error=str(sync_e))
+                    log_ingestion("ERROR", "RAM Sync failed during batch finalization", error=str(sync_e))
 
 
             self._write_back([])
@@ -93,7 +93,7 @@ class ExternalIngestor:
 
         except Exception as e:
             print(f"[ERROR] Critical Error in ExternalIngestor: {e}")
-            log_system("ERROR", "ExternalIngestor failed", error=str(e))
+            log_ingestion("ERROR", "ExternalIngestor failed", error=str(e))
 
         return stats
 
@@ -138,7 +138,7 @@ class ExternalIngestor:
         downloader_type = self._get_downloader_type(url)
         if not downloader_type:
             print(f"as i   [{platform.upper()}] Unsupported platform: {url}")
-            log_system("WARNING", "URL skipped: Unsupported platform", url=url)
+            log_ingestion("WARNING", "URL skipped: Unsupported platform", url=url)
             self._log_failure(url, "Unsupported platform")
             return False, url, item_stats, []
 
@@ -159,7 +159,7 @@ class ExternalIngestor:
                 platform_label = "YouTube community" if is_youtube_community else "Pinterest" if is_pinterest else "Instagram" if is_instagram else "Pixiv"
                 error_msg = metadata_info.get('error', f'{platform_label} metadata failed')
                 print(f"   [ERROR] [{platform.upper()}] Metadata failed: {error_msg}")
-                log_system("ERROR", f"{platform_label} metadata failed", url=url, error=error_msg)
+                log_ingestion("ERROR", f"{platform_label} metadata failed", url=url, error=error_msg)
                 self._log_failure(url, f"{platform_label} metadata failed: {error_msg}")
                 item_stats["errors"] += 1
                 return False, url, item_stats, []
@@ -169,32 +169,32 @@ class ExternalIngestor:
                 shortcode = self._instagram_shortcode(url)
                 if self._instagram_complete(url, expected_count):
                     print(f"[OK] [{platform.upper()}] URL already complete, skipping: {url}")
-                    log_system("INFO", "Instagram URL skipped: Complete in database", url=url, shortcode=shortcode, expected_count=expected_count)
+                    log_ingestion("INFO", "Instagram URL skipped: Complete in database", url=url, shortcode=shortcode, expected_count=expected_count)
                     item_stats["skipped"] += 1
                     return True, url, item_stats, []
             elif is_pinterest:
                 if self._url_complete(url):
                     print(f"[OK] [{platform.upper()}] URL already ingested, skipping: {url}")
-                    log_system("INFO", "Pinterest URL skipped: Complete in database", url=url)
+                    log_ingestion("INFO", "Pinterest URL skipped: Complete in database", url=url)
                     item_stats["skipped"] += 1
                     return True, url, item_stats, []
             elif is_youtube_community:
                 if self._url_complete(url, expected_count):
                     print(f"[OK] [{platform.upper()}] Community post already complete, skipping: {url}")
-                    log_system("INFO", "YouTube community post skipped: Complete in database", url=url, expected_count=expected_count)
+                    log_ingestion("INFO", "YouTube community post skipped: Complete in database", url=url, expected_count=expected_count)
                     item_stats["skipped"] += 1
                     return True, url, item_stats, []
             elif self._url_complete(url, expected_count):
                 print(f"[OK] [{platform.upper()}] URL already complete, skipping: {url}")
-                log_system("INFO", "Pixiv URL skipped: Complete in database", url=url, expected_count=expected_count)
+                log_ingestion("INFO", "Pixiv URL skipped: Complete in database", url=url, expected_count=expected_count)
                 item_stats["skipped"] += 1
                 return True, url, item_stats, []
         elif self._url_complete(url):
             print(f"[OK] [{platform.upper()}] URL already ingested, skipping: {url}")
             if is_x:
-                log_system("INFO", "X URL skipped: Complete in database", url=url)
+                log_ingestion("INFO", "X URL skipped: Complete in database", url=url)
             else:
-                log_system("INFO", "URL skipped: Complete in database", url=url)
+                log_ingestion("INFO", "URL skipped: Complete in database", url=url)
             item_stats["skipped"] += 1
             return True, url, item_stats, []
 
@@ -221,7 +221,7 @@ class ExternalIngestor:
 
                 if not success and attempt < max_attempts:
                     print(f"   a3 [{platform.upper()}] Attempt {attempt} failed. Retrying in 2 seconds...")
-                    log_system("WARNING", f"Download attempt {attempt} failed", url=url, platform=platform)
+                    log_ingestion("WARNING", f"Download attempt {attempt} failed", url=url, platform=platform)
                     time.sleep(2)
 
             if success:
@@ -229,9 +229,9 @@ class ExternalIngestor:
                 if is_pixiv:
                     expected_count = result.get("expected_count", 0)
                     downloaded_count = result.get("downloaded_count", len(result.get("file_paths", [])))
-                    log_system("INFO", "Pixiv download verified", url=url, expected_count=expected_count, downloaded_count=downloaded_count)
+                    log_ingestion("INFO", "Pixiv download verified", url=url, expected_count=expected_count, downloaded_count=downloaded_count)
                 elif is_x:
-                    log_system(
+                    log_ingestion(
                         "INFO",
                         "X download completed",
                         url=url,
@@ -239,7 +239,7 @@ class ExternalIngestor:
                         downloaded_count=result.get("downloaded_count", len(result.get("file_paths", [])))
                     )
                 elif is_instagram:
-                    log_system(
+                    log_ingestion(
                         "INFO",
                         "Instagram download verified",
                         url=url,
@@ -248,7 +248,7 @@ class ExternalIngestor:
                         downloaded_count=result.get("downloaded_count", len(result.get("file_paths", [])))
                     )
                 elif is_pinterest:
-                    log_system(
+                    log_ingestion(
                         "INFO",
                         "Pinterest download verified",
                         url=url,
@@ -256,7 +256,7 @@ class ExternalIngestor:
                         downloaded_count=result.get("downloaded_count", len(result.get("file_paths", [])))
                     )
                 elif is_youtube_community:
-                    log_system(
+                    log_ingestion(
                         "INFO",
                         "YouTube community download verified",
                         url=url,
@@ -301,7 +301,7 @@ class ExternalIngestor:
 
                 if validation_failed:
                     print(f"   [ERROR] [{platform.upper()}] Integrity Check Failed: {validation_error}")
-                    log_system("ERROR", "Integrity check failed", url=url, error=validation_error)
+                    log_ingestion("ERROR", "Integrity check failed", url=url, error=validation_error)
                     self._log_failure(url, f"Integrity check failed: {validation_error}")
 
 
@@ -347,25 +347,25 @@ class ExternalIngestor:
                     if batch_data and batch_protected:
                         rolled_back = self._rollback_batch(batch_data)
                         item_stats["processed"] = max(0, item_stats["processed"] - rolled_back)
-                        log_system("WARNING", "Rolled back partial URL ingest", url=url, platform=platform, rolled_back=rolled_back)
+                        log_ingestion("WARNING", "Rolled back partial URL ingest", url=url, platform=platform, rolled_back=rolled_back)
                     self._log_failure(url, "Pipeline Error during file processing")
                     return False, url, item_stats, [] if batch_protected else batch_data
 
                 if is_pixiv:
-                    log_system("INFO", "Pixiv URL processed successfully", url=url, processed=len(batch_data))
+                    log_ingestion("INFO", "Pixiv URL processed successfully", url=url, processed=len(batch_data))
                 elif is_x:
-                    log_system("INFO", "X URL processed successfully", url=url, processed=len(batch_data))
+                    log_ingestion("INFO", "X URL processed successfully", url=url, processed=len(batch_data))
                 elif is_instagram:
-                    log_system("INFO", "Instagram URL processed successfully", url=url, shortcode=self._instagram_shortcode(url), processed=len(batch_data))
+                    log_ingestion("INFO", "Instagram URL processed successfully", url=url, shortcode=self._instagram_shortcode(url), processed=len(batch_data))
                 elif is_pinterest:
-                    log_system("INFO", "Pinterest URL processed successfully", url=url, processed=len(batch_data))
+                    log_ingestion("INFO", "Pinterest URL processed successfully", url=url, processed=len(batch_data))
                 elif is_youtube_community:
-                    log_system("INFO", "YouTube community post processed successfully", url=url, processed=len(batch_data))
+                    log_ingestion("INFO", "YouTube community post processed successfully", url=url, processed=len(batch_data))
                 return True, url, item_stats, batch_data
             else:
                 error_msg = result.get('error', f"Failed after {max_attempts} attempts")
                 print(f"   [ERROR] [{platform.upper()}] Download failed: {error_msg}")
-                log_system("ERROR", f"Download permanently failed", url=url, platform=platform, error=error_msg)
+                log_ingestion("ERROR", f"Download permanently failed", url=url, platform=platform, error=error_msg)
 
                 self._log_failure(url, f"Download failed: {error_msg}")
                 item_stats["errors"] += 1
@@ -415,11 +415,11 @@ class ExternalIngestor:
                     missing_assets.append(file_hash)
 
             if missing_assets:
-                log_system("WARNING", "Instagram URL has DB rows with missing assets", url=url, shortcode=shortcode, missing_count=len(missing_assets))
+                log_ingestion("WARNING", "Instagram URL has DB rows with missing assets", url=url, shortcode=shortcode, missing_count=len(missing_assets))
                 return False
 
             if expected_count and len(rows) != expected_count:
-                log_system("WARNING", "Instagram URL has incomplete DB row count", url=url, shortcode=shortcode, expected_count=expected_count, db_count=len(rows))
+                log_ingestion("WARNING", "Instagram URL has incomplete DB row count", url=url, shortcode=shortcode, expected_count=expected_count, db_count=len(rows))
                 return False
 
             return True
@@ -444,11 +444,11 @@ class ExternalIngestor:
                     missing_assets.append(file_hash)
 
             if missing_assets:
-                log_system("WARNING", "URL has DB rows with missing assets", url=url, missing_count=len(missing_assets))
+                log_ingestion("WARNING", "URL has DB rows with missing assets", url=url, missing_count=len(missing_assets))
                 return False
 
             if expected_count is not None and len(rows) != expected_count:
-                log_system("WARNING", "URL has incomplete DB row count", url=url, expected_count=expected_count, db_count=len(rows))
+                log_ingestion("WARNING", "URL has incomplete DB row count", url=url, expected_count=expected_count, db_count=len(rows))
                 return False
 
             return True
@@ -487,7 +487,7 @@ class ExternalIngestor:
             return rolled_back
         except Exception as e:
             conn.rollback()
-            log_system("ERROR", "Rollback failed", error=str(e))
+            log_ingestion("ERROR", "Rollback failed", error=str(e))
             return rolled_back
         finally:
             conn.close()
