@@ -39,6 +39,13 @@ class InspectorView(QFrame):
         self.preview.setMinimumHeight(220)
         self.preview.setMaximumHeight(240)
         self.preview.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.preview_stage = QWidget()
+        self.preview_stage.setObjectName("TransparentContainer")
+        self.preview_stage.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.preview_stage.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        preview_stage_layout = QGridLayout(self.preview_stage)
+        preview_stage_layout.setContentsMargins(0, 0, 0, 0)
+        preview_stage_layout.addWidget(self.preview, 0, 0, Qt.AlignmentFlag.AlignCenter)
         self.video_preview = VideoPlayerWidget()
         self.video_preview.set_view_callbacks(self.request_wide, self.request_fullscreen, lambda: self.focus_mode)
         self.video_preview.setMinimumHeight(220)
@@ -48,9 +55,9 @@ class InspectorView(QFrame):
         self.media_widget.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.media_stack = QStackedLayout(self.media_widget)
         self.media_stack.setContentsMargins(12, 12, 12, 12)
-        self.media_stack.addWidget(self.preview)
+        self.media_stack.addWidget(self.preview_stage)
         self.media_stack.addWidget(self.video_preview)
-        self.media_stack.setAlignment(self.preview, Qt.AlignmentFlag.AlignCenter)
+        self.media_stack.setAlignment(self.preview_stage, Qt.AlignmentFlag.AlignCenter)
         self.media_stack.setAlignment(self.video_preview, Qt.AlignmentFlag.AlignCenter)
 
         self.image_wide_button = QPushButton("W")
@@ -256,7 +263,7 @@ class InspectorView(QFrame):
         self.topic_values = []
         self.video_preview.stop()
         self.preview.clear()
-        self.media_stack.setCurrentWidget(self.preview)
+        self.media_stack.setCurrentWidget(self.preview_stage)
         self.hash_value.setText("No selection")
         self.hash_value.setCursorPosition(0)
         self.platform_value.setText("Unknown")
@@ -334,7 +341,7 @@ class InspectorView(QFrame):
         else:
             self.video_preview.stop()
             self.preview_source_path = asset_path if asset_path.exists() else None
-            self.media_stack.setCurrentWidget(self.preview)
+            self.media_stack.setCurrentWidget(self.preview_stage)
             self.update_image_preview()
         self.hash_value.setText(item_hash)
         self.hash_value.setCursorPosition(0)
@@ -386,6 +393,7 @@ class InspectorView(QFrame):
             0 if fullscreen else 18,
         )
         self.root_layout.setSpacing(0 if fullscreen else 12)
+        self.preview.setContentsMargins(0, 0, 0, 0) if focused else self.preview.setContentsMargins(0, 18, 0, 6)
         self.bottom_spacer.changeSize(0, 0, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed if focused else QSizePolicy.Policy.Expanding)
         self.media_widget.setMinimumHeight(0 if fullscreen else 520 if focused else 240)
         self.media_widget.setMaximumHeight(16777215 if focused else 260)
@@ -393,11 +401,15 @@ class InspectorView(QFrame):
         self.video_preview.setMinimumHeight(0 if fullscreen else 520 if focused else 220)
         self.video_preview.setMaximumHeight(16777215 if focused else 260)
         self.video_preview.setMinimumWidth(0)
-        self.preview.setMinimumHeight(520 if focused else 200)
-        self.preview.setMaximumHeight(16777215 if focused else 220)
+        self.preview_stage.setMinimumHeight(520 if focused else 200)
+        self.preview_stage.setMaximumHeight(16777215 if focused else 220)
+        self.preview_stage.setMinimumWidth(0)
+        self.preview.setMinimumHeight(0)
+        self.preview.setMaximumHeight(16777215)
         self.preview.setMinimumWidth(0)
         self.media_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding if focused else QSizePolicy.Policy.Fixed)
-        self.preview.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding if focused else QSizePolicy.Policy.Expanding)
+        self.preview_stage.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding if focused else QSizePolicy.Policy.Expanding)
+        self.preview.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         for widget in [
             self.meta_panel,
             self.summary_panel,
@@ -409,24 +421,27 @@ class InspectorView(QFrame):
         self.video_preview.update_view_buttons()
         self.update_image_view_buttons()
         self.media_widget.updateGeometry()
+        self.preview_stage.updateGeometry()
         self.preview.updateGeometry()
         self.update_image_preview()
         QTimer.singleShot(0, self.update_image_preview)
+        QTimer.singleShot(50, self.update_image_preview)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self.update_image_preview()
 
     def update_image_preview(self):
-        if self.media_stack.currentWidget() is not self.preview:
+        if self.media_stack.currentWidget() is not self.preview_stage:
             return
         if self.preview_source_path and self.preview_source_path.exists():
             pixmap = QPixmap(str(self.preview_source_path))
             if not pixmap.isNull():
-                target_size = self.preview.size()
+                target_size = self.preview_stage.size()
                 if target_size.width() <= 0 or target_size.height() <= 0:
                     target_size = self.media_widget.size()
-                target_size.setHeight(max(1, target_size.height() - 24))
+                if self.focus_mode == "normal":
+                    target_size.setHeight(max(1, target_size.height() - 24))
                 if target_size.width() > 0 and target_size.height() > 0:
                     pixmap = pixmap.scaled(target_size, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
                 self.preview.setPixmap(pixmap)
@@ -438,7 +453,7 @@ class InspectorView(QFrame):
 
     def update_image_view_buttons(self):
         previewable = self.asset_path is not None and self.asset_path.exists()
-        image_active = self.media_stack.currentWidget() is self.preview and previewable
+        image_active = self.media_stack.currentWidget() is self.preview_stage and previewable
         self.media_controls.setVisible(image_active)
         self.image_wide_button.setEnabled(image_active)
         self.image_fullscreen_button.setEnabled(image_active)

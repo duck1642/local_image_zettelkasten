@@ -189,8 +189,8 @@ class MainWindow(QMainWindow):
         self.inspector.setMinimumWidth(0)
         self.inspector.setMaximumWidth(16777215)
         if self.centralWidget() and self.centralWidget().layout():
-            self.centralWidget().layout().setContentsMargins(0 if mode == "fullscreen" else 12, 0 if mode == "fullscreen" else 12, 0 if mode == "fullscreen" else 12, 0)
-            self.centralWidget().layout().setSpacing(0 if mode == "fullscreen" else 12)
+            self.centralWidget().layout().setContentsMargins(0 if focused else 12, 0 if focused else 12, 0 if focused else 12, 0)
+            self.centralWidget().layout().setSpacing(0 if focused else 12)
         self.inspector.set_focus_mode(mode)
         if mode == "fullscreen":
             self.showFullScreen()
