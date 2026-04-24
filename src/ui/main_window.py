@@ -63,7 +63,7 @@ class MainWindow(QMainWindow):
         self.worker = None
         self.tag_worker = None
         self.video_mode = "normal"
-        self.normal_geometry = None
+        self.normal_size = None
         self.restoring_focus = False
 
         self.search_input = QLineEdit()
@@ -165,19 +165,24 @@ class MainWindow(QMainWindow):
         self.setStatusBar(self.status)
         self.show_view(0)
         self.update_stats()
-        self.normal_geometry = self.geometry()
+        self.normal_size = self.size()
+        self.log_normal_size("initial_normal_size")
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
         if self.video_mode == "normal" and not self.restoring_focus and self.isVisible() and not self.isFullScreen():
-            self.normal_geometry = self.geometry()
+            self.normal_size = self.size()
+            self.log_normal_size("resize_normal_size")
+        elif self.video_mode != "normal" or self.restoring_focus:
             log_ui(
                 "INFO",
-                "Qt normal geometry recorded",
-                width=self.normal_geometry.width(),
-                height=self.normal_geometry.height(),
-                x=self.normal_geometry.x(),
-                y=self.normal_geometry.y(),
+                "Qt normal size record skipped",
+                mode=self.video_mode,
+                restoring_focus=self.restoring_focus,
+                visible=self.isVisible(),
+                fullscreen=self.isFullScreen(),
+                width=self.size().width(),
+                height=self.size().height(),
             )
 
     def toggle_video_wide(self):
@@ -189,6 +194,17 @@ class MainWindow(QMainWindow):
     def set_video_mode(self, mode: str):
         previous_mode = self.video_mode
         returning_to_normal = previous_mode != "normal" and mode == "normal"
+        log_ui(
+            "INFO",
+            "Qt video mode switch requested",
+            previous_mode=previous_mode,
+            next_mode=mode,
+            returning_to_normal=returning_to_normal,
+            current_width=self.size().width(),
+            current_height=self.size().height(),
+            normal_width=self.normal_size.width() if self.normal_size else 0,
+            normal_height=self.normal_size.height() if self.normal_size else 0,
+        )
         if returning_to_normal:
             self.restoring_focus = True
         self.video_mode = mode
@@ -234,11 +250,31 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(150, self.finish_focus_restore)
 
     def finish_focus_restore(self):
+        log_ui(
+            "INFO",
+            "Qt focus restore finishing",
+            mode=self.video_mode,
+            current_width=self.size().width(),
+            current_height=self.size().height(),
+            normal_width=self.normal_size.width() if self.normal_size else 0,
+            normal_height=self.normal_size.height() if self.normal_size else 0,
+        )
         self.restoring_focus = False
         if self.video_mode == "normal" and self.isVisible() and not self.isFullScreen():
-            self.normal_geometry = self.geometry()
+            self.normal_size = self.size()
+            self.log_normal_size("finish_focus_restore_recorded")
 
     def restore_normal_window_geometry(self):
+        log_ui(
+            "INFO",
+            "Qt normal restore start",
+            current_width=self.size().width(),
+            current_height=self.size().height(),
+            normal_width=self.normal_size.width() if self.normal_size else 0,
+            normal_height=self.normal_size.height() if self.normal_size else 0,
+            maximized=self.isMaximized(),
+            fullscreen=self.isFullScreen(),
+        )
         self.root_layout_main.setContentsMargins(12, 12, 12, 0)
         self.root_layout_main.setSpacing(12)
         self.media_focus_host.setVisible(False)
@@ -252,8 +288,29 @@ class MainWindow(QMainWindow):
         self.inspector_host.updateGeometry()
         if self.centralWidget():
             self.centralWidget().updateGeometry()
-        if self.normal_geometry and not self.isMaximized():
-            self.setGeometry(self.normal_geometry)
+        if self.normal_size and not self.isMaximized():
+            self.resize(self.normal_size)
+        self.log_focus_layout("after_restore_normal_window_geometry")
+        log_ui(
+            "INFO",
+            "Qt normal restore end",
+            current_width=self.size().width(),
+            current_height=self.size().height(),
+            normal_width=self.normal_size.width() if self.normal_size else 0,
+            normal_height=self.normal_size.height() if self.normal_size else 0,
+        )
+
+    def log_normal_size(self, stage: str):
+        log_ui(
+            "INFO",
+            "Qt normal size recorded",
+            stage=stage,
+            mode=self.video_mode,
+            width=self.normal_size.width() if self.normal_size else 0,
+            height=self.normal_size.height() if self.normal_size else 0,
+            current_width=self.size().width(),
+            current_height=self.size().height(),
+        )
 
     def move_media_to_focus(self):
         if self.media_focus_layout.indexOf(self.inspector.media_widget) == -1:
