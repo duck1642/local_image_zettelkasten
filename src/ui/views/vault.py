@@ -270,6 +270,8 @@ class VaultView(QScrollArea):
         super().__init__()
         self.items = []
         self.tiles = []
+        self.last_columns = 0
+        self.last_item_count = 0
         self.setObjectName("AppSurface")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setWidgetResizable(True)
@@ -322,10 +324,18 @@ class VaultView(QScrollArea):
 
     def render_items(self):
         # GUARD: Wait for real geometry if we are currently hidden or collapsed
-        # This prevents the "momentary 2-column squash" during view transitions.
         if self.viewport().width() < 50:
-            log_ui("DEBUG", "Qt vault render skipped (stale geometry)", width=self.viewport().width())
             return
+
+        columns = self.column_count()
+        item_count = len(self.items)
+        
+        # Lazy Update: Only re-render if the layout structure or data count actually changed
+        if columns == self.last_columns and item_count == self.last_item_count:
+            return
+            
+        self.last_columns = columns
+        self.last_item_count = item_count
 
         while self.grid.count():
             item = self.grid.takeAt(0)
