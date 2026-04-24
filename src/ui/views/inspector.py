@@ -34,6 +34,7 @@ class InspectorView(QFrame):
 
         self.preview = QLabel()
         self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.preview.setContentsMargins(0, 18, 0, 6)
         self.preview.setMinimumSize(0, 0)
         self.preview.setMinimumHeight(220)
         self.preview.setMaximumHeight(240)
@@ -425,6 +426,7 @@ class InspectorView(QFrame):
                 target_size = self.preview.size()
                 if target_size.width() <= 0 or target_size.height() <= 0:
                     target_size = self.media_widget.size()
+                target_size.setHeight(max(1, target_size.height() - 24))
                 if target_size.width() > 0 and target_size.height() > 0:
                     pixmap = pixmap.scaled(target_size, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
                 self.preview.setPixmap(pixmap)
