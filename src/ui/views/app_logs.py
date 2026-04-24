@@ -52,7 +52,8 @@ class AppLogsView(QWidget):
 
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.refresh_log)
-        self.timer.start(1000)
+        # TEMPORARY TEST: 30 seconds instead of 1 second
+        self.timer.start(30000)
         self.refresh_log()
 
     def log_path(self):

@@ -74,7 +74,7 @@ ingestion_concurrency:
 tagging:
   enabled: true
   model_repo: SmilingWolf/wd-vit-tagger-v3
-  device: auto
+  device: cuda
   display_source: yaml
   threshold: 0.35
   max_tags: 30
@@ -90,4 +90,4 @@ ui:
     artist: 'a:'
     tag: '#'
     platform: '@'
-  vault_layout: grid
+  vault_layout: masonry

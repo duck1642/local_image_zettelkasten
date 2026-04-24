@@ -364,7 +364,7 @@ class InspectorView(QFrame):
         self.next_button.setEnabled(grouped)
         self.update_image_view_buttons()
         self.log_inspector_state("after_load_group_index")
-        log_ui("INFO", "Qt inspector loaded", hash=item_hash, asset_path=str(asset_path), exists=asset_path.exists())
+        log_ui("DEBUG", "Qt inspector loaded", hash=item_hash, asset_path=str(asset_path), exists=asset_path.exists())
 
     def previous_group_item(self):
         if len(self.group_rows) <= 1:
@@ -596,6 +596,7 @@ class InspectorView(QFrame):
         log_ui(
             "DEBUG",
             "Qt inspector flow state",
+
             stage=stage,
             hash=self.item_hash or "",
             host=host.objectName() or host.__class__.__name__,
@@ -612,6 +613,7 @@ class InspectorView(QFrame):
         log_ui(
             "DEBUG",
             "Qt inspector state",
+
             stage=stage,
             hash=self.item_hash or "",
             topics_visible=self.topics_wrap.isVisible(),
@@ -637,6 +639,7 @@ class InspectorView(QFrame):
         log_ui(
             "DEBUG",
             "Qt inspector preview geometry",
+
             stage=stage,
             hash=self.item_hash or "",
             mode=self.focus_mode,

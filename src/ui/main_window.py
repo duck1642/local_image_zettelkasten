@@ -274,7 +274,8 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(100, self.restore_normal_window_geometry)
             QTimer.singleShot(150, self.finish_focus_restore)
         self.log_focus_layout("after_set_video_mode")
-        log_ui("INFO", "Qt video layout mode changed", mode=mode)
+        log_ui("DEBUG", "Qt video layout mode changed", mode=mode)
+
 
     def exit_fullscreen_window_state(self):
         self.setWindowState(self.windowState() & ~Qt.WindowState.WindowFullScreen)
@@ -286,7 +287,7 @@ class MainWindow(QMainWindow):
 
     def finish_focus_restore(self):
         log_ui(
-            "INFO",
+            "DEBUG",
             "Qt focus restore finishing",
             mode=self.video_mode,
             current_width=self.size().width(),
