@@ -165,8 +165,8 @@ class MainWindow(QMainWindow):
         self.setStatusBar(self.status)
         self.show_view(0)
         self.update_stats()
-        self.normal_size = self.size()
-        self.log_normal_size("initial_normal_size")
+        QTimer.singleShot(0, self.capture_visible_normal_size)
+        QTimer.singleShot(150, self.capture_visible_normal_size)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -184,6 +184,11 @@ class MainWindow(QMainWindow):
                 width=self.size().width(),
                 height=self.size().height(),
             )
+
+    def capture_visible_normal_size(self):
+        if self.video_mode == "normal" and not self.restoring_focus and self.isVisible() and not self.isFullScreen():
+            self.normal_size = self.size()
+            self.log_normal_size("visible_normal_size")
 
     def toggle_video_wide(self):
         self.set_video_mode("normal" if self.video_mode == "wide" else "wide")
@@ -205,6 +210,9 @@ class MainWindow(QMainWindow):
             normal_width=self.normal_size.width() if self.normal_size else 0,
             normal_height=self.normal_size.height() if self.normal_size else 0,
         )
+        if previous_mode == "normal" and mode != "normal" and self.isVisible() and not self.isFullScreen():
+            self.normal_size = self.size()
+            self.log_normal_size("pre_focus_normal_size")
         if returning_to_normal:
             self.restoring_focus = True
         self.video_mode = mode
