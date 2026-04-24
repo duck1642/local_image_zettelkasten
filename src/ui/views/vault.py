@@ -400,7 +400,15 @@ class VaultView(QScrollArea):
         # Ensure we are using the correct layout type
         if current_type != self.layout_type:
             self.layout_type = current_type
-            # We recreate it on the container
+            # Remove old layout properly
+            old_layout = self.container.layout()
+            if old_layout:
+                # We can't delete a layout directly while items are in it, 
+                # but since we already deleted the widgets above, we can just 
+                # reparent the layout to a temporary widget to disconnect it.
+                dummy = QWidget()
+                dummy.setLayout(old_layout)
+            
             if self.layout_type == "masonry":
                 self.layout_manager = MasonryLayout(self.container, spacing=10, column_width=210)
             else:

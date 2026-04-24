@@ -16,10 +16,10 @@ class AppLogsView(QWidget):
         self.log_content = ""
         self.log_selector = QComboBox()
         self.log_selector.addItems(["system.log", "ui.log", "ingestion.log"])
-        self.log_selector.currentIndexChanged.connect(self.force_reload)
+        self.log_selector.activated.connect(self.force_reload)
         self.mode_selector = QComboBox()
         self.mode_selector.addItems(["Normal", "Full"])
-        self.mode_selector.currentIndexChanged.connect(self.force_reload)
+        self.mode_selector.activated.connect(self.force_reload)
         
         self.show_debug = QCheckBox("Show Debug")
         self.show_debug.setChecked(True)
@@ -33,8 +33,8 @@ class AppLogsView(QWidget):
         self.log_text = QTextEdit()
         self.log_text.setReadOnly(True)
         self.log_text.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
-        # Use Nerd Font for better log alignment and icon support
-        self.log_text.setStyleSheet("font-size: 10pt; font-family: 'NotoSansM Nerd Font Mono', 'Consolas', 'monospace'; background: #161b22;")
+        # Use Consolas as primary font for better readability
+        self.log_text.setStyleSheet("font-size: 10pt; font-family: 'Consolas', 'monospace'; background: #161b22;")
 
         top = QHBoxLayout()
         top.addWidget(self.log_selector)

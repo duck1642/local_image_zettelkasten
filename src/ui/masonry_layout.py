@@ -52,6 +52,9 @@ class MasonryLayout(QLayout):
         """
         The Pinterest Logic: Place each item in the column with the minimum current height.
         """
+        if not self.items:
+            return 0
+
         spacing = self.spacing()
         effective_width = rect.width()
         
@@ -70,10 +73,12 @@ class MasonryLayout(QLayout):
             y = col_heights[min_col_idx]
             
             # 3. Get item height
-            # We respect heightForWidth if available, otherwise fallback to sizeHint
             item_height = item.heightForWidth(self.column_width)
             if item_height <= 0:
                 item_height = item.sizeHint().height()
+            
+            # Ensure height is at least something visible
+            item_height = max(item_height, 100)
             
             # 4. Apply geometry
             if apply_geometry:
@@ -83,4 +88,4 @@ class MasonryLayout(QLayout):
             col_heights[min_col_idx] = y + item_height + spacing
 
         # Return total required height
-        return max(col_heights) - rect.y() if col_heights else 0
+        return max(col_heights) - rect.y()

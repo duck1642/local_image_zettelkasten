@@ -76,40 +76,40 @@ def add_play_overlay(pixmap: QPixmap) -> QPixmap:
     return output
 
 
-def pixmap_for_item(item_hash: str, extension: str | None, mime_type: str | None, size: int = 192, allow_generate: bool = True) -> QPixmap:
+def pixmap_for_item(item_hash: str, extension: str | None, mime_type: str | None, width: int = 192, allow_generate: bool = True) -> QPixmap:
     asset_path = asset_path_for(item_hash, extension, mime_type)
     if not asset_path.exists():
-        return placeholder_pixmap("MISSING", QColor("#f85149"), size)
+        return placeholder_pixmap("MISSING", QColor("#f85149"), width)
     if (mime_type or "").startswith("video/"):
         thumb_path = THUMBNAIL_DIR / f"{item_hash}_video.jpg"
         if thumb_path.exists() and thumb_path.stat().st_mtime >= asset_path.stat().st_mtime:
             pixmap = QPixmap(str(thumb_path))
             if not pixmap.isNull():
-                scaled = pixmap.scaled(size, size, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                scaled = pixmap.scaledToWidth(width, Qt.TransformationMode.SmoothTransformation)
                 return add_play_overlay(scaled)
         
         if not allow_generate:
-            return placeholder_pixmap("VIDEO", QColor("#8b949e"), size)
+            return placeholder_pixmap("VIDEO", QColor("#8b949e"), width)
 
         try:
             thumb_path = video_thumbnail_path_for(asset_path, item_hash)
             pixmap = QPixmap(str(thumb_path))
             if pixmap.isNull():
-                return placeholder_pixmap("PLAY", QColor("#8b949e"), size)
-            scaled = pixmap.scaled(size, size, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                return placeholder_pixmap("PLAY", QColor("#8b949e"), width)
+            scaled = pixmap.scaledToWidth(width, Qt.TransformationMode.SmoothTransformation)
             return add_play_overlay(scaled)
         except Exception:
-            return placeholder_pixmap("PLAY", QColor("#8b949e"), size)
+            return placeholder_pixmap("PLAY", QColor("#8b949e"), width)
     try:
         thumb_path = thumbnail_path_for(asset_path, item_hash)
         pixmap = QPixmap(str(thumb_path))
         if pixmap.isNull():
             log_ui("ERROR", "Qt thumbnail pixmap null", hash=item_hash, thumbnail_path=str(thumb_path))
-            return placeholder_pixmap("IMAGE", QColor("#f85149"), size)
-        return pixmap.scaled(size, size, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            return placeholder_pixmap("IMAGE", QColor("#f85149"), width)
+        return pixmap.scaledToWidth(width, Qt.TransformationMode.SmoothTransformation)
     except Exception as exc:
         log_ui("ERROR", "Qt thumbnail load failed", hash=item_hash, error=str(exc))
-        return placeholder_pixmap("IMAGE", QColor("#f85149"), size)
+        return placeholder_pixmap("IMAGE", QColor("#f85149"), width)
 
 
 def preview_pixmap(asset_path: Path, item_hash: str, mime_type: str | None, width: int = 260, height: int = 220) -> QPixmap:

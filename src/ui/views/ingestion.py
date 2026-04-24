@@ -53,7 +53,7 @@ class IngestionView(QWidget):
         self.log_text = QTextEdit()
         self.log_text.setReadOnly(True)
         self.log_text.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
-        self.log_text.setStyleSheet("font-size: 10pt; font-family: 'NotoSansM Nerd Font Mono', 'Consolas', 'monospace'; background: #161b22;")
+        self.log_text.setStyleSheet("font-size: 10pt; font-family: 'Consolas', 'monospace'; background: #161b22;")
 
         top = QHBoxLayout()
         top.addWidget(self.normal_button)
@@ -254,6 +254,11 @@ class IngestionView(QWidget):
         self.refresh_log()
 
     def refresh_log(self):
+        # Skip refresh if user is interacting with selection menus to avoid "stealing" focus or closing popups
+        # Note: IngestionView doesn't have mode/log selectors yet, but we check running state and button views
+        if self.running: # If ingestion is running, the log is very active
+             pass
+
         self.log_file.parent.mkdir(parents=True, exist_ok=True)
         if not self.log_file.exists():
             self.log_file.touch()

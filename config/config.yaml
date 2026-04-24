@@ -90,4 +90,4 @@ ui:
     artist: 'a:'
     tag: '#'
     platform: '@'
-  vault_layout: masonry
+  vault_layout: grid
