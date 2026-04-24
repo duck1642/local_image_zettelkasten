@@ -202,7 +202,7 @@ class MainWindow(QMainWindow):
             self.log_normal_size("resize_normal_size")
         elif self.video_mode != "normal" or self.restoring_focus:
             log_ui(
-                "INFO",
+                "DEBUG",
                 "Qt normal size record skipped",
                 mode=self.video_mode,
                 restoring_focus=self.restoring_focus,
@@ -227,7 +227,7 @@ class MainWindow(QMainWindow):
         previous_mode = self.video_mode
         returning_to_normal = previous_mode != "normal" and mode == "normal"
         log_ui(
-            "INFO",
+            "DEBUG",
             "Qt video mode switch requested",
             previous_mode=previous_mode,
             next_mode=mode,
@@ -327,7 +327,7 @@ class MainWindow(QMainWindow):
             self.resize(self.normal_size)
         self.log_focus_layout("after_restore_normal_window_geometry")
         log_ui(
-            "INFO",
+            "DEBUG",
             "Qt normal restore end",
             current_width=self.size().width(),
             current_height=self.size().height(),
@@ -337,7 +337,7 @@ class MainWindow(QMainWindow):
 
     def log_normal_size(self, stage: str):
         log_ui(
-            "INFO",
+            "DEBUG",
             "Qt normal size recorded",
             stage=stage,
             mode=self.video_mode,
@@ -369,8 +369,9 @@ class MainWindow(QMainWindow):
         inspector_geometry = self.inspector.geometry()
         media_geometry = self.inspector.media_widget.geometry()
         log_ui(
-            "INFO",
+            "DEBUG",
             "Qt focus layout geometry",
+
             stage=stage,
             mode=self.video_mode,
             focus_visible=self.media_focus_host.isVisible(),

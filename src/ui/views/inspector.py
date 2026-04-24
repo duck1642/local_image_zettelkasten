@@ -594,7 +594,7 @@ class InspectorView(QFrame):
         geometry = host.geometry()
         size_hint = host.sizeHint()
         log_ui(
-            "INFO",
+            "DEBUG",
             "Qt inspector flow state",
             stage=stage,
             hash=self.item_hash or "",
@@ -610,7 +610,7 @@ class InspectorView(QFrame):
 
     def log_inspector_state(self, stage: str):
         log_ui(
-            "INFO",
+            "DEBUG",
             "Qt inspector state",
             stage=stage,
             hash=self.item_hash or "",
@@ -635,7 +635,7 @@ class InspectorView(QFrame):
         media_geometry = self.media_widget.geometry()
         pixmap = self.preview.pixmap()
         log_ui(
-            "INFO",
+            "DEBUG",
             "Qt inspector preview geometry",
             stage=stage,
             hash=self.item_hash or "",

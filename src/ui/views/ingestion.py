@@ -1,9 +1,10 @@
 from PySide6.QtCore import Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QMessageBox, QPlainTextEdit, QPushButton, QSplitter, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QMessageBox, QTextEdit, QPlainTextEdit, QPushButton, QSplitter, QVBoxLayout, QWidget, QCheckBox
 
 from logs.logger import LOGS_DIR, log_ui
 from queue_service import QUEUE_LABELS, clear_failed, move_failed_urls, parse_urls, queue_counts, queue_path, read_queue, write_queue
+from ui.log_utils import render_log_html
 
 
 class IngestionView(QWidget):
@@ -26,6 +27,10 @@ class IngestionView(QWidget):
         self.save_state_label = QLabel("Saved")
         self.save_state_label.setObjectName("SavedLabel")
 
+        self.show_debug = QCheckBox("Show Debug")
+        self.show_debug.setChecked(True)
+        self.show_debug.stateChanged.connect(lambda: self.force_refresh_log())
+
         self.reload_button = QPushButton("Reload")
         self.reload_button.clicked.connect(self.reload_current)
         self.open_button = QPushButton("Open")
@@ -45,9 +50,10 @@ class IngestionView(QWidget):
         self.clear_failed_button = QPushButton("Clear Failed")
         self.clear_failed_button.clicked.connect(self.clear_failed_dialog)
 
-        self.log_text = QPlainTextEdit()
+        self.log_text = QTextEdit()
         self.log_text.setReadOnly(True)
-        self.log_text.setMaximumBlockCount(800)
+        self.log_text.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
+        self.log_text.setStyleSheet("font-family: 'Consolas', 'Monaco', 'monospace'; background: #161b22;")
 
         top = QHBoxLayout()
         top.addWidget(self.normal_button)
@@ -56,6 +62,7 @@ class IngestionView(QWidget):
         top.addWidget(self.ready_label)
         top.addWidget(self.save_state_label)
         top.addStretch(1)
+        top.addWidget(self.show_debug)
         top.addWidget(self.reload_button)
         top.addWidget(self.open_button)
         top.addWidget(self.save_button)
@@ -241,6 +248,11 @@ class IngestionView(QWidget):
         for button in self.queue_buttons.values():
             button.setEnabled(not self.running)
 
+    def force_refresh_log(self):
+        self.log_file_offset = 0
+        self.log_text.clear()
+        self.refresh_log()
+
     def refresh_log(self):
         self.log_file.parent.mkdir(parents=True, exist_ok=True)
         if not self.log_file.exists():
@@ -251,29 +263,36 @@ class IngestionView(QWidget):
             self.log_file_offset = 0
             self.log_text.clear()
             
-        if file_size == self.log_file_offset:
+        if file_size == self.log_file_offset and self.log_file_offset > 0:
             self.update_controls()
             return
 
         try:
             with open(self.log_file, "r", encoding="utf-8", errors="replace") as f:
-                f.seek(self.log_file_offset)
-                new_data = f.read()
+                if self.log_file_offset == 0:
+                    # For initial load, just read the last chunk
+                    chunk_size = 1024 * 64
+                    if file_size > chunk_size:
+                        f.seek(file_size - chunk_size)
+                    new_data = f.read()
+                else:
+                    f.seek(self.log_file_offset)
+                    new_data = f.read()
                 self.log_file_offset = f.tell()
                 
-            if new_data:
-                # We can either append to existing text or just show the last N lines of the total
-                # For simplicity and to match previous behavior, we'll split the newly extended content
-                current_text = self.log_text.toPlainText()
-                if "--- Ingestion Monitor Active ---" in current_text:
-                    # Strip header to re-split correctly
-                    actual_logs = current_text.split("--- Ingestion Monitor Active ---\n", 1)[-1]
-                    combined = actual_logs + new_data
-                else:
-                    combined = new_data
+            if new_data or self.log_file_offset == 0:
+                # We need all lines to render properly with the offset tracking
+                # but for IngestionView we typically just want the most recent ones.
+                # To keep it consistent with AppLogsView, we'll read the whole file 
+                # or enough of it to split into lines.
+                with open(self.log_file, "r", encoding="utf-8", errors="replace") as f:
+                    # Read last 200 lines for the display
+                    all_content = f.read()
+                    lines = all_content.splitlines()[-200:]
                 
-                lines = combined.splitlines()[-120:]
-                self.log_text.setPlainText("--- Ingestion Monitor Active ---\n" + "\n".join(lines))
+                rendered_html = render_log_html(lines, show_debug=self.show_debug.isChecked())
+                header = "<div style='color: #58a6ff; font-weight: bold; margin-bottom: 8px; border-bottom: 1px solid #30363d;'>--- Ingestion Monitor Active ---</div>"
+                self.log_text.setHtml(header + rendered_html)
                 self.log_text.verticalScrollBar().setValue(self.log_text.verticalScrollBar().maximum())
         except Exception as exc:
             log_ui("ERROR", "Qt ingestion log refresh failed", error=str(exc))
