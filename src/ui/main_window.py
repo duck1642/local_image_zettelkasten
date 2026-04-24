@@ -3,11 +3,11 @@ from pathlib import Path
 from PySide6.QtCore import QThread, Qt, QTimer, Signal
 from PySide6.QtWidgets import QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMessageBox, QPushButton, QScrollArea, QSizePolicy, QStackedWidget, QStatusBar, QVBoxLayout, QWidget
 
-from core import main as run_ingestion
 from db.sqlite_operator import init_database
 from logs.logger import log_ui
 from md_generator import generate_markdown
 from processor import process_file
+from queue_service import INGESTION_LOCK, QUEUE_LABELS, run_queue
 from tagging import tag_media
 from ui.views.ingestion import IngestionView
 from ui.views.inspector import InspectorView
@@ -15,19 +15,25 @@ from ui.views.modals import MetadataDialog
 from ui.views.review import ReviewView
 from ui.views.settings import SettingsView
 from ui.views.vault import VaultView
-from utils import QUEUES_DIR, get_config, note_path_for
+from utils import get_config, note_path_for
 
 
 class IngestionWorker(QThread):
     completed = Signal(str)
     failed = Signal(str)
 
+    def __init__(self, queue: str):
+        super().__init__()
+        self.queue = queue
+
     def run(self):
         try:
-            run_ingestion()
-            self.completed.emit("Ingestion pipeline complete.")
+            stats = run_queue(self.queue)
+            self.completed.emit(f"{QUEUE_LABELS[self.queue]} ingestion complete. Added: {stats['processed']} | Skipped: {stats.get('skipped', 0)} | Errors: {stats['errors']}")
         except Exception as exc:
             self.failed.emit(str(exc))
+        finally:
+            INGESTION_LOCK.release()
 
 
 class TagWorker(QThread):
@@ -114,6 +120,7 @@ class MainWindow(QMainWindow):
         self.inspector.fullscreen_requested.connect(self.toggle_video_fullscreen)
         self.review_view.changed.connect(self.refresh_vault)
         self.settings_view.saved.connect(self.reload_config)
+        self.ingestion_view.start_requested.connect(self.run_ingestion_queue)
 
         top_layout = QHBoxLayout()
         top_layout.addWidget(self.search_input, 1)
@@ -165,7 +172,7 @@ class MainWindow(QMainWindow):
         focused = mode != "normal"
         self.nav_widget.setVisible(not focused)
         self.workspace.setVisible(not focused)
-        self.inspector_host.setVisible(not focused)
+        self.inspector_host.setVisible(not focused and self.stack.currentIndex() == 0)
         self.media_focus_host.setVisible(focused)
         if focused:
             self.move_media_to_focus()
@@ -259,6 +266,8 @@ class MainWindow(QMainWindow):
     def show_view(self, index: int):
         self.stack.setCurrentIndex(index)
         self.set_nav_checked(index)
+        if self.video_mode == "normal":
+            self.inspector_host.setVisible(index == 0)
         if index == 0:
             self.vault_view.refresh()
         elif index == 1:
@@ -316,49 +325,48 @@ class MainWindow(QMainWindow):
         if self.worker and self.worker.isRunning():
             QMessageBox.information(self, "Ingestion", "Ingestion is already running.")
             return
-        self.worker = IngestionWorker()
+        self.run_ingestion_queue(self.ingestion_view.current_queue if self.ingestion_view.current_queue in {"normal", "force"} else "normal")
+
+    def run_ingestion_queue(self, queue: str):
+        if queue not in {"normal", "force"}:
+            QMessageBox.information(self, "Ingestion", "Failed queue cannot be started directly. Use Retry Failed.")
+            return
+        if self.worker and self.worker.isRunning():
+            QMessageBox.information(self, "Ingestion", "Ingestion is already running.")
+            return
+        if self.ingestion_view.current_queue == queue and self.ingestion_view.dirty:
+            self.ingestion_view.save_current()
+        if not INGESTION_LOCK.acquire(blocking=False):
+            QMessageBox.information(self, "Ingestion", "Another ingestion queue is already running.")
+            return
+        self.worker = IngestionWorker(queue)
         self.worker.completed.connect(self.ingestion_done)
         self.worker.failed.connect(self.ingestion_failed)
+        self.worker.finished.connect(lambda: self.ingestion_view.set_running(False))
+        self.ingestion_view.set_running(True)
         self.worker.start()
         self.show_view(2)
-        self.status.showMessage("Ingestion running...")
-        log_ui("INFO", "Qt ingestion command started")
+        self.status.showMessage(f"{QUEUE_LABELS[queue]} ingestion running...")
+        log_ui("INFO", "Qt ingestion queue started", queue=queue)
 
     def ingestion_done(self, message: str):
         QMessageBox.information(self, "Ingestion", message)
         self.refresh_vault()
+        self.ingestion_view.load_queue(self.ingestion_view.current_queue, force=True)
 
     def ingestion_failed(self, message: str):
         QMessageBox.critical(self, "Ingestion Error", message)
         log_ui("ERROR", "Qt ingestion command failed", error=message)
 
     def retry_failed_links(self):
-        failed_file = QUEUES_DIR / "failed_links.md"
-        pending_file = QUEUES_DIR / "normal_pending_links.md"
-        if not failed_file.exists():
-            QMessageBox.information(self, "Retry", "No failed links file found.")
+        if not INGESTION_LOCK.acquire(blocking=False):
+            QMessageBox.information(self, "Retry", "Ingestion is already running.")
             return
-        urls = []
-        for line in failed_file.read_text(encoding="utf-8").splitlines():
-            if not line.strip() or line.lstrip().startswith("#"):
-                continue
-            if "|" in line:
-                line = line.split("|", 1)[0]
-            if "]" in line:
-                line = line.split("]", 1)[1]
-            url = line.strip()
-            if url:
-                urls.append(url)
-        if not urls:
-            QMessageBox.information(self, "Retry", "No failed URLs found.")
-            return
-        pending_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(pending_file, "a", encoding="utf-8") as handle:
-            for url in urls:
-                handle.write(f"{url}\n")
-        failed_file.write_text("# LIZ Failed Links Log\n", encoding="utf-8")
-        QMessageBox.information(self, "Retry", f"Queued {len(urls)} failed URLs.")
-        log_ui("INFO", "Qt retry queued", count=len(urls))
+        try:
+            self.show_view(2)
+            self.ingestion_view.retry_failed_dialog()
+        finally:
+            INGESTION_LOCK.release()
 
     def add_files(self):
         paths, _ = QFileDialog.getOpenFileNames(self, "Select files to ingest")

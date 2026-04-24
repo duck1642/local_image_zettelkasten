@@ -39,7 +39,7 @@ QUEUES_DIR = _resolve_path('queues', "data/queues")
 BATCHES_DIR = _resolve_path('batches', "data/batches")
 SECRETS_DIR = _resolve_path('secrets', "secrets")
 MODELS_DIR = _resolve_path('models', "data/models")
-TOPICS_DIR = _resolve_path('topics', "data/topics")
+WD_TAGS_DIR = _resolve_path('wd_tags', "data/wd-tags")
 
 OUTPUT_DIR = VAULT_DIR
 ASSETS_DIR = OUTPUT_DIR / "assets"
@@ -70,7 +70,7 @@ def setup_directories():
         QUEUES_DIR,
         BATCHES_DIR,
         MODELS_DIR,
-        TOPICS_DIR,
+        WD_TAGS_DIR,
         OUTPUT_DIR,
         ASSETS_DIR,
         NOTES_DIR,
@@ -94,6 +94,10 @@ def existing_note_path_for(file_hash: str) -> Path:
     if sharded_path.exists():
         return sharded_path
     return legacy_note_path_for(file_hash)
+
+def wd_tag_cache_path_for(file_hash: str) -> Path:
+
+    return WD_TAGS_DIR / str(file_hash)[:2] / f"{file_hash}.json"
 
 def validate_config_schema(config: dict):
 
@@ -169,7 +173,7 @@ def get_config() -> dict:
                 'batches': str(BATCHES_DIR),
                 'secrets': str(SECRETS_DIR),
                 'models': str(MODELS_DIR),
-                'topics': str(TOPICS_DIR),
+                'wd_tags': str(WD_TAGS_DIR),
             },
             'firewall': {
                 'allowed_extensions': ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.jfif', '.mp4', '.webm', '.ogv'],

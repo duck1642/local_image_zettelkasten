@@ -88,8 +88,8 @@ class ExternalIngestor:
                     log_system("ERROR", "RAM Sync failed during batch finalization", error=str(sync_e))
 
 
-            self._write_back(all_remaining)
-            print(f"\n[OK] Ingestion cycle complete. {len(all_remaining)} links remaining in file.")
+            self._write_back([])
+            print(f"\n[OK] Ingestion cycle complete. {len(all_remaining)} failed links logged for explicit retry.")
 
         except Exception as e:
             print(f"[ERROR] Critical Error in ExternalIngestor: {e}")
@@ -139,6 +139,7 @@ class ExternalIngestor:
         if not downloader_type:
             print(f"as i   [{platform.upper()}] Unsupported platform: {url}")
             log_system("WARNING", "URL skipped: Unsupported platform", url=url)
+            self._log_failure(url, "Unsupported platform")
             return False, url, item_stats, []
 
         is_pixiv = self._is_pixiv_url(url)

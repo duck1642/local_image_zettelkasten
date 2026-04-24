@@ -11,7 +11,7 @@ paths:
   batches: "data/batches"
   secrets: "secrets"
   models: "data/models"
-  topics: "data/topics"
+  wd_tags: "data/wd-tags"
 
 firewall:
   allowed_extensions:

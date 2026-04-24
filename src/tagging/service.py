@@ -10,7 +10,7 @@ from PIL import Image
 
 from fingerprint import extract_sampled_video_frames
 from logs.logger import log_system
-from utils import MODELS_DIR, TOPICS_DIR, calculate_file_hash, get_config
+from utils import MODELS_DIR, calculate_file_hash, get_config, wd_tag_cache_path_for
 from validators import get_mime_type
 
 
@@ -147,8 +147,8 @@ def _result(item_hash: str, media_path: Path, model_repo: str, device: str, prov
 def _write_result(result: TagResult):
     if not result.hash:
         return
-    TOPICS_DIR.mkdir(parents=True, exist_ok=True)
-    target = TOPICS_DIR / f"{result.hash}.json"
+    target = wd_tag_cache_path_for(result.hash)
+    target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(json.dumps(result.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8")
 
 
@@ -300,7 +300,7 @@ def _merge_tag_group(sampled_frames: list[dict[str, Any]], key: str, max_tags: i
 
 
 def load_tag_cache(item_hash: str) -> dict:
-    path = TOPICS_DIR / f"{item_hash}.json"
+    path = wd_tag_cache_path_for(item_hash)
     if not path.exists():
         return {}
     try:
