@@ -415,7 +415,8 @@ class MainWindow(QMainWindow):
         if self.video_mode == "normal":
             self.inspector_host.setVisible(index == 0)
         if index == 0:
-            self.vault_view.refresh()
+            # Delay refresh to ensure geometry is updated by the stack widget
+            QTimer.singleShot(0, self.vault_view.refresh)
         elif index == 1:
             self.review_view.load_items()
         self.update_stats()

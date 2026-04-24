@@ -321,6 +321,12 @@ class VaultView(QScrollArea):
         return [grouped[key] for key in ordered]
 
     def render_items(self):
+        # GUARD: Wait for real geometry if we are currently hidden or collapsed
+        # This prevents the "momentary 2-column squash" during view transitions.
+        if self.viewport().width() < 50:
+            log_ui("DEBUG", "Qt vault render skipped (stale geometry)", width=self.viewport().width())
+            return
+
         while self.grid.count():
             item = self.grid.takeAt(0)
             widget = item.widget()
