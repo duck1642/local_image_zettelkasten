@@ -272,6 +272,12 @@ class VaultView(QScrollArea):
         self.tiles = []
         self.last_columns = 0
         self.last_item_count = 0
+        
+        # Debounce timer: ensures we only render once the layout has settled
+        self.render_timer = QTimer(self)
+        self.render_timer.setSingleShot(True)
+        self.render_timer.timeout.connect(self.render_items)
+        
         self.setObjectName("AppSurface")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setWidgetResizable(True)
@@ -289,11 +295,11 @@ class VaultView(QScrollArea):
 
     def refresh(self):
         self.load_items()
-        self.render_items()
+        self.render_timer.start(50)
 
     def filter_by(self, field: str | None, value: str | None):
         self.load_items(field, value)
-        self.render_items()
+        self.render_timer.start(50)
 
     def load_items(self, field: str | None = None, value: str | None = None):
         allowed = {"source_artist", "platform", "original_filename"}
@@ -359,11 +365,9 @@ class VaultView(QScrollArea):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        if not self.tiles:
-            return
-        columns = self.column_count()
-        for index, tile in enumerate(self.tiles):
-            self.grid.addWidget(tile, index // columns, index % columns)
+        # Instead of moving tiles immediately, queue a debounced render.
+        # This prevents "jumping" while the window is still resizing.
+        self.render_timer.start(50)
 
     def column_count(self) -> int:
         width = max(1, self.viewport().width())
