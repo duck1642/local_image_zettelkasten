@@ -1,11 +1,27 @@
-from PySide6.QtCore import QEvent, QTimer, Qt, Signal
-from PySide6.QtGui import QCursor
+from PySide6.QtCore import QEvent, QRunnable, QThreadPool, QTimer, Qt, Signal
+from PySide6.QtGui import QCursor, QPixmap
 from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea, QStackedLayout, QVBoxLayout, QWidget
 
 from db.sqlite_operator import init_database
 from logs.logger import log_ui
 from ui.thumbnail_cache import asset_path_for, pixmap_for_item
 from ui.video_widgets import VideoPlayerWidget
+
+
+class ThumbnailWorker(QRunnable):
+    def __init__(self, item_hash, extension, mime_type, callback):
+        super().__init__()
+        self.item_hash = item_hash
+        self.extension = extension
+        self.mime_type = mime_type
+        self.callback = callback
+
+    def run(self):
+        try:
+            pixmap = pixmap_for_item(self.item_hash, self.extension, self.mime_type, 178, allow_generate=True)
+            self.callback(self.item_hash, pixmap)
+        except Exception as exc:
+            log_ui("ERROR", "Background thumbnail generation failed", hash=self.item_hash, error=str(exc))
 
 
 class VaultTile(QFrame):
@@ -29,11 +45,19 @@ class VaultTile(QFrame):
         self.setFixedSize(210, 230)
         self.setMouseTracking(True)
 
-        pixmap = pixmap_for_item(self.item_hash, self.extension, self.mime_type, 178)
+        pixmap = pixmap_for_item(self.item_hash, self.extension, self.mime_type, 178, allow_generate=False)
         self.image = QLabel()
         self.image.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.image.setFixedHeight(180)
         self.image.setPixmap(pixmap)
+        
+        if self.is_video and self.asset_path.exists():
+            from ui.thumbnail_cache import THUMBNAIL_DIR
+            thumb_path = THUMBNAIL_DIR / f"{self.item_hash}_video.jpg"
+            if not thumb_path.exists():
+                worker = ThumbnailWorker(self.item_hash, self.extension, self.mime_type, self.on_thumbnail_ready)
+                QThreadPool.globalInstance().start(worker)
+
         self.video = None
         self.video_loaded = False
         self.hover_active = False
@@ -114,6 +138,11 @@ class VaultTile(QFrame):
                 VaultTile.active_hover_tile = None
             log_ui("INFO", "Qt vault hover video stopped", hash=self.item_hash)
 
+    def on_thumbnail_ready(self, item_hash, pixmap):
+        if item_hash == self.item_hash:
+            # Must update UI on main thread
+            QTimer.singleShot(0, lambda: self.image.setPixmap(pixmap))
+
 
 class VaultGroupTile(QFrame):
     clicked = Signal(str)
@@ -177,10 +206,24 @@ class VaultGroupTile(QFrame):
 
     def update_item(self):
         item_hash, extension, mime_type, original_name, source_url = self.current_row()
-        self.image.setPixmap(pixmap_for_item(str(item_hash), extension or "", mime_type or "", 178))
+        item_hash = str(item_hash)
+        pixmap = pixmap_for_item(item_hash, extension or "", mime_type or "", 178, allow_generate=False)
+        self.image.setPixmap(pixmap)
+        
+        if (mime_type or "").startswith("video/"):
+            from ui.thumbnail_cache import THUMBNAIL_DIR
+            thumb_path = THUMBNAIL_DIR / f"{item_hash}_video.jpg"
+            if not thumb_path.exists():
+                worker = ThumbnailWorker(item_hash, extension or "", mime_type or "", self.on_thumbnail_ready)
+                QThreadPool.globalInstance().start(worker)
+
         self.counter.setText(f"{self.current_index + 1} / {len(self.rows)}")
-        self.label.setText(str(item_hash)[:12])
-        self.label.setToolTip(str(item_hash))
+        self.label.setText(item_hash[:12])
+        self.label.setToolTip(item_hash)
+
+    def on_thumbnail_ready(self, item_hash, pixmap):
+        if item_hash == str(self.current_row()[0]):
+            QTimer.singleShot(0, lambda: self.image.setPixmap(pixmap))
 
     def previous_item(self):
         self.current_index = (self.current_index - 1) % len(self.rows)
@@ -300,7 +343,6 @@ class VaultView(QScrollArea):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        old_positions = [(self.grid.indexOf(tile), tile) for tile in self.tiles]
         if not self.tiles:
             return
         columns = self.column_count()

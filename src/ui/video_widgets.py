@@ -39,7 +39,6 @@ class ClickableSlider(QSlider):
             self.setValue(value)
             self.clicked_value.emit(value)
             event.accept()
-            return
 
         super().mousePressEvent(event)
 

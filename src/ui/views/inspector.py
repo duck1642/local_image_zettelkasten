@@ -27,6 +27,7 @@ class InspectorView(QFrame):
         self.mime_type = ""
         self.asset_path = None
         self.preview_source_path = None
+        self.cached_preview_pixmap = None
         self.focus_mode = "normal"
         self.group_rows = []
         self.group_index = 0
@@ -336,11 +337,16 @@ class InspectorView(QFrame):
         self.asset_path = asset_path
         if self.mime_type.startswith("video/") and asset_path.exists():
             self.preview_source_path = None
+            self.cached_preview_pixmap = None
             self.video_preview.load(asset_path)
             self.media_stack.setCurrentWidget(self.video_preview)
         else:
             self.video_preview.stop()
             self.preview_source_path = asset_path if asset_path.exists() else None
+            if self.preview_source_path:
+                self.cached_preview_pixmap = QPixmap(str(self.preview_source_path))
+            else:
+                self.cached_preview_pixmap = None
             self.media_stack.setCurrentWidget(self.preview_stage)
             self.update_image_preview()
         self.hash_value.setText(item_hash)
@@ -434,19 +440,18 @@ class InspectorView(QFrame):
     def update_image_preview(self):
         if self.media_stack.currentWidget() is not self.preview_stage:
             return
-        if self.preview_source_path and self.preview_source_path.exists():
-            pixmap = QPixmap(str(self.preview_source_path))
-            if not pixmap.isNull():
-                target_size = self.preview_stage.size()
-                if target_size.width() <= 0 or target_size.height() <= 0:
-                    target_size = self.media_widget.size()
-                if self.focus_mode == "normal":
-                    target_size.setHeight(max(1, target_size.height() - 24))
-                if target_size.width() > 0 and target_size.height() > 0:
-                    pixmap = pixmap.scaled(target_size, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-                self.preview.setPixmap(pixmap)
-                self.log_preview_geometry("image_preview_updated")
-                return
+        if self.cached_preview_pixmap and not self.cached_preview_pixmap.isNull():
+            pixmap = self.cached_preview_pixmap
+            target_size = self.preview_stage.size()
+            if target_size.width() <= 0 or target_size.height() <= 0:
+                target_size = self.media_widget.size()
+            if self.focus_mode == "normal":
+                target_size.setHeight(max(1, target_size.height() - 24))
+            if target_size.width() > 0 and target_size.height() > 0:
+                pixmap = pixmap.scaled(target_size, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            self.preview.setPixmap(pixmap)
+            self.log_preview_geometry("image_preview_updated")
+            return
         if self.asset_path:
             self.preview.setPixmap(preview_pixmap(self.asset_path, self.item_hash, self.mime_type))
             self.log_preview_geometry("image_preview_fallback")
@@ -652,21 +657,23 @@ class InspectorView(QFrame):
         artist = self.artist_input.text().strip()
         source_url = self.url_input.text().strip()
         conn = init_database()
-        cursor = conn.cursor()
-        target_hashes = [str(row[0]) for row in self.group_rows] if len(self.group_rows) > 1 else [self.item_hash]
-        for target_hash in target_hashes:
-            cursor.execute(
-                "UPDATE items SET source_artist = ?, source_url = ? WHERE hash = ?",
-                (artist, source_url, target_hash),
-            )
-        conn.commit()
-        for target_hash in target_hashes:
-            md_content = generate_markdown(conn, target_hash)
-            if md_content:
-                note_path = note_path_for(target_hash)
-                note_path.parent.mkdir(parents=True, exist_ok=True)
-                note_path.write_text(md_content, encoding="utf-8")
-        conn.close()
+        try:
+            cursor = conn.cursor()
+            target_hashes = [str(row[0]) for row in self.group_rows] if len(self.group_rows) > 1 else [self.item_hash]
+            for target_hash in target_hashes:
+                cursor.execute(
+                    "UPDATE items SET source_artist = ?, source_url = ? WHERE hash = ?",
+                    (artist, source_url, target_hash),
+                )
+            conn.commit()
+            for target_hash in target_hashes:
+                md_content = generate_markdown(conn, target_hash)
+                if md_content:
+                    note_path = note_path_for(target_hash)
+                    note_path.parent.mkdir(parents=True, exist_ok=True)
+                    note_path.write_text(md_content, encoding="utf-8")
+        finally:
+            conn.close()
         log_ui("INFO", "Qt inspector saved", hash=self.item_hash, group_count=len(target_hashes), topic_count=len(self.topic_values))
         self.saved.emit()
 
@@ -694,19 +701,6 @@ def _display_topic(topic: str) -> str:
     if match:
         return match.group(1).strip() or topic
     return topic
-
-
-def _parse_topics(topics) -> list[str]:
-    if not topics:
-        return []
-    if isinstance(topics, list):
-        return [_normalize_topic(topic) for topic in topics if _normalize_topic(topic)]
-    values = []
-    for raw in str(topics).replace("\r", "\n").replace(",", "\n").split("\n"):
-        normalized = _normalize_topic(raw)
-        if normalized and normalized not in values:
-            values.append(normalized)
-    return values
 
 
 def _display_tag(tag: dict) -> str:

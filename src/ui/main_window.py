@@ -37,6 +37,32 @@ class IngestionWorker(QThread):
             INGESTION_LOCK.release()
 
 
+class ManualIngestionWorker(QThread):
+    progress = Signal(str)
+    completed = Signal(str)
+    failed = Signal(str)
+
+    def __init__(self, tasks: list[tuple[Path, dict]]):
+        super().__init__()
+        self.tasks = tasks
+
+    def run(self):
+        processed = 0
+        errors = 0
+        for file_path, metadata in self.tasks:
+            try:
+                success, message, _ = process_file(file_path, get_config(), metadata=metadata, delete_source=False)
+                if success:
+                    processed += 1
+                else:
+                    errors += 1
+                self.progress.emit(message)
+            except Exception as exc:
+                errors += 1
+                self.progress.emit(f"Error processing {file_path.name}: {exc}")
+        self.completed.emit(f"Manual ingestion complete. Added: {processed} | Errors: {errors}")
+
+
 class TagWorker(QThread):
     completed = Signal(object)
     failed = Signal(str)
@@ -61,6 +87,7 @@ class MainWindow(QMainWindow):
         self.config = get_config()
         self.prefixes = self.config.get("ui", {}).get("prefixes", {"command": ">", "platform": "@", "artist": "a:", "tag": "#"})
         self.worker = None
+        self.manual_worker = None
         self.tag_worker = None
         self.video_mode = "normal"
         self.normal_size = None
@@ -487,23 +514,35 @@ class MainWindow(QMainWindow):
             INGESTION_LOCK.release()
 
     def add_files(self):
+        if self.manual_worker and self.manual_worker.isRunning():
+            QMessageBox.information(self, "Add Files", "Manual ingestion is already running.")
+            return
+            
         paths, _ = QFileDialog.getOpenFileNames(self, "Select files to ingest")
         if not paths:
             return
+            
+        tasks = []
         for raw_path in paths:
             file_path = Path(raw_path)
             dialog = MetadataDialog(file_path, self)
-            if dialog.exec() != dialog.DialogCode.Accepted:
-                continue
-            try:
-                success, message, _ = process_file(file_path, get_config(), metadata=dialog.metadata(), delete_source=False)
-                if not success:
-                    QMessageBox.warning(self, "Add Files", message)
-                log_ui("INFO", "Qt add file processed", path=str(file_path), success=success, message=message)
-            except Exception as exc:
-                QMessageBox.critical(self, "Add Files Error", str(exc))
-                log_ui("ERROR", "Qt add file failed", path=str(file_path), error=str(exc))
+            if dialog.exec() == dialog.DialogCode.Accepted:
+                tasks.append((file_path, dialog.metadata()))
+        
+        if not tasks:
+            return
+            
+        self.manual_worker = ManualIngestionWorker(tasks)
+        self.manual_worker.progress.connect(lambda msg: self.status.showMessage(msg))
+        self.manual_worker.completed.connect(self.manual_ingestion_done)
+        self.manual_worker.start()
+        self.status.showMessage(f"Processing {len(tasks)} files...")
+        log_ui("INFO", "Qt manual ingestion started", count=len(tasks))
+
+    def manual_ingestion_done(self, message: str):
+        QMessageBox.information(self, "Add Files", message)
         self.refresh_vault()
+        log_ui("INFO", "Qt manual ingestion finished", message=message)
 
     def refresh_vault(self):
         self.vault_view.refresh()

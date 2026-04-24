@@ -12,7 +12,7 @@ class IngestionView(QWidget):
     def __init__(self):
         super().__init__()
         self.log_file = LOGS_DIR / "ingestion.log"
-        self.last_size = 0
+        self.log_file_offset = 0
         self.current_queue = "normal"
         self.dirty = False
         self.running = False
@@ -245,9 +245,37 @@ class IngestionView(QWidget):
         self.log_file.parent.mkdir(parents=True, exist_ok=True)
         if not self.log_file.exists():
             self.log_file.touch()
-        text = self.log_file.read_text(encoding="utf-8", errors="replace")
-        if len(text) != self.last_size:
-            self.last_size = len(text)
-            self.log_text.setPlainText("--- Ingestion Monitor Active ---\n" + "\n".join(text.splitlines()[-120:]))
-            self.log_text.verticalScrollBar().setValue(self.log_text.verticalScrollBar().maximum())
+            
+        file_size = self.log_file.stat().st_size
+        if file_size < self.log_file_offset:
+            self.log_file_offset = 0
+            self.log_text.clear()
+            
+        if file_size == self.log_file_offset:
+            self.update_controls()
+            return
+
+        try:
+            with open(self.log_file, "r", encoding="utf-8", errors="replace") as f:
+                f.seek(self.log_file_offset)
+                new_data = f.read()
+                self.log_file_offset = f.tell()
+                
+            if new_data:
+                # We can either append to existing text or just show the last N lines of the total
+                # For simplicity and to match previous behavior, we'll split the newly extended content
+                current_text = self.log_text.toPlainText()
+                if "--- Ingestion Monitor Active ---" in current_text:
+                    # Strip header to re-split correctly
+                    actual_logs = current_text.split("--- Ingestion Monitor Active ---\n", 1)[-1]
+                    combined = actual_logs + new_data
+                else:
+                    combined = new_data
+                
+                lines = combined.splitlines()[-120:]
+                self.log_text.setPlainText("--- Ingestion Monitor Active ---\n" + "\n".join(lines))
+                self.log_text.verticalScrollBar().setValue(self.log_text.verticalScrollBar().maximum())
+        except Exception as exc:
+            log_ui("ERROR", "Qt ingestion log refresh failed", error=str(exc))
+            
         self.update_controls()

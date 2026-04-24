@@ -11,10 +11,11 @@ class AppLogsView(QWidget):
     def __init__(self):
         super().__init__()
         self.last_key = ""
-        self.last_size = -1
+        self.log_file_offset = 0
+        self.log_content = ""
         self.log_selector = QComboBox()
         self.log_selector.addItems(["system.log", "ui.log", "ingestion.log"])
-        self.log_selector.currentTextChanged.connect(self.refresh_log)
+        self.log_selector.currentTextChanged.connect(self.force_reload)
         self.mode_selector = QComboBox()
         self.mode_selector.addItems(["Normal", "Full"])
         self.mode_selector.currentTextChanged.connect(self.force_reload)
@@ -47,7 +48,9 @@ class AppLogsView(QWidget):
         return LOGS_DIR / self.log_selector.currentText()
 
     def force_reload(self):
-        self.last_size = -1
+        self.log_file_offset = 0
+        self.log_content = ""
+        self.last_key = ""
         self.refresh_log()
 
     def open_current(self):
@@ -65,20 +68,49 @@ class AppLogsView(QWidget):
         path.parent.mkdir(parents=True, exist_ok=True)
         if not path.exists():
             path.touch()
+        
+        file_size = path.stat().st_size
+        
+        # If file shrunk or changed, reset
         key = str(path)
-        text = path.read_text(encoding="utf-8", errors="replace")
         mode = self.mode_selector.currentText()
         mode_key = f"{key}:{mode}"
-        if mode_key != self.last_key or len(text) != self.last_size:
+        
+        if mode_key != self.last_key or file_size < self.log_file_offset:
+            self.log_file_offset = 0
+            self.log_content = ""
             self.last_key = mode_key
-            self.last_size = len(text)
-            lines = text.splitlines()[-300:]
+            self.log_text.clear()
+
+        if file_size == self.log_file_offset:
+            return
+
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as f:
+                f.seek(self.log_file_offset)
+                new_data = f.read()
+                self.log_file_offset = f.tell()
+                
+            if not new_data:
+                return
+                
+            self.log_content += new_data
+            # Limit memory buffer if needed, but QPlainTextEdit handles its own block count
+            
+            lines = self.log_content.splitlines()
+            # If log is massive, only render the last 300 to keep UI snappy
+            display_lines = lines[-300:]
+            
             if mode == "Full":
-                rendered = "\n\n".join(lines)
+                rendered = "\n\n".join(display_lines)
             else:
-                rendered = self.render_normal(lines)
+                rendered = self.render_normal(display_lines)
+                
             self.log_text.setPlainText(rendered)
             self.log_text.verticalScrollBar().setValue(self.log_text.verticalScrollBar().maximum())
+            
+        except Exception as exc:
+            log_ui("ERROR", "Qt log refresh failed", path=str(path), error=str(exc))
 
     def render_normal(self, lines: list[str]) -> str:
         rendered = []
