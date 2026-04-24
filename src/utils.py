@@ -175,6 +175,15 @@ def get_config() -> dict:
                 'models': str(MODELS_DIR),
                 'wd_tags': str(WD_TAGS_DIR),
             },
+            'ui': {
+                'vault_layout': 'grid',
+                'prefixes': {
+                    'command': '>',
+                    'platform': '@',
+                    'artist': 'a:',
+                    'tag': '#'
+                }
+            },
             'firewall': {
                 'allowed_extensions': ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.jfif', '.mp4', '.webm', '.ogv'],
                 'allowed_mimes': list(DEFAULT_ALLOWED_MIMES)

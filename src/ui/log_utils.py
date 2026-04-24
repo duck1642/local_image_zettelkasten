@@ -26,7 +26,7 @@ def render_log_html(lines: list[str], show_debug: bool = True, mode: str = "Norm
     html_lines = []
     
     # CSS for the log entries
-    header = "<style>pre { white-space: pre-wrap; margin: 0; font-family: 'Segoe UI', monospace; font-size: 12px; }</style>"
+    header = "<style>pre { white-space: pre-wrap; margin: 0; font-family: 'Segoe UI', monospace; font-size: 9pt; }</style>"
     html_lines.append(header)
 
     for line in lines:
@@ -94,7 +94,7 @@ def render_log_html(lines: list[str], show_debug: bool = True, mode: str = "Norm
 
         entry_html = f"<div style='margin-bottom: 12px;'>{main_line}"
         if details:
-            entry_html += f"<div style='margin-left: 65px; font-size: 11px; line-height: 1.5; color: #8b949e;'>{' | '.join(details)}</div>"
+            entry_html += f"<div style='margin-left: 65px; font-size: 8pt; line-height: 1.5; color: #8b949e;'>{' | '.join(details)}</div>"
         if error_details:
             entry_html += f"<div style='margin-left: 65px;'>{''.join(error_details)}</div>"
         entry_html += "</div>"

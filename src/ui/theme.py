@@ -2,7 +2,7 @@ APP_STYLESHEET = """
 QWidget {
     color: #c9d1d9;
     font-family: Segoe UI;
-    font-size: 12px;
+    font-size: 9pt;
 }
 QMainWindow, QDialog {
     background: #0d1117;
@@ -141,12 +141,12 @@ QLabel#DirtyLabel {
 }
 QLabel#SectionLabel {
     color: #8b949e;
-    font-size: 11px;
+    font-size: 8.5pt;
     font-weight: 600;
 }
 QLabel#InfoValue {
     color: #f0f6fc;
-    font-size: 12px;
+    font-size: 9pt;
     font-weight: 600;
 }
 QLineEdit#InfoField {
@@ -155,7 +155,7 @@ QLineEdit#InfoField {
     border-radius: 4px;
     padding: 4px 8px;
     color: #f0f6fc;
-    font-size: 12px;
+    font-size: 9pt;
     font-weight: 600;
 }
 QLineEdit#InfoField:focus {
@@ -173,14 +173,14 @@ QWidget#MediaPanel {
 QLabel#TitleLabel {
     color: #f0f6fc;
     font-weight: 700;
-    font-size: 15px;
+    font-size: 11pt;
 }
 QLabel#OverlayBadge {
     background: transparent;
     border: none;
     color: #c9d1d9;
     padding: 0;
-    font-size: 10px;
+    font-size: 7.5pt;
     font-weight: 600;
 }
 QFrame#Panel {
@@ -200,7 +200,7 @@ QFrame#InspectorHost {
 QPushButton#EditableChip, QPushButton#SuggestionChip, QPushButton#RatingChip {
     border-radius: 12px;
     padding: 4px 10px;
-    font-size: 11px;
+    font-size: 8.5pt;
 }
 QPushButton#EditableChip {
     background: #21262d;

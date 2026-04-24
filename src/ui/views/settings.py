@@ -18,6 +18,11 @@ class SettingsView(QWidget):
         self.artist_prefix = QLineEdit(prefixes.get("artist", "a:"))
         self.tag_prefix = QLineEdit(prefixes.get("tag", "#"))
         self.platform_prefix = QLineEdit(prefixes.get("platform", "@"))
+        
+        self.vault_layout = QComboBox()
+        self.vault_layout.addItems(["grid", "masonry"])
+        self.vault_layout.setCurrentText(self.config.get("ui", {}).get("vault_layout", "grid"))
+        
         self.flatten_transparency = QCheckBox("Flatten Transparency")
         self.flatten_transparency.setChecked(self.config.get("processing", {}).get("flatten_transparency", True))
         tagging = self.config.get("tagging", {})
@@ -46,6 +51,7 @@ class SettingsView(QWidget):
         form.addRow("Artist Prefix", self.artist_prefix)
         form.addRow("Tag Prefix", self.tag_prefix)
         form.addRow("Platform Prefix", self.platform_prefix)
+        form.addRow("Vault Layout", self.vault_layout)
         form.addRow("", self.flatten_transparency)
         form.addRow("", self.tagging_enabled)
         form.addRow("Tag Model Repo", self.tagging_model_repo)
@@ -79,6 +85,7 @@ class SettingsView(QWidget):
             "tag": self.tag_prefix.text(),
             "platform": self.platform_prefix.text(),
         }
+        data["ui"]["vault_layout"] = self.vault_layout.currentText()
         data["processing"]["flatten_transparency"] = self.flatten_transparency.isChecked()
         tagging = data.get("tagging", {})
         tagging.update({

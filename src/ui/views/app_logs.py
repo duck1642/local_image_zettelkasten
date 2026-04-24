@@ -33,8 +33,8 @@ class AppLogsView(QWidget):
         self.log_text = QTextEdit()
         self.log_text.setReadOnly(True)
         self.log_text.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
-        # Use a fixed-width font for better log alignment
-        self.log_text.setStyleSheet("font-family: 'Consolas', 'Monaco', 'monospace'; background: #161b22;")
+        # Use Nerd Font for better log alignment and icon support
+        self.log_text.setStyleSheet("font-size: 10pt; font-family: 'NotoSansM Nerd Font Mono', 'Consolas', 'monospace'; background: #161b22;")
 
         top = QHBoxLayout()
         top.addWidget(self.log_selector)

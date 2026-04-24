@@ -1,87 +1,81 @@
-# LIZ Configuration
 paths:
-  vault: "data/vault"
-  input: "data/input"
-  review: "data/review"
-  local_ingest: "data/local_ingest"
-  online_ingest: "data/online_ingest"
-  db: "data/db/liz_main.db"
-  logs: "logs"
-  queues: "data/queues"
-  batches: "data/batches"
-  secrets: "secrets"
-  models: "data/models"
-  wd_tags: "data/wd-tags"
-
+  vault: data/vault
+  input: data/input
+  review: data/review
+  local_ingest: data/local_ingest
+  online_ingest: data/online_ingest
+  db: data/db/liz_main.db
+  logs: logs
+  queues: data/queues
+  batches: data/batches
+  secrets: secrets
+  models: data/models
+  wd_tags: data/wd-tags
 firewall:
   allowed_extensions:
-    - ".jpg"
-    - ".jpeg"
-    - ".png"
-    - ".gif"
-    - ".webp"
-    - ".jfif"
-    - ".mp4"
-    - ".webm"
-    - ".ogv"
+  - .jpg
+  - .jpeg
+  - .png
+  - .gif
+  - .webp
+  - .jfif
+  - .mp4
+  - .webm
+  - .ogv
   allowed_mimes:
-    - "image/jpeg"
-    - "image/png"
-    - "image/gif"
-    - "image/webp"
-    - "video/mp4"
-    - "video/webm"
-    - "video/ogg"
-
-# --- External Tools & Authentication ---
+  - image/jpeg
+  - image/png
+  - image/gif
+  - image/webp
+  - video/mp4
+  - video/webm
+  - video/ogg
 external_tools:
-  # cookies_path and pixiv_token are loaded from .secrets.yaml by utils.py
-
-  # Optional: Proxy for bypassing IP bans (e.g., "http://user:pass@host:port")
-  proxy: ""
-
-  user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-
-hash_algorithm: "sha256"
-log_level: "INFO"
-
-# --- Image Processing & Deduplication ---
+  proxy: ''
+  user_agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
+    like Gecko) Chrome/120.0.0.0 Safari/537.36
+hash_algorithm: sha256
+log_level: INFO
 processing:
-  # If true, transparent backgrounds (PNG/WebP) are flattened 
-  # BEFORE generating pHashes. The original vault file remains unchanged.
   flatten_transparency: true
-  
-  # Options: white, black, gray, custom
-  background_preset: "white"
-  
-  # Only used if background_preset is "custom"
-  custom_color: [255, 255, 255]
-
-# --- Ingestion Concurrency & Scaling ---
+  background_preset: white
+  custom_color:
+  - 255
+  - 255
+  - 255
 ingestion_concurrency:
   global_max_workers: 10
   platforms:
     youtube:
       workers: 3
-      jitter_range: [1.0, 3.0]
+      jitter_range:
+      - 1.0
+      - 3.0
     pixiv:
       workers: 2
-      jitter_range: [2.0, 5.0]
+      jitter_range:
+      - 2.0
+      - 5.0
     instagram:
       workers: 1
-      jitter_range: [3.0, 8.0]
+      jitter_range:
+      - 3.0
+      - 8.0
     x:
       workers: 2
-      jitter_range: [1.5, 4.0]
-    default: # Fallback for unknown platforms
+      jitter_range:
+      - 1.5
+      - 4.0
+    default:
       workers: 1
-      jitter_range: [2.0, 4.0]
-
+      jitter_range:
+      - 2.0
+      - 4.0
 tagging:
   enabled: true
-  model_repo: "SmilingWolf/wd-vit-tagger-v3"
-  device: "auto"
-  display_source: "yaml"
+  model_repo: SmilingWolf/wd-vit-tagger-v3
+  device: auto
+  display_source: yaml
   threshold: 0.35
   max_tags: 30
   fail_ingestion_on_error: false
@@ -90,3 +84,10 @@ tagging:
     frame_count: 5
     merge_min_frames: 2
     merge_high_confidence: 0.75
+ui:
+  prefixes:
+    command: '>'
+    artist: 'a:'
+    tag: '#'
+    platform: '@'
+  vault_layout: masonry

@@ -1,11 +1,13 @@
 from PySide6.QtCore import QEvent, QRunnable, QThreadPool, QTimer, Qt, Signal
 from PySide6.QtGui import QCursor, QPixmap
-from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea, QStackedLayout, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea, QSizePolicy, QStackedLayout, QVBoxLayout, QWidget
 
 from db.sqlite_operator import init_database
 from logs.logger import log_ui
+from ui.masonry_layout import MasonryLayout
 from ui.thumbnail_cache import asset_path_for, pixmap_for_item
 from ui.video_widgets import VideoPlayerWidget
+from utils import get_config
 
 
 class ThumbnailWorker(QRunnable):
@@ -42,13 +44,12 @@ class VaultTile(QFrame):
         self.asset_path = asset_path_for(self.item_hash, self.extension, self.mime_type)
         self.is_video = self.mime_type.startswith("video/")
         self.setObjectName("Panel")
-        self.setFixedSize(210, 230)
+        self.setFixedWidth(210)
         self.setMouseTracking(True)
 
         pixmap = pixmap_for_item(self.item_hash, self.extension, self.mime_type, 178, allow_generate=False)
         self.image = QLabel()
         self.image.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.image.setFixedHeight(180)
         self.image.setPixmap(pixmap)
         
         if self.is_video and self.asset_path.exists():
@@ -138,10 +139,27 @@ class VaultTile(QFrame):
                 VaultTile.active_hover_tile = None
             log_ui("INFO", "Qt vault hover video stopped", hash=self.item_hash)
 
+    def heightForWidth(self, width: int) -> int:
+        # Calculate dynamic height based on aspect ratio
+        pixmap = self.image.pixmap()
+        if pixmap and not pixmap.isNull():
+            ratio = pixmap.height() / pixmap.width()
+            # Constrain ratio to avoid extremely long "spaghetti" tiles
+            ratio = max(0.5, min(ratio, 2.0))
+            return int(width * ratio) + 40 # 40px for labels/margins
+        return 230 # Fallback
+
     def on_thumbnail_ready(self, item_hash, pixmap):
         if item_hash == self.item_hash:
             # Must update UI on main thread
-            QTimer.singleShot(0, lambda: self.image.setPixmap(pixmap))
+            QTimer.singleShot(0, lambda: self.update_thumbnail(pixmap))
+
+    def update_thumbnail(self, pixmap):
+        self.image.setPixmap(pixmap)
+        # Notify layout that our size hint changed
+        self.updateGeometry()
+        if self.parentWidget() and self.parentWidget().layout():
+            self.parentWidget().layout().invalidate()
 
 
 class VaultGroupTile(QFrame):
@@ -152,12 +170,12 @@ class VaultGroupTile(QFrame):
         self.rows = rows
         self.current_index = 0
         self.setObjectName("Panel")
-        self.setFixedSize(210, 230)
+        self.setFixedWidth(210)
         self.setMouseTracking(True)
 
         self.image = QLabel()
         self.image.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.image.setFixedHeight(188)
+        self.image.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         self.counter = QLabel()
         self.counter.setObjectName("OverlayBadge")
@@ -262,6 +280,24 @@ class VaultGroupTile(QFrame):
         self.prev_button.hide()
         self.next_button.hide()
 
+    def heightForWidth(self, width: int) -> int:
+        pixmap = self.image.pixmap()
+        if pixmap and not pixmap.isNull():
+            ratio = pixmap.height() / pixmap.width()
+            ratio = max(0.5, min(ratio, 2.0))
+            return int(width * ratio) + 60 # extra space for carousel buttons
+        return 230
+
+    def on_thumbnail_ready(self, item_hash, pixmap):
+        if item_hash == str(self.current_row()[0]):
+            QTimer.singleShot(0, lambda: self.update_thumbnail(pixmap))
+
+    def update_thumbnail(self, pixmap):
+        self.image.setPixmap(pixmap)
+        self.updateGeometry()
+        if self.parentWidget() and self.parentWidget().layout():
+            self.parentWidget().layout().invalidate()
+
 
 class VaultView(QScrollArea):
     item_selected = Signal(str)
@@ -287,13 +323,21 @@ class VaultView(QScrollArea):
         self.container.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.viewport().setObjectName("AppSurface")
         self.viewport().setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.grid = QGridLayout(self.container)
-        self.grid.setContentsMargins(0, 0, 0, 0)
-        self.grid.setSpacing(10)
+        
+        self.layout_type = get_config().get("ui", {}).get("vault_layout", "grid")
+        if self.layout_type == "masonry":
+            self.layout_manager = MasonryLayout(self.container, spacing=10, column_width=210)
+        else:
+            self.layout_manager = QGridLayout(self.container)
+            self.layout_manager.setContentsMargins(0, 0, 0, 0)
+            self.layout_manager.setSpacing(10)
+            
         self.setWidget(self.container)
         self.refresh()
 
     def refresh(self):
+        # Refresh config in case it changed
+        self.layout_type = get_config().get("ui", {}).get("vault_layout", "grid")
         self.load_items()
         self.render_timer.start(50)
 
@@ -335,21 +379,35 @@ class VaultView(QScrollArea):
 
         columns = self.column_count()
         item_count = len(self.items)
+        current_type = get_config().get("ui", {}).get("vault_layout", "grid")
         
-        # Lazy Update: Only re-render if the layout structure or data count actually changed
-        if columns == self.last_columns and item_count == self.last_item_count:
+        # Lazy Update: Only re-render if layout type, structure, or data count changed
+        if (current_type == self.layout_type and 
+            columns == self.last_columns and 
+            item_count == self.last_item_count):
             return
             
         self.last_columns = columns
         self.last_item_count = item_count
 
-        while self.grid.count():
-            item = self.grid.takeAt(0)
+        # Clear existing items
+        while self.layout_manager.count():
+            item = self.layout_manager.takeAt(0)
             widget = item.widget()
             if widget:
                 widget.deleteLater()
+        
+        # Ensure we are using the correct layout type
+        if current_type != self.layout_type:
+            self.layout_type = current_type
+            # We recreate it on the container
+            if self.layout_type == "masonry":
+                self.layout_manager = MasonryLayout(self.container, spacing=10, column_width=210)
+            else:
+                self.layout_manager = QGridLayout(self.container)
+                self.layout_manager.setContentsMargins(0, 0, 0, 0)
+                self.layout_manager.setSpacing(10)
         self.tiles = []
-        columns = self.column_count()
         groups = self.display_groups()
         for index, rows in enumerate(groups):
             if len(rows) > 1:
@@ -359,9 +417,20 @@ class VaultView(QScrollArea):
                 tile = VaultTile(str(item_hash), extension or "", mime_type or "", original_name or "")
             tile.clicked.connect(self.item_selected.emit)
             self.tiles.append(tile)
-            self.grid.addWidget(tile, index // columns, index % columns)
-        self.grid.setRowStretch((len(groups) + columns - 1) // columns, 1)
-        log_ui("INFO", "Qt vault widget grid rendered", item_count=len(self.items), tile_count=len(self.tiles), columns=columns)
+            
+            if self.layout_type == "masonry":
+                self.layout_manager.addWidget(tile)
+            else:
+                self.layout_manager.addWidget(tile, index // columns, index % columns)
+        
+        if self.layout_type == "grid":
+            self.layout_manager.setRowStretch((len(groups) + columns - 1) // columns, 1)
+            
+        log_ui("INFO", "Qt vault widget grid rendered", 
+               mode=self.layout_type, 
+               item_count=len(self.items), 
+               tile_count=len(self.tiles), 
+               columns=columns)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
