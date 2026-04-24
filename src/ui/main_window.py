@@ -63,6 +63,8 @@ class MainWindow(QMainWindow):
         self.worker = None
         self.tag_worker = None
         self.video_mode = "normal"
+        self.normal_geometry = None
+        self.restoring_focus = False
 
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText(f"Search (use {self.prefixes['artist']} for artist, {self.prefixes['command']} for cmd)...")
@@ -104,6 +106,7 @@ class MainWindow(QMainWindow):
         self.media_focus_layout.setContentsMargins(0, 0, 0, 0)
         self.media_focus_layout.setSpacing(10)
         self.media_focus_host.setVisible(False)
+        self.media_focus_host.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         self.review_view = ReviewView()
         self.ingestion_view = IngestionView()
         self.app_logs_view = AppLogsView()
@@ -162,6 +165,20 @@ class MainWindow(QMainWindow):
         self.setStatusBar(self.status)
         self.show_view(0)
         self.update_stats()
+        self.normal_geometry = self.geometry()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self.video_mode == "normal" and not self.restoring_focus and self.isVisible() and not self.isFullScreen():
+            self.normal_geometry = self.geometry()
+            log_ui(
+                "INFO",
+                "Qt normal geometry recorded",
+                width=self.normal_geometry.width(),
+                height=self.normal_geometry.height(),
+                x=self.normal_geometry.x(),
+                y=self.normal_geometry.y(),
+            )
 
     def toggle_video_wide(self):
         self.set_video_mode("normal" if self.video_mode == "wide" else "wide")
@@ -171,12 +188,16 @@ class MainWindow(QMainWindow):
 
     def set_video_mode(self, mode: str):
         previous_mode = self.video_mode
+        returning_to_normal = previous_mode != "normal" and mode == "normal"
+        if returning_to_normal:
+            self.restoring_focus = True
         self.video_mode = mode
         focused = mode != "normal"
         self.nav_widget.setVisible(not focused)
         self.workspace.setVisible(not focused)
         self.inspector_host.setVisible(not focused and self.stack.currentIndex() == 0)
         self.media_focus_host.setVisible(focused)
+        self.media_focus_host.setSizePolicy(QSizePolicy.Policy.Expanding if focused else QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding if focused else QSizePolicy.Policy.Ignored)
         if focused:
             self.move_media_to_focus()
         else:
@@ -196,6 +217,11 @@ class MainWindow(QMainWindow):
             self.showFullScreen()
         elif previous_mode == "fullscreen":
             self.exit_fullscreen_window_state()
+        elif returning_to_normal:
+            self.restore_normal_window_geometry()
+            QTimer.singleShot(0, self.restore_normal_window_geometry)
+            QTimer.singleShot(100, self.restore_normal_window_geometry)
+            QTimer.singleShot(150, self.finish_focus_restore)
         self.log_focus_layout("after_set_video_mode")
         log_ui("INFO", "Qt video layout mode changed", mode=mode)
 
@@ -204,6 +230,30 @@ class MainWindow(QMainWindow):
         self.showNormal()
         QTimer.singleShot(0, self.showNormal)
         QTimer.singleShot(50, lambda: self.setWindowState(self.windowState() & ~Qt.WindowState.WindowFullScreen))
+        QTimer.singleShot(60, self.restore_normal_window_geometry)
+        QTimer.singleShot(150, self.finish_focus_restore)
+
+    def finish_focus_restore(self):
+        self.restoring_focus = False
+        if self.video_mode == "normal" and self.isVisible() and not self.isFullScreen():
+            self.normal_geometry = self.geometry()
+
+    def restore_normal_window_geometry(self):
+        self.root_layout_main.setContentsMargins(12, 12, 12, 0)
+        self.root_layout_main.setSpacing(12)
+        self.media_focus_host.setVisible(False)
+        self.media_focus_host.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
+        self.workspace.setVisible(True)
+        self.inspector_host.setVisible(self.stack.currentIndex() == 0)
+        self.inspector_host.setMinimumWidth(520)
+        self.inspector_host.setMaximumWidth(520)
+        self.inspector_host.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
+        self.workspace.updateGeometry()
+        self.inspector_host.updateGeometry()
+        if self.centralWidget():
+            self.centralWidget().updateGeometry()
+        if self.normal_geometry and not self.isMaximized():
+            self.setGeometry(self.normal_geometry)
 
     def move_media_to_focus(self):
         if self.media_focus_layout.indexOf(self.inspector.media_widget) == -1:
