@@ -79,9 +79,6 @@ class VaultTile(QFrame):
         layout.setContentsMargins(8, 8, 8, 8)
         layout.addWidget(self.media_widget)
         layout.addWidget(self.label)
-        for widget in [self.image, self.video, self.media_widget, self.label]:
-            if widget:
-                widget.installEventFilter(self)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -338,14 +335,20 @@ class VaultView(QScrollArea):
     def refresh(self):
         # Refresh config in case it changed
         self.layout_type = get_config().get("ui", {}).get("vault_layout", "grid")
-        self.load_items()
+        new_items = self._fetch_items()
+        if new_items == self.items:
+            return
+        self.items = new_items
         self.render_timer.start(50)
 
     def filter_by(self, field: str | None, value: str | None):
-        self.load_items(field, value)
+        self.items = self._fetch_items(field, value)
         self.render_timer.start(50)
 
     def load_items(self, field: str | None = None, value: str | None = None):
+        self.items = self._fetch_items(field, value)
+
+    def _fetch_items(self, field: str | None = None, value: str | None = None):
         allowed = {"source_artist", "platform", "original_filename"}
         conn = init_database()
         cursor = conn.cursor()
@@ -356,9 +359,10 @@ class VaultView(QScrollArea):
             )
         else:
             cursor.execute("SELECT hash, file_extension, mime_type, original_filename, source_url FROM items ORDER BY date_added ASC LIMIT 300")
-        self.items = cursor.fetchall()
+        rows = cursor.fetchall()
         conn.close()
-        log_ui("INFO", "Qt vault widget grid loaded", item_count=len(self.items))
+        log_ui("INFO", "Qt vault widget grid loaded", item_count=len(rows))
+        return rows
 
     def display_groups(self):
         grouped = {}

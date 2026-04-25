@@ -54,6 +54,11 @@ class AppLogsView(QWidget):
         self.timer.timeout.connect(self.refresh_log)
         # TEMPORARY TEST: 30 seconds instead of 1 second
         self.timer.start(30000)
+        
+        self.reload_debounce = QTimer(self)
+        self.reload_debounce.setSingleShot(True)
+        self.reload_debounce.timeout.connect(self._do_reload)
+        
         self.refresh_log()
 
     def log_path(self):
@@ -63,6 +68,9 @@ class AppLogsView(QWidget):
         self.log_file_offset = 0
         self.log_content = ""
         self.last_key = ""
+        self.reload_debounce.start(150)
+
+    def _do_reload(self):
         self.refresh_log()
 
     def open_current(self):

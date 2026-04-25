@@ -411,13 +411,13 @@ class MainWindow(QMainWindow):
         super().keyPressEvent(event)
 
     def show_view(self, index: int):
+        self.vault_view.render_timer.stop()
         self.stack.setCurrentIndex(index)
         self.set_nav_checked(index)
         if self.video_mode == "normal":
             self.inspector_host.setVisible(index == 0)
         if index == 0:
-            # Delay refresh to ensure geometry is updated by the stack widget
-            QTimer.singleShot(0, self.vault_view.refresh)
+            self.vault_view.render_timer.start(50)
         elif index == 1:
             self.review_view.load_items()
         self.update_stats()
