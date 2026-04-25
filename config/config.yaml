@@ -1,16 +1,9 @@
-paths:
-  vault: data/vault
-  input: data/input
-  review: data/review
-  local_ingest: data/local_ingest
-  online_ingest: data/online_ingest
-  db: data/db/liz_main.db
-  logs: logs
-  queues: data/queues
-  batches: data/batches
-  secrets: secrets
-  models: data/models
-  wd_tags: data/wd-tags
+external_tools:
+  cookies_path: F:/ARCHIVE/main/04_software_projects/04.03_python/projects/local_image_zettelkasten/secrets/cookies.txt
+  pixiv_token: C3Lp-X81WROUy1sMxx2_zDAdtPitQoJDb9wYUwj3jKU
+  proxy: ''
+  user_agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
+    like Gecko) Chrome/120.0.0.0 Safari/537.36
 firewall:
   allowed_extensions:
   - .jpg
@@ -30,64 +23,73 @@ firewall:
   - video/mp4
   - video/webm
   - video/ogg
-external_tools:
-  proxy: ''
-  user_agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
-    like Gecko) Chrome/120.0.0.0 Safari/537.36
 hash_algorithm: sha256
+ingestion_concurrency:
+  global_max_workers: 10
+  platforms:
+    default:
+      jitter_range:
+      - 2
+      - 4
+      workers: 1
+    instagram:
+      jitter_range:
+      - 3
+      - 8
+      workers: 1
+    pixiv:
+      jitter_range:
+      - 2
+      - 5
+      workers: 2
+    x:
+      jitter_range:
+      - 1.5
+      - 4
+      workers: 2
+    youtube:
+      jitter_range:
+      - 1
+      - 3
+      workers: 3
 log_level: INFO
+paths:
+  batches: data/batches
+  db: data/db/liz_main.db
+  input: data/input
+  local_ingest: data/local_ingest
+  logs: logs
+  models: data/models
+  online_ingest: data/online_ingest
+  queues: data/queues
+  review: data/review
+  secrets: secrets
+  vault: data/vault
+  wd_tags: data/wd-tags
 processing:
-  flatten_transparency: true
   background_preset: white
   custom_color:
   - 255
   - 255
   - 255
-ingestion_concurrency:
-  global_max_workers: 10
-  platforms:
-    youtube:
-      workers: 3
-      jitter_range:
-      - 1.0
-      - 3.0
-    pixiv:
-      workers: 2
-      jitter_range:
-      - 2.0
-      - 5.0
-    instagram:
-      workers: 1
-      jitter_range:
-      - 3.0
-      - 8.0
-    x:
-      workers: 2
-      jitter_range:
-      - 1.5
-      - 4.0
-    default:
-      workers: 1
-      jitter_range:
-      - 2.0
-      - 4.0
+  flatten_transparency: true
 tagging:
-  enabled: true
-  model_repo: SmilingWolf/wd-vit-tagger-v3
   device: cuda
   display_source: yaml
-  threshold: 0.35
-  max_tags: 30
+  enabled: true
   fail_ingestion_on_error: false
+  max_tags: 30
+  model_repo: SmilingWolf/wd-vit-tagger-v3
+  threshold: 0.35
   video:
     enabled: true
     frame_count: 5
-    merge_min_frames: 2
     merge_high_confidence: 0.75
+    merge_min_frames: 2
 ui:
   prefixes:
-    command: '>'
     artist: 'a:'
-    tag: '#'
+    command: '>'
     platform: '@'
+    tag: '#'
   vault_layout: masonry

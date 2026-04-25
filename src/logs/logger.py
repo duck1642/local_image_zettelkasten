@@ -2,16 +2,13 @@ import logging
 from logging.handlers import RotatingFileHandler
 import json
 import datetime
-import threading
 from pathlib import Path
 from utils import OUTPUT_DIR, LOGS_DIR
-
 
 LOGS_DIR.mkdir(parents=True, exist_ok=True)
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 class JSONFormatter(logging.Formatter):
-
     def format(self, record):
         log_record = {
             "timestamp": datetime.datetime.fromtimestamp(record.created).strftime("%Y-%m-%d %H:%M:%S"),
@@ -23,98 +20,58 @@ class JSONFormatter(logging.Formatter):
             log_record.update(record.extra_data)
         return json.dumps(log_record)
 
-
+# 1. System Logger (The Brain / FastAPI)
 system_logger = logging.getLogger("liz_system")
 system_logger.setLevel(logging.INFO)
 sys_handler = RotatingFileHandler(LOGS_DIR / "system.log", maxBytes=5*1024*1024, backupCount=2, encoding="utf-8")
 sys_handler.setFormatter(JSONFormatter())
-if not system_logger.handlers:
-    system_logger.addHandler(sys_handler)
+if not system_logger.handlers: system_logger.addHandler(sys_handler)
 
+# 2. Svelte Logger (The Face / JS Frontend)
+svelte_logger = logging.getLogger("liz_svelte")
+svelte_logger.setLevel(logging.INFO)
+svelte_handler = RotatingFileHandler(LOGS_DIR / "svelte.log", maxBytes=5*1024*1024, backupCount=3, encoding="utf-8")
+svelte_handler.setFormatter(JSONFormatter())
+if not svelte_logger.handlers: svelte_logger.addHandler(svelte_handler)
 
-activity_logger = logging.getLogger("liz_activity")
-activity_logger.setLevel(logging.INFO)
-act_handler = RotatingFileHandler(OUTPUT_DIR / "activity.jsonl", maxBytes=5*1024*1024, backupCount=2, encoding="utf-8")
-act_handler.setFormatter(JSONFormatter())
-if not activity_logger.handlers:
-    activity_logger.addHandler(act_handler)
+# 3. Legacy UI Logger (The Ghost / PyQt)
+pyui_logger = logging.getLogger("liz_pyui")
+pyui_logger.setLevel(logging.INFO)
+pyui_handler = RotatingFileHandler(LOGS_DIR / "pyui.log", maxBytes=5*1024*1024, backupCount=3, encoding="utf-8")
+pyui_handler.setFormatter(JSONFormatter())
+if not pyui_logger.handlers: pyui_logger.addHandler(pyui_handler)
 
-
-ui_logger = logging.getLogger("liz_ui")
-ui_logger.setLevel(logging.INFO)
-ui_handler = RotatingFileHandler(LOGS_DIR / "ui.log", maxBytes=5*1024*1024, backupCount=3, encoding="utf-8")
-ui_handler.setFormatter(JSONFormatter())
-if not ui_logger.handlers:
-    ui_logger.addHandler(ui_handler)
-
-
+# 4. Ingestion Logger (The Worker)
 ingestion_logger = logging.getLogger("liz_ingestion")
 ingestion_logger.setLevel(logging.INFO)
 ingestion_handler = RotatingFileHandler(LOGS_DIR / "ingestion.log", maxBytes=5*1024*1024, backupCount=3, encoding="utf-8")
 ingestion_handler.setFormatter(JSONFormatter())
-if not ingestion_logger.handlers:
-    ingestion_logger.addHandler(ingestion_handler)
+if not ingestion_logger.handlers: ingestion_logger.addHandler(ingestion_handler)
 
-def log_system(level: str, message: str, **kwargs):
+# --- Helper Functions ---
+
+def log_system(level, message, **kwargs):
+    getattr(system_logger, level.lower(), system_logger.info)(message, extra={"extra_data": kwargs} if kwargs else {})
+
+def log_svelte(level, message, **kwargs):
+    getattr(svelte_logger, level.lower(), svelte_logger.info)(message, extra={"extra_data": kwargs} if kwargs else {})
+
+def log_pyui(level, message, **kwargs):
+    getattr(pyui_logger, level.lower(), pyui_logger.info)(message, extra={"extra_data": kwargs} if kwargs else {})
+
+def log_ingestion(level, message, **kwargs):
     extra = {"extra_data": kwargs} if kwargs else {}
-    log_fn = getattr(system_logger, level.lower(), system_logger.info)
-    log_fn(message, extra=extra)
+    getattr(ingestion_logger, level.lower(), ingestion_logger.info)(message, extra=extra)
+    getattr(system_logger, level.lower(), system_logger.info)(message, extra=extra)
 
-def log_ui(level: str, message: str, **kwargs):
-    extra = {"extra_data": kwargs} if kwargs else {}
-    log_fn = getattr(ui_logger, level.lower(), ui_logger.info)
-    log_fn(message, extra=extra)
+# activity logging remains unchanged
+activity_logger = logging.getLogger("liz_activity")
+activity_logger.setLevel(logging.INFO)
+act_handler = RotatingFileHandler(OUTPUT_DIR / "activity.jsonl", maxBytes=5*1024*1024, backupCount=2, encoding="utf-8")
+act_handler.setFormatter(JSONFormatter())
+if not activity_logger.handlers: activity_logger.addHandler(act_handler)
 
-def log_ingestion(level: str, message: str, **kwargs):
-    extra = {"extra_data": kwargs} if kwargs else {}
-    log_fn = getattr(ingestion_logger, level.lower(), ingestion_logger.info)
-    log_fn(message, extra=extra)
-    log_fn2 = getattr(system_logger, level.lower(), system_logger.info)
-    log_fn2(message, extra=extra)
-
-def log_activity(original_name: str, vault_id: str, platform: str, artist: str, source_url: str = "", timestamp_str: str = None):
-    if timestamp_str is None:
-        timestamp_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    extra = {
-        "original_name": original_name,
-        "vault_id": vault_id,
-        "platform": platform,
-        "artist": artist,
-        "source_url": source_url,
-        "event_time": timestamp_str
-    }
-
+def log_activity(original_name, vault_id, platform, artist, source_url="", timestamp_str=None):
+    if timestamp_str is None: timestamp_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    extra = {"original_name": original_name, "vault_id": vault_id, "platform": platform, "artist": artist, "source_url": source_url, "event_time": timestamp_str}
     activity_logger.info("Ingestion successful", extra={"extra_data": extra})
-
-def get_recent_activity(limit: int = 10) -> list[str]:
-    log_file = OUTPUT_DIR / "activity.jsonl"
-
-    if not log_file.exists():
-        old_log = OUTPUT_DIR / "activity.log"
-        if old_log.exists():
-            with open(old_log, "r", encoding="utf-8") as f:
-                return f.readlines()[-limit:]
-        return ["No activity logged yet."]
-
-    lines = []
-    with open(log_file, "r", encoding="utf-8") as f:
-        recent = f.readlines()[-limit:]
-
-        for line in recent:
-            try:
-                data = json.loads(line)
-                ts = data.get("event_time", data.get("timestamp", ""))
-                plat = data.get("platform", "Unknown")
-                art = data.get("artist", "Unknown")
-                vid = data.get("vault_id", "")
-                orig = data.get("original_name", "")
-                url = data.get("source_url", "")
-
-                url_str = f" | URL: {url}" if url else ""
-                formatted = f"[{ts}] [{plat:10}] Artist: {art:15} | ID: {vid} | Original: {orig}{url_str}\n"
-                lines.append(formatted)
-            except json.JSONDecodeError:
-                lines.append(line)
-
-    return lines

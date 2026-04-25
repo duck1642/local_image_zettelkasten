@@ -1,242 +1,211 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import type { VaultItem } from './lib/types';
-  import ItemTile from './lib/ItemTile.svelte';
   import Inspector from './lib/Inspector.svelte';
   import LogsView from './lib/LogsView.svelte';
+  import Ingestion from './lib/Ingestion.svelte';
+  import ReviewView from './lib/ReviewView.svelte';
+  import SettingsView from './lib/SettingsView.svelte';
+  import VaultGroupTile from './lib/VaultGroupTile.svelte';
+  import MediaFocus from './lib/MediaFocus.svelte';
+  import { log as uiLog } from './lib/logger';
 
   let items: VaultItem[] = [];
   let stats = { total_items: 0 };
+  let queueStats = { normal: 0, force: 0, failed: 0 };
+  let reviewCount = 0;
   let loading = true;
   let selectedItem: VaultItem | null = null;
-  let activeTab: 'vault' | 'logs' = 'vault';
+  let activeTab: 'vault' | 'logs' | 'ingest' | 'review' | 'settings' = 'vault';
+  let searchQuery = '';
+  
+  // Focus Mode State
+  let focusMode: 'normal' | 'wide' | 'fullscreen' = 'normal';
 
-  async function fetchItems() {
+  // GROUPING LOGIC
+  $: groupedItems = (() => {
+    const groups: { [key: string]: VaultItem[] } = {};
+    const orderedKeys: string[] = [];
+    items.forEach(item => {
+      const key = item.source_url && item.source_url.trim() !== '' ? item.source_url : `single-${item.hash}`;
+      if (!groups[key]) { groups[key] = []; orderedKeys.push(key); }
+      groups[key].push(item);
+    });
+    orderedKeys.forEach(key => { groups[key].sort((a, b) => a.date_added.localeCompare(b.date_added)); });
+    return orderedKeys.map(key => ({ id: key, items: groups[key] }));
+  })();
+
+  async function fetchItems(field?: string, value?: string) {
+    loading = true;
     try {
-      const response = await fetch('http://localhost:8000/api/items');
+      let url = 'http://localhost:8000/api/items';
+      if (field && value) url += `?field=${field}&value=${encodeURIComponent(value)}`;
+      const response = await fetch(url);
       items = await response.json();
-      
       const statsRes = await fetch('http://localhost:8000/api/stats');
       stats = await statsRes.json();
-    } catch (error) {
-      console.error('Failed to fetch items:', error);
-    } finally {
-      loading = false;
+      await fetchSecondaryStats();
+    } catch (error) { uiLog('ERROR', 'Failed to fetch items', { error });
+    } finally { loading = false; }
+  }
+
+  async function fetchSecondaryStats() {
+    try {
+        const qStatsRes = await fetch('http://localhost:8000/api/queue-stats');
+        queueStats = await qStatsRes.json();
+        const reviewRes = await fetch('http://localhost:8000/api/review');
+        const reviewData = await reviewRes.json();
+        reviewCount = reviewData.length;
+    } catch (e) { }
+  }
+
+  function handleSearchKeydown(event: KeyboardEvent) {
+    if (event.key === 'Enter') {
+      const text = searchQuery.trim();
+      if (!text) { fetchItems(); return; }
+      uiLog('INFO', `Searching for: ${text}`);
+      if (text.startsWith('a:')) fetchItems('source_artist', text.slice(2).trim());
+      else if (text.startsWith('@')) fetchItems('platform', text.slice(1).trim());
+      else fetchItems('original_filename', text);
+      searchQuery = '';
+      activeTab = 'vault';
     }
   }
 
   function handleSelectItem(item: VaultItem) {
     selectedItem = item;
+    uiLog('DEBUG', `Selected item: ${item.hash.substring(0, 12)}`);
   }
 
   function handleUpdate(event: CustomEvent) {
     const { hash, artist, source_url, platform } = event.detail;
-    items = items.map(i => {
-      if (i.hash === hash) {
-        return { ...i, artist, source_url, platform };
-      }
-      return i;
-    });
+    uiLog('INFO', `Item updated: ${hash.substring(0, 12)}`, { artist, platform });
+    items = items.map(i => (i.hash === hash ? { ...i, artist, source_url, platform } : i));
     if (selectedItem && selectedItem.hash === hash) {
       selectedItem = { ...selectedItem, artist, source_url, platform };
     }
   }
 
+  function handleFocusMode(event: CustomEvent) {
+      focusMode = event.detail.mode;
+      uiLog('INFO', `Switched to ${focusMode} view`);
+  }
+
   onMount(() => {
+    uiLog('INFO', 'Svelte UI initialized and mounted');
     fetchItems();
+    const interval = setInterval(fetchSecondaryStats, 5000);
+    return () => clearInterval(interval);
   });
 </script>
 
-<main>
-  <header>
-    <div class="logo">LIZ <span>Management Center</span></div>
-    
-    <nav class="tabs">
+<div class="app-container">
+  <aside class="sidebar">
+    <div class="nav-group">
       <button class:active={activeTab === 'vault'} on:click={() => activeTab = 'vault'}>Vault</button>
-      <button class:active={activeTab === 'logs'} on:click={() => activeTab = 'logs'}>Logs</button>
-    </nav>
-
-    <div class="stats">
-      {stats.total_items} items
-      <button class="refresh-btn" title="Refresh Data" on:click={fetchItems}>🔄</button>
+      <button class:active={activeTab === 'review'} on:click={() => activeTab = 'review'}>
+        Review {#if reviewCount > 0}<span class="badge warn">{reviewCount}</span>{/if}
+      </button>
+      <button class:active={activeTab === 'ingest'} on:click={() => activeTab = 'ingest'}>
+        Ingestion {#if (queueStats.normal + queueStats.force) > 0}<span class="badge">{(queueStats.normal + queueStats.force)}</span>{/if}
+      </button>
+      <button class:active={activeTab === 'logs'} on:click={() => activeTab = 'logs'}>App Logs</button>
+      <button class:active={activeTab === 'settings'} on:click={() => activeTab = 'settings'}>Settings</button>
     </div>
-    
-    <div class="search-bar">
-      <input type="text" placeholder="Search (a:artist, @platform, #tag)..." />
-    </div>
-  </header>
+  </aside>
 
-  <div class="main-layout">
-    <div class="view-container">
-      {#if activeTab === 'vault'}
-        {#if loading}
-          <div class="loading">Loading your vault...</div>
-        {:else}
-          <div class="content">
-            <div class="masonry">
-              {#each items as item (item.hash)}
-                <div 
-                  class="tile-wrapper" 
-                  class:selected={selectedItem?.hash === item.hash}
-                  on:click={() => handleSelectItem(item)}
-                >
-                  <ItemTile {item} />
-                </div>
-              {/each}
+  <main class="main-content">
+    <header class="top-header">
+      <div class="search-container">
+        <input 
+          type="text" 
+          placeholder="Search (use a: for artist, > for cmd)..." 
+          bind:value={searchQuery}
+          on:keydown={handleSearchKeydown}
+        />
+      </div>
+      <div class="header-actions">
+        <button class="primary" on:click={() => activeTab = 'ingest'}>Add Files</button>
+        <button on:click={() => fetchItems()}>Refresh</button>
+        <span class="status-text">Showing {groupedItems.length} groups of {stats.total_items} items</span>
+      </div>
+    </header>
+
+    <div class="view-and-inspector">
+      <div class="viewport">
+        {#if activeTab === 'vault'}
+          {#if loading}
+            <div class="loading">Loading...</div>
+          {:else}
+            <div class="masonry-container">
+              <div class="masonry">
+                {#each groupedItems as group (group.id)}
+                  <VaultGroupTile 
+                    {group} 
+                    selectedHash={selectedItem?.hash}
+                    on:select={(e) => handleSelectItem(e.detail)} 
+                  />
+                {/each}
+              </div>
             </div>
-          </div>
+          {/if}
+        {:else if activeTab === 'review'}
+          <ReviewView />
+        {:else if activeTab === 'ingest'}
+          <Ingestion />
+        {:else if activeTab === 'settings'}
+          <SettingsView />
+        {:else}
+          <LogsView />
         {/if}
-      {:else}
-        <LogsView />
+      </div>
+
+      {#if activeTab === 'vault'}
+        <Inspector 
+            item={selectedItem} 
+            on:close={() => selectedItem = null} 
+            on:updated={handleUpdate} 
+            on:focus={handleFocusMode}
+        />
       {/if}
     </div>
+    
+    <footer class="bottom-status">
+        Total Items: {stats.total_items} | DB: WAL | LIZ Tauri
+    </footer>
+  </main>
 
-    {#if activeTab === 'vault'}
-      <Inspector 
-          item={selectedItem} 
-          on:close={() => selectedItem = null}
-          on:updated={handleUpdate}
-      />
-    {/if}
-  </div>
-</main>
+  {#if focusMode !== 'normal' && selectedItem}
+    <MediaFocus 
+        item={selectedItem} 
+        mode={focusMode} 
+        on:close={() => focusMode = 'normal'} 
+    />
+  {/if}
+</div>
 
 <style>
-  main {
-    height: 100vh;
-    display: flex;
-    flex-direction: column;
-    background: var(--bg-main);
-  }
-
-  header {
-    height: 60px;
-    background: var(--bg-panel);
-    border-bottom: 1px solid var(--border-dim);
-    display: flex;
-    align-items: center;
-    padding: 0 20px;
-    gap: 30px;
-    z-index: 10;
-  }
-
-  .logo {
-    font-weight: bold;
-    font-size: 18px;
-    color: var(--text-bright);
-    flex-shrink: 0;
-  }
-
-  .logo span {
-    font-weight: normal;
-    color: var(--text-muted);
-    font-size: 14px;
-    margin-left: 5px;
-  }
-
-  .tabs {
-    display: flex;
-    gap: 5px;
-  }
-
-  .tabs button {
-    background: transparent;
-    border: none;
-    color: var(--text-muted);
-    padding: 8px 16px;
-    font-weight: 600;
-  }
-
-  .tabs button.active {
-    color: var(--accent-primary);
-    border-bottom: 2px solid var(--accent-primary);
-    border-radius: 0;
-  }
-
-  .stats {
-    color: var(--text-muted);
-    font-size: 12px;
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-
-  .refresh-btn {
-    background: transparent;
-    border: 1px solid var(--border-dim);
-    padding: 4px 8px;
-    font-size: 12px;
-    border-radius: 4px;
-    color: var(--text-muted);
-  }
-
-  .refresh-btn:hover {
-    border-color: var(--accent-primary);
-    color: var(--text-bright);
-  }
-
-  .search-bar {
-    flex-grow: 1;
-  }
-
-  .search-bar input {
-    width: 100%;
-    max-width: 400px;
-  }
-
-  .main-layout {
-    flex-grow: 1;
-    display: flex;
-    overflow: hidden;
-  }
-
-  .view-container {
-    flex-grow: 1;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-  }
-
-  .loading {
-    flex-grow: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--text-muted);
-  }
-
-  .content {
-    flex-grow: 1;
-    overflow-y: auto;
-    padding: 20px;
-  }
-
-  .masonry {
-    column-count: 5;
-    column-gap: 15px;
-  }
-
-  .tile-wrapper {
-    cursor: pointer;
-    border-radius: 10px;
-    transition: all 0.2s;
-    border: 2px solid transparent;
-    margin-bottom: 15px;
-    break-inside: avoid;
-  }
-
-  .tile-wrapper:hover {
-    transform: translateY(-2px);
-  }
-
-  .tile-wrapper.selected {
-    border-color: var(--accent-primary);
-    background: rgba(31, 111, 235, 0.1);
-  }
-
-  @media (max-width: 1600px) { .masonry { column-count: 4; } }
-  @media (max-width: 1200px) { .masonry { column-count: 3; } }
+  .app-container { display: flex; height: 100vh; width: 100vw; background: var(--bg-main); overflow: hidden; }
+  .sidebar { width: 120px; background: var(--bg-main); border-right: 1px solid var(--border-dim); display: flex; flex-direction: column; padding: 15px 10px; flex-shrink: 0; }
+  .nav-group { display: flex; flex-direction: column; gap: 10px; }
+  .nav-group button { width: 100%; padding: 10px 5px; font-size: 13px; border-radius: 6px; background: transparent; border: 1px solid transparent; color: var(--text-main); text-align: center; }
+  .nav-group button.active { background: var(--accent-primary); color: white; border-color: var(--accent-primary); }
+  .nav-group button:not(.active):hover { border-color: var(--border-dim); background: var(--bg-panel); }
+  .main-content { flex-grow: 1; display: flex; flex-direction: column; overflow: hidden; }
+  .top-header { height: var(--header-height); display: flex; align-items: center; padding: 0 15px; gap: 15px; border-bottom: 1px solid var(--border-dim); flex-shrink: 0; z-index: 100; }
+  .search-container { flex-grow: 1; }
+  .search-container input { width: 100%; max-width: 800px; }
+  .header-actions { display: flex; align-items: center; gap: 10px; }
+  .status-text { color: var(--text-muted); font-size: 12px; white-space: nowrap; }
+  .view-and-inspector { flex-grow: 1; display: flex; overflow: hidden; }
+  .viewport { flex-grow: 1; display: flex; flex-direction: column; overflow: hidden; }
+  .masonry-container { flex-grow: 1; overflow-y: auto; padding: 15px; }
+  .masonry { column-count: 5; column-gap: 10px; }
+  .tile-wrapper { margin-bottom: 10px; break-inside: avoid; border-radius: 8px; border: 2px solid transparent; }
+  .bottom-status { height: 25px; background: #010409; border-top: 1px solid var(--border-dim); padding: 0 10px; display: flex; align-items: center; font-size: 11px; color: var(--text-muted); flex-shrink: 0; }
+  .badge { background: var(--accent-primary); color: white; font-size: 10px; padding: 1px 5px; border-radius: 10px; margin-left: 3px; }
+  .badge.warn { background: var(--accent-warning); }
+  @media (max-width: 1400px) { .masonry { column-count: 4; } }
+  @media (max-width: 1100px) { .masonry { column-count: 3; } }
   @media (max-width: 800px) { .masonry { column-count: 2; } }
-  @media (max-width: 500px) { .masonry { column-count: 1; } }
 </style>
