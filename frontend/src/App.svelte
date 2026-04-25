@@ -16,10 +16,10 @@
   let reviewCount = 0;
   let loading = true;
   let selectedItem: VaultItem | null = null;
+  let selectedGroup: { id: string, items: VaultItem[] } | null = null;
   let activeTab: 'vault' | 'logs' | 'ingest' | 'review' | 'settings' = 'vault';
   let searchQuery = '';
   
-  // Focus Mode State
   let focusMode: 'normal' | 'wide' | 'fullscreen' = 'normal';
 
   // GROUPING LOGIC
@@ -72,8 +72,9 @@
     }
   }
 
-  function handleSelectItem(item: VaultItem) {
+  function handleSelectItem(item: VaultItem, group: any) {
     selectedItem = item;
+    selectedGroup = group;
     uiLog('DEBUG', `Selected item: ${item.hash.substring(0, 12)}`);
   }
 
@@ -143,7 +144,7 @@
                   <VaultGroupTile 
                     {group} 
                     selectedHash={selectedItem?.hash}
-                    on:select={(e) => handleSelectItem(e.detail)} 
+                    on:select={(e) => handleSelectItem(e.detail, group)} 
                   />
                 {/each}
               </div>
@@ -163,9 +164,11 @@
       {#if activeTab === 'vault'}
         <Inspector 
             item={selectedItem} 
-            on:close={() => selectedItem = null} 
+            group={selectedGroup}
+            on:close={() => { selectedItem = null; selectedGroup = null; }} 
             on:updated={handleUpdate} 
             on:focus={handleFocusMode}
+            on:changeItem={(e) => selectedItem = e.detail}
         />
       {/if}
     </div>

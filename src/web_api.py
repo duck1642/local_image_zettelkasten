@@ -76,9 +76,33 @@ async def get_item(item_hash: str):
         
         # Load extra metadata from files
         topics = load_note_topics(h)
-        wd_tags = load_note_wd_tags(h)
-        # Also check global tag cache
-        tag_cache = load_tag_cache(h)
+        
+        # Load WD tags (try note first, then cache)
+        wd_data = load_note_wd_tags(h)
+        if wd_data.get("status") != "ok":
+            cache_data = load_tag_cache(h)
+            if cache_data.get("status") == "ok":
+                wd_data = {
+                    "status": "ok",
+                    "source": "cache",
+                    "rating": cache_data.get("rating") or {},
+                    "character_tags": cache_data.get("character_tags") or [],
+                    "tags": cache_data.get("tags") or []
+                }
+        
+        # Helper to extract names
+        def get_names(tag_list):
+            names = []
+            for t in tag_list:
+                if isinstance(t, str): names.append(t)
+                elif isinstance(t, dict): names.append(t.get("display_name") or t.get("name") or "")
+            return [n for n in names if n]
+
+        formatted_wd = {
+            "rating": wd_data.get("rating", {}).get("label") or wd_data.get("rating", {}).get("name") or "None",
+            "characters": get_names(wd_data.get("character_tags", [])),
+            "general": get_names(wd_data.get("tags", []))
+        }
         
         return {
             "hash": h, "extension": ext, "mime_type": mime,
@@ -86,8 +110,7 @@ async def get_item(item_hash: str):
             "date_added": row[5], "platform": row[6], "artist": row[7],
             "url": f"/vault/{h[:2]}/{h}{ext}",
             "topics": topics,
-            "wd_tags": wd_tags,
-            "tag_cache": tag_cache
+            "wd_tags": formatted_wd
         }
     finally:
         conn.close()
@@ -102,7 +125,9 @@ async def get_item_path(item_hash: str):
         if not row: raise HTTPException(status_code=404)
         from ui.thumbnail_cache import asset_path_for
         path = asset_path_for(item_hash, row[0] or "", row[1] or "")
-        return {"absolute_path": str(path.resolve())}
+        # Resolve to get absolute path
+        abs_path = path.resolve()
+        return {"absolute_path": str(abs_path)}
     finally:
         conn.close()
 
@@ -125,13 +150,10 @@ async def update_item(item_hash: str, update: ItemUpdate):
             cursor.execute("UPDATE items SET platform = ? WHERE hash = ?", (update.platform, item_hash))
         conn.commit()
         
-        # If topics changed, we need to regenerate the markdown note
+        # If topics changed, regenerate note
         if update.topics is not None:
             from md_generator import generate_markdown
-            # Fetch full row for md generator
-            cursor.execute("SELECT * FROM items WHERE hash = ?", (item_hash,))
-            # This is simplified; real generation needs the full row dictionary
-            # But the existing logic in md_generator usually handles the file update
+            # We'd need to fetch more data here for a full regen, but let's assume UI just shows what's in files for now
             pass
             
         return {"status": "success"}
@@ -153,7 +175,7 @@ async def stream_logs(filename: str = Query("system.log")):
             for line in lines[-100:]:
                 yield f"data: {line}\n\n"
         try:
-            with open(log_file, "r", encoding="utf-8", errors="replace") as f:
+            with open(log_file, "r", encoding="utf-8") as f:
                 f.seek(0, os.SEEK_END)
                 while True:
                     line = f.readline()
