@@ -8,6 +8,11 @@ from utils import OUTPUT_DIR, LOGS_DIR
 LOGS_DIR.mkdir(parents=True, exist_ok=True)
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
+# 0. Compatibility definitions (Must be at the top)
+def log_ui(level, message, **kwargs):
+    # This will be properly linked once pyui_logger is defined below
+    getattr(logging.getLogger("liz_pyui"), level.lower(), logging.info)(message, extra={"extra_data": kwargs} if kwargs else {})
+
 class JSONFormatter(logging.Formatter):
     def format(self, record):
         log_record = {
@@ -57,7 +62,7 @@ def log_svelte(level, message, **kwargs):
     getattr(svelte_logger, level.lower(), svelte_logger.info)(message, extra={"extra_data": kwargs} if kwargs else {})
 
 def log_pyui(level, message, **kwargs):
-    getattr(pyui_logger, level.lower(), pyui_logger.info)(message, extra={"extra_data": kwargs} if kwargs else {})
+    log_ui(level, message, **kwargs)
 
 def log_ingestion(level, message, **kwargs):
     extra = {"extra_data": kwargs} if kwargs else {}

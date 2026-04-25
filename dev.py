@@ -42,11 +42,16 @@ def run():
     finally:
         # 5. Cleanup
         print("--- Cleaning up processes ---")
-        api_proc.terminate()
-        try:
-            api_proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            api_proc.kill()
+        if os.name == 'nt':
+            # On Windows, Uvicorn (with reload) spawns child processes that survive 
+            # a simple terminate(). We must kill the entire process tree.
+            subprocess.call(['taskkill', '/F', '/T', '/PID', str(api_proc.pid)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        else:
+            api_proc.terminate()
+            try:
+                api_proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                api_proc.kill()
         print("✅ Done.")
 
 if __name__ == "__main__":

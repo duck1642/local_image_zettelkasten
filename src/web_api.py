@@ -1,6 +1,8 @@
 import os
+import sys
 import json
 import asyncio
+import traceback
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,11 +11,37 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 from db.sqlite_operator import init_database
-from utils import VAULT_DIR, DB_PATH, get_config, ASSETS_DIR, LOGS_DIR, REVIEW_DIR, note_path_for
+from utils import VAULT_DIR, DB_PATH, get_config, ASSETS_DIR, LOGS_DIR, REVIEW_DIR, note_path_for, asset_path_for
 from processor import process_file
 from logs.logger import log_svelte, log_pyui, log_system, log_ingestion
-from md_generator import load_note_topics, load_note_wd_tags
-from tagging import load_tag_cache
+from md_generator import load_note_topics, load_note_wd_tags, generate_markdown
+from tagging import load_tag_cache, tag_media
+
+# --- TERMINAL LOG REDIRECTION ---
+# This ensures raw terminal output (like tracebacks) goes to a log file
+class TerminalLogger:
+    def __init__(self, filename, original_stream):
+        self.terminal = original_stream
+        self.log_path = LOGS_DIR / filename
+        self.log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    def write(self, message):
+        self.terminal.write(message)
+        with open(self.log_path, "a", encoding="utf-8") as f:
+            f.write(message)
+
+    def flush(self):
+        self.terminal.flush()
+
+    def isatty(self):
+        return hasattr(self.terminal, 'isatty') and self.terminal.isatty()
+
+    def __getattr__(self, attr):
+        return getattr(self.terminal, attr)
+
+# Redirect both stdout and stderr to terminal.log
+sys.stdout = TerminalLogger("terminal.log", sys.stdout)
+sys.stderr = TerminalLogger("terminal.log", sys.stderr)
 
 app = FastAPI(title="LIZ API")
 
@@ -61,6 +89,43 @@ async def get_items(field: str = None, value: str = None):
     finally:
         conn.close()
 
+def _get_item_details(h, row):
+    ext = row[1] or ""
+    topics = load_note_topics(h)
+    wd_data = load_note_wd_tags(h)
+    if wd_data.get("status") != "ok":
+        cache_data = load_tag_cache(h)
+        if cache_data.get("status") == "ok":
+            wd_data = {
+                "status": "ok",
+                "source": "cache",
+                "rating": cache_data.get("rating") or {},
+                "character_tags": cache_data.get("character_tags") or [],
+                "tags": cache_data.get("tags") or []
+            }
+    
+    def get_names(tag_list):
+        names = []
+        for t in tag_list:
+            if isinstance(t, str): names.append(t)
+            elif isinstance(t, dict): names.append(t.get("display_name") or t.get("name") or "")
+        return [n for n in names if n]
+
+    formatted_wd = {
+        "rating": wd_data.get("rating", {}).get("label") or wd_data.get("rating", {}).get("name") or "None",
+        "characters": get_names(wd_data.get("character_tags", [])),
+        "general": get_names(wd_data.get("tags", []))
+    }
+    
+    return {
+        "hash": h, "extension": ext, "mime_type": row[2] or "",
+        "original_filename": row[3], "source_url": row[4],
+        "date_added": row[5], "platform": row[6], "artist": row[7],
+        "url": f"/vault/{h[:2]}/{h}{ext}",
+        "topics": topics,
+        "wd_tags": formatted_wd
+    }
+
 @app.get("/api/items/{item_hash}")
 async def get_item(item_hash: str):
     conn = init_database()
@@ -69,49 +134,7 @@ async def get_item(item_hash: str):
         cursor.execute("SELECT hash, file_extension, mime_type, original_filename, source_url, date_added, platform, source_artist FROM items WHERE hash = ?", (item_hash,))
         row = cursor.fetchone()
         if not row: raise HTTPException(status_code=404)
-        
-        h = row[0]
-        ext = row[1] or ""
-        mime = row[2] or ""
-        
-        # Load extra metadata from files
-        topics = load_note_topics(h)
-        
-        # Load WD tags (try note first, then cache)
-        wd_data = load_note_wd_tags(h)
-        if wd_data.get("status") != "ok":
-            cache_data = load_tag_cache(h)
-            if cache_data.get("status") == "ok":
-                wd_data = {
-                    "status": "ok",
-                    "source": "cache",
-                    "rating": cache_data.get("rating") or {},
-                    "character_tags": cache_data.get("character_tags") or [],
-                    "tags": cache_data.get("tags") or []
-                }
-        
-        # Helper to extract names
-        def get_names(tag_list):
-            names = []
-            for t in tag_list:
-                if isinstance(t, str): names.append(t)
-                elif isinstance(t, dict): names.append(t.get("display_name") or t.get("name") or "")
-            return [n for n in names if n]
-
-        formatted_wd = {
-            "rating": wd_data.get("rating", {}).get("label") or wd_data.get("rating", {}).get("name") or "None",
-            "characters": get_names(wd_data.get("character_tags", [])),
-            "general": get_names(wd_data.get("tags", []))
-        }
-        
-        return {
-            "hash": h, "extension": ext, "mime_type": mime,
-            "original_filename": row[3], "source_url": row[4],
-            "date_added": row[5], "platform": row[6], "artist": row[7],
-            "url": f"/vault/{h[:2]}/{h}{ext}",
-            "topics": topics,
-            "wd_tags": formatted_wd
-        }
+        return _get_item_details(item_hash, row)
     finally:
         conn.close()
 
@@ -123,11 +146,9 @@ async def get_item_path(item_hash: str):
         cursor.execute("SELECT file_extension, mime_type FROM items WHERE hash = ?", (item_hash,))
         row = cursor.fetchone()
         if not row: raise HTTPException(status_code=404)
-        from ui.thumbnail_cache import asset_path_for
+        # Using utils instead of ui
         path = asset_path_for(item_hash, row[0] or "", row[1] or "")
-        # Resolve to get absolute path
-        abs_path = path.resolve()
-        return {"absolute_path": str(abs_path)}
+        return {"absolute_path": str(path.resolve())}
     finally:
         conn.close()
 
@@ -150,15 +171,50 @@ async def update_item(item_hash: str, update: ItemUpdate):
             cursor.execute("UPDATE items SET platform = ? WHERE hash = ?", (update.platform, item_hash))
         conn.commit()
         
-        # If topics changed, regenerate note
-        if update.topics is not None:
-            from md_generator import generate_markdown
-            # We'd need to fetch more data here for a full regen, but let's assume UI just shows what's in files for now
-            pass
+        md_content = generate_markdown(conn, item_hash)
+        if md_content:
+            note_path = note_path_for(item_hash)
+            note_path.parent.mkdir(parents=True, exist_ok=True)
+            note_path.write_text(md_content, encoding="utf-8")
             
         return {"status": "success"}
     finally:
         conn.close()
+
+@app.post("/api/items/{item_hash}/tag")
+async def trigger_tagging(item_hash: str):
+    def sync_tagging():
+        conn = init_database()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("SELECT file_extension, mime_type FROM items WHERE hash = ?", (item_hash,))
+            row = cursor.fetchone()
+            if not row: return None
+            
+            # Using utils instead of ui
+            asset_path = asset_path_for(item_hash, row[0] or "", row[1] or "")
+            if not asset_path.exists(): return None
+
+            log_system("INFO", f"Triggering AI tagging for {item_hash}")
+            tag_media(asset_path, item_hash=item_hash, config=get_config())
+            
+            md_content = generate_markdown(conn, item_hash)
+            if md_content:
+                note_path = note_path_for(item_hash)
+                note_path.parent.mkdir(parents=True, exist_ok=True)
+                note_path.write_text(md_content, encoding="utf-8")
+            
+            cursor.execute("SELECT hash, file_extension, mime_type, original_filename, source_url, date_added, platform, source_artist FROM items WHERE hash = ?", (item_hash,))
+            updated_row = cursor.fetchone()
+            return _get_item_details(item_hash, updated_row)
+        finally:
+            conn.close()
+
+    try:
+        return await asyncio.to_thread(sync_tagging)
+    except Exception as e:
+        print(f"!!! TAGGING CRASH !!!\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 # --- LOGGING ENDPOINTS ---
 
@@ -170,12 +226,14 @@ async def stream_logs(filename: str = Query("system.log")):
         log_file.touch()
     
     async def log_generator():
+        # Last 150 lines for terminal
         with open(log_file, "r", encoding="utf-8", errors="replace") as f:
             lines = f.readlines()
-            for line in lines[-100:]:
+            for line in lines[-150:]:
                 yield f"data: {line}\n\n"
+
         try:
-            with open(log_file, "r", encoding="utf-8") as f:
+            with open(log_file, "r", encoding="utf-8", errors="replace") as f:
                 f.seek(0, os.SEEK_END)
                 while True:
                     line = f.readline()

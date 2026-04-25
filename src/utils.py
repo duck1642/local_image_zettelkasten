@@ -49,6 +49,21 @@ DB_PATH = _resolve_path('db', "data/db/liz_main.db")
 
 LOGS_DIR = _resolve_path('logs', "logs")
 
+EXT_MAP = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/gif": ".gif",
+    "image/webp": ".webp",
+    "image/jfif": ".jpg",
+    "video/mp4": ".mp4",
+    "video/webm": ".webm",
+    "video/ogg": ".ogv",
+}
+
+def asset_path_for(item_hash: str, extension: str | None, mime_type: str | None) -> Path:
+    ext = extension or EXT_MAP.get(mime_type or "", ".jpg")
+    return ASSETS_DIR / item_hash[:2] / f"{item_hash}{ext}"
+
 DEFAULT_ALLOWED_MIMES = {
     'image/jpeg',
     'image/png',

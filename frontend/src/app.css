@@ -76,3 +76,8 @@ input:focus, textarea:focus {
 ::-webkit-scrollbar-track { background: var(--bg-main); }
 ::-webkit-scrollbar-thumb { background: #30363d; border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: #484f58; }
+
+/* Completely hide the native video fullscreen button in Chromium */
+video::-webkit-media-controls-fullscreen-button {
+    display: none !important;
+}

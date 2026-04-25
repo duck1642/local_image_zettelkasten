@@ -21,6 +21,7 @@
   let searchQuery = '';
   
   let focusMode: 'normal' | 'wide' | 'fullscreen' = 'normal';
+  let focusStartTime = 0;
 
   // GROUPING LOGIC
   $: groupedItems = (() => {
@@ -89,7 +90,8 @@
 
   function handleFocusMode(event: CustomEvent) {
       focusMode = event.detail.mode;
-      uiLog('INFO', `Switched to ${focusMode} view`);
+      focusStartTime = event.detail.startTime || 0;
+      uiLog('INFO', `Switched to ${focusMode} view from time ${focusStartTime}`);
   }
 
   onMount(() => {
@@ -182,6 +184,7 @@
     <MediaFocus 
         item={selectedItem} 
         mode={focusMode} 
+        startTime={focusStartTime}
         on:close={() => focusMode = 'normal'} 
     />
   {/if}

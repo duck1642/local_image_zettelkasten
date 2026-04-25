@@ -1,5 +1,3 @@
-use tauri_plugin_shell::ShellExt;
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
@@ -13,20 +11,24 @@ pub fn run() {
             }),
         ])
         .build())
-    .setup(|app| {
-      let shell = app.shell();
-      let sidecar_command = shell.sidecar("liz-api").unwrap();
-      let (mut rx, _child) = sidecar_command
-        .spawn()
-        .expect("Failed to spawn sidecar");
+    .setup(|_app| {
+      #[cfg(not(dev))]
+      {
+        use tauri_plugin_shell::ShellExt;
+        let shell = _app.shell();
+        let sidecar_command = shell.sidecar("liz-api").unwrap();
+        let (mut rx, _child) = sidecar_command
+          .spawn()
+          .expect("Failed to spawn sidecar");
 
-      tauri::async_runtime::spawn(async move {
-        while let Some(event) = rx.recv().await {
-            if let tauri_plugin_shell::process::CommandEvent::Stdout(line) = event {
-                println!("Sidecar: {}", String::from_utf8_lossy(&line));
-            }
-        }
-      });
+        tauri::async_runtime::spawn(async move {
+          while let Some(event) = rx.recv().await {
+              if let tauri_plugin_shell::process::CommandEvent::Stdout(line) = event {
+                  println!("Sidecar: {}", String::from_utf8_lossy(&line));
+              }
+          }
+        });
+      }
 
       Ok(())
     })

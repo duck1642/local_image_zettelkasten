@@ -11,6 +11,8 @@
     "shell:allow-execute",
     "shell:allow-spawn",
     "shell:allow-open",
-    "log:default"
+    "log:default",
+    "core:window:default",
+    "core:window:allow-set-fullscreen"
   ]
 }
