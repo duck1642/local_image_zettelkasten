@@ -160,7 +160,7 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
     mime_type = get_mime_type(filepath) or "unknown"
     if not is_allowed_mime(mime_type, allowed_mimes):
         log_system("WARNING", f"Skipped: Invalid MIME type", file=filepath.name, mime=mime_type)
-        return False, f"[ERROR] Invalid MIME: {mime_type}", None
+        return False, f"Invalid MIME: {mime_type}", None
 
 
     allowed_exts_config = firewall_config.get('allowed_extensions', [])
@@ -168,14 +168,14 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
 
     if filepath.suffix.lstrip('.').lower() not in allowed_exts:
         log_system("WARNING", f"Skipped: Invalid extension", file=filepath.name, extension=filepath.suffix)
-        return False, f"[ERROR] Invalid extension: {filepath.suffix}", None
+        return False, f"Invalid extension: {filepath.suffix}", None
 
     file_hash = calculate_file_hash(filepath)
     conn = init_database()
     if check_duplicate_hash(conn, file_hash):
         conn.close()
         log_system("INFO", f"Skipped: Duplicate hash", hash=file_hash, file=filepath.name)
-        return False, f"[OK] Duplicate ignored: {file_hash[:8]}...", None
+        return False, f"Duplicate ignored: {file_hash[:8]}...", None
 
 
     phash = None
@@ -338,7 +338,7 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
             timestamp_str=master_timestamp_str
         )
 
-        return True, f"[INFO] Success: {filepath.name} -> {new_filename}", index_data
+        return True, f"Success: {filepath.name} -> {new_filename}", index_data
 
     except Exception as e:
 
@@ -356,7 +356,7 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
             pass
 
         log_system("ERROR", f"Pipeline crash during processing", file=filepath.name, error=str(e))
-        return False, f"[ERROR] System Error (Rolled back): {str(e)}", None
+        return False, f"System Error (Rolled back): {str(e)}", None
 
     finally:
         if 'conn' in locals():

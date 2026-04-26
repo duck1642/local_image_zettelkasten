@@ -40,7 +40,6 @@ class ExternalIngestor:
         batch_index_queue = []
 
         if not self.links_file.exists():
-            log_ingestion('ERROR', f"Links file not found: {self.links_file}")
             log_ingestion("WARNING", f"Ingestion skipped: {self.links_file.name} not found")
             return stats
 
@@ -49,7 +48,6 @@ class ExternalIngestor:
             links = self._parse_links()
 
             if not links:
-                log_ingestion('INFO', f"No valid links found in {self.links_file.name}.")
                 log_ingestion("INFO", f"Ingestion finished: {self.links_file.name} is empty")
                 return stats
 
@@ -74,8 +72,7 @@ class ExternalIngestor:
                         all_remaining.extend(worker_remaining)
                         batch_index_queue.extend(worker_index_data)
                     except Exception as e:
-                        log_ingestion('ERROR', f"Platform manager for {platform} crashed: {e}")
-                        log_ingestion("ERROR", f"Platform manager crash", platform=platform, error=str(e))
+                        log_ingestion("ERROR", "Platform manager crash", platform=platform, error=str(e))
 
 
             if batch_index_queue:
@@ -84,7 +81,6 @@ class ExternalIngestor:
                     for item in batch_index_queue:
                         search_manager.update_indexes(**item)
                 except Exception as sync_e:
-                    log_ingestion('INFO', f"  RAM Index Sync error (Batch): {sync_e}")
                     log_ingestion("ERROR", "RAM Sync failed during batch finalization", error=str(sync_e))
 
 
@@ -92,7 +88,6 @@ class ExternalIngestor:
             log_ingestion('INFO', f"\n[OK] Ingestion cycle complete. {len(all_remaining)} failed links logged for explicit retry.")
 
         except Exception as e:
-            log_ingestion('ERROR', f"Critical Error in ExternalIngestor: {e}")
             log_ingestion("ERROR", "ExternalIngestor failed", error=str(e))
 
         return stats
@@ -109,7 +104,7 @@ class ExternalIngestor:
         plat_remaining = []
         plat_index_data = []
 
-        log_ingestion('INFO', f"Starting queue with {num_workers} workers.", platform=platform)
+        log_ingestion("INFO", f"Starting queue with {num_workers} workers.", platform=platform)
 
         with ThreadPoolExecutor(max_workers=num_workers) as executor:
             futures = [executor.submit(self._worker_item, platform, url, jitter) for url in urls]
@@ -137,7 +132,6 @@ class ExternalIngestor:
 
         downloader_type = self._get_downloader_type(url)
         if not downloader_type:
-            log_ingestion('INFO', f"Unsupported platform: {url}", platform=platform)
             log_ingestion("WARNING", "URL skipped: Unsupported platform", url=url)
             self._log_failure(url, "Unsupported platform")
             return False, url, item_stats, []
@@ -158,8 +152,7 @@ class ExternalIngestor:
             if not meta_success:
                 platform_label = "YouTube community" if is_youtube_community else "Pinterest" if is_pinterest else "Instagram" if is_instagram else "Pixiv"
                 error_msg = metadata_info.get('error', f'{platform_label} metadata failed')
-                log_ingestion('ERROR', f"Metadata failed: {error_msg}", platform=platform)
-                log_ingestion("ERROR", f"{platform_label} metadata failed", url=url, error=error_msg)
+                log_ingestion("ERROR", f"{platform_label} metadata failed", url=url, platform=platform, error=error_msg)
                 self._log_failure(url, f"{platform_label} metadata failed: {error_msg}")
                 item_stats["errors"] += 1
                 return False, url, item_stats, []
@@ -204,7 +197,7 @@ class ExternalIngestor:
 
             while attempt < max_attempts and not success:
                 attempt += 1
-                log_ingestion('INFO', f"Processing: {url} (Attempt {attempt}/{max_attempts})", platform=platform)
+                log_ingestion("INFO", f"Processing (Attempt {attempt}/{max_attempts})", platform=platform, url=url)
 
                 if downloader_type == 'gallery-dl':
                     success, result = download_gallery(url, metadata_info=metadata_info)
@@ -212,8 +205,7 @@ class ExternalIngestor:
                     success, result = download_video(url, metadata_info=metadata_info)
 
                 if not success and attempt < max_attempts:
-                    log_ingestion('INFO', f"Attempt {attempt} failed. Retrying in 2 seconds...", platform=platform)
-                    log_ingestion("WARNING", f"Download attempt {attempt} failed", url=url, platform=platform)
+                    log_ingestion("WARNING", f"Download attempt {attempt} failed, retrying...", url=url, platform=platform)
                     time.sleep(2)
 
             if success:
@@ -261,8 +253,7 @@ class ExternalIngestor:
                                     break
 
                 if validation_failed:
-                    log_ingestion('ERROR', f"Integrity Check Failed: {validation_error}", platform=platform)
-                    log_ingestion("ERROR", "Integrity check failed", url=url, error=validation_error)
+                    log_ingestion("ERROR", "Integrity check failed", url=url, platform=platform, error=validation_error)
                     self._log_failure(url, f"Integrity check failed: {validation_error}")
 
 
@@ -325,8 +316,7 @@ class ExternalIngestor:
                 return True, url, item_stats, batch_data
             else:
                 error_msg = result.get('error', f"Failed after {max_attempts} attempts")
-                log_ingestion('ERROR', f"Download failed: {error_msg}", platform=platform)
-                log_ingestion("ERROR", f"Download permanently failed", url=url, platform=platform, error=error_msg)
+                log_ingestion("ERROR", "Download permanently failed", url=url, platform=platform, error=error_msg)
 
                 self._log_failure(url, f"Download failed: {error_msg}")
                 item_stats["errors"] += 1

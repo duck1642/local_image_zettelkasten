@@ -9,6 +9,8 @@
     message: string;
     raw?: string;
     isRaw?: boolean;
+    extras?: Record<string, any>;
+    platform?: string;
   }
 
   let logs: LogEntry[] = [];
@@ -16,16 +18,48 @@
   let currentMode: 'Normal' | 'Full' = 'Normal';
   let eventSource: EventSource | null = null;
   let logContainer: HTMLElement;
+  let searchText = '';
+
+  // Level filter: all on except DEBUG by default
+  let levelFilters: Record<string, boolean> = {
+    INFO: true,
+    WARNING: true,
+    ERROR: true,
+    DEBUG: false
+  };
 
   const logFiles = [
     { label: 'system.jsonl (Backend)', value: 'system.jsonl' },
     { label: 'terminal.log (Python Stdout)', value: 'terminal.log' },
     { label: 'svelte.jsonl (Frontend)', value: 'svelte.jsonl' },
-    { label: 'tauri.log (Shell)', value: 'tauri.log' },
     { label: 'ingestion.jsonl (Worker)', value: 'ingestion.jsonl' },
     { label: 'activity.jsonl (Audit)', value: 'activity.jsonl' },
     { label: 'pyui.jsonl (Legacy)', value: 'pyui.jsonl' }
   ];
+
+  // Fields to exclude from inline extras (already shown in columns)
+  const HIDDEN_EXTRA_KEYS = new Set(['timestamp', 'level', 'module', 'message', 'platform']);
+
+  function extractExtras(entry: any): Record<string, any> {
+    const extras: Record<string, any> = {};
+    for (const [key, value] of Object.entries(entry)) {
+      if (!HIDDEN_EXTRA_KEYS.has(key) && key !== 'raw' && key !== 'isRaw' && key !== 'extras') {
+        extras[key] = value;
+      }
+    }
+    return extras;
+  }
+
+  // Get module name from the current file to suppress redundant display
+  function currentFileModule(): string {
+    return currentFile.replace('.jsonl', '').replace('.log', '');
+  }
+
+  function shouldShowModule(mod: string): boolean {
+    if (!mod || mod === 'root' || mod === 'logger') return false;
+    if (mod === currentFileModule()) return false;
+    return true;
+  }
 
   function ansiToHtml(text: string) {
     const ansiColors: Record<string, string> = {
@@ -55,37 +89,31 @@
     eventSource.onmessage = (e) => {
       try {
         const raw = e.data;
-        const entry = JSON.parse(raw);
-        entry.raw = raw;
+        const parsed = JSON.parse(raw);
+        const entry: LogEntry = {
+          timestamp: parsed.timestamp || '',
+          level: parsed.level || '',
+          module: parsed.module || '',
+          message: parsed.message || '',
+          platform: parsed.platform || '',
+          raw,
+          isRaw: false,
+          extras: extractExtras(parsed)
+        };
 
         logs = [...logs, entry].slice(-400);
         setTimeout(() => { if (logContainer) logContainer.scrollTop = logContainer.scrollHeight; }, 30);
       } catch {
-          // Try to parse Tauri log format: [2026-04-25][09:40:06][tauri_plugin_shell::process][DEBUG] Message
-          const tauriMatch = e.data.match(/^\[(.*?)\]\[(.*?)\]\[(.*?)\]\[(.*?)\] (.*)$/);
-          
-          if (tauriMatch) {
-              const entry = {
-                  timestamp: `${tauriMatch[1]} ${tauriMatch[2]}`,
-                  level: tauriMatch[4],
-                  module: tauriMatch[3],
-                  message: tauriMatch[5],
-                  raw: e.data,
-                  isRaw: false
-              };
-              logs = [...logs, entry].slice(-400);
-          } else {
-              // Raw terminal line with ANSI or unknown text
-              const entry = {
-                  timestamp: '',
-                  level: '',
-                  module: '',
-                  message: ansiToHtml(e.data),
-                  raw: e.data,
-                  isRaw: true
-              };
-              logs = [...logs, entry].slice(-400);
-          }
+          // Raw terminal line with ANSI or unknown text
+          const entry: LogEntry = {
+              timestamp: '',
+              level: '',
+              module: '',
+              message: ansiToHtml(e.data),
+              raw: e.data,
+              isRaw: true
+          };
+          logs = [...logs, entry].slice(-400);
           setTimeout(() => { if (logContainer) logContainer.scrollTop = logContainer.scrollHeight; }, 30);
       }
     };
@@ -115,6 +143,31 @@
     connectToLogs();
   }
 
+  function toggleLevel(level: string) {
+    levelFilters[level] = !levelFilters[level];
+    levelFilters = levelFilters; // trigger reactivity
+  }
+
+  function formatExtraValue(value: any): string {
+    let str = typeof value === 'string' ? value : JSON.stringify(value);
+    // Truncate long values (paths, urls) for readability
+    if (str.length > 80) str = str.substring(0, 77) + '…';
+    return str;
+  }
+
+  // Filtered logs based on level and search
+  $: filteredLogs = logs.filter(log => {
+    // Raw lines always pass level filter
+    if (!log.isRaw && log.level && !levelFilters[log.level.toUpperCase()]) return false;
+    // Search filter
+    if (searchText) {
+      const q = searchText.toLowerCase();
+      const haystack = (log.message + ' ' + (log.raw || '')).toLowerCase();
+      if (!haystack.includes(q)) return false;
+    }
+    return true;
+  });
+
   onMount(connectToLogs);
   onDestroy(() => eventSource?.close());
 </script>
@@ -132,6 +185,23 @@
             <option value="Full">Full (Raw JSON)</option>
         </select>
 
+        <div class="level-filters">
+            {#each Object.entries(levelFilters) as [level, active]}
+                <button
+                    class="level-pill {level.toLowerCase()}"
+                    class:active={active}
+                    on:click={() => toggleLevel(level)}
+                >{level}</button>
+            {/each}
+        </div>
+
+        <input
+            class="search-box"
+            type="text"
+            placeholder="Search logs..."
+            bind:value={searchText}
+        />
+
         <div class="spacer"></div>
 
         <button on:click={connectToLogs}>Reload</button>
@@ -140,7 +210,7 @@
     </div>
 
     <div class="log-output" bind:this={logContainer}>
-        {#each logs as log}
+        {#each filteredLogs as log}
             {#if currentMode === 'Normal'}
                 <div class="line">
                     {#if log.isRaw}
@@ -148,17 +218,18 @@
                     {:else}
                         <span class="timestamp">{log.timestamp}</span>
                         <span class="level {log.level.toLowerCase()}">{log.level}</span>
-                        <span class="module">
-                            <span class="platform-tag {log.platform ? log.platform.toLowerCase() : ''}">
-                                {#if log.platform}
-                                    [{log.platform.toUpperCase()}]
-                                {/if}
-                            </span>
-                            {#if log.module && log.module !== 'root'}
-                                [{log.module}]
-                            {/if}
-                        </span>
+                        <span class="platform-tag {log.platform ? log.platform.toLowerCase() : ''}">{log.platform ? `[${log.platform.toUpperCase()}]` : ''}</span>
+                        {#if shouldShowModule(log.module)}
+                            <span class="module">[{log.module}]</span>
+                        {/if}
                         <span class="message">{log.message?.trim()}</span>
+                        {#if log.extras && Object.keys(log.extras).length > 0}
+                            <span class="extras">
+                                {#each Object.entries(log.extras) as [key, value]}
+                                    <span class="extra-pair"><span class="extra-key">{key}</span>=<span class="extra-val">{formatExtraValue(value)}</span></span>
+                                {/each}
+                            </span>
+                        {/if}
                     {/if}
                 </div>
             {:else}
@@ -182,13 +253,14 @@
 
     .toolbar {
         display: flex;
-        gap: 12px;
+        gap: 8px;
         align-items: center;
-        margin-bottom: 12px;
+        margin-bottom: 10px;
         background: var(--bg-panel);
-        padding: 8px 15px;
+        padding: 6px 12px;
         border-radius: 8px;
         border: 1px solid var(--border-dim);
+        flex-wrap: wrap;
     }
 
     .spacer { flex-grow: 1; }
@@ -197,26 +269,53 @@
         background: var(--bg-input);
         border: 1px solid var(--border-dim);
         color: var(--text-main);
-        padding: 4px 10px;
+        padding: 4px 8px;
         border-radius: 6px;
-        font-size: 13px;
+        font-size: 12px;
     }
 
-    .check-label {
-        font-size: 13px;
-        display: flex;
-        align-items: center;
-        gap: 6px;
+    .search-box {
+        background: var(--bg-input);
+        border: 1px solid var(--border-dim);
         color: var(--text-main);
-        cursor: pointer;
+        padding: 4px 10px;
+        border-radius: 6px;
+        font-size: 12px;
+        width: 160px;
+        outline: none;
     }
+    .search-box::placeholder { color: #484f58; }
+    .search-box:focus { border-color: #58a6ff; }
+
+    .level-filters {
+        display: flex;
+        gap: 4px;
+    }
+
+    .level-pill {
+        padding: 2px 10px;
+        font-size: 11px;
+        font-weight: 600;
+        border-radius: 12px;
+        border: 1px solid var(--border-dim);
+        background: transparent;
+        cursor: pointer;
+        opacity: 0.35;
+        transition: opacity 0.15s, background 0.15s;
+        color: #c9d1d9;
+    }
+    .level-pill.active { opacity: 1; }
+    .level-pill.info.active { background: rgba(201, 209, 217, 0.12); color: #c9d1d9; }
+    .level-pill.warning.active { background: rgba(210, 153, 34, 0.15); color: var(--accent-warning); }
+    .level-pill.error.active { background: rgba(218, 54, 51, 0.15); color: var(--accent-danger); }
+    .level-pill.debug.active { background: rgba(72, 79, 88, 0.2); color: #8b949e; }
 
     .log-output {
         flex-grow: 1;
         background: #010409;
         border: 1px solid var(--border-dim);
         border-radius: 8px;
-        padding: 15px;
+        padding: 12px;
         font-family: 'Consolas', 'Monaco', monospace;
         font-size: 12px;
         overflow-y: auto;
@@ -227,8 +326,8 @@
     }
 
     .line { 
-        margin-bottom: 4px; 
-        line-height: 1.4; 
+        margin-bottom: 2px; 
+        line-height: 1.45; 
         white-space: pre; 
         width: max-content;
         padding-right: 15px;
@@ -236,18 +335,18 @@
     .line.raw { 
         color: #8b949e; 
         font-size: 11px; 
-        margin-bottom: 8px; 
+        margin-bottom: 6px; 
         border-bottom: 1px solid #161b22; 
-        padding-bottom: 4px; 
+        padding-bottom: 3px; 
         font-family: 'Consolas', monospace;
         white-space: pre;
         width: max-content;
         padding-right: 15px;
     }
     
-    .timestamp { color: #58a6ff; margin-right: 12px; }
-    .level { font-weight: bold; margin-right: 12px; min-width: 60px; display: inline-block; }
-    .module { color: var(--accent-purple); margin-right: 12px; }
+    .timestamp { color: #58a6ff; margin-right: 8px; min-width: 152px; display: inline-block; }
+    .level { font-weight: bold; margin-right: 8px; min-width: 56px; display: inline-block; }
+    .module { color: var(--accent-purple); margin-right: 6px; }
     
     .level.info { color: #c9d1d9; }
     .level.warning { color: var(--accent-warning); }
@@ -256,17 +355,32 @@
     
     .message { color: #c9d1d9; }
     
-    .platform-tag { font-weight: bold; margin-right: 5px; }
+    .platform-tag { font-weight: bold; margin-right: 6px; min-width: 96px; display: inline-block; }
     .platform-tag.youtube { color: #ff4a4a; }
     .platform-tag.pixiv { color: #0096fa; }
     .platform-tag.x { color: #1da1f2; }
     .platform-tag.instagram { color: #e1306c; }
     .platform-tag.pinterest { color: #e60023; }
 
+    .extras {
+        margin-left: 6px;
+        color: #484f58;
+        font-size: 11px;
+    }
+    .extra-pair {
+        margin-left: 6px;
+    }
+    .extra-key {
+        color: #6e7681;
+    }
+    .extra-val {
+        color: #8b949e;
+    }
+
     button {
         background: var(--bg-input);
-        padding: 4px 15px;
-        font-size: 12px;
+        padding: 4px 12px;
+        font-size: 11px;
         font-weight: 600;
     }
 </style>

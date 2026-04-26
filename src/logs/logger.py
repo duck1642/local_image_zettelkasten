@@ -18,10 +18,13 @@ def log_ui(level, message, **kwargs):
 
 class JSONFormatter(logging.Formatter):
     def format(self, record):
+        # Use the logger name (e.g. liz_system -> system) instead of record.module
+        # which always resolves to 'logger' since all calls go through this file
+        module_name = record.name.replace('liz_', '') if record.name.startswith('liz_') else record.name
         log_record = {
             "timestamp": datetime.datetime.fromtimestamp(record.created).strftime("%Y-%m-%d %H:%M:%S"),
             "level": record.levelname,
-            "module": record.module,
+            "module": module_name,
             "message": record.getMessage()
         }
         if hasattr(record, 'extra_data') and isinstance(record.extra_data, dict):
@@ -70,7 +73,6 @@ def log_pyui(level, message, **kwargs):
 def log_ingestion(level, message, **kwargs):
     extra = {"extra_data": kwargs} if kwargs else {}
     getattr(ingestion_logger, level.lower(), ingestion_logger.info)(message, extra=extra)
-    getattr(system_logger, level.lower(), system_logger.info)(message, extra=extra)
 
 # activity logging remains unchanged
 activity_logger = logging.getLogger("liz_activity")
