@@ -9,6 +9,7 @@
   let running = false;
   let isDirty = false;
   let showDebug = true;
+  let parseTimer: any = null;
 
   // Monitor Logs
   let monitorLogs: any[] = [];
@@ -17,12 +18,10 @@
 
   function connectMonitor() {
     if (logSource) logSource.close();
-    // We only want the last few lines for context in the monitor
     logSource = new EventSource(`http://localhost:8000/api/logs?filename=ingestion.log`);
     logSource.onmessage = (e) => {
         try {
             const entry = JSON.parse(e.data);
-            if (!showDebug && entry.level === 'DEBUG') return;
             monitorLogs = [...monitorLogs, entry].slice(-100);
             setTimeout(() => { if (monitorContainer) monitorContainer.scrollTop = monitorContainer.scrollHeight; }, 30);
         } catch { }
@@ -39,6 +38,7 @@
   }
 
   async function fetchStats() {
+    if (isDirty) return; // don't overwrite live counts while editing
     try {
       const res = await fetch('http://localhost:8000/api/queue-stats');
       counts = await res.json();
@@ -46,7 +46,9 @@
   }
 
   function handleTabChange(name: 'normal' | 'force' | 'failed') {
-    if (isDirty) { if (!confirm('Discard changes?')) return; }
+    if (isDirty) { 
+        if (!confirm('You have unsaved changes. Discard them?')) return; 
+    }
     currentQueue = name;
     loadQueue(name);
   }
@@ -60,22 +62,100 @@
         body: JSON.stringify({ content: queueContent })
       });
       isDirty = false;
-      fetchStats();
+      await fetchStats();
       uiLog('INFO', `Queue ${currentQueue} saved`);
     } finally { saving = false; }
   }
 
   async function startIngestion() {
+    if (currentQueue === 'failed') {
+        alert("Failed queue cannot be started directly. Use Retry Failed.");
+        return;
+    }
     if (isDirty) await saveQueue();
     running = true;
     uiLog('INFO', `Starting ingestion for queue: ${currentQueue}`);
     try {
       await fetch(`http://localhost:8000/api/ingest/${currentQueue}`, { method: 'POST' });
     } finally { 
-        // Keep "Running" state for a bit to show activity
         setTimeout(() => running = false, 5000); 
     }
   }
+
+  function onEditorInput() {
+    isDirty = true;
+    clearTimeout(parseTimer);
+    parseTimer = setTimeout(async () => {
+        try {
+            const res = await fetch(`http://localhost:8000/api/queue/${currentQueue}/parse`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ content: queueContent })
+            });
+            const data = await res.json();
+            counts = { ...counts, [currentQueue]: data.count };
+        } catch {}
+    }, 400);
+  }
+
+  async function openExternal() {
+      if (isDirty) {
+          if (confirm("Save changes before opening?")) {
+              await saveQueue();
+          } else {
+              return;
+          }
+      }
+      try {
+          await fetch(`http://localhost:8000/api/queue/${currentQueue}/open`, { method: 'POST' });
+      } catch (e) { console.error(e); }
+  }
+
+  async function retryFailed() {
+      if (isDirty) {
+          if (!confirm("Discard unsaved changes before retrying?")) return;
+      }
+      if (counts.failed === 0) {
+          alert("No failed URLs found.");
+          return;
+      }
+      const target = prompt(`Retry ${counts.failed} failed URLs?\n\nType 'normal' or 'force' to choose destination:`, "normal");
+      if (target === 'normal' || target === 'force') {
+          try {
+              const res = await fetch(`http://localhost:8000/api/queue/actions/retry-failed`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ target })
+              });
+              const data = await res.json();
+              alert(`Moved ${data.moved} URLs to ${target}.`);
+              counts = data.counts;
+              if (currentQueue === target || currentQueue === 'failed') {
+                  loadQueue(currentQueue);
+              }
+          } catch(e) { console.error(e); }
+      }
+  }
+
+  async function clearFailed() {
+      if (isDirty) {
+          if (!confirm("Discard unsaved changes before clearing?")) return;
+      }
+      if (counts.failed === 0) {
+          alert("No failed URLs found.");
+          return;
+      }
+      if (confirm("Clear failed_links.md?")) {
+          try {
+              const res = await fetch(`http://localhost:8000/api/queue/actions/clear-failed`, { method: 'POST' });
+              const data = await res.json();
+              counts = data.counts;
+              if (currentQueue === 'failed') loadQueue('failed');
+          } catch(e) { console.error(e); }
+      }
+  }
+
+  $: readyCount = (counts.normal || 0) + (counts.force || 0);
 
   onMount(() => {
     loadQueue('normal');
@@ -92,15 +172,16 @@
 <div class="ingestion-container">
   <div class="toolbar">
     <div class="queue-tabs">
-      <button class:active={currentQueue === 'normal'} on:click={() => handleTabChange('normal')}>
-        Normal {counts.normal}
+      <button class:active={currentQueue === 'normal'} on:click={() => handleTabChange('normal')} disabled={running}>
+        Normal {counts.normal || 0}
       </button>
-      <button class:active={currentQueue === 'force'} on:click={() => handleTabChange('force')}>
-        Force {counts.force}
+      <button class:active={currentQueue === 'force'} on:click={() => handleTabChange('force')} disabled={running}>
+        Force {counts.force || 0}
       </button>
-      <button class:active={currentQueue === 'failed'} on:click={() => handleTabChange('failed')}>
-        Failed {counts.failed}
+      <button class:active={currentQueue === 'failed'} on:click={() => handleTabChange('failed')} disabled={running}>
+        Failed {counts.failed || 0}
       </button>
+      <span class="status-label" style="color: var(--text-main); font-weight: bold;">Ready: {readyCount}</span>
       <span class="status-label saved">{isDirty ? '● Unsaved' : 'Saved'}</span>
     </div>
 
@@ -108,8 +189,9 @@
       <label class="check-label">
         <input type="checkbox" bind:checked={showDebug} /> Show Debug
       </label>
-      <button on:click={() => loadQueue(currentQueue)}>Reload</button>
-      <button class="primary" on:click={startIngestion} disabled={running}>
+      <button on:click={() => handleTabChange(currentQueue)} disabled={running}>Reload</button>
+      <button on:click={openExternal} disabled={running}>Open</button>
+      <button class="primary" on:click={startIngestion} disabled={running || currentQueue === 'failed'}>
         {running ? 'Worker Active...' : 'Start Ingestion'}
       </button>
     </div>
@@ -118,7 +200,7 @@
   <div class="editor-area">
     <textarea 
         bind:value={queueContent} 
-        on:input={() => isDirty = true}
+        on:input={onEditorInput}
         placeholder="Edit queue markdown here..."
     ></textarea>
   </div>
@@ -127,11 +209,13 @@
     <div class="monitor-header">--- Ingestion Monitor Active ---</div>
     <div class="monitor-logs" bind:this={monitorContainer}>
         {#each monitorLogs as log}
-            <div class="log-line">
-                <span class="time">{log.timestamp.split(' ')[1]}</span>
-                <span class="level {log.level.toLowerCase()}">{log.level}</span>
-                <span class="msg">{log.message}</span>
-            </div>
+            {#if showDebug || log.level !== 'DEBUG'}
+                <div class="log-line">
+                    <span class="time">{log.timestamp.split(' ')[1]}</span>
+                    <span class="level {log.level.toLowerCase()}">{log.level}</span>
+                    <span class="msg">{log.message}</span>
+                </div>
+            {/if}
         {/each}
         {#if monitorLogs.length === 0}
             <div class="empty-monitor">Waiting for ingestion activity...</div>
@@ -140,9 +224,9 @@
   </div>
 
   <div class="footer-btns">
-      <button on:click={saveQueue} disabled={!isDirty || saving}>Save Changes</button>
-      <button>Retry Failed</button>
-      <button>Clear Failed</button>
+      <button on:click={saveQueue} disabled={!isDirty || saving || running}>Save Changes</button>
+      <button on:click={retryFailed} disabled={running || counts.failed === 0}>Retry Failed</button>
+      <button on:click={clearFailed} disabled={running || counts.failed === 0}>Clear Failed</button>
   </div>
 </div>
 
@@ -211,8 +295,20 @@
     letter-spacing: 2px;
   }
 
-  .monitor-logs { flex-grow: 1; overflow-y: auto; padding: 10px; font-family: 'Consolas', monospace; font-size: 12px; }
-  .log-line { margin-bottom: 2px; }
+  .monitor-logs { 
+      flex-grow: 1; 
+      overflow-y: auto; 
+      overflow-x: auto;
+      padding: 10px; 
+      font-family: 'Consolas', monospace; 
+      font-size: 12px; 
+  }
+  .log-line { 
+      margin-bottom: 2px; 
+      white-space: pre;
+      width: max-content;
+      padding-right: 15px;
+  }
   .time { color: #484f58; margin-right: 10px; }
   .level { font-weight: bold; margin-right: 10px; width: 50px; display: inline-block; }
   .level.info { color: #58a6ff; }

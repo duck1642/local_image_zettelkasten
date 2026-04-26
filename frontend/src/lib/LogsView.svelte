@@ -58,21 +58,34 @@
         const entry = JSON.parse(raw);
         entry.raw = raw;
 
-        if (!showDebug && entry.level === 'DEBUG') return;
-
         logs = [...logs, entry].slice(-400);
         setTimeout(() => { if (logContainer) logContainer.scrollTop = logContainer.scrollHeight; }, 30);
       } catch {
-          // Raw terminal line with ANSI
-          const entry = {
-              timestamp: '',
-              level: '',
-              module: '',
-              message: ansiToHtml(e.data),
-              raw: e.data,
-              isRaw: true
-          };
-          logs = [...logs, entry].slice(-400);
+          // Try to parse Tauri log format: [2026-04-25][09:40:06][tauri_plugin_shell::process][DEBUG] Message
+          const tauriMatch = e.data.match(/^\[(.*?)\]\[(.*?)\]\[(.*?)\]\[(.*?)\] (.*)$/);
+          
+          if (tauriMatch) {
+              const entry = {
+                  timestamp: `${tauriMatch[1]} ${tauriMatch[2]}`,
+                  level: tauriMatch[4],
+                  module: tauriMatch[3],
+                  message: tauriMatch[5],
+                  raw: e.data,
+                  isRaw: false
+              };
+              logs = [...logs, entry].slice(-400);
+          } else {
+              // Raw terminal line with ANSI or unknown text
+              const entry = {
+                  timestamp: '',
+                  level: '',
+                  module: '',
+                  message: ansiToHtml(e.data),
+                  raw: e.data,
+                  isRaw: true
+              };
+              logs = [...logs, entry].slice(-400);
+          }
           setTimeout(() => { if (logContainer) logContainer.scrollTop = logContainer.scrollHeight; }, 30);
       }
     };
@@ -107,7 +120,7 @@
         </select>
 
         <label class="check-label">
-            <input type="checkbox" bind:checked={showDebug} on:change={connectToLogs} /> 
+            <input type="checkbox" bind:checked={showDebug} /> 
             Show Debug
         </label>
 
@@ -119,21 +132,23 @@
 
     <div class="log-output" bind:this={logContainer}>
         {#each logs as log}
-            {#if currentMode === 'Normal'}
-                <div class="line">
-                    {#if log.isRaw}
-                        <span class="message raw-terminal">{@html log.message}</span>
-                    {:else}
-                        <span class="timestamp">{log.timestamp}</span>
-                        <span class="level {log.level.toLowerCase()}">{log.level}</span>
-                        <span class="module">[{log.module}]</span>
-                        <span class="message">{log.message}</span>
-                    {/if}
-                </div>
-            {:else}
-                <div class="line raw">
-                    {log.raw}
-                </div>
+            {#if showDebug || log.level !== 'DEBUG'}
+                {#if currentMode === 'Normal'}
+                    <div class="line">
+                        {#if log.isRaw}
+                            <span class="message raw-terminal">{@html log.message}</span>
+                        {:else}
+                            <span class="timestamp">{log.timestamp}</span>
+                            <span class="level {log.level.toLowerCase()}">{log.level}</span>
+                            <span class="module">[{log.module}]</span>
+                            <span class="message">{log.message}</span>
+                        {/if}
+                    </div>
+                {:else}
+                    <div class="line raw">
+                        {log.raw}
+                    </div>
+                {/if}
             {/if}
         {/each}
     </div>
@@ -189,9 +204,16 @@
         font-family: 'Consolas', 'Monaco', monospace;
         font-size: 12px;
         overflow-y: auto;
+        overflow-x: auto;
     }
 
-    .line { margin-bottom: 4px; line-height: 1.4; white-space: pre-wrap; word-break: break-all; }
+    .line { 
+        margin-bottom: 4px; 
+        line-height: 1.4; 
+        white-space: pre; 
+        width: max-content;
+        padding-right: 15px;
+    }
     .line.raw { 
         color: #8b949e; 
         font-size: 11px; 
@@ -199,6 +221,9 @@
         border-bottom: 1px solid #161b22; 
         padding-bottom: 4px; 
         font-family: 'Consolas', monospace;
+        white-space: pre;
+        width: max-content;
+        padding-right: 15px;
     }
     
     .timestamp { color: #58a6ff; margin-right: 12px; }

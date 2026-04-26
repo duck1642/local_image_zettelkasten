@@ -271,7 +271,7 @@ async def open_log_external(filename: str = Query(...)):
 # --- QUEUE & INGESTION ---
 class QueueUpdate(BaseModel):
     content: str
-from queue_service import read_queue, write_queue, queue_counts, INGESTION_LOCK, run_queue
+from queue_service import read_queue, write_queue, queue_counts, INGESTION_LOCK, run_queue, clear_failed, move_failed_urls, parse_urls, queue_path
 
 @app.get("/api/queue/{queue_name}")
 async def get_queue(queue_name: str):
@@ -281,6 +281,38 @@ async def get_queue(queue_name: str):
 async def save_queue(queue_name: str, update: QueueUpdate):
     write_queue(queue_name, update.content)
     return {"status": "success", "count": queue_counts().get(queue_name, 0)}
+
+@app.post("/api/queue/{queue_name}/parse")
+async def parse_queue_content(queue_name: str, update: QueueUpdate):
+    return {"count": len(parse_urls(update.content))}
+
+@app.post("/api/queue/actions/clear-failed")
+async def api_clear_failed():
+    clear_failed()
+    return {"status": "success", "counts": queue_counts()}
+
+class RetryFailedBody(BaseModel):
+    target: str
+
+@app.post("/api/queue/actions/retry-failed")
+async def api_retry_failed(body: RetryFailedBody):
+    if body.target not in ["normal", "force"]: raise HTTPException(400, "Invalid target")
+    moved = move_failed_urls(body.target)
+    return {"status": "success", "moved": moved, "counts": queue_counts()}
+
+@app.post("/api/queue/{queue_name}/open")
+async def open_queue_external(queue_name: str):
+    path = queue_path(queue_name)
+    if not path.exists():
+        read_queue(queue_name) # creates it if missing
+    try:
+        if os.name == 'nt': os.startfile(str(path))
+        else:
+            import subprocess
+            opener = "open" if os.uname().sysname == "Darwin" else "xdg-open"
+            subprocess.call([opener, str(path)])
+        return {"status": "opened"}
+    except Exception as e: raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/ingest/{queue_name}")
 async def start_ingestion(queue_name: str):
