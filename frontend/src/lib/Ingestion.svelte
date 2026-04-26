@@ -209,11 +209,7 @@
             <div class="log-line">
                 <span class="time">{log.timestamp?.split(' ')[1] || log.timestamp || ''}</span>
                 <span class="level {(log.level || 'INFO').toLowerCase()}">{log.level || 'INFO'}</span>
-                <span class="platform-tag {log.platform ? log.platform.toLowerCase() : ''}">
-                    {#if log.platform}
-                        [{log.platform.toUpperCase()}]
-                    {/if}
-                </span>
+                <span class="platform-tag {log.platform ? log.platform.toLowerCase() : ''}">{log.platform ? `[${log.platform.toUpperCase()}]` : ''}</span>
                 <span class="msg">{log.message?.trim()}</span>
             </div>
         {/each}
@@ -322,7 +318,7 @@
   .level.warning { color: var(--accent-warning); }
   .level.error { color: var(--accent-danger); }
   
-  .platform-tag { font-weight: bold; margin-right: 5px; }
+  .platform-tag { font-weight: bold; margin-right: 5px; min-width: 96px; display: inline-block; }
   .platform-tag.youtube { color: #ff4a4a; }
   .platform-tag.pixiv { color: #0096fa; }
   .platform-tag.x { color: #1da1f2; }
