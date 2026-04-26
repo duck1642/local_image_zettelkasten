@@ -206,6 +206,9 @@
         overflow-y: auto;
         overflow-x: auto;
     }
+    .log-output::-webkit-scrollbar-corner {
+        background: transparent;
+    }
 
     .line { 
         margin-bottom: 4px; 

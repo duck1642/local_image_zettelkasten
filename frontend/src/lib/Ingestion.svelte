@@ -212,7 +212,7 @@
                 {#if log.platform}
                     <span class="platform-tag {log.platform.toLowerCase()}">[{log.platform.toUpperCase()}]</span>
                 {/if}
-                <span class="msg">{log.message}</span>
+                <span class="msg">{log.message?.trim()}</span>
             </div>
         {/each}
         {#if monitorLogs.length === 0}
@@ -239,7 +239,7 @@
     overflow: hidden;
   }
 
-  .toolbar { display: flex; justify-content: space-between; align-items: center; }
+  .toolbar { display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; }
   .queue-tabs { display: flex; gap: 8px; align-items: center; }
   .queue-tabs button {
     background: var(--bg-panel);
@@ -258,15 +258,17 @@
   .action-group { display: flex; gap: 8px; align-items: center; }
   .check-label { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-main); margin-right: 10px; }
 
-  .editor-area { flex: 2; display: flex; min-height: 200px; }
+  .editor-area { display: flex; flex-direction: column; flex-shrink: 1; }
   textarea {
-    flex-grow: 1;
+    height: 35vh;
+    min-height: 100px;
+    max-height: calc(100vh - 320px);
     background: var(--bg-panel);
     border: 1px solid var(--border-dim);
     border-radius: 8px;
     font-family: 'Consolas', monospace;
     font-size: 13px;
-    resize: none;
+    resize: vertical;
     padding: 15px;
     color: var(--text-main);
   }
@@ -279,7 +281,8 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    min-height: 150px;
+    min-height: 120px;
+    flex-shrink: 1;
   }
 
   .monitor-header {
@@ -291,6 +294,7 @@
     border-bottom: 1px solid var(--border-dim);
     font-family: 'Segoe UI', system-ui, sans-serif;
     font-weight: 600;
+    flex-shrink: 0;
   }
 
   .monitor-logs { 
@@ -300,6 +304,9 @@
       padding: 10px; 
       font-family: 'Consolas', monospace; 
       font-size: 12px; 
+  }
+  .monitor-logs::-webkit-scrollbar-corner {
+      background: transparent;
   }
   .log-line { 
       margin-bottom: 2px; 
@@ -324,5 +331,5 @@
 
   .empty-monitor { color: #30363d; text-align: center; margin-top: 20px; font-style: italic; }
 
-  .footer-btns { display: flex; gap: 10px; }
+  .footer-btns { display: flex; gap: 10px; flex-shrink: 0; }
 </style>
