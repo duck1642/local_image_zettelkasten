@@ -55,7 +55,7 @@ class SearchManager:
             if self.is_hydrated:
                 return
 
-            print("Y Hydrating RAM indexes from SQLite...")
+            log_ingestion('INFO', "Hydrating RAM indexes from SQLite...")
 
 
             urls = get_all_urls(conn)
@@ -85,7 +85,7 @@ class SearchManager:
             self.audio_tree.build_index()
 
             self.is_hydrated = True
-            print(f"[OK] Hydration complete: {len(urls)} URLs | {len(phashes)} Images | {len(v_sigs)} Videos indexed in RAM.")
+            log_ingestion('INFO', f"Hydration complete: {len(urls)} URLs | {len(phashes)} Images | {len(v_sigs)} Videos indexed in RAM.")
 
     def query_image(self, phash: str, threshold: int = 5) -> List[Tuple[str, int, str]]:
 

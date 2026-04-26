@@ -12,19 +12,19 @@
   }
 
   let logs: LogEntry[] = [];
-  let currentFile = 'system.log';
+  let currentFile = 'system.jsonl';
   let currentMode: 'Normal' | 'Full' = 'Normal';
-  let showDebug = true;
   let eventSource: EventSource | null = null;
   let logContainer: HTMLElement;
 
   const logFiles = [
-    { label: 'system.log (Backend)', value: 'system.log' },
+    { label: 'system.jsonl (Backend)', value: 'system.jsonl' },
     { label: 'terminal.log (Python Stdout)', value: 'terminal.log' },
-    { label: 'svelte.log (Frontend)', value: 'svelte.log' },
+    { label: 'svelte.jsonl (Frontend)', value: 'svelte.jsonl' },
     { label: 'tauri.log (Shell)', value: 'tauri.log' },
-    { label: 'ingestion.log (Worker)', value: 'ingestion.log' },
-    { label: 'pyui.log (Legacy)', value: 'pyui.log' }
+    { label: 'ingestion.jsonl (Worker)', value: 'ingestion.jsonl' },
+    { label: 'activity.jsonl (Audit)', value: 'activity.jsonl' },
+    { label: 'pyui.jsonl (Legacy)', value: 'pyui.jsonl' }
   ];
 
   function ansiToHtml(text: string) {
@@ -119,11 +119,6 @@
             <option value="Full">Full (Raw JSON)</option>
         </select>
 
-        <label class="check-label">
-            <input type="checkbox" bind:checked={showDebug} /> 
-            Show Debug
-        </label>
-
         <div class="spacer"></div>
 
         <button on:click={connectToLogs}>Reload</button>
@@ -132,23 +127,28 @@
 
     <div class="log-output" bind:this={logContainer}>
         {#each logs as log}
-            {#if showDebug || log.level !== 'DEBUG'}
-                {#if currentMode === 'Normal'}
-                    <div class="line">
-                        {#if log.isRaw}
-                            <span class="message raw-terminal">{@html log.message}</span>
-                        {:else}
-                            <span class="timestamp">{log.timestamp}</span>
-                            <span class="level {log.level.toLowerCase()}">{log.level}</span>
-                            <span class="module">[{log.module}]</span>
-                            <span class="message">{log.message}</span>
-                        {/if}
-                    </div>
-                {:else}
-                    <div class="line raw">
-                        {log.raw}
-                    </div>
-                {/if}
+            {#if currentMode === 'Normal'}
+                <div class="line">
+                    {#if log.isRaw}
+                        <span class="message raw-terminal">{@html log.message}</span>
+                    {:else}
+                        <span class="timestamp">{log.timestamp}</span>
+                        <span class="level {log.level.toLowerCase()}">{log.level}</span>
+                        <span class="module">
+                            {#if log.platform}
+                                <span class="platform-tag {log.platform.toLowerCase()}">[{log.platform.toUpperCase()}]</span>
+                            {/if}
+                            {#if log.module && log.module !== 'root'}
+                                [{log.module}]
+                            {/if}
+                        </span>
+                        <span class="message">{log.message}</span>
+                    {/if}
+                </div>
+            {:else}
+                <div class="line raw">
+                    {log.raw}
+                </div>
             {/if}
         {/each}
     </div>
@@ -236,6 +236,13 @@
     .level.debug { color: #484f58; }
     
     .message { color: #c9d1d9; }
+    
+    .platform-tag { font-weight: bold; margin-right: 5px; }
+    .platform-tag.youtube { color: #ff4a4a; }
+    .platform-tag.pixiv { color: #0096fa; }
+    .platform-tag.x { color: #1da1f2; }
+    .platform-tag.instagram { color: #e1306c; }
+    .platform-tag.pinterest { color: #e60023; }
 
     button {
         background: var(--bg-input);

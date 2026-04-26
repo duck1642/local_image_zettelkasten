@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from db.sqlite_operator import init_database
 from utils import VAULT_DIR, DB_PATH, get_config, ASSETS_DIR, LOGS_DIR, REVIEW_DIR, note_path_for, asset_path_for
 from processor import process_file
-from logs.logger import log_svelte, log_pyui, log_system, log_ingestion
+from logs.logger import log_svelte, log_pyui, log_system, log_ingestion, RAW_LOGS_DIR, STRUCTURED_LOGS_DIR
 from md_generator import load_note_topics, load_note_wd_tags, generate_markdown
 from tagging import load_tag_cache, tag_media
 
@@ -22,7 +22,7 @@ from tagging import load_tag_cache, tag_media
 class TerminalLogger:
     def __init__(self, filename, original_stream):
         self.terminal = original_stream
-        self.log_path = LOGS_DIR / filename
+        self.log_path = RAW_LOGS_DIR / filename
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
 
     def write(self, message):
@@ -219,8 +219,12 @@ async def trigger_tagging(item_hash: str):
 # --- LOGGING ENDPOINTS ---
 
 @app.get("/api/logs")
-async def stream_logs(filename: str = Query("system.log")):
-    log_file = LOGS_DIR / filename
+async def stream_logs(filename: str = Query("system.jsonl")):
+    if filename.endswith(".jsonl"):
+        log_file = STRUCTURED_LOGS_DIR / filename
+    else:
+        log_file = RAW_LOGS_DIR / filename
+
     if not log_file.exists():
         log_file.parent.mkdir(parents=True, exist_ok=True)
         log_file.touch()
@@ -257,7 +261,11 @@ async def post_ui_log(entry: UILogEntry):
 
 @app.post("/api/logs/open")
 async def open_log_external(filename: str = Query(...)):
-    log_file = LOGS_DIR / filename
+    if filename.endswith(".jsonl"):
+        log_file = STRUCTURED_LOGS_DIR / filename
+    else:
+        log_file = RAW_LOGS_DIR / filename
+        
     if not log_file.exists(): raise HTTPException(status_code=404)
     try:
         if os.name == 'nt': os.startfile(str(log_file))

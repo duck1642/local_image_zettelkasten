@@ -8,7 +8,6 @@
   let saving = false;
   let running = false;
   let isDirty = false;
-  let showDebug = true;
   let parseTimer: any = null;
 
   // Monitor Logs
@@ -18,11 +17,12 @@
 
   function connectMonitor() {
     if (logSource) logSource.close();
-    logSource = new EventSource(`http://localhost:8000/api/logs?filename=ingestion.log`);
+    // Read from the structured ingestion log
+    logSource = new EventSource(`http://localhost:8000/api/logs?filename=ingestion.jsonl`);
     logSource.onmessage = (e) => {
         try {
             const entry = JSON.parse(e.data);
-            monitorLogs = [...monitorLogs, entry].slice(-100);
+            monitorLogs = [...monitorLogs, entry].slice(-150);
             setTimeout(() => { if (monitorContainer) monitorContainer.scrollTop = monitorContainer.scrollHeight; }, 30);
         } catch { }
     };
@@ -186,9 +186,6 @@
     </div>
 
     <div class="action-group">
-      <label class="check-label">
-        <input type="checkbox" bind:checked={showDebug} /> Show Debug
-      </label>
       <button on:click={() => handleTabChange(currentQueue)} disabled={running}>Reload</button>
       <button on:click={openExternal} disabled={running}>Open</button>
       <button class="primary" on:click={startIngestion} disabled={running || currentQueue === 'failed'}>
@@ -206,16 +203,17 @@
   </div>
 
   <div class="monitor-area">
-    <div class="monitor-header">--- Ingestion Monitor Active ---</div>
+    <div class="monitor-header">Ingestion Monitor</div>
     <div class="monitor-logs" bind:this={monitorContainer}>
         {#each monitorLogs as log}
-            {#if showDebug || log.level !== 'DEBUG'}
-                <div class="log-line">
-                    <span class="time">{log.timestamp.split(' ')[1]}</span>
-                    <span class="level {log.level.toLowerCase()}">{log.level}</span>
-                    <span class="msg">{log.message}</span>
-                </div>
-            {/if}
+            <div class="log-line">
+                <span class="time">{log.timestamp?.split(' ')[1] || log.timestamp || ''}</span>
+                <span class="level {(log.level || 'INFO').toLowerCase()}">{log.level || 'INFO'}</span>
+                {#if log.platform}
+                    <span class="platform-tag {log.platform.toLowerCase()}">[{log.platform.toUpperCase()}]</span>
+                {/if}
+                <span class="msg">{log.message}</span>
+            </div>
         {/each}
         {#if monitorLogs.length === 0}
             <div class="empty-monitor">Waiting for ingestion activity...</div>
@@ -286,13 +284,13 @@
 
   .monitor-header {
     background: rgba(255,255,255,0.02);
-    padding: 5px;
-    font-size: 10px;
+    padding: 5px 10px;
+    font-size: 12px;
     color: var(--accent-primary);
-    text-align: center;
+    text-align: left;
     border-bottom: 1px solid var(--border-dim);
-    font-family: monospace;
-    letter-spacing: 2px;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    font-weight: 600;
   }
 
   .monitor-logs { 
@@ -314,6 +312,14 @@
   .level.info { color: #58a6ff; }
   .level.warning { color: var(--accent-warning); }
   .level.error { color: var(--accent-danger); }
+  
+  .platform-tag { font-weight: bold; margin-right: 5px; }
+  .platform-tag.youtube { color: #ff4a4a; }
+  .platform-tag.pixiv { color: #0096fa; }
+  .platform-tag.x { color: #1da1f2; }
+  .platform-tag.instagram { color: #e1306c; }
+  .platform-tag.pinterest { color: #e60023; }
+  
   .msg { color: #8b949e; }
 
   .empty-monitor { color: #30363d; text-align: center; margin-top: 20px; font-style: italic; }

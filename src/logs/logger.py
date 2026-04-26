@@ -5,7 +5,10 @@ import datetime
 from pathlib import Path
 from utils import OUTPUT_DIR, LOGS_DIR
 
-LOGS_DIR.mkdir(parents=True, exist_ok=True)
+STRUCTURED_LOGS_DIR = LOGS_DIR / "structured"
+STRUCTURED_LOGS_DIR.mkdir(parents=True, exist_ok=True)
+RAW_LOGS_DIR = LOGS_DIR / "raw"
+RAW_LOGS_DIR.mkdir(parents=True, exist_ok=True)
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 # 0. Compatibility definitions (Must be at the top)
@@ -28,28 +31,28 @@ class JSONFormatter(logging.Formatter):
 # 1. System Logger (The Brain / FastAPI)
 system_logger = logging.getLogger("liz_system")
 system_logger.setLevel(logging.INFO)
-sys_handler = RotatingFileHandler(LOGS_DIR / "system.log", maxBytes=5*1024*1024, backupCount=2, encoding="utf-8")
+sys_handler = RotatingFileHandler(STRUCTURED_LOGS_DIR / "system.jsonl", maxBytes=5*1024*1024, backupCount=2, encoding="utf-8")
 sys_handler.setFormatter(JSONFormatter())
 if not system_logger.handlers: system_logger.addHandler(sys_handler)
 
 # 2. Svelte Logger (The Face / JS Frontend)
 svelte_logger = logging.getLogger("liz_svelte")
 svelte_logger.setLevel(logging.INFO)
-svelte_handler = RotatingFileHandler(LOGS_DIR / "svelte.log", maxBytes=5*1024*1024, backupCount=3, encoding="utf-8")
+svelte_handler = RotatingFileHandler(STRUCTURED_LOGS_DIR / "svelte.jsonl", maxBytes=5*1024*1024, backupCount=3, encoding="utf-8")
 svelte_handler.setFormatter(JSONFormatter())
 if not svelte_logger.handlers: svelte_logger.addHandler(svelte_handler)
 
 # 3. Legacy UI Logger (The Ghost / PyQt)
 pyui_logger = logging.getLogger("liz_pyui")
 pyui_logger.setLevel(logging.INFO)
-pyui_handler = RotatingFileHandler(LOGS_DIR / "pyui.log", maxBytes=5*1024*1024, backupCount=3, encoding="utf-8")
+pyui_handler = RotatingFileHandler(STRUCTURED_LOGS_DIR / "pyui.jsonl", maxBytes=5*1024*1024, backupCount=3, encoding="utf-8")
 pyui_handler.setFormatter(JSONFormatter())
 if not pyui_logger.handlers: pyui_logger.addHandler(pyui_handler)
 
 # 4. Ingestion Logger (The Worker)
 ingestion_logger = logging.getLogger("liz_ingestion")
 ingestion_logger.setLevel(logging.INFO)
-ingestion_handler = RotatingFileHandler(LOGS_DIR / "ingestion.log", maxBytes=5*1024*1024, backupCount=3, encoding="utf-8")
+ingestion_handler = RotatingFileHandler(STRUCTURED_LOGS_DIR / "ingestion.jsonl", maxBytes=5*1024*1024, backupCount=3, encoding="utf-8")
 ingestion_handler.setFormatter(JSONFormatter())
 if not ingestion_logger.handlers: ingestion_logger.addHandler(ingestion_handler)
 
@@ -72,7 +75,8 @@ def log_ingestion(level, message, **kwargs):
 # activity logging remains unchanged
 activity_logger = logging.getLogger("liz_activity")
 activity_logger.setLevel(logging.INFO)
-act_handler = RotatingFileHandler(OUTPUT_DIR / "activity.jsonl", maxBytes=5*1024*1024, backupCount=2, encoding="utf-8")
+# Also move activity.jsonl to structured folder to be accessible seamlessly
+act_handler = RotatingFileHandler(STRUCTURED_LOGS_DIR / "activity.jsonl", maxBytes=5*1024*1024, backupCount=2, encoding="utf-8")
 act_handler.setFormatter(JSONFormatter())
 if not activity_logger.handlers: activity_logger.addHandler(act_handler)
 

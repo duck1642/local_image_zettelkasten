@@ -40,22 +40,22 @@ class ExternalIngestor:
         batch_index_queue = []
 
         if not self.links_file.exists():
-            print(f"[ERROR] Links file not found: {self.links_file}")
+            log_ingestion('ERROR', f"Links file not found: {self.links_file}")
             log_ingestion("WARNING", f"Ingestion skipped: {self.links_file.name} not found")
             return stats
 
         try:
-            print(f"Y Reading links from: {self.links_file}")
+            log_ingestion('INFO', f"Reading links from: {self.links_file}")
             links = self._parse_links()
 
             if not links:
-                print(f"Y No valid links found in {self.links_file.name}.")
+                log_ingestion('INFO', f"No valid links found in {self.links_file.name}.")
                 log_ingestion("INFO", f"Ingestion finished: {self.links_file.name} is empty")
                 return stats
 
 
             buckets = self._bucket_links(links)
-            print(f"Y Bucketed {len(links)} links into {len(buckets)} platform queues.")
+            log_ingestion('INFO', f"Bucketed {len(links)} links into {len(buckets)} platform queues.")
 
 
             all_remaining = []
@@ -74,25 +74,25 @@ class ExternalIngestor:
                         all_remaining.extend(worker_remaining)
                         batch_index_queue.extend(worker_index_data)
                     except Exception as e:
-                        print(f"[ERROR] Platform manager for {platform} crashed: {e}")
+                        log_ingestion('ERROR', f"Platform manager for {platform} crashed: {e}")
                         log_ingestion("ERROR", f"Platform manager crash", platform=platform, error=str(e))
 
 
             if batch_index_queue:
-                print(f"Y Syncing RAM indexes for {len(batch_index_queue)} new items...")
+                log_ingestion('INFO', f"Syncing RAM indexes for {len(batch_index_queue)} new items...")
                 try:
                     for item in batch_index_queue:
                         search_manager.update_indexes(**item)
                 except Exception as sync_e:
-                    print(f"as i   RAM Index Sync error (Batch): {sync_e}")
+                    log_ingestion('INFO', f"  RAM Index Sync error (Batch): {sync_e}")
                     log_ingestion("ERROR", "RAM Sync failed during batch finalization", error=str(sync_e))
 
 
             self._write_back([])
-            print(f"\n[OK] Ingestion cycle complete. {len(all_remaining)} failed links logged for explicit retry.")
+            log_ingestion('INFO', f"\n[OK] Ingestion cycle complete. {len(all_remaining)} failed links logged for explicit retry.")
 
         except Exception as e:
-            print(f"[ERROR] Critical Error in ExternalIngestor: {e}")
+            log_ingestion('ERROR', f"Critical Error in ExternalIngestor: {e}")
             log_ingestion("ERROR", "ExternalIngestor failed", error=str(e))
 
         return stats
@@ -109,7 +109,7 @@ class ExternalIngestor:
         plat_remaining = []
         plat_index_data = []
 
-        print(f"[INFO] [{platform.upper()}] Starting queue with {num_workers} workers.")
+        log_ingestion('INFO', f"[{platform.upper()}] Starting queue with {num_workers} workers.")
 
         with ThreadPoolExecutor(max_workers=num_workers) as executor:
             futures = [executor.submit(self._worker_item, platform, url, jitter) for url in urls]
@@ -137,7 +137,7 @@ class ExternalIngestor:
 
         downloader_type = self._get_downloader_type(url)
         if not downloader_type:
-            print(f"as i   [{platform.upper()}] Unsupported platform: {url}")
+            log_ingestion('INFO', f"  [{platform.upper()}] Unsupported platform: {url}")
             log_ingestion("WARNING", "URL skipped: Unsupported platform", url=url)
             self._log_failure(url, "Unsupported platform")
             return False, url, item_stats, []
@@ -158,7 +158,7 @@ class ExternalIngestor:
             if not meta_success:
                 platform_label = "YouTube community" if is_youtube_community else "Pinterest" if is_pinterest else "Instagram" if is_instagram else "Pixiv"
                 error_msg = metadata_info.get('error', f'{platform_label} metadata failed')
-                print(f"   [ERROR] [{platform.upper()}] Metadata failed: {error_msg}")
+                log_ingestion('ERROR', f"[ERROR] [{platform.upper()}] Metadata failed: {error_msg}")
                 log_ingestion("ERROR", f"{platform_label} metadata failed", url=url, error=error_msg)
                 self._log_failure(url, f"{platform_label} metadata failed: {error_msg}")
                 item_stats["errors"] += 1
@@ -168,29 +168,29 @@ class ExternalIngestor:
             if is_instagram:
                 shortcode = self._instagram_shortcode(url)
                 if self._instagram_complete(url, expected_count):
-                    print(f"[OK] [{platform.upper()}] URL already complete, skipping: {url}")
+                    log_ingestion('INFO', f"[{platform.upper()}] URL already complete, skipping: {url}")
                     log_ingestion("INFO", "Instagram URL skipped: Complete in database", url=url, shortcode=shortcode, expected_count=expected_count)
                     item_stats["skipped"] += 1
                     return True, url, item_stats, []
             elif is_pinterest:
                 if self._url_complete(url):
-                    print(f"[OK] [{platform.upper()}] URL already ingested, skipping: {url}")
+                    log_ingestion('INFO', f"[{platform.upper()}] URL already ingested, skipping: {url}")
                     log_ingestion("INFO", "Pinterest URL skipped: Complete in database", url=url)
                     item_stats["skipped"] += 1
                     return True, url, item_stats, []
             elif is_youtube_community:
                 if self._url_complete(url, expected_count):
-                    print(f"[OK] [{platform.upper()}] Community post already complete, skipping: {url}")
+                    log_ingestion('INFO', f"[{platform.upper()}] Community post already complete, skipping: {url}")
                     log_ingestion("INFO", "YouTube community post skipped: Complete in database", url=url, expected_count=expected_count)
                     item_stats["skipped"] += 1
                     return True, url, item_stats, []
             elif self._url_complete(url, expected_count):
-                print(f"[OK] [{platform.upper()}] URL already complete, skipping: {url}")
+                log_ingestion('INFO', f"[{platform.upper()}] URL already complete, skipping: {url}")
                 log_ingestion("INFO", "Pixiv URL skipped: Complete in database", url=url, expected_count=expected_count)
                 item_stats["skipped"] += 1
                 return True, url, item_stats, []
         elif self._url_complete(url):
-            print(f"[OK] [{platform.upper()}] URL already ingested, skipping: {url}")
+            log_ingestion('INFO', f"[{platform.upper()}] URL already ingested, skipping: {url}")
             if is_x:
                 log_ingestion("INFO", "X URL skipped: Complete in database", url=url)
             else:
@@ -212,7 +212,7 @@ class ExternalIngestor:
 
             while attempt < max_attempts and not success:
                 attempt += 1
-                print(f"Y [{platform.upper()}] Processing: {url} (Attempt {attempt}/{max_attempts})")
+                log_ingestion('INFO', f"[{platform.upper()}] Processing: {url} (Attempt {attempt}/{max_attempts})")
 
                 if downloader_type == 'gallery-dl':
                     success, result = download_gallery(url, metadata_info=metadata_info)
@@ -220,7 +220,7 @@ class ExternalIngestor:
                     success, result = download_video(url, metadata_info=metadata_info)
 
                 if not success and attempt < max_attempts:
-                    print(f"   a3 [{platform.upper()}] Attempt {attempt} failed. Retrying in 2 seconds...")
+                    log_ingestion('INFO', f"[{platform.upper()}] Attempt {attempt} failed. Retrying in 2 seconds...")
                     log_ingestion("WARNING", f"Download attempt {attempt} failed", url=url, platform=platform)
                     time.sleep(2)
 
@@ -300,7 +300,7 @@ class ExternalIngestor:
                                     break
 
                 if validation_failed:
-                    print(f"   [ERROR] [{platform.upper()}] Integrity Check Failed: {validation_error}")
+                    log_ingestion('ERROR', f"[ERROR] [{platform.upper()}] Integrity Check Failed: {validation_error}")
                     log_ingestion("ERROR", "Integrity check failed", url=url, error=validation_error)
                     self._log_failure(url, f"Integrity check failed: {validation_error}")
 
@@ -327,12 +327,12 @@ class ExternalIngestor:
                     )
 
                     if process_success:
-                        print(f"   [{platform.upper()}] {msg}")
+                        log_ingestion('INFO', f"[{platform.upper()}] {msg}")
                         item_stats["processed"] += 1
                         if idx_data:
                             batch_data.append(idx_data)
                     else:
-                        print(f"   [{platform.upper()}] [ERROR] Pipeline Error: {msg}")
+                        log_ingestion('ERROR', f"[{platform.upper()}] [ERROR] Pipeline Error: {msg}")
                         item_stats["errors"] += 1
                         processed_all = False
 
@@ -364,7 +364,7 @@ class ExternalIngestor:
                 return True, url, item_stats, batch_data
             else:
                 error_msg = result.get('error', f"Failed after {max_attempts} attempts")
-                print(f"   [ERROR] [{platform.upper()}] Download failed: {error_msg}")
+                log_ingestion('ERROR', f"[ERROR] [{platform.upper()}] Download failed: {error_msg}")
                 log_ingestion("ERROR", f"Download permanently failed", url=url, platform=platform, error=error_msg)
 
                 self._log_failure(url, f"Download failed: {error_msg}")
