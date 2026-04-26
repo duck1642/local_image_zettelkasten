@@ -79,6 +79,19 @@ def _base_args(url: str) -> list:
 
 
 def _load_metadata_lines(stdout: str) -> list:
+    if not stdout.strip():
+        return []
+    
+    # Try parsing the entire output as a single JSON array first (gallery-dl -j default)
+    try:
+        data = json.loads(stdout)
+        if isinstance(data, list):
+            # If it's a list of items (like [2, {...}], [3, {...}]), return it
+            return data
+    except json.JSONDecodeError:
+        pass
+
+    # Fallback to jsonlines parsing if gallery-dl was run with a different format
     meta_json = []
     for line in stdout.strip().splitlines():
         line = line.strip()
