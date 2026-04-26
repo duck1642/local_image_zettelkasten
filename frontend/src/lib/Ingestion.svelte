@@ -24,6 +24,11 @@
             const entry = JSON.parse(e.data);
             monitorLogs = [...monitorLogs, entry].slice(-150);
             setTimeout(() => { if (monitorContainer) monitorContainer.scrollTop = monitorContainer.scrollHeight; }, 30);
+            // Auto-reload queue when ingestion finishes
+            if (entry.message && entry.message.includes('Ingestion cycle complete')) {
+                fetchStats();
+                if (!isDirty) loadQueue(currentQueue);
+            }
         } catch { }
     };
   }
