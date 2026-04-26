@@ -209,9 +209,11 @@
             <div class="log-line">
                 <span class="time">{log.timestamp?.split(' ')[1] || log.timestamp || ''}</span>
                 <span class="level {(log.level || 'INFO').toLowerCase()}">{log.level || 'INFO'}</span>
-                {#if log.platform}
-                    <span class="platform-tag {log.platform.toLowerCase()}">[{log.platform.toUpperCase()}]</span>
-                {/if}
+                <span class="platform-tag {log.platform ? log.platform.toLowerCase() : ''}">
+                    {#if log.platform}
+                        [{log.platform.toUpperCase()}]
+                    {/if}
+                </span>
                 <span class="msg">{log.message?.trim()}</span>
             </div>
         {/each}
@@ -222,7 +224,7 @@
   </div>
 
   <div class="footer-btns">
-      <button on:click={saveQueue} disabled={!isDirty || saving || running}>Save Changes</button>
+      <button class:primary={isDirty} on:click={saveQueue} disabled={!isDirty || saving || running}>Save Changes</button>
       <button on:click={retryFailed} disabled={running || counts.failed === 0}>Retry Failed</button>
       <button on:click={clearFailed} disabled={running || counts.failed === 0}>Clear Failed</button>
   </div>
@@ -315,7 +317,7 @@
       padding-right: 15px;
   }
   .time { color: #484f58; margin-right: 10px; }
-  .level { font-weight: bold; margin-right: 10px; width: 50px; display: inline-block; }
+  .level { font-weight: bold; margin-right: 10px; width: 50px; display: inline-block; flex-shrink: 0; }
   .level.info { color: #58a6ff; }
   .level.warning { color: var(--accent-warning); }
   .level.error { color: var(--accent-danger); }

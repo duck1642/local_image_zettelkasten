@@ -97,6 +97,19 @@
     } catch (e) { console.error(e); }
   }
 
+  async function clearLogs() {
+    if (!confirm("Are you sure you want to clear all log files? This cannot be undone.")) return;
+    try {
+        await fetch(`http://localhost:8000/api/logs/clear`, { method: 'POST' });
+        logs = [];
+        uiLog('INFO', 'All logs cleared by user.');
+        connectToLogs();
+    } catch (e) {
+        console.error(e);
+        alert("Failed to clear logs.");
+    }
+  }
+
   function handleFileChange() {
     uiLog('DEBUG', `Switched log view to ${currentFile}`);
     connectToLogs();
@@ -122,6 +135,7 @@
         <div class="spacer"></div>
 
         <button on:click={connectToLogs}>Reload</button>
+        <button on:click={clearLogs}>Clear Logs</button>
         <button on:click={openExternal}>Open Externally</button>
     </div>
 
@@ -135,14 +149,16 @@
                         <span class="timestamp">{log.timestamp}</span>
                         <span class="level {log.level.toLowerCase()}">{log.level}</span>
                         <span class="module">
-                            {#if log.platform}
-                                <span class="platform-tag {log.platform.toLowerCase()}">[{log.platform.toUpperCase()}]</span>
-                            {/if}
+                            <span class="platform-tag {log.platform ? log.platform.toLowerCase() : ''}">
+                                {#if log.platform}
+                                    [{log.platform.toUpperCase()}]
+                                {/if}
+                            </span>
                             {#if log.module && log.module !== 'root'}
                                 [{log.module}]
                             {/if}
                         </span>
-                        <span class="message">{log.message}</span>
+                        <span class="message">{log.message?.trim()}</span>
                     {/if}
                 </div>
             {:else}

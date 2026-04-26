@@ -276,6 +276,19 @@ async def open_log_external(filename: str = Query(...)):
         return {"status": "opened"}
     except Exception as e: raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/logs/clear")
+async def clear_all_logs():
+    try:
+        for folder in [RAW_LOGS_DIR, STRUCTURED_LOGS_DIR]:
+            if folder.exists():
+                for f in folder.iterdir():
+                    if f.is_file() and (f.suffix == '.log' or f.suffix == '.jsonl'):
+                        with open(f, 'w', encoding='utf-8') as out:
+                            out.write('')
+        return {"status": "success"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 # --- QUEUE & INGESTION ---
 class QueueUpdate(BaseModel):
     content: str

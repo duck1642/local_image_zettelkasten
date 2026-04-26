@@ -109,7 +109,7 @@ class ExternalIngestor:
         plat_remaining = []
         plat_index_data = []
 
-        log_ingestion('INFO', f"[{platform.upper()}] Starting queue with {num_workers} workers.")
+        log_ingestion('INFO', f"Starting queue with {num_workers} workers.", platform=platform)
 
         with ThreadPoolExecutor(max_workers=num_workers) as executor:
             futures = [executor.submit(self._worker_item, platform, url, jitter) for url in urls]
@@ -137,7 +137,7 @@ class ExternalIngestor:
 
         downloader_type = self._get_downloader_type(url)
         if not downloader_type:
-            log_ingestion('INFO', f"  [{platform.upper()}] Unsupported platform: {url}")
+            log_ingestion('INFO', f"Unsupported platform: {url}", platform=platform)
             log_ingestion("WARNING", "URL skipped: Unsupported platform", url=url)
             self._log_failure(url, "Unsupported platform")
             return False, url, item_stats, []
@@ -158,7 +158,7 @@ class ExternalIngestor:
             if not meta_success:
                 platform_label = "YouTube community" if is_youtube_community else "Pinterest" if is_pinterest else "Instagram" if is_instagram else "Pixiv"
                 error_msg = metadata_info.get('error', f'{platform_label} metadata failed')
-                log_ingestion('ERROR', f"[ERROR] [{platform.upper()}] Metadata failed: {error_msg}")
+                log_ingestion('ERROR', f"Metadata failed: {error_msg}", platform=platform)
                 log_ingestion("ERROR", f"{platform_label} metadata failed", url=url, error=error_msg)
                 self._log_failure(url, f"{platform_label} metadata failed: {error_msg}")
                 item_stats["errors"] += 1
@@ -168,33 +168,25 @@ class ExternalIngestor:
             if is_instagram:
                 shortcode = self._instagram_shortcode(url)
                 if self._instagram_complete(url, expected_count):
-                    log_ingestion('INFO', f"[{platform.upper()}] URL already complete, skipping: {url}")
-                    log_ingestion("INFO", "Instagram URL skipped: Complete in database", url=url, shortcode=shortcode, expected_count=expected_count)
+                    log_ingestion("INFO", "URL skipped: Complete in database", platform=platform, url=url, shortcode=shortcode, expected_count=expected_count)
                     item_stats["skipped"] += 1
                     return True, url, item_stats, []
             elif is_pinterest:
                 if self._url_complete(url):
-                    log_ingestion('INFO', f"[{platform.upper()}] URL already ingested, skipping: {url}")
-                    log_ingestion("INFO", "Pinterest URL skipped: Complete in database", url=url)
+                    log_ingestion("INFO", "URL skipped: Complete in database", platform=platform, url=url)
                     item_stats["skipped"] += 1
                     return True, url, item_stats, []
             elif is_youtube_community:
                 if self._url_complete(url, expected_count):
-                    log_ingestion('INFO', f"[{platform.upper()}] Community post already complete, skipping: {url}")
-                    log_ingestion("INFO", "YouTube community post skipped: Complete in database", url=url, expected_count=expected_count)
+                    log_ingestion("INFO", "URL skipped: Complete in database", platform=platform, url=url, expected_count=expected_count)
                     item_stats["skipped"] += 1
                     return True, url, item_stats, []
             elif self._url_complete(url, expected_count):
-                log_ingestion('INFO', f"[{platform.upper()}] URL already complete, skipping: {url}")
-                log_ingestion("INFO", "Pixiv URL skipped: Complete in database", url=url, expected_count=expected_count)
+                log_ingestion("INFO", "URL skipped: Complete in database", platform=platform, url=url, expected_count=expected_count)
                 item_stats["skipped"] += 1
                 return True, url, item_stats, []
         elif self._url_complete(url):
-            log_ingestion('INFO', f"[{platform.upper()}] URL already ingested, skipping: {url}")
-            if is_x:
-                log_ingestion("INFO", "X URL skipped: Complete in database", url=url)
-            else:
-                log_ingestion("INFO", "URL skipped: Complete in database", url=url)
+            log_ingestion("INFO", "URL skipped: Complete in database", platform=platform, url=url)
             item_stats["skipped"] += 1
             return True, url, item_stats, []
 
@@ -212,7 +204,7 @@ class ExternalIngestor:
 
             while attempt < max_attempts and not success:
                 attempt += 1
-                log_ingestion('INFO', f"[{platform.upper()}] Processing: {url} (Attempt {attempt}/{max_attempts})")
+                log_ingestion('INFO', f"Processing: {url} (Attempt {attempt}/{max_attempts})", platform=platform)
 
                 if downloader_type == 'gallery-dl':
                     success, result = download_gallery(url, metadata_info=metadata_info)
@@ -220,49 +212,18 @@ class ExternalIngestor:
                     success, result = download_video(url, metadata_info=metadata_info)
 
                 if not success and attempt < max_attempts:
-                    log_ingestion('INFO', f"[{platform.upper()}] Attempt {attempt} failed. Retrying in 2 seconds...")
+                    log_ingestion('INFO', f"Attempt {attempt} failed. Retrying in 2 seconds...", platform=platform)
                     log_ingestion("WARNING", f"Download attempt {attempt} failed", url=url, platform=platform)
                     time.sleep(2)
 
             if success:
 
-                if is_pixiv:
-                    expected_count = result.get("expected_count", 0)
-                    downloaded_count = result.get("downloaded_count", len(result.get("file_paths", [])))
-                    log_ingestion("INFO", "Pixiv download verified", url=url, expected_count=expected_count, downloaded_count=downloaded_count)
-                elif is_x:
-                    log_ingestion(
-                        "INFO",
-                        "X download completed",
-                        url=url,
-                        download_url=result.get("download_url", ""),
-                        downloaded_count=result.get("downloaded_count", len(result.get("file_paths", [])))
-                    )
-                elif is_instagram:
-                    log_ingestion(
-                        "INFO",
-                        "Instagram download verified",
-                        url=url,
-                        shortcode=self._instagram_shortcode(url),
-                        expected_count=result.get("expected_count", 0),
-                        downloaded_count=result.get("downloaded_count", len(result.get("file_paths", [])))
-                    )
-                elif is_pinterest:
-                    log_ingestion(
-                        "INFO",
-                        "Pinterest download verified",
-                        url=url,
-                        expected_count=result.get("expected_count", 0),
-                        downloaded_count=result.get("downloaded_count", len(result.get("file_paths", [])))
-                    )
-                elif is_youtube_community:
-                    log_ingestion(
-                        "INFO",
-                        "YouTube community download verified",
-                        url=url,
-                        expected_count=result.get("expected_count", 0),
-                        downloaded_count=result.get("downloaded_count", len(result.get("file_paths", [])))
-                    )
+                expected_count = result.get("expected_count", 0)
+                downloaded_count = result.get("downloaded_count", len(result.get("file_paths", [])))
+                extra_data = {"url": url, "platform": platform, "expected_count": expected_count, "downloaded_count": downloaded_count}
+                if is_x: extra_data["download_url"] = result.get("download_url", "")
+                if is_instagram: extra_data["shortcode"] = self._instagram_shortcode(url)
+                log_ingestion("INFO", "Download verified", **extra_data)
 
                 validation_failed = False
                 validation_error = ""
@@ -300,7 +261,7 @@ class ExternalIngestor:
                                     break
 
                 if validation_failed:
-                    log_ingestion('ERROR', f"[ERROR] [{platform.upper()}] Integrity Check Failed: {validation_error}")
+                    log_ingestion('ERROR', f"Integrity Check Failed: {validation_error}", platform=platform)
                     log_ingestion("ERROR", "Integrity check failed", url=url, error=validation_error)
                     self._log_failure(url, f"Integrity check failed: {validation_error}")
 
@@ -327,12 +288,12 @@ class ExternalIngestor:
                     )
 
                     if process_success:
-                        log_ingestion('INFO', f"[{platform.upper()}] {msg}")
+                        log_ingestion("INFO", msg, platform=platform, url=url)
                         item_stats["processed"] += 1
                         if idx_data:
                             batch_data.append(idx_data)
                     else:
-                        log_ingestion('ERROR', f"[{platform.upper()}] [ERROR] Pipeline Error: {msg}")
+                        log_ingestion("ERROR", f"Pipeline Error: {msg}", platform=platform, url=url)
                         item_stats["errors"] += 1
                         processed_all = False
 
@@ -364,7 +325,7 @@ class ExternalIngestor:
                 return True, url, item_stats, batch_data
             else:
                 error_msg = result.get('error', f"Failed after {max_attempts} attempts")
-                log_ingestion('ERROR', f"[ERROR] [{platform.upper()}] Download failed: {error_msg}")
+                log_ingestion('ERROR', f"Download failed: {error_msg}", platform=platform)
                 log_ingestion("ERROR", f"Download permanently failed", url=url, platform=platform, error=error_msg)
 
                 self._log_failure(url, f"Download failed: {error_msg}")
