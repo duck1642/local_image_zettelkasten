@@ -209,7 +209,7 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
                     "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                     "metadata": metadata
                 }
-                with open(dest_path.with_suffix('.json'), 'w', encoding='utf-8') as f:
+                with open(dest_path.with_suffix(dest_path.suffix + '.json'), 'w', encoding='utf-8') as f:
                     json.dump(sidecar, f, indent=4)
 
                 log_system("WARNING", f"Quarantined: Visual match detected ({match_type})", file=filepath.name, match_type=match_type, conflicts=total_conflicts)
@@ -242,7 +242,7 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
                     "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                     "metadata": metadata
                 }
-                with open(dest_path.with_suffix('.json'), 'w', encoding='utf-8') as f:
+                with open(dest_path.with_suffix(dest_path.suffix + '.json'), 'w', encoding='utf-8') as f:
                     json.dump(sidecar, f, indent=4)
 
                 log_system("WARNING", f"Quarantined: Video duplicate detected ({match_type})", file=filepath.name, match_type=match_type, conflicts=total_conflicts)

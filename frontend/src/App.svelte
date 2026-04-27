@@ -27,8 +27,8 @@
 
   let currentSort = 'newest';
   let currentMediaType = 'all';
-  let currentSearchField = '';
-  let currentSearchValue = '';
+  let activeFilters: { artist?: string; platform?: string; filename?: string; topic?: string; wd_tag?: string; command?: string } = {};
+  let searchDebounceTimer: number | null = null;
 
   async function fetchConfig() {
     try {
@@ -57,18 +57,33 @@
       fetchConfig();
   }
 
-  async function fetchItems(field?: string, value?: string) {
+  function parseSearchQuery(query: string) {
+    const filters: { artist?: string; platform?: string; filename?: string; topic?: string; wd_tag?: string; command?: string } = {};
+    const tokens = query.trim().split(/\s+/);
+    const bareWords: string[] = [];
+
+    for (const token of tokens) {
+      if (token.startsWith('a:')) filters.artist = token.slice(2).trim();
+      else if (token.startsWith('@')) filters.platform = token.slice(1).trim();
+      else if (token.startsWith('#')) filters.topic = token.slice(1).trim();
+      else if (token.startsWith('*')) filters.wd_tag = token.slice(1).trim();
+      else if (token.startsWith('>')) filters.command = token.slice(1).trim();
+      else if (token) bareWords.push(token);
+    }
+
+    if (bareWords.length > 0) filters.filename = bareWords.join(' ');
+    return filters;
+  }
+
+  async function fetchItems() {
     loading = true;
     try {
-      if (field !== undefined && value !== undefined) {
-          currentSearchField = field;
-          currentSearchValue = value;
-      }
-
       let url = `http://localhost:8000/api/items?sort=${currentSort}&media_type=${currentMediaType}`;
-      if (currentSearchField && currentSearchValue) {
-          url += `&field=${currentSearchField}&value=${encodeURIComponent(currentSearchValue)}`;
-      }
+      if (activeFilters.artist) url += `&artist=${encodeURIComponent(activeFilters.artist)}`;
+      if (activeFilters.platform) url += `&platform=${encodeURIComponent(activeFilters.platform)}`;
+      if (activeFilters.filename) url += `&filename=${encodeURIComponent(activeFilters.filename)}`;
+      if (activeFilters.topic) url += `&topic=${encodeURIComponent(activeFilters.topic)}`;
+      if (activeFilters.wd_tag) url += `&wd_tag=${encodeURIComponent(activeFilters.wd_tag)}`;
 
       const response = await fetch(url);
       items = await response.json();
@@ -79,11 +94,45 @@
     } finally { loading = false; }
   }
 
-  function clearSearch() {
-      searchQuery = '';
-      currentSearchField = '';
-      currentSearchValue = '';
+  function applySearch(immediate: boolean = false) {
+    if (searchDebounceTimer !== null) {
+      clearTimeout(searchDebounceTimer);
+      searchDebounceTimer = null;
+    }
+    const text = searchQuery.trim();
+    if (!text) {
+      activeFilters = {};
       fetchItems();
+      return;
+    }
+    activeFilters = parseSearchQuery(text);
+    if (immediate) {
+      fetchItems();
+    } else {
+      searchDebounceTimer = setTimeout(() => fetchItems(), 300);
+    }
+  }
+
+  function clearSearch() {
+    searchQuery = '';
+    activeFilters = {};
+    if (searchDebounceTimer !== null) {
+      clearTimeout(searchDebounceTimer);
+      searchDebounceTimer = null;
+    }
+    fetchItems();
+  }
+
+  function handleSearchInput() {
+    applySearch(false);
+  }
+
+  function handleSearchKeydown(event: KeyboardEvent) {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      applySearch(true);
+      activeTab = 'vault';
+    }
   }
 
   async function fetchSecondaryStats() {
@@ -94,19 +143,6 @@
         const reviewData = await reviewRes.json();
         reviewCount = reviewData.length;
     } catch (e) { }
-  }
-
-  function handleSearchKeydown(event: KeyboardEvent) {
-    if (event.key === 'Enter') {
-      const text = searchQuery.trim();
-      if (!text) { fetchItems(); return; }
-      uiLog('INFO', `Searching for: ${text}`);
-      if (text.startsWith('a:')) fetchItems('source_artist', text.slice(2).trim());
-      else if (text.startsWith('@')) fetchItems('platform', text.slice(1).trim());
-      else fetchItems('original_filename', text);
-      searchQuery = '';
-      activeTab = 'vault';
-    }
   }
 
   function handleSelectItem(item: VaultItem, group: any) {
@@ -177,11 +213,12 @@
         <div class="search-wrapper">
           <input 
             type="text" 
-            placeholder="Search (use a: for artist, > for cmd)..." 
+            placeholder="a: artist  # topic  * wd-tag  @ platform  > cmd" 
             bind:value={searchQuery}
+            on:input={handleSearchInput}
             on:keydown={handleSearchKeydown}
           />
-          {#if currentSearchValue || currentSearchField}
+          {#if searchQuery.trim() || Object.keys(activeFilters).length > 0}
               <button class="clear-search" on:click={clearSearch} title="Clear Search">✖</button>
           {/if}
         </div>
@@ -283,7 +320,6 @@
   .header-actions { display: flex; align-items: center; gap: 10px; }
   .header-actions.with-inspector { width: calc(400px - 15px); min-width: calc(400px - 15px); justify-content: flex-start; padding-left: 15px; border-left: 1px solid var(--border-dim); }
   .filter-select { background: var(--bg-input); border: 1px solid var(--border-dim); color: var(--text-main); padding: 5px 10px; border-radius: 6px; font-size: 12px; cursor: pointer; height: 32px; }
-  .status-text { color: var(--text-muted); font-size: 12px; white-space: nowrap; }
   .view-and-inspector { flex-grow: 1; display: flex; overflow: hidden; }
   .viewport { flex-grow: 1; display: flex; flex-direction: column; overflow: hidden; }
   .masonry-container { flex-grow: 1; overflow-y: auto; padding: 15px; }

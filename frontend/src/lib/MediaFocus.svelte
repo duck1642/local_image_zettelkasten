@@ -1,7 +1,8 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
-  import { onMount, onDestroy } from 'svelte';
+  import { onDestroy } from 'svelte';
   import { getCurrentWindow } from '@tauri-apps/api/window';
+  import { log as uiLog } from './logger';
 
   export let item: any;
   export let mode: 'wide' | 'fullscreen' = 'wide';

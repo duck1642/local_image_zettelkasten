@@ -85,7 +85,7 @@ class ExternalIngestor:
 
 
             self._write_back([])
-            log_ingestion('INFO', f"\n[OK] Ingestion cycle complete. {len(all_remaining)} failed links logged for explicit retry.")
+            log_ingestion('INFO', f"[OK] Ingestion cycle complete. {len(all_remaining)} failed links logged for explicit retry.")
 
         except Exception as e:
             log_ingestion("ERROR", "ExternalIngestor failed", error=str(e))

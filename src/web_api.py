@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from db.sqlite_operator import init_database
 from utils import VAULT_DIR, DB_PATH, get_config, ASSETS_DIR, LOGS_DIR, REVIEW_DIR, note_path_for, asset_path_for
 from processor import process_file
-from logs.logger import log_svelte, log_pyui, log_system, log_ingestion, RAW_LOGS_DIR, STRUCTURED_LOGS_DIR
+from logs.logger import log_svelte, log_system, log_ingestion, RAW_LOGS_DIR, STRUCTURED_LOGS_DIR
 from md_generator import load_note_topics, load_note_wd_tags, generate_markdown
 from tagging import load_tag_cache, tag_media
 
@@ -61,9 +61,25 @@ if REVIEW_DIR.exists():
 
 # --- CORE LOGIC ENDPOINTS ---
 
+@app.get("/api/stats")
+async def get_stats():
+    conn = init_database()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT COUNT(*) FROM items")
+        count = cursor.fetchone()[0]
+        return {"total_items": count}
+    finally:
+        conn.close()
+
 @app.get("/api/items")
-async def get_items(field: str = None, value: str = None, sort: str = 'newest', media_type: str = 'all'):
-    allowed = {"source_artist", "platform", "original_filename"}
+async def get_items(
+    field: str = None, value: str = None,
+    sort: str = 'newest', media_type: str = 'all',
+    artist: str = None, platform: str = None,
+    filename: str = None, topic: str = None,
+    wd_tag: str = None
+):
     conn = init_database()
     cursor = conn.cursor()
     try:
@@ -71,9 +87,21 @@ async def get_items(field: str = None, value: str = None, sort: str = 'newest', 
         conditions = []
         params = []
 
-        if field and value and field in allowed:
-            conditions.append(f"{field} LIKE ?")
-            params.append(f"%{value}%")
+        if field and value:
+            allowed = {"source_artist", "platform", "original_filename"}
+            if field in allowed:
+                conditions.append(f"{field} LIKE ?")
+                params.append(f"%{value}%")
+
+        if artist:
+            conditions.append("source_artist LIKE ?")
+            params.append(f"%{artist}%")
+        if platform:
+            conditions.append("platform LIKE ?")
+            params.append(f"%{platform}%")
+        if filename:
+            conditions.append("original_filename LIKE ?")
+            params.append(f"%{filename}%")
 
         if media_type == 'image':
             conditions.append("mime_type LIKE 'image/%'")
@@ -89,17 +117,47 @@ async def get_items(field: str = None, value: str = None, sort: str = 'newest', 
         elif sort == 'artist': order_clause = " ORDER BY source_artist COLLATE NOCASE ASC, date_added DESC"
         elif sort == 'shuffle': order_clause = " ORDER BY RANDOM()"
 
-        cursor.execute(f"{base_query}{where_clause}{order_clause} LIMIT 300", tuple(params))
+        has_frontmatter_filter = topic or wd_tag
+        limit = 5000 if has_frontmatter_filter else 300
+
+        cursor.execute(f"{base_query}{where_clause}{order_clause} LIMIT {limit}", tuple(params))
         rows = cursor.fetchall()
+
         items = []
+        topic_lower = (topic or "").lower()
+        wd_tag_lower = (wd_tag or "").lower()
+
         for row in rows:
             h, ext = row[0], (row[1] or "")
+
+            if topic_lower:
+                note_topics = load_note_topics(h)
+                if not any(topic_lower in t.lower() for t in note_topics):
+                    continue
+
+            if wd_tag_lower:
+                wd_data = load_note_wd_tags(h)
+                wd_strings = []
+                rating = wd_data.get("rating", {})
+                if rating:
+                    wd_strings.append(rating.get("label", "") or rating.get("name", ""))
+                for t in wd_data.get("character_tags", []):
+                    wd_strings.append(t.get("display_name", "") or t.get("name", ""))
+                for t in wd_data.get("tags", []):
+                    wd_strings.append(t.get("display_name", "") or t.get("name", ""))
+                if not any(wd_tag_lower in s.lower() for s in wd_strings if s):
+                    continue
+
             items.append({
                 "hash": h, "extension": ext, "mime_type": row[2],
                 "original_filename": row[3], "source_url": row[4],
                 "date_added": row[5], "platform": row[6], "artist": row[7],
                 "url": f"/vault/{h[:2]}/{h}{ext}"
             })
+
+            if has_frontmatter_filter and len(items) >= 300:
+                break
+
         return items
     finally:
         conn.close()
@@ -384,7 +442,7 @@ async def start_ingestion(queue_name: str):
         with INGESTION_LOCK:
             try: run_queue(queue_name)
             except Exception as e: print(e)
-    asyncio.get_event_loop().run_in_executor(None, run_in_background)
+    asyncio.get_running_loop().run_in_executor(None, run_in_background)
     return {"status": "success"}
 
 @app.get("/api/queue-stats")
@@ -405,11 +463,13 @@ async def get_review_items():
             match_data = None
             if best_match:
                 conn = init_database()
-                cursor = conn.cursor()
-                cursor.execute("SELECT hash, file_extension, mime_type, source_artist FROM items WHERE hash = ?", (best_match,))
-                row = cursor.fetchone()
-                if row: match_data = {"hash": row[0], "url": f"/vault/{row[0][:2]}/{row[0]}{row[1]}" if row[1] else f"/vault/{row[0][:2]}/{row[0]}", "artist": row[3]}
-                conn.close()
+                try:
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT hash, file_extension, mime_type, source_artist FROM items WHERE hash = ?", (best_match,))
+                    row = cursor.fetchone()
+                    if row: match_data = {"hash": row[0], "url": f"/vault/{row[0][:2]}/{row[0]}{row[1]}" if row[1] else f"/vault/{row[0][:2]}/{row[0]}", "artist": row[3]}
+                finally:
+                    conn.close()
             items.append({"filename": p.name, "url": f"/review-assets/{p.name}", "metadata": meta, "best_match": match_data})
     return items
 
@@ -421,7 +481,7 @@ async def review_action(filename: str, action: str):
         file_path.unlink()
         meta_path = file_path.with_suffix(file_path.suffix + ".json")
         if meta_path.exists(): meta_path.unlink()
-    elif action == "keep":
+    elif action == "keep" or action == "variant":
         meta_path = file_path.with_suffix(file_path.suffix + ".json")
         meta = {}
         if meta_path.exists():

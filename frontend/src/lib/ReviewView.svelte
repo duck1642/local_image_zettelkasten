@@ -67,7 +67,7 @@
     <div class="action-bar">
         <button class="keep-btn action-big" on:click={() => handleAction('keep')}>Keep</button>
         <button class="delete-btn action-big" on:click={() => handleAction('delete')}>Delete</button>
-        <button class="action-big">Save as Variant</button>
+        <button class="action-big" on:click={() => handleAction('variant')}>Save as Variant</button>
     </div>
 
     <div class="nav-bar">
