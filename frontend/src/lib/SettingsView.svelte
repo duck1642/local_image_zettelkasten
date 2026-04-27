@@ -1,14 +1,18 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   let config: any = null;
+  let initialConfigStr: string = '';
   let loading = true;
   let saving = false;
+
+  $: isDirty = config ? JSON.stringify(config) !== initialConfigStr : false;
 
   async function loadConfig() {
     loading = true;
     try {
       const res = await fetch('http://localhost:8000/api/config');
       config = await res.json();
+      initialConfigStr = JSON.stringify(config);
     } finally { loading = false; }
   }
 
@@ -20,6 +24,7 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(config)
       });
+      initialConfigStr = JSON.stringify(config);
     } finally { saving = false; }
   }
 
@@ -30,7 +35,12 @@
   {#if loading}
     <div class="centered">Loading...</div>
   {:else if config}
-    <h3>System Settings</h3>
+    <div class="header-row">
+        <h3>System Settings</h3>
+        {#if isDirty}
+            <span class="status-label unsaved">● Unsaved Changes</span>
+        {/if}
+    </div>
     
     <div class="form-grid">
       <label>Command Prefix</label>
@@ -75,7 +85,7 @@
       </div>
 
       <div class="grid-spacer"></div>
-      <button class="primary save-large" on:click={saveConfig} disabled={saving}>
+      <button class="save-large" class:primary={isDirty} on:click={saveConfig} disabled={!isDirty || saving}>
         {saving ? 'Saving...' : 'Save Settings'}
       </button>
     </div>
@@ -90,7 +100,20 @@
     overflow-y: auto;
   }
 
-  h3 { color: var(--text-bright); margin-bottom: 25px; }
+  h3 { color: var(--text-bright); margin: 0; }
+
+  .header-row {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    margin-bottom: 25px;
+  }
+
+  .status-label.unsaved {
+    color: var(--accent-warning);
+    font-size: 12px;
+    font-weight: 600;
+  }
 
   .form-grid {
     display: grid;
