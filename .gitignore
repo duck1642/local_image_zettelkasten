@@ -179,7 +179,7 @@ cython_debug/
 .cursorindexingignore
 
 # LIZ runtime/private state
-docs/
+# docs/
 data/
 logs/
 secrets/
