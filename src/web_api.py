@@ -62,19 +62,34 @@ if REVIEW_DIR.exists():
 # --- CORE LOGIC ENDPOINTS ---
 
 @app.get("/api/items")
-async def get_items(field: str = None, value: str = None):
+async def get_items(field: str = None, value: str = None, sort: str = 'newest', media_type: str = 'all'):
     allowed = {"source_artist", "platform", "original_filename"}
     conn = init_database()
     cursor = conn.cursor()
     try:
+        base_query = "SELECT hash, file_extension, mime_type, original_filename, source_url, date_added, platform, source_artist FROM items"
+        conditions = []
+        params = []
+
         if field and value and field in allowed:
-            cursor.execute(
-                f"SELECT hash, file_extension, mime_type, original_filename, source_url, date_added, platform, source_artist FROM items WHERE {field} LIKE ? ORDER BY date_added DESC LIMIT 300",
-                (f"%{value}%",),
-            )
-        else:
-            cursor.execute("SELECT hash, file_extension, mime_type, original_filename, source_url, date_added, platform, source_artist FROM items ORDER BY date_added DESC LIMIT 300")
-        
+            conditions.append(f"{field} LIKE ?")
+            params.append(f"%{value}%")
+
+        if media_type == 'image':
+            conditions.append("mime_type LIKE 'image/%'")
+        elif media_type == 'video':
+            conditions.append("mime_type LIKE 'video/%'")
+
+        where_clause = ""
+        if conditions:
+            where_clause = " WHERE " + " AND ".join(conditions)
+
+        order_clause = " ORDER BY date_added DESC"
+        if sort == 'oldest': order_clause = " ORDER BY date_added ASC"
+        elif sort == 'artist': order_clause = " ORDER BY source_artist COLLATE NOCASE ASC, date_added DESC"
+        elif sort == 'shuffle': order_clause = " ORDER BY RANDOM()"
+
+        cursor.execute(f"{base_query}{where_clause}{order_clause} LIMIT 300", tuple(params))
         rows = cursor.fetchall()
         items = []
         for row in rows:
@@ -177,6 +192,33 @@ async def update_item(item_hash: str, update: ItemUpdate):
             note_path.parent.mkdir(parents=True, exist_ok=True)
             note_path.write_text(md_content, encoding="utf-8")
             
+        return {"status": "success"}
+    finally:
+        conn.close()
+
+@app.delete("/api/items/{item_hash}")
+async def delete_item(item_hash: str):
+    conn = init_database()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT file_extension, mime_type FROM items WHERE hash = ?", (item_hash,))
+        row = cursor.fetchone()
+        if not row: raise HTTPException(status_code=404)
+
+        # Using utils instead of ui
+        asset_path = asset_path_for(item_hash, row[0] or "", row[1] or "")
+        if asset_path.exists(): asset_path.unlink()
+
+        note_path = note_path_for(item_hash)
+        if note_path.exists(): note_path.unlink()
+
+        from utils import WD_TAGS_DIR
+        tags_path = WD_TAGS_DIR / item_hash[:2] / f"{item_hash}.json"
+        if tags_path.exists(): tags_path.unlink()
+
+        cursor.execute("DELETE FROM items WHERE hash = ?", (item_hash,))
+        conn.commit()
+        log_system("INFO", f"Deleted item {item_hash}")
         return {"status": "success"}
     finally:
         conn.close()

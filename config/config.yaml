@@ -92,4 +92,4 @@ ui:
     command: '>'
     platform: '@'
     tag: '#'
-  vault_layout: grid
+  vault_layout: masonry

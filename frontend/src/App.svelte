@@ -25,6 +25,11 @@
   let currentLayout: 'masonry' | 'grid' = 'masonry';
   let configCache: any = null;
 
+  let currentSort = 'newest';
+  let currentMediaType = 'all';
+  let currentSearchField = '';
+  let currentSearchValue = '';
+
   async function fetchConfig() {
     try {
       const res = await fetch('http://localhost:8000/api/config');
@@ -44,7 +49,7 @@
       if (!groups[key]) { groups[key] = []; orderedKeys.push(key); }
       groups[key].push(item);
     });
-    orderedKeys.forEach(key => { groups[key].sort((a, b) => a.date_added.localeCompare(b.date_added)); });
+    // The sorting is now handled primarily by the backend, but we still group them.
     return orderedKeys.map(key => ({ id: key, items: groups[key] }));
   })();
 
@@ -55,8 +60,16 @@
   async function fetchItems(field?: string, value?: string) {
     loading = true;
     try {
-      let url = 'http://localhost:8000/api/items';
-      if (field && value) url += `?field=${field}&value=${encodeURIComponent(value)}`;
+      if (field !== undefined && value !== undefined) {
+          currentSearchField = field;
+          currentSearchValue = value;
+      }
+
+      let url = `http://localhost:8000/api/items?sort=${currentSort}&media_type=${currentMediaType}`;
+      if (currentSearchField && currentSearchValue) {
+          url += `&field=${currentSearchField}&value=${encodeURIComponent(currentSearchValue)}`;
+      }
+
       const response = await fetch(url);
       items = await response.json();
       const statsRes = await fetch('http://localhost:8000/api/stats');
@@ -64,6 +77,13 @@
       await fetchSecondaryStats();
     } catch (error) { uiLog('ERROR', 'Failed to fetch items', { error });
     } finally { loading = false; }
+  }
+
+  function clearSearch() {
+      searchQuery = '';
+      currentSearchField = '';
+      currentSearchValue = '';
+      fetchItems();
   }
 
   async function fetchSecondaryStats() {
@@ -119,8 +139,9 @@
   });
 </script>
 
-<div class="app-container">
-  <aside class="sidebar">
+<div class="root-container">
+  <div class="app-container">
+    <aside class="sidebar">
     <div class="nav-group">
       <button class:active={activeTab === 'vault'} on:click={() => activeTab = 'vault'}>Vault</button>
       <button class:active={activeTab === 'review'} on:click={() => activeTab = 'review'}>
@@ -137,17 +158,33 @@
   <main class="main-content">
     <header class="top-header">
       <div class="search-container">
-        <input 
-          type="text" 
-          placeholder="Search (use a: for artist, > for cmd)..." 
-          bind:value={searchQuery}
-          on:keydown={handleSearchKeydown}
-        />
+        <div class="search-wrapper">
+          <input 
+            type="text" 
+            placeholder="Search (use a: for artist, > for cmd)..." 
+            bind:value={searchQuery}
+            on:keydown={handleSearchKeydown}
+          />
+          {#if currentSearchValue || currentSearchField}
+              <button class="clear-search" on:click={clearSearch} title="Clear Search">✖</button>
+          {/if}
+        </div>
       </div>
-      <div class="header-actions">
+      <div class="header-actions" class:with-inspector={activeTab === 'vault'}>
+        <select class="filter-select" bind:value={currentSort} on:change={() => fetchItems()}>
+          <option value="newest">Newest First</option>
+          <option value="oldest">Oldest First</option>
+          <option value="artist">Artist (A-Z)</option>
+          <option value="shuffle">Shuffle</option>
+        </select>
+        
+        <select class="filter-select" bind:value={currentMediaType} on:change={() => fetchItems()}>
+          <option value="all">All Media</option>
+          <option value="image">Images Only</option>
+          <option value="video">Videos Only</option>
+        </select>
+
         <button class="primary" on:click={() => activeTab = 'ingest'}>Add Files</button>
-        <button on:click={() => fetchItems()}>Refresh</button>
-        <span class="status-text">Showing {groupedItems.length} groups of {stats.total_items} items</span>
       </div>
     </header>
 
@@ -189,15 +226,12 @@
             on:updated={handleUpdate} 
             on:focus={handleFocusMode}
             on:changeItem={(e) => selectedItem = e.detail}
+            on:deleted={() => { selectedItem = null; selectedGroup = null; fetchItems(); }}
         />
       {/if}
     </div>
-    
-    <footer class="bottom-status">
-        Total Items: {stats.total_items} | DB: WAL | LIZ Tauri
-    </footer>
   </main>
-
+  
   {#if focusMode !== 'normal' && selectedItem}
     <MediaFocus 
         item={selectedItem} 
@@ -206,20 +240,32 @@
         on:close={() => focusMode = 'normal'} 
     />
   {/if}
+  </div>
+
+  <footer class="bottom-status">
+      <span class="status-left">Total Items: {stats.total_items} | DB: WAL | LIZ Tauri</span>
+      <span class="status-right">Showing {groupedItems.length} groups of {stats.total_items} items</span>
+  </footer>
 </div>
 
 <style>
-  .app-container { display: flex; height: 100vh; width: 100vw; background: var(--bg-main); overflow: hidden; }
+  .root-container { display: flex; flex-direction: column; height: 100vh; width: 100vw; background: var(--bg-main); overflow: hidden; }
+  .app-container { display: flex; flex-grow: 1; overflow: hidden; }
   .sidebar { width: 120px; background: var(--bg-main); border-right: 1px solid var(--border-dim); display: flex; flex-direction: column; padding: 15px 10px; flex-shrink: 0; }
   .nav-group { display: flex; flex-direction: column; gap: 10px; }
-  .nav-group button { width: 100%; padding: 10px 5px; font-size: 13px; border-radius: 6px; background: transparent; border: 1px solid transparent; color: var(--text-main); text-align: center; }
+  .nav-group button { width: 100%; padding: 10px 5px; font-size: 13px; border-radius: 6px; background: transparent; border: 1px solid rgba(255, 255, 255, 0.15); color: var(--text-main); text-align: center; }
   .nav-group button.active { background: var(--accent-primary); color: white; border-color: var(--accent-primary); }
-  .nav-group button:not(.active):hover { border-color: var(--border-dim); background: var(--bg-panel); }
+  .nav-group button:not(.active):hover { border-color: rgba(255, 255, 255, 0.3); background: var(--bg-panel); }
   .main-content { flex-grow: 1; display: flex; flex-direction: column; overflow: hidden; }
   .top-header { height: var(--header-height); display: flex; align-items: center; padding: 0 15px; gap: 15px; border-bottom: 1px solid var(--border-dim); flex-shrink: 0; z-index: 100; }
   .search-container { flex-grow: 1; }
-  .search-container input { width: 100%; max-width: 800px; }
+  .search-wrapper { position: relative; width: 100%; display: flex; align-items: center; }
+  .search-wrapper input { width: 100%; max-width: 100%; padding-right: 35px; }
+  .clear-search { position: absolute; right: 8px; background: transparent; border: none; color: var(--text-muted); font-size: 14px; cursor: pointer; padding: 4px; }
+  .clear-search:hover { color: var(--accent-danger); background: transparent; border: none; }
   .header-actions { display: flex; align-items: center; gap: 10px; }
+  .header-actions.with-inspector { width: calc(400px - 15px); min-width: calc(400px - 15px); justify-content: flex-start; padding-left: 15px; border-left: 1px solid var(--border-dim); }
+  .filter-select { background: var(--bg-input); border: 1px solid var(--border-dim); color: var(--text-main); padding: 5px 10px; border-radius: 6px; font-size: 12px; cursor: pointer; height: 32px; }
   .status-text { color: var(--text-muted); font-size: 12px; white-space: nowrap; }
   .view-and-inspector { flex-grow: 1; display: flex; overflow: hidden; }
   .viewport { flex-grow: 1; display: flex; flex-direction: column; overflow: hidden; }
@@ -232,7 +278,9 @@
       align-items: stretch;
   }
   .tile-wrapper { margin-bottom: 10px; break-inside: avoid; border-radius: 8px; border: 2px solid transparent; }
-  .bottom-status { height: 25px; background: #010409; border-top: 1px solid var(--border-dim); padding: 0 10px; display: flex; align-items: center; font-size: 11px; color: var(--text-muted); flex-shrink: 0; }
+  .bottom-status { height: 25px; background: #010409; border-top: 1px solid var(--border-dim); padding: 0; display: flex; align-items: center; justify-content: space-between; font-size: 11px; color: var(--text-muted); flex-shrink: 0; z-index: 200; width: 100%; box-sizing: border-box; }
+  .status-left { padding-left: 15px; }
+  .status-right { padding-right: 15px; }
   .badge { background: var(--accent-primary); color: white; font-size: 10px; padding: 1px 5px; border-radius: 10px; margin-left: 3px; }
   .badge.warn { background: var(--accent-warning); }
   @media (max-width: 1400px) { .vault-layout.masonry { column-count: 4; } }

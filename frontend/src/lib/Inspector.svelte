@@ -119,6 +119,26 @@
     } catch (e) { uiLog('ERROR', 'Failed to open source URL', { error: String(e) }); }
   }
 
+  function copyData() {
+      if (!fullItem) return;
+      navigator.clipboard.writeText(JSON.stringify(fullItem, null, 2));
+      uiLog('INFO', `Data for ${item.hash.substring(0, 12)} copied to clipboard`);
+  }
+
+  async function deleteData() {
+      if (!item) return;
+      if (!confirm("Are you sure you want to permanently delete this item? This will delete the file, note, and database entry.")) return;
+      try {
+          const res = await fetch(`http://localhost:8000/api/items/${item.hash}`, { method: 'DELETE' });
+          if (res.ok) {
+              uiLog('INFO', `Item deleted: ${item.hash}`);
+              dispatch('deleted', item.hash);
+          } else {
+              throw new Error("Failed to delete");
+          }
+      } catch (e) { uiLog('ERROR', 'Delete failed', { error: String(e) }); }
+  }
+
   function copyHash() {
     if (!item) return;
     navigator.clipboard.writeText(item.hash);
@@ -190,6 +210,8 @@
     <div class="group-container horizontal action-row">
         <button class="flex-grow" on:click={openFolder}>Open Folder</button>
         <button class="flex-grow" on:click={openSource} disabled={!sourceUrl}>Open Source</button>
+        <button class="flex-grow" on:click={copyData}>Copy Data</button>
+        <button class="flex-grow delete-btn" on:click={deleteData}>Delete Data</button>
     </div>
 
     <div class="group-container">
@@ -419,6 +441,7 @@
     color: var(--text-muted);
   }
 
-  .action-row button { background: var(--bg-input); border-color: var(--border-dim); font-size: 12px; font-weight: 600; }
+  .action-row button { background: var(--bg-input); border-color: var(--border-dim); font-size: 12px; font-weight: 600; padding: 6px; }
   .action-row button:hover { border-color: var(--border-hover); color: var(--text-bright); }
+  .action-row button.delete-btn:hover { border-color: var(--accent-danger); color: var(--accent-danger); }
 </style>
