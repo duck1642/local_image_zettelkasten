@@ -32,62 +32,49 @@
   {:else if config}
     <h3>System Settings</h3>
     
-    <div class="form">
-      <div class="field">
-        <label>Command Prefix</label>
-        <input type="text" bind:value={config.ui.prefixes.command} />
-      </div>
-      <div class="field">
-        <label>Artist Prefix</label>
-        <input type="text" bind:value={config.ui.prefixes.artist} />
-      </div>
-      <div class="field">
-        <label>Tag Prefix</label>
-        <input type="text" bind:value={config.ui.prefixes.tag} />
-      </div>
-      <div class="field">
-        <label>Platform Prefix</label>
-        <input type="text" bind:value={config.ui.prefixes.platform} />
-      </div>
+    <div class="form-grid">
+      <label>Command Prefix</label>
+      <input type="text" bind:value={config.ui.prefixes.command} />
 
-      <div class="field">
-        <label>Vault Layout</label>
-        <select bind:value={config.ui.vault_layout}>
-            <option value="masonry">masonry</option>
-            <option value="grid">grid</option>
-        </select>
-      </div>
+      <label>Artist Prefix</label>
+      <input type="text" bind:value={config.ui.prefixes.artist} />
 
+      <label>Tag Prefix</label>
+      <input type="text" bind:value={config.ui.prefixes.tag} />
+
+      <label>Platform Prefix</label>
+      <input type="text" bind:value={config.ui.prefixes.platform} />
+
+      <label>Vault Layout</label>
+      <select bind:value={config.ui.vault_layout}>
+          <option value="masonry">masonry</option>
+          <option value="grid">grid</option>
+      </select>
+
+      <div class="grid-spacer"></div>
       <div class="checkbox-group">
-          <label><input type="checkbox" /> Flatten Transparency</label>
-          <label><input type="checkbox" bind:checked={config.tagging.enabled} /> Enable Tagging</label>
+          <label class="check-label"><input type="checkbox" bind:checked={config.processing.flatten_transparency} /> Flatten Transparency</label>
+          <label class="check-label"><input type="checkbox" bind:checked={config.tagging.enabled} /> Enable Tagging</label>
       </div>
 
-      <div class="field">
-        <label>Tag Model Repo</label>
-        <input type="text" bind:value={config.tagging.model_repo} />
+      <label>Tag Model Repo</label>
+      <input type="text" bind:value={config.tagging.model_repo} />
+
+      <label>Tag Device</label>
+      <select bind:value={config.tagging.device}>
+          <option value="cpu">cpu</option>
+          <option value="cuda">cuda</option>
+          <option value="auto">auto</option>
+      </select>
+
+      <label>Tag Threshold</label>
+      <div class="multi-input">
+        <input type="number" step="0.05" bind:value={config.tagging.threshold} />
+        <label class="inline-label">Max Tags</label>
+        <input type="number" bind:value={config.tagging.max_tags} />
       </div>
 
-      <div class="field">
-        <label>Tag Device</label>
-        <select bind:value={config.tagging.device}>
-            <option value="cpu">cpu</option>
-            <option value="cuda">cuda</option>
-            <option value="auto">auto</option>
-        </select>
-      </div>
-
-      <div class="row">
-          <div class="field half">
-            <label>Tag Threshold</label>
-            <input type="number" step="0.05" bind:value={config.tagging.threshold} />
-          </div>
-          <div class="field half">
-            <label>Tag Max Tags</label>
-            <input type="number" bind:value={config.tagging.max_tags} />
-          </div>
-      </div>
-
+      <div class="grid-spacer"></div>
       <button class="primary save-large" on:click={saveConfig} disabled={saving}>
         {saving ? 'Saving...' : 'Save Settings'}
       </button>
@@ -105,25 +92,37 @@
 
   h3 { color: var(--text-bright); margin-bottom: 25px; }
 
-  .form {
-    display: flex;
-    flex-direction: column;
+  .form-grid {
+    display: grid;
+    grid-template-columns: 180px 1fr;
     gap: 15px;
-    max-width: 100%;
+    align-items: center;
+    max-width: 600px;
   }
 
-  .field { display: flex; align-items: center; gap: 20px; }
-  .field label { width: 150px; font-size: 13px; color: var(--text-main); }
-  .field input, .field select { flex-grow: 1; background: var(--bg-panel); border: 1px solid var(--border-dim); }
+  label { font-size: 13px; color: var(--text-main); }
+  
+  input[type="text"], input[type="number"], select { 
+      background: var(--bg-panel); 
+      border: 1px solid var(--border-dim); 
+      padding: 8px 12px;
+      color: var(--text-main);
+      border-radius: 6px;
+      font-size: 13px;
+      width: 100%;
+      box-sizing: border-box;
+  }
 
-  .checkbox-group { margin-left: 170px; display: flex; flex-direction: column; gap: 10px; }
-  .checkbox-group label { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+  .grid-spacer { display: block; }
 
-  .row { display: flex; gap: 20px; }
-  .field.half { flex: 1; }
+  .checkbox-group { display: flex; flex-direction: column; gap: 10px; }
+  .check-label { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+
+  .multi-input { display: flex; gap: 15px; align-items: center; }
+  .inline-label { margin-left: 10px; }
 
   .save-large {
-    margin-top: 20px;
+    margin-top: 10px;
     padding: 12px;
     width: 100%;
     font-size: 14px;
