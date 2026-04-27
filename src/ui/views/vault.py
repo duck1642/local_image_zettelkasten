@@ -5,9 +5,9 @@ from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QPushBut
 from db.sqlite_operator import init_database
 from logs.logger import log_ui
 from ui.masonry_layout import MasonryLayout
-from ui.thumbnail_cache import asset_path_for, pixmap_for_item
+from ui.thumbnail_cache import pixmap_for_item
 from ui.video_widgets import VideoPlayerWidget
-from utils import get_config
+from utils import get_config, asset_path_for
 
 
 class ThumbnailWorker(QRunnable):

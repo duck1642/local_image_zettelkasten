@@ -6,7 +6,7 @@ from datetime import datetime
 from tagging import wd_frontmatter_fields
 from utils import existing_note_path_for
 
-def generate_markdown(conn: sqlite3.Connection, file_hash: str, asset_rel_path: str = None, title: str = "") -> str:
+def generate_markdown(conn: sqlite3.Connection, file_hash: str, asset_rel_path: str = None, title: str = "", topics_override: list = None) -> str:
 
     cursor = conn.cursor()
     cursor.execute('''
@@ -52,7 +52,7 @@ def generate_markdown(conn: sqlite3.Connection, file_hash: str, asset_rel_path: 
         "platform": platform or "",
         "artist": source_artist or "",
         "phash": phash or "",
-        "topics": load_note_topics(file_hash),
+        "topics": topics_override if topics_override is not None else load_note_topics(file_hash),
         "file_format": mime_type or ""
     }
     frontmatter.update(wd_frontmatter_fields(file_hash))

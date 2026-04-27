@@ -16,6 +16,7 @@
   let isDirty = false;
   let loading = false;
   let tagging = false;
+  let abortController: AbortController | null = null;
 
   let videoElement: HTMLVideoElement;
 
@@ -28,9 +29,13 @@
   $: currentIndex = group ? group.items.findIndex(i => i.hash === item?.hash) : 0;
 
   async function loadFullDetails(hash: string) {
+    if (abortController) abortController.abort();
+    abortController = new AbortController();
+    const signal = abortController.signal;
+    fullItem = null;
     loading = true;
     try {
-        const res = await fetch(`http://localhost:8000/api/items/${hash}`);
+        const res = await fetch(`http://localhost:8000/api/items/${hash}`, { signal });
         if (!res.ok) throw new Error('API error');
         fullItem = await res.json();
         
@@ -39,8 +44,10 @@
         platform = fullItem.platform || '';
         topics = fullItem.topics || [];
         isDirty = false;
-    } catch (e) {
-        uiLog('ERROR', 'Failed to load item details', { hash, error: String(e) });
+    } catch (e: any) {
+        if (e.name !== 'AbortError') {
+            uiLog('ERROR', 'Failed to load item details', { hash, error: String(e) });
+        }
     } finally {
         loading = false;
     }
@@ -186,11 +193,13 @@
     <div class="empty-panel">
         <p>No item selected</p>
     </div>
-  {:else if loading}
-    <div class="loading-panel">
-        <p>Loading details...</p>
-    </div>
-  {:else if fullItem}
+  {:else}
+    {#if loading}
+      <div class="loading-overlay">
+          <p>Loading details...</p>
+      </div>
+    {/if}
+    {#if fullItem}
     <div class="group-container media-preview">
         {#if item.mime_type.startsWith('image/')}
             <img src={`http://localhost:8000${item.url}`} alt="Preview" />
@@ -315,6 +324,7 @@
             Save Changes
         </button>
     </div>
+    {/if}
   {/if}
 </aside>
 
@@ -329,6 +339,7 @@
     padding: 15px;
     gap: 12px;
     overflow-y: auto;
+    position: relative;
   }
 
   .group-container {
@@ -448,7 +459,19 @@
   }
   .action-footer button { flex: 1; padding: 10px; font-weight: bold; }
 
-  .empty-panel, .loading-panel {
+  .loading-overlay {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+    border-radius: 8px;
+    color: var(--text-muted);
+  }
+
+  .empty-panel {
     flex-grow: 1;
     border: 1px solid var(--border-dim);
     border-radius: 8px;

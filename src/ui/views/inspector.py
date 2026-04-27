@@ -9,7 +9,7 @@ from logs.logger import log_ui
 from md_generator import generate_markdown, load_note_topics, load_note_wd_tags
 from tagging import load_tag_cache
 from ui.flow_layout import FlowLayout
-from ui.thumbnail_cache import asset_path_for, preview_pixmap
+from ui.thumbnail_cache import preview_pixmap, asset_path_for
 from ui.video_widgets import VideoPlayerWidget
 from utils import get_config, note_path_for
 

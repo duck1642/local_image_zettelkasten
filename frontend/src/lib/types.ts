@@ -8,4 +8,7 @@ export interface VaultItem {
     platform: string;
     artist: string;
     url: string;
+    thumbnail_url: string;
+    width: number | null;
+    height: number | null;
 }

@@ -16,6 +16,7 @@ from processor import process_file
 from logs.logger import log_svelte, log_system, log_ingestion, RAW_LOGS_DIR, STRUCTURED_LOGS_DIR
 from md_generator import load_note_topics, load_note_wd_tags, generate_markdown
 from tagging import load_tag_cache, tag_media
+from thumbnails import get_or_generate_thumbnail
 
 # --- TERMINAL LOG REDIRECTION ---
 # This ensures raw terminal output (like tracebacks) goes to a log file
@@ -72,18 +73,37 @@ async def get_stats():
     finally:
         conn.close()
 
+@app.get("/api/thumbnails/{item_hash}")
+async def get_thumbnail(item_hash: str):
+    conn = init_database()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT file_extension, mime_type FROM items WHERE hash = ?", (item_hash,))
+        row = cursor.fetchone()
+        if not row: raise HTTPException(status_code=404)
+        thumb_path = get_or_generate_thumbnail(item_hash, row[0], row[1])
+        if not thumb_path: raise HTTPException(status_code=500, detail="Thumbnail generation failed")
+        return FileResponse(
+            thumb_path, media_type="image/jpeg",
+            headers={"Cache-Control": "public, max-age=31536000, immutable"}
+        )
+    finally:
+        conn.close()
+
 @app.get("/api/items")
 async def get_items(
     field: str = None, value: str = None,
     sort: str = 'newest', media_type: str = 'all',
     artist: str = None, platform: str = None,
     filename: str = None, topic: str = None,
-    wd_tag: str = None
+    wd_tag: str = None,
+    cursor: str = None, limit: int = 50
 ):
+    limit = max(1, min(limit, 100))
     conn = init_database()
-    cursor = conn.cursor()
+    cursor_obj = conn.cursor()
     try:
-        base_query = "SELECT hash, file_extension, mime_type, original_filename, source_url, date_added, platform, source_artist FROM items"
+        base_query = "SELECT hash, file_extension, mime_type, original_filename, source_url, date_added, platform, source_artist, width, height FROM items"
         conditions = []
         params = []
 
@@ -108,20 +128,31 @@ async def get_items(
         elif media_type == 'video':
             conditions.append("mime_type LIKE 'video/%'")
 
+        if cursor:
+            try:
+                cursor_date, cursor_hash = cursor.rsplit("_", 1)
+            except ValueError:
+                cursor_date, cursor_hash = cursor, ""
+            if sort == 'oldest':
+                conditions.append("(date_added > ? OR (date_added = ? AND hash > ?))")
+                params.extend([cursor_date, cursor_date, cursor_hash])
+            else:
+                conditions.append("(date_added < ? OR (date_added = ? AND hash < ?))")
+                params.extend([cursor_date, cursor_date, cursor_hash])
+
         where_clause = ""
         if conditions:
             where_clause = " WHERE " + " AND ".join(conditions)
 
-        order_clause = " ORDER BY date_added DESC"
-        if sort == 'oldest': order_clause = " ORDER BY date_added ASC"
+        order_clause = " ORDER BY date_added DESC, hash DESC"
+        if sort == 'oldest': order_clause = " ORDER BY date_added ASC, hash ASC"
         elif sort == 'artist': order_clause = " ORDER BY source_artist COLLATE NOCASE ASC, date_added DESC"
-        elif sort == 'shuffle': order_clause = " ORDER BY RANDOM()"
 
         has_frontmatter_filter = topic or wd_tag
-        limit = 5000 if has_frontmatter_filter else 300
+        sql_limit = 5000 if has_frontmatter_filter else limit + 1
 
-        cursor.execute(f"{base_query}{where_clause}{order_clause} LIMIT {limit}", tuple(params))
-        rows = cursor.fetchall()
+        cursor_obj.execute(f"{base_query}{where_clause}{order_clause} LIMIT {sql_limit}", tuple(params))
+        rows = cursor_obj.fetchall()
 
         items = []
         topic_lower = (topic or "").lower()
@@ -152,13 +183,28 @@ async def get_items(
                 "hash": h, "extension": ext, "mime_type": row[2],
                 "original_filename": row[3], "source_url": row[4],
                 "date_added": row[5], "platform": row[6], "artist": row[7],
-                "url": f"/vault/{h[:2]}/{h}{ext}"
+                "url": f"/vault/{h[:2]}/{h}{ext}",
+                "thumbnail_url": f"/api/thumbnails/{h}",
+                "width": row[8], "height": row[9]
             })
 
+            if not has_frontmatter_filter and len(items) >= limit + 1:
+                break
             if has_frontmatter_filter and len(items) >= 300:
                 break
 
-        return items
+        has_more = len(items) > limit if not has_frontmatter_filter else len(items) >= 300
+        if not has_frontmatter_filter and has_more:
+            items = items[:limit]
+        elif has_frontmatter_filter and len(items) > 300:
+            items = items[:300]
+
+        next_cursor = None
+        if has_more and items:
+            last = items[-1]
+            next_cursor = f"{last['date_added']}_{last['hash']}"
+
+        return {"items": items, "next_cursor": next_cursor, "has_more": has_more}
     finally:
         conn.close()
 
@@ -195,6 +241,8 @@ def _get_item_details(h, row):
         "original_filename": row[3], "source_url": row[4],
         "date_added": row[5], "platform": row[6], "artist": row[7],
         "url": f"/vault/{h[:2]}/{h}{ext}",
+        "thumbnail_url": f"/api/thumbnails/{h}",
+        "width": row[8], "height": row[9],
         "topics": topics,
         "wd_tags": formatted_wd
     }
@@ -204,7 +252,7 @@ async def get_item(item_hash: str):
     conn = init_database()
     cursor = conn.cursor()
     try:
-        cursor.execute("SELECT hash, file_extension, mime_type, original_filename, source_url, date_added, platform, source_artist FROM items WHERE hash = ?", (item_hash,))
+        cursor.execute("SELECT hash, file_extension, mime_type, original_filename, source_url, date_added, platform, source_artist, width, height FROM items WHERE hash = ?", (item_hash,))
         row = cursor.fetchone()
         if not row: raise HTTPException(status_code=404)
         return _get_item_details(item_hash, row)
@@ -244,7 +292,7 @@ async def update_item(item_hash: str, update: ItemUpdate):
             cursor.execute("UPDATE items SET platform = ? WHERE hash = ?", (update.platform, item_hash))
         conn.commit()
         
-        md_content = generate_markdown(conn, item_hash)
+        md_content = generate_markdown(conn, item_hash, topics_override=update.topics)
         if md_content:
             note_path = note_path_for(item_hash)
             note_path.parent.mkdir(parents=True, exist_ok=True)
@@ -304,7 +352,7 @@ async def trigger_tagging(item_hash: str):
                 note_path.parent.mkdir(parents=True, exist_ok=True)
                 note_path.write_text(md_content, encoding="utf-8")
             
-            cursor.execute("SELECT hash, file_extension, mime_type, original_filename, source_url, date_added, platform, source_artist FROM items WHERE hash = ?", (item_hash,))
+            cursor.execute("SELECT hash, file_extension, mime_type, original_filename, source_url, date_added, platform, source_artist, width, height FROM items WHERE hash = ?", (item_hash,))
             updated_row = cursor.fetchone()
             return _get_item_details(item_hash, updated_row)
         finally:

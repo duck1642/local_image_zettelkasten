@@ -2,7 +2,7 @@
 import sqlite3
 from pathlib import Path
 from datetime import datetime
-from utils import DB_PATH, VAULT_DIR
+from utils import DB_PATH
 
 def init_database():
 
@@ -52,6 +52,10 @@ def init_database():
         cursor.execute("ALTER TABLE items ADD COLUMN audio_hash BLOB")
     if 'visual_embedding' not in columns:
         cursor.execute("ALTER TABLE items ADD COLUMN visual_embedding BLOB")
+    if 'width' not in columns:
+        cursor.execute("ALTER TABLE items ADD COLUMN width INTEGER")
+    if 'height' not in columns:
+        cursor.execute("ALTER TABLE items ADD COLUMN height INTEGER")
 
     conn.commit()
     return conn
@@ -116,7 +120,7 @@ def check_duplicate_url(conn: sqlite3.Connection, url: str) -> bool:
     cursor.execute('SELECT 1 FROM items WHERE LOWER(source_url) = LOWER(?)', (url.strip(),))
     return cursor.fetchone() is not None
 
-def insert_to_database(conn: sqlite3.Connection, filepath: Path, file_hash: str, mime_type: str, target_ext: str, metadata: dict = None, file_size: int = None, timestamp: datetime = None, phash: str = None, audio_hash: str = None, visual_embedding: bytes = None):
+def insert_to_database(conn: sqlite3.Connection, filepath: Path, file_hash: str, mime_type: str, target_ext: str, metadata: dict = None, file_size: int = None, timestamp: datetime = None, phash: str = None, audio_hash: str = None, visual_embedding: bytes = None, width: int = None, height: int = None):
     metadata = metadata or {}
     source_url = metadata.get('source_url', "")
     platform = metadata.get('platform', "")
@@ -131,8 +135,8 @@ def insert_to_database(conn: sqlite3.Connection, filepath: Path, file_hash: str,
     cursor = conn.cursor()
     cursor.execute('''
         INSERT OR REPLACE INTO items
-        (hash, original_filename, file_extension, mime_type, size_bytes, date_added, source_url, platform, source_artist, phash, audio_hash, visual_embedding)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (hash, original_filename, file_extension, mime_type, size_bytes, date_added, source_url, platform, source_artist, phash, audio_hash, visual_embedding, width, height)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ''', (
         file_hash,
         filepath.name,
@@ -145,5 +149,7 @@ def insert_to_database(conn: sqlite3.Connection, filepath: Path, file_hash: str,
         source_artist,
         phash,
         audio_hash,
-        visual_embedding
+        visual_embedding,
+        width,
+        height
     ))

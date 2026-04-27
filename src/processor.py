@@ -182,10 +182,18 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
     audio_hash = None
     visual_embedding = None
     tiles = []
+    width = None
+    height = None
 
     if mime_type.startswith('image/'):
         phash = calculate_phash(filepath)
         tiles = calculate_tiles(filepath)
+        try:
+            from PIL import Image as PILImage
+            with PILImage.open(filepath) as img:
+                width, height = img.size
+        except Exception:
+            pass
 
         if phash and not skip_similarity:
             conflict_hash, match_type, total_conflicts, distance = find_visual_duplicate(phash, threshold=5, new_tiles=tiles)
@@ -219,6 +227,17 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
 
         audio_hash = get_audio_fingerprint(filepath)
         visual_embedding = get_visual_embedding(filepath)
+        try:
+            import subprocess
+            result = subprocess.run(
+                ['ffprobe', '-v', 'error', '-select_streams', 'v:0',
+                 '-show_entries', 'stream=width,height', '-of', 'csv=s=x:p=0',
+                 str(filepath)], capture_output=True, text=True, timeout=10)
+            if result.returncode == 0 and 'x' in result.stdout.strip():
+                parts = result.stdout.strip().split('x')
+                width, height = int(parts[0]), int(parts[1])
+        except Exception:
+            pass
 
         if (audio_hash or visual_embedding) and not skip_similarity:
             conflict_hash, match_type, total_conflicts, similarity = find_video_duplicate(audio_hash, visual_embedding, ai_threshold=0.08)
@@ -273,7 +292,7 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
 
         shutil.copy2(filepath, vault_path)
 
-        insert_to_database(conn, filepath, file_hash, mime_type, target_ext, metadata, file_size=file_size, timestamp=master_timestamp, phash=phash, audio_hash=audio_hash, visual_embedding=visual_embedding)
+        insert_to_database(conn, filepath, file_hash, mime_type, target_ext, metadata, file_size=file_size, timestamp=master_timestamp, phash=phash, audio_hash=audio_hash, visual_embedding=visual_embedding, width=width, height=height)
 
         if tiles:
             insert_tiles(conn, file_hash, tiles)

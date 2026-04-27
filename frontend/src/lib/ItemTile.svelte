@@ -2,15 +2,18 @@
     import type { VaultItem } from './types';
     export let item: VaultItem;
     
-    // The backend serves assets at http://localhost:8000/vault/...
-    const assetUrl = `http://localhost:8000${item.url}`;
+    $: thumbnailUrl = `http://localhost:8000${item.thumbnail_url}`;
+    $: fullUrl = `http://localhost:8000${item.url}`;
 </script>
 
 <div class="tile">
     {#if item.mime_type.startsWith('image/')}
-        <img src={assetUrl} alt={item.original_filename} loading="lazy" />
+        <img src={thumbnailUrl} alt={item.original_filename} loading="lazy"
+             width={item.width || undefined} height={item.height || undefined} />
     {:else if item.mime_type.startsWith('video/')}
-        <video src={assetUrl} muted loop on:mouseenter={e => e.target.play()} on:mouseleave={e => {e.target.pause(); e.target.currentTime = 0}}></video>
+        <video src={fullUrl} poster={thumbnailUrl} preload="none" muted loop
+               on:mouseenter={(e) => e.currentTarget.play().catch(() => {})}
+               on:mouseleave={(e) => { e.currentTarget.pause(); e.currentTarget.currentTime = 0; }}></video>
         <div class="video-badge">VIDEO</div>
     {/if}
     <div class="info">
@@ -21,13 +24,17 @@
 
 <style>
     .tile {
+        position: relative;
         background: var(--bg-panel);
         border: 1px solid var(--border-dim);
         border-radius: 8px;
         overflow: hidden;
         margin-bottom: 10px;
         break-inside: avoid;
+        display: flex;
+        flex-direction: column;
         transition: border-color 0.2s;
+        content-visibility: auto;
     }
 
     .tile:hover {
@@ -52,9 +59,8 @@
         font-weight: bold;
     }
 
-    .tile {
-        position: relative;
-        background: var(--bg-panel);
+    .info {
+        padding: 8px;
         display: flex;
         justify-content: space-between;
         align-items: center;
@@ -69,5 +75,10 @@
     .artist {
         color: var(--accent-purple);
         font-weight: bold;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        max-width: 60%;
+        text-align: right;
     }
 </style>

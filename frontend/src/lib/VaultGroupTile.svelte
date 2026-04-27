@@ -10,8 +10,12 @@
   let index = 0;
 
   $: current = group.items[index];
-  $: assetUrl = `http://localhost:8000${current.url}`;
-  $: isSelected = group.items.some(i => i.hash === selectedHash);
+  $: thumbnailUrl = `http://localhost:8000${current.thumbnail_url}`;
+  $: fullUrl = `http://localhost:8000${current.url}`;
+  $: isSelected = current.hash === selectedHash;
+  $: aspectStyle = (current.width && current.height)
+    ? `aspect-ratio: ${current.width} / ${current.height}`
+    : '';
 
   function next(e: MouseEvent) {
     e.stopPropagation();
@@ -26,14 +30,26 @@
   function select() {
     dispatch('select', current);
   }
+
+  function playVideo(e: MouseEvent & { currentTarget: HTMLVideoElement }) {
+    e.currentTarget.play().catch(() => {});
+  }
+
+  function pauseVideo(e: MouseEvent & { currentTarget: HTMLVideoElement }) {
+    const v = e.currentTarget;
+    v.pause();
+    v.currentTime = 0;
+  }
 </script>
 
 <div class="tile-group {layout}" class:selected={isSelected} on:click={select}>
-    <div class="media-stack">
+    <div class="media-stack" style={layout !== 'grid' ? aspectStyle : ''}>
         {#if current.mime_type.startsWith('image/')}
-            <img src={assetUrl} alt="Vault Item" loading="lazy" />
+            <img src={thumbnailUrl} alt="Vault Item" loading="lazy"
+                 width={current.width || undefined} height={current.height || undefined} />
         {:else}
-            <video src={assetUrl} muted loop on:mouseenter={e => e.target.play()} on:mouseleave={e => {e.target.pause(); e.target.currentTime = 0}}></video>
+            <video src={fullUrl} poster={thumbnailUrl} preload="none" muted loop
+                   on:mouseenter={playVideo} on:mouseleave={pauseVideo}></video>
         {/if}
 
         {#if group.items.length > 1}
@@ -54,16 +70,16 @@
 <style>
   .tile-group {
     background: var(--bg-panel);
-    border: 1px solid var(--border-dim);
+    border: 2px solid transparent;
     border-radius: 8px;
     overflow: hidden;
     margin-bottom: 12px;
     break-inside: avoid;
     cursor: pointer;
-    border: 2px solid transparent;
-    transition: all 0.1s;
+    transition: border-color 0.1s, background 0.1s;
     display: flex;
     flex-direction: column;
+    content-visibility: auto;
   }
 
   .tile-group.grid {

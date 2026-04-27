@@ -30,6 +30,9 @@
   let activeFilters: { artist?: string; platform?: string; filename?: string; topic?: string; wd_tag?: string; command?: string } = {};
   let searchDebounceTimer: number | null = null;
 
+  let nextCursor: string | null = null;
+  let hasMore = false;
+
   async function fetchConfig() {
     try {
       const res = await fetch('http://localhost:8000/api/config');
@@ -40,7 +43,6 @@
     } catch(e) {}
   }
 
-  // GROUPING LOGIC
   $: groupedItems = (() => {
     const groups: { [key: string]: VaultItem[] } = {};
     const orderedKeys: string[] = [];
@@ -49,7 +51,6 @@
       if (!groups[key]) { groups[key] = []; orderedKeys.push(key); }
       groups[key].push(item);
     });
-    // The sorting is now handled primarily by the backend, but we still group them.
     return orderedKeys.map(key => ({ id: key, items: groups[key] }));
   })();
 
@@ -75,10 +76,12 @@
     return filters;
   }
 
-  async function fetchItems() {
+  async function fetchItems(append = false) {
+    if (!append) { items = []; nextCursor = null; }
     loading = true;
     try {
-      let url = `http://localhost:8000/api/items?sort=${currentSort}&media_type=${currentMediaType}`;
+      let url = `http://localhost:8000/api/items?sort=${currentSort}&media_type=${currentMediaType}&limit=50`;
+      if (append && nextCursor) url += `&cursor=${encodeURIComponent(nextCursor)}`;
       if (activeFilters.artist) url += `&artist=${encodeURIComponent(activeFilters.artist)}`;
       if (activeFilters.platform) url += `&platform=${encodeURIComponent(activeFilters.platform)}`;
       if (activeFilters.filename) url += `&filename=${encodeURIComponent(activeFilters.filename)}`;
@@ -86,12 +89,21 @@
       if (activeFilters.wd_tag) url += `&wd_tag=${encodeURIComponent(activeFilters.wd_tag)}`;
 
       const response = await fetch(url);
-      items = await response.json();
+      const data = await response.json();
+      const newItems: VaultItem[] = Array.isArray(data.items) ? data.items : [];
+      items = append ? [...items, ...newItems] : newItems;
+      nextCursor = data.next_cursor || null;
+      hasMore = data.has_more || false;
+
       const statsRes = await fetch('http://localhost:8000/api/stats');
       stats = await statsRes.json();
       await fetchSecondaryStats();
     } catch (error) { uiLog('ERROR', 'Failed to fetch items', { error });
     } finally { loading = false; }
+  }
+
+  function loadMore() {
+    if (hasMore && !loading) fetchItems(true);
   }
 
   function applySearch(immediate: boolean = false) {
@@ -170,7 +182,6 @@
       if (e.key === 'F5') {
           if (e.ctrlKey) {
               uiLog('INFO', 'Ctrl+F5 pressed: Reloading full app');
-              // Let default browser reload happen, or force it:
               window.location.reload();
           } else {
               e.preventDefault();
@@ -180,12 +191,20 @@
       }
   }
 
+  let sentinelEl: HTMLElement | null = null;
+
   onMount(() => {
     uiLog('INFO', 'Svelte UI initialized and mounted');
     fetchConfig();
     fetchItems();
     const interval = setInterval(fetchSecondaryStats, 5000);
-    return () => clearInterval(interval);
+
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting && hasMore && !loading) loadMore();
+    }, { rootMargin: '400px' });
+    if (sentinelEl) observer.observe(sentinelEl);
+
+    return () => { clearInterval(interval); observer.disconnect(); };
   });
 </script>
 
@@ -228,7 +247,6 @@
           <option value="newest">Newest First</option>
           <option value="oldest">Oldest First</option>
           <option value="artist">Artist (A-Z)</option>
-          <option value="shuffle">Shuffle</option>
         </select>
         
         <select class="filter-select" bind:value={currentMediaType} on:change={() => fetchItems()}>
@@ -244,20 +262,44 @@
     <div class="view-and-inspector">
       <div class="viewport">
         {#if activeTab === 'vault'}
-          {#if loading}
+          {#if loading && items.length === 0}
             <div class="loading">Loading...</div>
-          {:else}
-            <div class="masonry-container">
-              <div class="vault-layout {currentLayout}">
+          {:else if currentLayout === 'masonry'}
+            <div class="masonry-scroll">
+              <div class="vault-layout masonry">
                 {#each groupedItems as group (group.id)}
                   <VaultGroupTile 
                     {group} 
-                    layout={currentLayout}
+                    layout="masonry"
                     selectedHash={selectedItem?.hash}
                     on:select={(e) => handleSelectItem(e.detail, group)} 
                   />
                 {/each}
               </div>
+              <div bind:this={sentinelEl} class="scroll-sentinel"></div>
+              {#if loading && items.length > 0}
+                <div class="loading-more">Loading more...</div>
+              {/if}
+            </div>
+          {:else}
+            <div class="grid-scroll">
+              <div class="vault-layout grid">
+                {#each groupedItems as group (group.id)}
+                  <VaultGroupTile 
+                    {group} 
+                    layout="grid"
+                    selectedHash={selectedItem?.hash}
+                    on:select={(e) => handleSelectItem(e.detail, group)} 
+                  />
+                {/each}
+              </div>
+              {#if hasMore}
+                <div class="load-more">
+                  <button on:click={loadMore} disabled={loading}>
+                    {loading ? 'Loading...' : 'Load More'}
+                  </button>
+                </div>
+              {/if}
             </div>
           {/if}
         {:else if activeTab === 'review'}
@@ -298,7 +340,7 @@
 
   <footer class="bottom-status">
       <span class="status-left">Total Items: {stats.total_items} | DB: WAL | LIZ Tauri</span>
-      <span class="status-right">Showing {groupedItems.length} groups of {stats.total_items} items</span>
+      <span class="status-right">Showing {groupedItems.length} groups{hasMore ? ' (more available)' : ''}</span>
   </footer>
 </div>
 
@@ -322,21 +364,26 @@
   .filter-select { background: var(--bg-input); border: 1px solid var(--border-dim); color: var(--text-main); padding: 5px 10px; border-radius: 6px; font-size: 12px; cursor: pointer; height: 32px; }
   .view-and-inspector { flex-grow: 1; display: flex; overflow: hidden; }
   .viewport { flex-grow: 1; display: flex; flex-direction: column; overflow: hidden; }
-  .masonry-container { flex-grow: 1; overflow-y: auto; padding: 15px; }
-  .vault-layout.masonry { column-count: 5; column-gap: 10px; }
+  .grid-scroll { flex-grow: 1; overflow-y: auto; padding: 15px; }
+  .masonry-scroll { flex-grow: 1; overflow-y: auto; padding: 15px; }
+  .vault-layout.masonry {
+      column-count: 5;
+      column-gap: 12px;
+  }
   .vault-layout.grid { 
       display: grid; 
       grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); 
       gap: 15px; 
       align-items: stretch;
   }
-  .tile-wrapper { margin-bottom: 10px; break-inside: avoid; border-radius: 8px; border: 2px solid transparent; }
+  .scroll-sentinel { height: 1px; }
+  .loading-more { text-align: center; padding: 15px; color: var(--text-muted); font-size: 12px; }
+  .load-more { text-align: center; padding: 20px; }
+  .load-more button { background: var(--bg-panel); border: 1px solid var(--border-dim); color: var(--text-main); padding: 10px 30px; border-radius: 6px; cursor: pointer; font-weight: bold; }
+  .load-more button:hover { border-color: var(--accent-primary); }
   .bottom-status { height: 25px; background: #010409; border-top: 1px solid var(--border-dim); padding: 0; display: flex; align-items: center; justify-content: space-between; font-size: 11px; color: var(--text-muted); flex-shrink: 0; z-index: 200; width: 100%; box-sizing: border-box; }
   .status-left { padding-left: 15px; }
   .status-right { padding-right: 15px; }
   .badge { background: var(--accent-primary); color: white; font-size: 10px; padding: 1px 5px; border-radius: 10px; margin-left: 3px; }
   .badge.warn { background: var(--accent-warning); }
-  @media (max-width: 1400px) { .vault-layout.masonry { column-count: 4; } }
-  @media (max-width: 1100px) { .vault-layout.masonry { column-count: 3; } }
-  @media (max-width: 800px) { .vault-layout.masonry { column-count: 2; } }
 </style>

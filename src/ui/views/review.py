@@ -7,7 +7,7 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QMessageBox, QPushButton, QVB
 
 from logs.logger import log_ui
 from processor import process_file
-from ui.thumbnail_cache import asset_path_for, placeholder_pixmap, preview_pixmap
+from ui.thumbnail_cache import placeholder_pixmap, preview_pixmap
 from utils import ASSETS_DIR, REVIEW_DIR, get_config
 
 
