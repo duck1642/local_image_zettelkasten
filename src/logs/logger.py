@@ -11,11 +11,6 @@ RAW_LOGS_DIR = LOGS_DIR / "raw"
 RAW_LOGS_DIR.mkdir(parents=True, exist_ok=True)
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-# 0. Compatibility definitions (Must be at the top)
-def log_ui(level, message, **kwargs):
-    # This will be properly linked once pyui_logger is defined below
-    getattr(logging.getLogger("liz_pyui"), level.lower(), logging.info)(message, extra={"extra_data": kwargs} if kwargs else {})
-
 class JSONFormatter(logging.Formatter):
     def format(self, record):
         # Use the logger name (e.g. liz_system -> system) instead of record.module
@@ -45,13 +40,6 @@ svelte_handler = RotatingFileHandler(STRUCTURED_LOGS_DIR / "svelte.jsonl", maxBy
 svelte_handler.setFormatter(JSONFormatter())
 if not svelte_logger.handlers: svelte_logger.addHandler(svelte_handler)
 
-# 3. Legacy UI Logger (The Ghost / PyQt)
-pyui_logger = logging.getLogger("liz_pyui")
-pyui_logger.setLevel(logging.INFO)
-pyui_handler = RotatingFileHandler(STRUCTURED_LOGS_DIR / "pyui.jsonl", maxBytes=5*1024*1024, backupCount=3, encoding="utf-8")
-pyui_handler.setFormatter(JSONFormatter())
-if not pyui_logger.handlers: pyui_logger.addHandler(pyui_handler)
-
 # 4. Ingestion Logger (The Worker)
 ingestion_logger = logging.getLogger("liz_ingestion")
 ingestion_logger.setLevel(logging.INFO)
@@ -66,9 +54,6 @@ def log_system(level, message, **kwargs):
 
 def log_svelte(level, message, **kwargs):
     getattr(svelte_logger, level.lower(), svelte_logger.info)(message, extra={"extra_data": kwargs} if kwargs else {})
-
-def log_pyui(level, message, **kwargs):
-    log_ui(level, message, **kwargs)
 
 def log_ingestion(level, message, **kwargs):
     extra = {"extra_data": kwargs} if kwargs else {}

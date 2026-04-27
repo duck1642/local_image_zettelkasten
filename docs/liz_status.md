@@ -234,26 +234,26 @@ python -B tools/maintenance/vault_integrity.py
     - Hardened the `W` (Wide) and `F` (Fullscreen) hotkeys inside the Inspector to support seamless cross-toggling and active-input protection (ignoring keystrokes when typing in text fields).
     - Added a dedicated, styled **Keyboard Shortcuts** reference guide to the bottom of the Settings panel.
 
+## What API models did
+
+### 28-04-2026
+
+#### Masonry View Fix
+- **Root Cause:** VirtualScroller rendered tiles in single-column absolute positioning (`left: 0; right: 0`), making every tile very wide and short. The `itemPositions` reactive computed a single vertical stack — no column distribution logic existed.
+- **Fix:** Replaced VirtualScroller with CSS `column-count: 5` masonry (the original working approach). Added IntersectionObserver infinite scroll via a sentinel element at the bottom that triggers `loadMore()` within 400px of the viewport.
+- **fetchConfig Repair:** Earlier edit had accidentally merged the `fetchConfig` function declaration into the `hasMore` variable line, turning it into a bare block. Restored proper `async function fetchConfig()` declaration.
+- **Dead Code Removal:** Removed `itemPositions` reactive, `layoutContainerHeight` reactive, and `VirtualScroller` import from App.svelte. `VirtualScroller.svelte` file remains in lib/ but is unused.
+
+#### Old PyQt UI Removed Entirely
+- **Deleted `src/ui/`:** Entire folder — `app.py`, `flow_layout.py`, `log_utils.py`, `main_window.py`, `masonry_layout.py`, `theme.py`, `thumbnail_cache.py`, `video_widgets.py`, `views/` (7 files), `__init__.py`.
+- **Deleted `gui.py`:** Was the PyQt entry point (`from ui.app import main`). Dead without `src/ui/`.
+- **Cleaned `src/logs/logger.py`:** Removed `log_ui()`, `log_pyui()`, and `pyui_logger` + its `pyui.jsonl` handler. Only `log_system`, `log_svelte`, `log_ingestion`, and `log_activity` remain.
+- **Cleaned `pyproject.toml`:** Removed `PySide6` from dependencies, removed `liz-gui` script entry, removed `ui`/`ui.views` from `tool.setuptools.packages.find.include`, updated description from "PySide6 UI" to "Tauri/Svelte UI".
+- **Verified:** Zero PySide6 / log_ui / log_pyui references remain in `src/` or root files. Only the kept `backup after masonry fix/` folder still has them.
+
 ## Current Bugs/Redundant Codes
 
-### Bugs
-
-1. **`MediaFocus.svelte` — `uiLog` used but never imported.** Lines 19, 33, 55, 63 call `uiLog()` but there is no `import { log as uiLog } from './logger'`. This will crash at runtime when toggling wide/fullscreen modes.
-2. **`App.svelte:75` — `/api/stats` endpoint does not exist.** `fetchItems()` calls `fetch('http://localhost:8000/api/stats')` but there is no corresponding `@app.get("/api/stats")` route in `web_api.py`. The fetch silently fails and `stats.total_items` stays at 0, so the status bar shows wrong counts.
-3. **`web_api.py` vs `processor.py` — Review sidecar path mismatch.** `web_api.py:400` constructs the sidecar path as `p.with_suffix(p.suffix + ".json")` (e.g. `photo.jpg.json`), but `processor.py:212` writes them as `dest_path.with_suffix('.json')` (e.g. `photo.json`, replacing the extension). These two conventions are incompatible — review metadata written by the processor will never be found by the API.
-4. **`web_api.py:387` — `asyncio.get_event_loop()` is deprecated.** Should use `asyncio.get_running_loop()`. Newer Python/uvicorn versions may log deprecation warnings or behave unexpectedly.
-5. **`web_api.py:406-412` — DB connection opened inside a loop without try/finally.** Each review item with a `best_match` opens a new DB connection. If the query throws, the connection leaks.
-6. **`external_ingestion.py:88` — `\n` embedded in log message.** The string `f"\n[OK] Ingestion cycle complete..."` puts a literal newline in the JSON `message` field, which can break single-line JSONL parsing.
-7. **`ReviewView.svelte:70` — "Save as Variant" button has no `on:click` handler.** The button renders but does nothing when clicked.
-
-### Redundant Code
-
-1. **`Counter.svelte` — Unused boilerplate.** Default Vite/Svelte template file, never imported by any component. Can be deleted.
-2. **`MediaFocus.svelte:3` — `onMount` imported but never used.** Only `onDestroy` is actually called.
-3. **`logger.py:15-17` — `log_ui()` compatibility shim is dead code for the Svelte app.** Only the legacy PyQt `ui/` folder calls it. The Svelte app uses `log_svelte()` via the HTTP endpoint.
-4. **`logger.py:70-71` — `log_pyui()` just wraps `log_ui()`.** Two layers of indirection for the same call.
-5. **`web_api.py:16` — `log_pyui` is imported but never called anywhere in the file.**
-6. **`App.svelte:286` — `.status-text` CSS class is defined but never used in the template.**
+_None._
 
 ---
 

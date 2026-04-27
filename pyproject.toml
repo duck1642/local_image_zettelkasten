@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "local-image-zettelkasten"
 version = "0.1.0"
-description = "Local image and media zettelkasten ingestion, deduplication, and PySide6 UI."
+description = "Local image and media zettelkasten ingestion, deduplication, and Tauri/Svelte UI."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -18,7 +18,6 @@ dependencies = [
     "onnxruntime>=1.17.0",
     "pillow",
     "playwright",
-    "PySide6",
     "pyyaml",
     "sentence-transformers",
     "torch",
@@ -40,7 +39,6 @@ gpu = [
 
 [project.scripts]
 liz = "core:main"
-liz-gui = "ui.app:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
@@ -56,7 +54,7 @@ py-modules = [
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["db", "downloaders", "logs", "scripts", "tagging", "ui", "ui.views"]
+include = ["db", "downloaders", "logs", "scripts", "tagging"]
 exclude = ["backups", "program", "tools", "tests", "data", "secrets"]
 
 [tool.ruff]
