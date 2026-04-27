@@ -150,6 +150,22 @@
       dispatch('focus', { mode, hash: item?.hash, startTime });
   }
 
+  function handleKeydown(e: KeyboardEvent) {
+      if (!item) return;
+      if (e.repeat) return;
+      const target = e.target as HTMLElement;
+      if (['INPUT', 'TEXTAREA'].includes(target.tagName)) return;
+      if (document.querySelector('.focus-overlay')) return; // Let MediaFocus handle it if it's open
+
+      if (e.key.toLowerCase() === 'w') {
+          e.preventDefault();
+          toggleFocus('wide');
+      } else if (e.key.toLowerCase() === 'f') {
+          e.preventDefault();
+          toggleFocus('fullscreen');
+      }
+  }
+
   function nextItem() {
       if (!group) return;
       const nextIdx = (currentIndex + 1) % group.items.length;
@@ -162,6 +178,8 @@
       dispatch('changeItem', group.items[prevIdx]);
   }
 </script>
+
+<svelte:window on:keydown={handleKeydown} />
 
 <aside class="inspector">
   {#if !item}

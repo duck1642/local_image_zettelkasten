@@ -13,20 +13,57 @@
 
   $: assetUrl = `http://localhost:8000${item.url}`;
 
-  async function close() {
+  $: handleModeChange(mode);
+
+  async function handleModeChange(newMode: 'wide' | 'fullscreen') {
+      uiLog('INFO', `MediaFocus mode changed to: ${newMode}`);
+      try {
+          if (newMode === 'fullscreen') {
+              await appWindow.setFullscreen(true);
+          } else {
+              await appWindow.setFullscreen(false);
+          }
+      } catch (e) {
+          console.error('Failed to toggle native fullscreen:', e);
+      }
+  }
+
+  async function close(reason: string | Event = 'unknown') {
+    let reasonStr = typeof reason === 'string' ? reason : 'overlay_or_btn_click';
+    uiLog('INFO', `MediaFocus closing because: ${reasonStr}`);
     try {
-        if (mode === 'fullscreen') {
-            await appWindow.setFullscreen(false);
-        }
+        await appWindow.setFullscreen(false);
     } catch (e) {
-        console.error('Failed to exit native fullscreen:', e);
     } finally {
         dispatch('close');
     }
   }
 
   function handleKeydown(e: KeyboardEvent) {
-      if (e.key === 'Escape') close();
+      if (e.repeat) return;
+      const target = e.target as HTMLElement;
+      if (['INPUT', 'TEXTAREA'].includes(target.tagName)) return;
+
+      if (e.key === 'Escape') {
+          e.preventDefault();
+          close('Escape Key Pressed');
+      } else if (e.key.toLowerCase() === 'w') {
+          e.preventDefault();
+          if (mode === 'wide') {
+              close('W Key Pressed (Toggle Off Wide)');
+          } else {
+              uiLog('INFO', 'Dispatching switchMode wide');
+              dispatch('switchMode', 'wide');
+          }
+      } else if (e.key.toLowerCase() === 'f') {
+          e.preventDefault();
+          if (mode === 'fullscreen') {
+              close('F Key Pressed (Toggle Off Fullscreen)');
+          } else {
+              uiLog('INFO', 'Dispatching switchMode fullscreen');
+              dispatch('switchMode', 'fullscreen');
+          }
+      }
   }
 
   function handleLoaded() {
@@ -35,14 +72,10 @@
       }
   }
 
-  onMount(async () => {
-      if (mode === 'fullscreen') {
-          await appWindow.setFullscreen(true);
-      }
-  });
-
   onDestroy(async () => {
-      await appWindow.setFullscreen(false);
+      try {
+          await appWindow.setFullscreen(false);
+      } catch(e) {}
   });
 </script>
 

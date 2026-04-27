@@ -130,6 +130,20 @@
       uiLog('INFO', `Switched to ${focusMode} view from time ${focusStartTime}`);
   }
 
+  function handleGlobalKeydown(e: KeyboardEvent) {
+      if (e.key === 'F5') {
+          if (e.ctrlKey) {
+              uiLog('INFO', 'Ctrl+F5 pressed: Reloading full app');
+              // Let default browser reload happen, or force it:
+              window.location.reload();
+          } else {
+              e.preventDefault();
+              uiLog('INFO', 'F5 pressed: Refreshing database/items');
+              fetchItems();
+          }
+      }
+  }
+
   onMount(() => {
     uiLog('INFO', 'Svelte UI initialized and mounted');
     fetchConfig();
@@ -138,6 +152,8 @@
     return () => clearInterval(interval);
   });
 </script>
+
+<svelte:window on:keydown={handleGlobalKeydown} />
 
 <div class="root-container">
   <div class="app-container">
@@ -238,6 +254,7 @@
         mode={focusMode} 
         startTime={focusStartTime}
         on:close={() => focusMode = 'normal'} 
+        on:switchMode={(e) => { focusMode = e.detail; }}
     />
   {/if}
   </div>

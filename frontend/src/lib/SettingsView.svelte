@@ -89,6 +89,36 @@
         {saving ? 'Saving...' : 'Save Settings'}
       </button>
     </div>
+
+    <div class="shortcuts-guide">
+        <h4>Keyboard Shortcuts & Search Prefixes</h4>
+        <div class="shortcuts-grid">
+            <div class="shortcut-row">
+                <span class="key">Enter</span>
+                <span class="desc">Execute Search</span>
+            </div>
+            <div class="shortcut-row">
+                <span class="key">F5</span>
+                <span class="desc">Refresh Vault (from Database)</span>
+            </div>
+            <div class="shortcut-row">
+                <span class="key">Ctrl+F5</span>
+                <span class="desc">Full App Reload</span>
+            </div>
+            <div class="shortcut-row">
+                <span class="key">Esc</span>
+                <span class="desc">Close Media Focus</span>
+            </div>
+            <div class="shortcut-row">
+                <span class="key">W</span>
+                <span class="desc">Toggle Wide View (in Inspector)</span>
+            </div>
+            <div class="shortcut-row">
+                <span class="key">F</span>
+                <span class="desc">Toggle Fullscreen (in Inspector)</span>
+            </div>
+        </div>
+    </div>
   {/if}
 </div>
 
@@ -152,4 +182,57 @@
   }
 
   .centered { flex-grow: 1; display: flex; align-items: center; justify-content: center; color: var(--text-muted); }
+
+  .shortcuts-guide {
+    margin-top: 40px;
+    padding-top: 25px;
+    border-top: 1px solid var(--border-dim);
+    max-width: 600px;
+  }
+
+  .shortcuts-guide h4 {
+    margin: 0 0 15px 0;
+    color: var(--text-bright);
+    font-size: 14px;
+  }
+
+  .shortcuts-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    background: var(--bg-panel);
+    padding: 15px;
+    border-radius: 8px;
+    border: 1px solid var(--border-dim);
+  }
+
+  .shortcut-row {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+  }
+
+  .shortcut-row .key {
+    background: var(--bg-main);
+    border: 1px solid var(--border-dim);
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-family: 'Consolas', monospace;
+    font-size: 11px;
+    font-weight: bold;
+    color: var(--text-bright);
+    min-width: 60px;
+    text-align: center;
+  }
+
+  .shortcut-row .desc {
+    font-size: 13px;
+    color: var(--text-muted);
+  }
+
+  .divider {
+    height: 1px;
+    background: var(--border-dim);
+    margin: 5px 0;
+  }
 </style>
