@@ -4,6 +4,7 @@
   
   export let group: { id: string, items: VaultItem[] };
   export let selectedHash: string | undefined = '';
+  export let layout: 'masonry' | 'grid' = 'masonry';
   
   const dispatch = createEventDispatcher();
   let index = 0;
@@ -27,7 +28,7 @@
   }
 </script>
 
-<div class="tile-group" class:selected={isSelected} on:click={select}>
+<div class="tile-group {layout}" class:selected={isSelected} on:click={select}>
     <div class="media-stack">
         {#if current.mime_type.startsWith('image/')}
             <img src={assetUrl} alt="Vault Item" loading="lazy" />
@@ -61,14 +62,32 @@
     cursor: pointer;
     border: 2px solid transparent;
     transition: all 0.1s;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .tile-group.grid {
+    margin-bottom: 0;
+    height: 100%;
   }
 
   .tile-group:hover { border-color: var(--border-hover); }
   .tile-group.selected { border-color: var(--accent-primary); background: rgba(31, 111, 235, 0.05); }
 
-  .media-stack { position: relative; width: 100%; background: #000; min-height: 100px; }
+  .media-stack { position: relative; width: 100%; background: #000; min-height: 100px; display: flex; align-items: center; justify-content: center; }
+  
+  .tile-group.grid .media-stack {
+    flex-grow: 1;
+    aspect-ratio: 1 / 1;
+  }
 
   img, video { width: 100%; display: block; height: auto; }
+  
+  .tile-group.grid img, .tile-group.grid video {
+    height: 100%;
+    width: 100%;
+    object-fit: cover;
+  }
 
   .controls {
     position: absolute;
@@ -104,8 +123,9 @@
     justify-content: space-between;
     align-items: center;
     font-size: 11px;
+    flex-shrink: 0;
   }
 
   .hash { color: var(--text-muted); font-family: monospace; }
-  .artist { color: var(--accent-purple); font-weight: bold; }
+  .artist { color: var(--accent-purple); font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60%; text-align: right; }
 </style>

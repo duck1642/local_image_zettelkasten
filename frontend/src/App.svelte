@@ -22,6 +22,18 @@
   
   let focusMode: 'normal' | 'wide' | 'fullscreen' = 'normal';
   let focusStartTime = 0;
+  let currentLayout: 'masonry' | 'grid' = 'masonry';
+  let configCache: any = null;
+
+  async function fetchConfig() {
+    try {
+      const res = await fetch('http://localhost:8000/api/config');
+      configCache = await res.json();
+      if (configCache?.ui?.vault_layout) {
+          currentLayout = configCache.ui.vault_layout;
+      }
+    } catch(e) {}
+  }
 
   // GROUPING LOGIC
   $: groupedItems = (() => {
@@ -35,6 +47,10 @@
     orderedKeys.forEach(key => { groups[key].sort((a, b) => a.date_added.localeCompare(b.date_added)); });
     return orderedKeys.map(key => ({ id: key, items: groups[key] }));
   })();
+
+  $: if (activeTab === 'vault') {
+      fetchConfig();
+  }
 
   async function fetchItems(field?: string, value?: string) {
     loading = true;
@@ -96,6 +112,7 @@
 
   onMount(() => {
     uiLog('INFO', 'Svelte UI initialized and mounted');
+    fetchConfig();
     fetchItems();
     const interval = setInterval(fetchSecondaryStats, 5000);
     return () => clearInterval(interval);
@@ -141,10 +158,11 @@
             <div class="loading">Loading...</div>
           {:else}
             <div class="masonry-container">
-              <div class="masonry">
+              <div class="vault-layout {currentLayout}">
                 {#each groupedItems as group (group.id)}
                   <VaultGroupTile 
                     {group} 
+                    layout={currentLayout}
                     selectedHash={selectedItem?.hash}
                     on:select={(e) => handleSelectItem(e.detail, group)} 
                   />
@@ -206,12 +224,18 @@
   .view-and-inspector { flex-grow: 1; display: flex; overflow: hidden; }
   .viewport { flex-grow: 1; display: flex; flex-direction: column; overflow: hidden; }
   .masonry-container { flex-grow: 1; overflow-y: auto; padding: 15px; }
-  .masonry { column-count: 5; column-gap: 10px; }
+  .vault-layout.masonry { column-count: 5; column-gap: 10px; }
+  .vault-layout.grid { 
+      display: grid; 
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); 
+      gap: 15px; 
+      align-items: stretch;
+  }
   .tile-wrapper { margin-bottom: 10px; break-inside: avoid; border-radius: 8px; border: 2px solid transparent; }
   .bottom-status { height: 25px; background: #010409; border-top: 1px solid var(--border-dim); padding: 0 10px; display: flex; align-items: center; font-size: 11px; color: var(--text-muted); flex-shrink: 0; }
   .badge { background: var(--accent-primary); color: white; font-size: 10px; padding: 1px 5px; border-radius: 10px; margin-left: 3px; }
   .badge.warn { background: var(--accent-warning); }
-  @media (max-width: 1400px) { .masonry { column-count: 4; } }
-  @media (max-width: 1100px) { .masonry { column-count: 3; } }
-  @media (max-width: 800px) { .masonry { column-count: 2; } }
+  @media (max-width: 1400px) { .vault-layout.masonry { column-count: 4; } }
+  @media (max-width: 1100px) { .vault-layout.masonry { column-count: 3; } }
+  @media (max-width: 800px) { .vault-layout.masonry { column-count: 2; } }
 </style>
