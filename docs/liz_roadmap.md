@@ -143,84 +143,85 @@ Check how paths handled. Everything must be relative to project folder
 
 ---
 
-## Phase 8 — Management GUI & Local Tagging
+## Phase 8 — Modern Management UI, Local Tagging, and API Hardening
 
 ### Task
-Build a practical desktop interface for vault management and add the first local AI tagging layer.
+Build a practical desktop interface for vault management, add local AI tagging, and harden the local API/runtime boundary.
 
 ### Completed
-- Replaced the broken Flet UI with a PySide6/QWidgets UI.
-- Added root launcher support through python gui.py and liz-gui.
-- Added vault grid browsing for sharded assets.
-- Added image thumbnails and hover video previews.
-- Added inspector panel for image/video preview and metadata editing.
-- Added Review, Ingestion Log, and Settings views.
-- Added video playback controls: play/pause, seek, volume, wide view, and fullscreen.
-- Added image wide view and fullscreen support.
-- Added source URL grouping in the vault so multi-image posts show as one grouped tile.
-- Added group previous/next navigation in vault tiles.
-- Added source URL group navigation in the inspector.
-- Metadata save in grouped inspector updates all rows in the group and regenerates related markdown notes.
-- Changed vault tile labels to hash prefixes instead of original filenames.
-- Added a read-only note-backed topic display in the inspector.
-- Added WD suggestion display in the inspector from local JSON tag cache.
-- Removed SQLite-backed topics from the UI metadata boundary.
-- Began separating normal inspector layout from wide/fullscreen media focus layout.
-- Began separating image controls from video controls so they do not stack together.
-- Fixed wide/fullscreen exit sizing by preserving the visible normal window size before entering focus mode.
-- Added readable App Logs UI with Normal and Full modes.
-- Added external Open action for log files.
-- Added a reusable local WD tagging service.
-- Added local model storage under `data/models/`.
+- Replaced the broken Flet/PySide direction with a Tauri + Svelte desktop UI backed by FastAPI.
+- Removed old PySide UI code, `gui.py`, PySide dependencies, and the `liz-gui` entry point.
+- Added a Svelte vault with masonry/grid layouts, grouped source URL tiles, infinite loading, and media filters.
+- Added a Svelte inspector for metadata editing, source URL group navigation, copy/delete/open actions, and clickable WD suggestions.
+- Added image/video wide and fullscreen focus behavior through the modern frontend.
+- Added markdown queue ingestion workbench with Normal/Force/Failed queues, save/open/retry/clear actions, live URL counts, and ingestion locking.
+- Added Svelte Review, Settings, and Logs views.
+- Split logs into raw terminal output and structured JSONL streams.
+- Added readable and raw log display modes in the UI.
+- Added a reusable local WD tagging service with local model storage under `data/models/`.
 - Added detailed WD tag cache under `data/wd-tags/{hash[:2]}/{hash}.json`.
 - Added distilled WD fields to markdown frontmatter.
-- Added GUI-triggered one-image tagging.
+- Added image and video WD tagging; videos use sampled frame tagging and merged suggestions.
 - Kept manual topics separate from WD tags.
 - Kept SQLite free of manual topics and WD tag metadata.
+- Hardened local API mutating endpoints with a local session key and allowlisted origins.
+- Validated log, queue, and review paths to prevent traversal.
+- Fixed false-success API behavior for missing items.
+- Improved API pagination for frontmatter-backed filters.
+- Moved main blocking API paths through thread helpers.
+- Replaced unsafe `INSERT OR REPLACE` DB writes.
+- Added indexed `source_url_norm` duplicate checks.
+- Shared gallery-dl/yt-dlp valid media filtering.
 
-### Current Work In Progress
-- Wide/fullscreen media mode is being stabilized for both images and videos.
-- The current direction is a dedicated media focus surface instead of stretching the right inspector panel.
-- Fullscreen window-state exit was fixed after the first focus refactor.
-- Wide/fullscreen return-to-normal sizing is now stable in normal manual testing.
-- Image/video controls are being kept separate, but still need visual testing across normal, wide, and fullscreen modes.
-- WD tagging is functional for individual images, but tag filtering, ontology cleanup, and batch workflow are not final.
-
-### Current Caveats
-- Image wide/fullscreen can feel slow because full images are loaded and scaled on resize. Caching the full pixmap is the next optimization.
-- Source URL grouping is UI-only; the database schema is still file-based.
-- Search remains the older Enter-based prefix search.
-- Drag/drop ingestion is not implemented yet; current manual ingestion is file-picker only.
-- Manual file select works, but still needs workflow polish for multi-file metadata entry and sidecar support.
-- The UI is still considered temporary and pragmatic, not final product design.
-- Videos are skipped by the V1 image tagger.
-- WD tags are useful but noisy; final ontology and review workflow are still undecided.
-- Phase 8 is not considered fully finished until image/video wide/fullscreen scaling, control layout, and the first tagging workflow are visually stable.
+### Remaining Caveats
+- Search/index hydration still bulk-loads runtime signatures into RAM.
+- `get_config()` still reparses YAML often; caching needs explicit invalidation.
+- Video embedding still extracts five frames through separate ffmpeg calls.
+- YouTube community posts still fail/retry if one expected image fails.
+- Existing `source_url_norm` values are backfilled lazily on DB init, not through a standalone migration tool.
+- Frontend still has Svelte accessibility warnings.
+- `src/` has not been renamed to `backend/`.
 
 ---
 
-## Phase 9 — Reverse Search & Provenance
+## Phase 9 — Search Scaling, Config Cache, and Runtime Cleanup
+
+### Task
+Make the current Tauri/Svelte + FastAPI system scale better and remove the remaining deferred technical debt.
+
+### Planned
+- Add deliberate config caching with safe invalidation when Settings writes `config.yaml`.
+- Add a proper source URL normalization maintenance tool for existing databases.
+- Reduce search hydration memory pressure with batching or a persistent index strategy.
+- Optimize video embedding frame extraction.
+- Resolve Svelte accessibility warnings.
+- Consolidate remaining duplicate helper logic.
+- Decide whether to rename `src/` to `backend/`.
+
+---
+
+## Phase 10 — Reverse Search & Provenance
 
 ### Task
 Recover the "Exact Source" of orphan files using pHash-based reverse lookups and auto-filling missing metadata from online databases.
 
 ---
 
-## Phase 10 — Modular Logic & Advanced Vision
+## Phase 11 — Modular Logic & Advanced Vision
 
 ### Task
 Implement the **Strategy Pattern** for switchable deduplication algorithms and upgrade tiling to a **Sliding Window** system.
 
 ---
 
-## Phase 11 — Security & Hardening
+## Phase 12 — Security & Credential Hardening
 
 ### Task
 Encrypt `.secrets.yaml` and `cookies.txt` at rest and implement improved credential isolation.
 
 ---
 
-## Phase 12 — Maintenance & Vault Health
+## Phase 13 — Maintenance & Vault Health
 
 ### Task
 Implement "Orphan/Ghost" integrity checks and periodic SHA256 re-verification to detect bit-rot.
