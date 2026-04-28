@@ -19,7 +19,7 @@ local_image_zettelkasten/
   config/
     config.yaml
   frontend/
-    backend/
+    src/
       lib/
     src-tauri/
   backend/
@@ -65,7 +65,7 @@ local_image_zettelkasten/
 - `python main.py` runs CLI ingestion.
 - `liz` runs `core:main` when installed.
 
-The old `gui.py`, `backend/ui/`, and `liz-gui` PySide entry point are removed.
+The old `gui.py`, old Python UI package, and `liz-gui` PySide entry point are removed.
 
 ## Core Data Flow
 

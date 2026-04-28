@@ -17,7 +17,7 @@ python main.py
 liz
 ```
 
-The old Flet and PySide/PyQt UI paths are no longer active. `gui.py`, `backend/ui/`, PySide dependencies, and the `liz-gui` entry point were removed.
+The old Flet and PySide/PyQt UI paths are no longer active. `gui.py`, the old Python UI package, PySide dependencies, and the `liz-gui` entry point were removed.
 
 ## Working Areas
 
@@ -48,6 +48,7 @@ The old Flet and PySide/PyQt UI paths are no longer active. `gui.py`, `backend/u
 - WD cache: `data/wd-tags/{hash[:2]}/{hash}.json`.
 - Logs: `logs/raw/` and `logs/structured/`.
 - Secrets: `secrets/`.
+- Python source root: `backend/`.
 
 SQLite stores runtime asset/index metadata only. Manual topics and WD tags live outside SQLite.
 
@@ -73,6 +74,7 @@ SQLite stores runtime asset/index metadata only. Manual topics and WD tags live 
 - Dead `FlatVectorSearcher` and tagging `_prepare_image()` were removed.
 - Markdown frontmatter parsing handles BOM and line-delimited YAML fences.
 - Pillow is pinned to `>=9.0.0`.
+- Python source root was renamed from `src/` to `backend/`.
 
 ## Still Deferred
 
@@ -84,7 +86,6 @@ SQLite stores runtime asset/index metadata only. Manual topics and WD tags live 
 - Timestamp consistency: local Python timestamps and SQLite UTC defaults still coexist.
 - Thumbnail helper cleanup: `thumbnails.py` still has a small asset-path helper duplication.
 - Frontend accessibility warnings remain in Svelte build output.
-- `src/` has been successfully renamed to `backend/`.
 
 ## Useful Checks
 

@@ -172,6 +172,7 @@ Build a practical desktop interface for vault management, add local AI tagging, 
 - Replaced unsafe `INSERT OR REPLACE` DB writes.
 - Added indexed `source_url_norm` duplicate checks.
 - Shared gallery-dl/yt-dlp valid media filtering.
+- Renamed the Python source root from `src/` to `backend/`.
 
 ### Remaining Caveats
 - Search/index hydration still bulk-loads runtime signatures into RAM.
@@ -180,7 +181,6 @@ Build a practical desktop interface for vault management, add local AI tagging, 
 - YouTube community posts still fail/retry if one expected image fails.
 - Existing `source_url_norm` values are backfilled lazily on DB init, not through a standalone migration tool.
 - Frontend still has Svelte accessibility warnings.
-- `src/` has been successfully renamed to `backend/`.
 
 ---
 
@@ -196,7 +196,6 @@ Make the current Tauri/Svelte + FastAPI system scale better and remove the remai
 - Optimize video embedding frame extraction.
 - Resolve Svelte accessibility warnings.
 - Consolidate remaining duplicate helper logic.
-- [x] Rename `src/` to `backend/`.
 
 ---
 
