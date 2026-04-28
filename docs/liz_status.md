@@ -51,14 +51,30 @@ The old Flet and PySide/PyQt UI paths are no longer active. `gui.py`, the old Py
 - Python source root: `backend/`.
 
 SQLite stores runtime asset/index metadata only. Manual topics and WD tags live outside SQLite.
-
 ## Recent Hardening Completed
 
 - Structured logging system implemented with color-coded `.jsonl` streams.
 - Live search UI glitch fixed by decoupling `isSearching` and `isLoadingMore` states to prevent flicker.
 - Layout toggle commands (`>grid`, `>masonry`) added with auto-complete dropdown and keyboard navigation.
 - Mutating API endpoints now require a local UI session key.
-- CORS is restricted to local/Tauri origins.
+
+## Current Issues
+
+### Critical & Bugs
+- **Production sidecar is a dummy:** `frontend/src-tauri/bin/dummy.rs` is a no-op loop. Production Tauri builds will not start the Python backend. Needs compilation of `web_api.py` into a real binary.
+- **`App.svelte` config POST missing API key:** Command-triggered layout changes (`>grid`) use raw `fetch()` instead of `apiFetch()`. Requests are rejected by backend middleware (HTTP 403) and fail silently.
+- **Infinite scroll (Masonry) stale closure:** `IntersectionObserver` in `onMount` captures initial values of `hasMore` and `isSearching`. It never refreshes its logic, preventing auto-loading more items as the user scrolls. **(Needs checking/verification)**.
+- **Inconsistent pagination UI:** Infinite scroll is only implemented for Masonry view; Grid view still uses a manual "Load More" button.
+
+### Technical Debt & Architecture
+- **Hardcoded Backend URLs:** ~26 instances of `http://localhost:8000` are hardcoded across 9 Svelte files instead of using `apiUrl()` or `apiFetch()`.
+- **Missing Vite Proxy:** Dev mode requires full URLs for every request. Adding a proxy to `vite.config.ts` would simplify frontend code and eliminate URL duplication.
+- **Hardcoded SSE URLs:** `LogsView.svelte` and `Ingestion.svelte` use hardcoded strings for `EventSource` connections.
+- **Tauri Panic on Startup:** `lib.rs` uses `.expect()` for sidecar spawning. If the binary is missing, the app crashes without a user-friendly error.
+- **Logger Import Hoisting:** `logger.ts` imports `apiFetch` at the bottom of the file; technically works but is non-idiomatic.
+- **CSP Disabled:** `tauri.conf.json` has `"csp": null`, providing no protection against content injection.
+
+## Still Deferred
 - Log, queue, and review endpoints validate requested paths.
 - Item update/delete/tag endpoints return 404 for missing items.
 - Delete order now removes DB rows before cleaning asset/note/tag files.
