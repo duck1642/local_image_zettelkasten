@@ -1,6 +1,13 @@
 #[tauri::command]
 fn copy_file_to_clipboard(path: String) -> Result<(), String> {
     use clipboard_win::{formats, Clipboard, Setter};
+    let file_path = std::path::PathBuf::from(&path);
+    if !file_path.exists() {
+        return Err(format!("Clipboard file path does not exist: {path}"));
+    }
+    if !file_path.is_file() {
+        return Err(format!("Clipboard path is not a file: {path}"));
+    }
     let paths = vec![path];
     let _clip = Clipboard::new_attempts(10).map_err(|e| e.to_string())?;
     formats::FileList.write_clipboard(&paths.as_slice()).map_err(|e| e.to_string())

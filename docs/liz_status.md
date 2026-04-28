@@ -86,6 +86,7 @@ SQLite stores runtime asset/index metadata only. Manual topics and WD tags live 
 
 ## Current Issues
 
+- Next session: improve search stacking behavior and add dropdown views for other search prefixes.
 - Production sidecar packaging has a build path, but the generated sidecar still needs release-build validation on a clean machine.
 - Frontend accessibility warnings remain in Svelte build output.
 - CSP is practical rather than strict and should be revisited after production packaging is stable.
