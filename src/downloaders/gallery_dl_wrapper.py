@@ -5,8 +5,8 @@ import subprocess
 from pathlib import Path
 from urllib.parse import urlparse
 
+from downloaders.media_filter import valid_media_files
 from utils import INPUT_DIR, get_config, get_cookie_path
-from validators import get_mime_type, is_allowed_mime
 
 
 def _extract_artist(data: dict, platform: str) -> str:
@@ -209,34 +209,9 @@ def _minimal_download_info(url: str) -> dict:
     }
 
 
-def _valid_media_files(session_dir: Path, config: dict) -> list:
-    firewall_config = config.get('firewall', {})
-    allowed_exts = {ext.lstrip('.').lower() for ext in firewall_config.get('allowed_extensions', [])}
-    allowed_mimes = firewall_config.get('allowed_mimes', [])
-    excluded_exts = {'.part', '.zip', '.json', '.txt', '.yml', '.yaml'}
-    actual_files = []
-
-    for file_path in session_dir.rglob('*'):
-        if not file_path.is_file():
-            continue
-        suffix = file_path.suffix.lower()
-        if suffix in excluded_exts:
-            continue
-        if suffix.lstrip('.') not in allowed_exts:
-            continue
-        if file_path.stat().st_size <= 0:
-            continue
-        mime_type = get_mime_type(file_path) or "unknown"
-        if not is_allowed_mime(mime_type, allowed_mimes):
-            continue
-        actual_files.append(file_path)
-
-    return sorted(actual_files, key=lambda p: str(p))
-
-
 def download_gallery(url: str, metadata_info: dict = None) -> tuple[bool, dict]:
     config = get_config()
-    url_hash = hashlib.sha256(url.encode()).hexdigest()[:10]
+    url_hash = hashlib.sha256(url.encode()).hexdigest()[:16]
     session_dir = INPUT_DIR / "external" / url_hash
     session_dir.mkdir(parents=True, exist_ok=True)
 
@@ -266,7 +241,7 @@ def download_gallery(url: str, metadata_info: dict = None) -> tuple[bool, dict]:
             shutil.rmtree(session_dir, ignore_errors=True)
             return False, {"error": dl_res.stderr}
 
-        actual_files = _valid_media_files(session_dir, config)
+        actual_files = valid_media_files(session_dir, config)
         downloaded_count = len(actual_files)
         expected_count = metadata_info.get("expected_count", 0)
 

@@ -9,8 +9,8 @@ from pathlib import Path
 from urllib.parse import parse_qs, urljoin, urlparse
 from urllib.request import HTTPCookieProcessor, ProxyHandler, Request, build_opener
 
+from downloaders.media_filter import valid_media_files
 from utils import INPUT_DIR, get_config, get_cookie_path
-from validators import get_mime_type, is_allowed_mime
 
 
 def _is_community_url(url: str) -> bool:
@@ -120,13 +120,32 @@ def _community_renderers(data: dict) -> list:
     return renderers
 
 
+def _value_contains_post_id(value, post_id: str) -> bool:
+    if isinstance(value, str):
+        return post_id in value
+    if isinstance(value, dict):
+        return any(_value_contains_post_id(child, post_id) for child in value.values())
+    if isinstance(value, list):
+        return any(_value_contains_post_id(child, post_id) for child in value)
+    return False
+
+
 def _choose_community_renderer(data: dict, post_id: str) -> dict:
     renderers = _community_renderers(data)
     if not renderers:
         return {}
     if post_id:
         for renderer in renderers:
-            if post_id in json.dumps(renderer, ensure_ascii=False):
+            for node in _walk(renderer):
+                if post_id in {str(node.get("postId", "")), str(node.get("post_id", "")), str(node.get("entityId", "")), str(node.get("id", ""))}:
+                    return renderer
+                navigation = node.get("navigationEndpoint")
+                if isinstance(navigation, dict) and _value_contains_post_id(navigation, post_id):
+                    return renderer
+                command = node.get("commandMetadata")
+                if isinstance(command, dict) and _value_contains_post_id(command, post_id):
+                    return renderer
+            if post_id in str(renderer.get("postId", "")):
                 return renderer
     return renderers[0]
 
@@ -173,25 +192,6 @@ def _extension_from_type(content_type: str, fallback_url: str) -> str:
         return type_map[content_type]
     suffix = Path(urlparse(fallback_url).path).suffix.lower()
     return suffix if suffix in type_map.values() else ".jpg"
-
-
-def _valid_media_files(session_dir: Path, config: dict) -> list:
-    firewall_config = config.get('firewall', {})
-    allowed_exts = {ext.lstrip('.').lower() for ext in firewall_config.get('allowed_extensions', [])}
-    allowed_mimes = firewall_config.get('allowed_mimes', [])
-    actual_files = []
-    for file_path in session_dir.rglob('*'):
-        if not file_path.is_file():
-            continue
-        if file_path.suffix.lower().lstrip('.') not in allowed_exts:
-            continue
-        if file_path.stat().st_size <= 0:
-            continue
-        mime_type = get_mime_type(file_path) or "unknown"
-        if not is_allowed_mime(mime_type, allowed_mimes):
-            continue
-        actual_files.append(file_path)
-    return sorted(actual_files, key=lambda p: str(p))
 
 
 def inspect_youtube_community(url: str) -> tuple[bool, dict]:
@@ -253,17 +253,21 @@ def _download_community_post(url: str, metadata_info: dict = None) -> tuple[bool
         opener = _opener(config)
         expected_sizes = {}
 
+        download_errors = []
         for index, image_url in enumerate(metadata_info.get("image_urls", []), start=1):
             absolute_url = urljoin("https://www.youtube.com", image_url)
             request = Request(absolute_url, headers={"User-Agent": user_agent, "Referer": url})
-            with opener.open(request, timeout=30) as response:
-                payload = response.read()
-                extension = _extension_from_type(response.headers.get("Content-Type", ""), absolute_url)
-                file_path = session_dir / f"{index}{extension}"
-                file_path.write_bytes(payload)
-                expected_sizes[str(index)] = len(payload)
+            try:
+                with opener.open(request, timeout=30) as response:
+                    payload = response.read()
+                    extension = _extension_from_type(response.headers.get("Content-Type", ""), absolute_url)
+                    file_path = session_dir / f"{index}{extension}"
+                    file_path.write_bytes(payload)
+                    expected_sizes[str(index)] = len(payload)
+            except Exception as exc:
+                download_errors.append(f"{index}: {exc}")
 
-        actual_files = _valid_media_files(session_dir, config)
+        actual_files = valid_media_files(session_dir, config)
         expected_count = metadata_info.get("expected_count", 0)
         downloaded_count = len(actual_files)
 
@@ -272,7 +276,8 @@ def _download_community_post(url: str, metadata_info: dict = None) -> tuple[bool
             return False, {
                 "error": f"YouTube community incomplete download: expected {expected_count}, got {downloaded_count}",
                 "expected_count": expected_count,
-                "downloaded_count": downloaded_count
+                "downloaded_count": downloaded_count,
+                "download_errors": download_errors
             }
 
         if not actual_files:
@@ -351,7 +356,7 @@ def download_video(url: str, metadata_info: dict = None) -> tuple[bool, dict]:
             shutil.rmtree(session_dir, ignore_errors=True)
             return False, {"error": dl_res.stderr}
 
-        actual_files = _valid_media_files(session_dir, config)
+        actual_files = valid_media_files(session_dir, config)
 
         if not actual_files:
             shutil.rmtree(session_dir, ignore_errors=True)

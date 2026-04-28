@@ -203,12 +203,6 @@ def _predict_image_tags(session, input_meta, output_meta, labels: list[dict[str,
     return _tags_from_predictions(labels, predictions, threshold, max_tags)
 
 
-def _prepare_image(image_path: Path, input_shape) -> np.ndarray:
-    image = Image.open(image_path)
-    image.seek(0)
-    return _prepare_pil_image(image, input_shape)
-
-
 def _prepare_pil_image(image: Image.Image, input_shape) -> np.ndarray:
     target_size = _target_size(input_shape)
     channel_first = len(input_shape) == 4 and input_shape[1] == 3

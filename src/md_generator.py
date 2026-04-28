@@ -6,7 +6,7 @@ from datetime import datetime
 from tagging import wd_frontmatter_fields
 from utils import existing_note_path_for
 
-def generate_markdown(conn: sqlite3.Connection, file_hash: str, asset_rel_path: str = None, title: str = "", topics_override: list = None) -> str:
+def generate_markdown(conn: sqlite3.Connection, file_hash: str, asset_rel_path: str | None = None, title: str = "", topics_override: list | None = None) -> str:
 
     cursor = conn.cursor()
     cursor.execute('''
@@ -87,11 +87,19 @@ def load_note_frontmatter(file_hash: str) -> dict:
     text = text.lstrip("\ufeff")
     if not text.startswith("---"):
         return {}
-    parts = text.split("---", 2)
-    if len(parts) < 3:
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != "---":
         return {}
+    end_index = None
+    for index, line in enumerate(lines[1:], start=1):
+        if line.strip() == "---":
+            end_index = index
+            break
+    if end_index is None:
+        return {}
+    yaml_text = "\n".join(lines[1:end_index])
     try:
-        data = yaml.safe_load(parts[1]) or {}
+        data = yaml.safe_load(yaml_text) or {}
     except yaml.YAMLError:
         return {}
     return data if isinstance(data, dict) else {}

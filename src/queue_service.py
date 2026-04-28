@@ -78,29 +78,35 @@ def clean_url(url: str) -> str:
 
 def queue_counts() -> dict[str, int]:
     with QUEUE_LOCK:
-        return {queue: len(parse_urls(read_queue(queue))) for queue in QUEUE_FILES}
+        ensure_queue_files()
+        return {
+            queue: len(parse_urls(queue_path(queue).read_text(encoding="utf-8", errors="replace")))
+            for queue in QUEUE_FILES
+        }
 
 
 def append_urls(queue: str, urls: list[str]):
     with QUEUE_LOCK:
-        existing = read_queue(queue).rstrip()
+        ensure_queue_files()
+        existing = queue_path(queue).read_text(encoding="utf-8", errors="replace").rstrip()
         lines = [clean_url(url) for url in urls if clean_url(url)]
         if not lines:
             return
         body = "\n".join(lines)
-        write_queue(queue, f"{existing}\n\n{body}\n" if existing else f"{body}\n")
+        queue_path(queue).write_text(f"{existing}\n\n{body}\n" if existing else f"{body}\n", encoding="utf-8")
 
 
 def move_failed_urls(target_queue: str) -> int:
     with QUEUE_LOCK:
         if target_queue not in {"normal", "force"}:
             return 0
-        failed_text = read_queue("failed")
+        ensure_queue_files()
+        failed_text = queue_path("failed").read_text(encoding="utf-8", errors="replace")
         urls = parse_urls(failed_text)
         if not urls:
             return 0
         append_urls(target_queue, urls)
-        write_queue("failed", "# LIZ Failed Links Log\n")
+        queue_path("failed").write_text("# LIZ Failed Links Log\n", encoding="utf-8")
         return len(urls)
 
 

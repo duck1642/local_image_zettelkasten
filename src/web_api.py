@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
-from db.sqlite_operator import init_database
+from db.sqlite_operator import init_database, normalize_source_url
 from utils import get_config, ASSETS_DIR, REVIEW_DIR, note_path_for, asset_path_for
 from processor import process_file
 from logs.logger import log_svelte, log_system, RAW_LOGS_DIR, STRUCTURED_LOGS_DIR
@@ -156,6 +156,9 @@ if REVIEW_DIR.exists():
 
 @app.get("/api/stats")
 async def get_stats():
+    return await asyncio.to_thread(_get_stats_sync)
+
+def _get_stats_sync():
     conn = init_database()
     cursor = conn.cursor()
     try:
@@ -167,6 +170,9 @@ async def get_stats():
 
 @app.get("/api/thumbnails/{item_hash}")
 async def get_thumbnail(item_hash: str):
+    return await asyncio.to_thread(_get_thumbnail_sync, item_hash)
+
+def _get_thumbnail_sync(item_hash: str):
     conn = init_database()
     cursor = conn.cursor()
     try:
@@ -191,6 +197,25 @@ async def get_items(
     wd_tag: str = None,
     cursor: str = None, limit: int = 50
 ):
+    return await asyncio.to_thread(
+        _get_items_sync,
+        field, value, sort, media_type, artist, platform, filename, topic, wd_tag, cursor, limit
+    )
+
+def _item_after_cursor(item: dict, cursor: str, sort: str) -> bool:
+    if not cursor:
+        return True
+    try:
+        cursor_date, cursor_hash = cursor.rsplit("_", 1)
+    except ValueError:
+        cursor_date, cursor_hash = cursor, ""
+    item_key = (str(item.get("date_added") or ""), str(item.get("hash") or ""))
+    cursor_key = (cursor_date, cursor_hash)
+    if sort == "oldest":
+        return item_key > cursor_key
+    return item_key < cursor_key
+
+def _get_items_sync(field, value, sort, media_type, artist, platform, filename, topic, wd_tag, cursor, limit):
     limit = max(1, min(limit, 100))
     conn = init_database()
     cursor_obj = conn.cursor()
@@ -220,7 +245,9 @@ async def get_items(
         elif media_type == 'video':
             conditions.append("mime_type LIKE 'video/%'")
 
-        if cursor:
+        has_frontmatter_filter = topic or wd_tag
+
+        if cursor and not has_frontmatter_filter:
             try:
                 cursor_date, cursor_hash = cursor.rsplit("_", 1)
             except ValueError:
@@ -240,8 +267,7 @@ async def get_items(
         if sort == 'oldest': order_clause = " ORDER BY date_added ASC, hash ASC"
         elif sort == 'artist': order_clause = " ORDER BY source_artist COLLATE NOCASE ASC, date_added DESC"
 
-        has_frontmatter_filter = topic or wd_tag
-        sql_limit = 5000 if has_frontmatter_filter else limit + 1
+        sql_limit = 100000 if has_frontmatter_filter else limit + 1
 
         cursor_obj.execute(f"{base_query}{where_clause}{order_clause} LIMIT {sql_limit}", tuple(params))
         rows = cursor_obj.fetchall()
@@ -280,16 +306,12 @@ async def get_items(
                 "width": row[8], "height": row[9]
             })
 
-            if not has_frontmatter_filter and len(items) >= limit + 1:
-                break
-            if has_frontmatter_filter and len(items) >= 300:
-                break
+        if has_frontmatter_filter and cursor:
+            items = [item for item in items if _item_after_cursor(item, cursor, sort)]
 
-        has_more = len(items) > limit if not has_frontmatter_filter else len(items) >= 300
-        if not has_frontmatter_filter and has_more:
+        has_more = len(items) > limit
+        if has_more:
             items = items[:limit]
-        elif has_frontmatter_filter and len(items) > 300:
-            items = items[:300]
 
         next_cursor = None
         if has_more and items:
@@ -341,6 +363,9 @@ def _get_item_details(h, row):
 
 @app.get("/api/items/{item_hash}")
 async def get_item(item_hash: str):
+    return await asyncio.to_thread(_get_item_sync, item_hash)
+
+def _get_item_sync(item_hash: str):
     conn = init_database()
     cursor = conn.cursor()
     try:
@@ -353,6 +378,9 @@ async def get_item(item_hash: str):
 
 @app.get("/api/items/{item_hash}/path")
 async def get_item_path(item_hash: str):
+    return await asyncio.to_thread(_get_item_path_sync, item_hash)
+
+def _get_item_path_sync(item_hash: str):
     conn = init_database()
     cursor = conn.cursor()
     try:
@@ -373,6 +401,9 @@ class ItemUpdate(BaseModel):
 
 @app.patch("/api/items/{item_hash}")
 async def update_item(item_hash: str, update: ItemUpdate):
+    return await asyncio.to_thread(_update_item_sync, item_hash, update)
+
+def _update_item_sync(item_hash: str, update: ItemUpdate):
     conn = init_database()
     cursor = conn.cursor()
     try:
@@ -382,7 +413,7 @@ async def update_item(item_hash: str, update: ItemUpdate):
         if update.artist is not None:
             cursor.execute("UPDATE items SET source_artist = ? WHERE hash = ?", (update.artist, item_hash))
         if update.source_url is not None:
-            cursor.execute("UPDATE items SET source_url = ? WHERE hash = ?", (update.source_url, item_hash))
+            cursor.execute("UPDATE items SET source_url = ?, source_url_norm = ? WHERE hash = ?", (update.source_url, normalize_source_url(update.source_url), item_hash))
         if update.platform is not None:
             cursor.execute("UPDATE items SET platform = ? WHERE hash = ?", (update.platform, item_hash))
         conn.commit()
@@ -391,7 +422,7 @@ async def update_item(item_hash: str, update: ItemUpdate):
         if md_content:
             note_path = note_path_for(item_hash)
             note_path.parent.mkdir(parents=True, exist_ok=True)
-            note_path.write_text(md_content, encoding="utf-8")
+            atomic_write_text(note_path, md_content)
             
         return {"status": "success"}
     finally:
@@ -399,6 +430,9 @@ async def update_item(item_hash: str, update: ItemUpdate):
 
 @app.delete("/api/items/{item_hash}")
 async def delete_item(item_hash: str):
+    return await asyncio.to_thread(_delete_item_sync, item_hash)
+
+def _delete_item_sync(item_hash: str):
     conn = init_database()
     cursor = conn.cursor()
     cleanup_paths = []
@@ -447,7 +481,7 @@ async def trigger_tagging(item_hash: str):
             if md_content:
                 note_path = note_path_for(item_hash)
                 note_path.parent.mkdir(parents=True, exist_ok=True)
-                note_path.write_text(md_content, encoding="utf-8")
+                atomic_write_text(note_path, md_content)
             
             cursor.execute("SELECT hash, file_extension, mime_type, original_filename, source_url, date_added, platform, source_artist, width, height FROM items WHERE hash = ?", (item_hash,))
             updated_row = cursor.fetchone()
@@ -500,20 +534,30 @@ async def post_ui_log(entry: UILogEntry):
 
 @app.post("/api/logs/open")
 async def open_log_external(filename: str = Query(...)):
+    return await asyncio.to_thread(_open_log_external_sync, filename)
+
+def _open_path_external(path: Path):
+    if os.name == 'nt':
+        os.startfile(str(path))
+    else:
+        import subprocess
+        opener = "open" if os.uname().sysname == "Darwin" else "xdg-open"
+        subprocess.call([opener, str(path)])
+
+def _open_log_external_sync(filename: str):
     log_file = _log_file_for(filename)
         
     if not log_file.exists(): raise HTTPException(status_code=404)
     try:
-        if os.name == 'nt': os.startfile(str(log_file))
-        else:
-            import subprocess
-            opener = "open" if os.uname().sysname == "Darwin" else "xdg-open"
-            subprocess.call([opener, str(log_file)])
+        _open_path_external(log_file)
         return {"status": "opened"}
     except Exception as e: raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/logs/clear")
 async def clear_all_logs():
+    return await asyncio.to_thread(_clear_all_logs_sync)
+
+def _clear_all_logs_sync():
     try:
         for folder in [RAW_LOGS_DIR, STRUCTURED_LOGS_DIR]:
             if folder.exists():
@@ -531,22 +575,34 @@ from queue_service import read_queue, write_queue, queue_counts, INGESTION_LOCK,
 
 @app.get("/api/queue/{queue_name}")
 async def get_queue(queue_name: str):
+    return await asyncio.to_thread(_get_queue_sync, queue_name)
+
+def _get_queue_sync(queue_name: str):
     queue_name = _queue_name(queue_name)
     return {"content": read_queue(queue_name), "count": queue_counts().get(queue_name, 0)}
 
 @app.post("/api/queue/{queue_name}")
 async def save_queue(queue_name: str, update: QueueUpdate):
+    return await asyncio.to_thread(_save_queue_sync, queue_name, update)
+
+def _save_queue_sync(queue_name: str, update: QueueUpdate):
     queue_name = _queue_name(queue_name)
     write_queue(queue_name, update.content)
     return {"status": "success", "count": queue_counts().get(queue_name, 0)}
 
 @app.post("/api/queue/{queue_name}/parse")
 async def parse_queue_content(queue_name: str, update: QueueUpdate):
+    return await asyncio.to_thread(_parse_queue_content_sync, queue_name, update)
+
+def _parse_queue_content_sync(queue_name: str, update: QueueUpdate):
     _queue_name(queue_name)
     return {"count": len(parse_urls(update.content))}
 
 @app.post("/api/queue/actions/clear-failed")
 async def api_clear_failed():
+    return await asyncio.to_thread(_api_clear_failed_sync)
+
+def _api_clear_failed_sync():
     clear_failed()
     return {"status": "success", "counts": queue_counts()}
 
@@ -555,22 +611,24 @@ class RetryFailedBody(BaseModel):
 
 @app.post("/api/queue/actions/retry-failed")
 async def api_retry_failed(body: RetryFailedBody):
+    return await asyncio.to_thread(_api_retry_failed_sync, body)
+
+def _api_retry_failed_sync(body: RetryFailedBody):
     if body.target not in ["normal", "force"]: raise HTTPException(400, "Invalid target")
     moved = move_failed_urls(body.target)
     return {"status": "success", "moved": moved, "counts": queue_counts()}
 
 @app.post("/api/queue/{queue_name}/open")
 async def open_queue_external(queue_name: str):
+    return await asyncio.to_thread(_open_queue_external_sync, queue_name)
+
+def _open_queue_external_sync(queue_name: str):
     queue_name = _queue_name(queue_name)
     path = queue_path(queue_name)
     if not path.exists():
-        read_queue(queue_name) # creates it if missing
+        read_queue(queue_name)
     try:
-        if os.name == 'nt': os.startfile(str(path))
-        else:
-            import subprocess
-            opener = "open" if os.uname().sysname == "Darwin" else "xdg-open"
-            subprocess.call([opener, str(path)])
+        _open_path_external(path)
         return {"status": "opened"}
     except Exception as e: raise HTTPException(status_code=500, detail=str(e))
 
@@ -590,12 +648,16 @@ async def start_ingestion(queue_name: str):
     return {"status": "success"}
 
 @app.get("/api/queue-stats")
-async def get_queue_stats(): return queue_counts()
+async def get_queue_stats(): return await asyncio.to_thread(queue_counts)
 
 @app.get("/api/review")
 async def get_review_items():
+    return await asyncio.to_thread(_get_review_items_sync)
+
+def _get_review_items_sync():
     if not REVIEW_DIR.exists(): return []
     items = []
+    pending = []
     for p in sorted(REVIEW_DIR.iterdir()):
         if p.is_file() and p.suffix.lower() not in [".json", ".md"]:
             meta_path = p.with_suffix(p.suffix + ".json")
@@ -603,21 +665,30 @@ async def get_review_items():
             if meta_path.exists():
                 with open(meta_path, "r", encoding="utf-8") as f: meta = json.load(f)
             best_match = meta.get("best_match")
-            match_data = None
-            if best_match:
-                conn = init_database()
-                try:
-                    cursor = conn.cursor()
-                    cursor.execute("SELECT hash, file_extension, mime_type, source_artist FROM items WHERE hash = ?", (best_match,))
-                    row = cursor.fetchone()
-                    if row: match_data = {"hash": row[0], "url": f"/vault/{row[0][:2]}/{row[0]}{row[1]}" if row[1] else f"/vault/{row[0][:2]}/{row[0]}", "artist": row[3]}
-                finally:
-                    conn.close()
-            items.append({"filename": p.name, "url": f"/review-assets/{p.name}", "metadata": meta, "best_match": match_data})
+            pending.append((p, meta, best_match))
+
+    best_hashes = sorted({best for _, _, best in pending if best})
+    match_map = {}
+    if best_hashes:
+        conn = init_database()
+        try:
+            placeholders = ",".join("?" for _ in best_hashes)
+            cursor = conn.cursor()
+            cursor.execute(f"SELECT hash, file_extension, mime_type, source_artist FROM items WHERE hash IN ({placeholders})", best_hashes)
+            for row in cursor.fetchall():
+                match_map[row[0]] = {"hash": row[0], "url": f"/vault/{row[0][:2]}/{row[0]}{row[1]}" if row[1] else f"/vault/{row[0][:2]}/{row[0]}", "artist": row[3]}
+        finally:
+            conn.close()
+
+    for p, meta, best_match in pending:
+        items.append({"filename": p.name, "url": f"/review-assets/{p.name}", "metadata": meta, "best_match": match_map.get(best_match)})
     return items
 
 @app.post("/api/review/{filename}/action")
 async def review_action(filename: str, action: str):
+    return await asyncio.to_thread(_review_action_sync, filename, action)
+
+def _review_action_sync(filename: str, action: str):
     if action not in {"delete", "keep", "variant"}:
         raise HTTPException(status_code=400, detail="Invalid review action")
     file_path = _review_path(filename)
@@ -635,10 +706,13 @@ async def review_action(filename: str, action: str):
     return {"status": "success"}
 
 @app.get("/api/config")
-async def get_app_config(): return get_config()
+async def get_app_config(): return await asyncio.to_thread(get_config)
 
 @app.post("/api/config")
 async def update_app_config(new_config: dict):
+    return await asyncio.to_thread(_update_app_config_sync, new_config)
+
+def _update_app_config_sync(new_config: dict):
     from utils import CONFIG_PATH
     import yaml
     atomic_write_text(CONFIG_PATH, yaml.dump(new_config, default_flow_style=False, allow_unicode=True))

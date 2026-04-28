@@ -124,7 +124,6 @@ class SearchManager:
                 for f_hash, dist in audio_matches:
                     similarity = 1.0 - dist
                     results.append((f_hash, similarity, "Sonic"))
-                    break
 
 
             if visual_embedding:

@@ -8,7 +8,7 @@ import shutil
 import re
 
 from utils import get_config, QUEUES_DIR, ASSETS_DIR, existing_note_path_for
-from db.sqlite_operator import init_database
+from db.sqlite_operator import init_database, normalize_source_url
 from db.search_manager import search_manager
 from processor import process_file
 from logs.logger import log_ingestion
@@ -381,8 +381,8 @@ class ExternalIngestor:
         conn = init_database()
         try:
             rows = conn.execute(
-                'SELECT hash, file_extension FROM items WHERE LOWER(source_url) = LOWER(?)',
-                (url.strip(),)
+                'SELECT hash, file_extension FROM items WHERE source_url_norm = ?',
+                (normalize_source_url(url),)
             ).fetchall()
 
             if not rows:

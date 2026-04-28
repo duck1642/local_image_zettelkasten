@@ -2,7 +2,24 @@
 import sqlite3
 from pathlib import Path
 from datetime import datetime
+from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 from utils import DB_PATH
+
+
+def normalize_source_url(url: str) -> str:
+
+    if not url:
+        return ""
+    raw = str(url).strip()
+    try:
+        parsed = urlsplit(raw)
+    except ValueError:
+        return raw.lower()
+    scheme = (parsed.scheme or "https").lower()
+    host = parsed.netloc.lower()
+    path = parsed.path.rstrip("/")
+    query = urlencode(sorted(parse_qsl(parsed.query, keep_blank_values=True)))
+    return urlunsplit((scheme, host, path, query, ""))
 
 def init_database():
 
@@ -21,6 +38,7 @@ def init_database():
             size_bytes INTEGER,
             date_added DATETIME DEFAULT CURRENT_TIMESTAMP,
             source_url TEXT,
+            source_url_norm TEXT,
             platform TEXT,
             source_artist TEXT,
             phash TEXT,
@@ -58,6 +76,16 @@ def init_database():
         cursor.execute("ALTER TABLE items ADD COLUMN width INTEGER")
     if 'height' not in columns:
         cursor.execute("ALTER TABLE items ADD COLUMN height INTEGER")
+    if 'source_url_norm' not in columns:
+        cursor.execute("ALTER TABLE items ADD COLUMN source_url_norm TEXT")
+
+    cursor.execute('SELECT hash, source_url FROM items WHERE source_url IS NOT NULL AND source_url != "" AND (source_url_norm IS NULL OR source_url_norm = "")')
+    rows = cursor.fetchall()
+    cursor.executemany(
+        'UPDATE items SET source_url_norm = ? WHERE hash = ?',
+        [(normalize_source_url(source_url), file_hash) for file_hash, source_url in rows]
+    )
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_source_url_norm ON items(source_url_norm)')
 
     conn.commit()
     return conn
@@ -87,6 +115,9 @@ def get_all_tiles(conn: sqlite3.Connection) -> list[tuple[str, int, str]]:
     return cursor.fetchall()
 
 def insert_tiles(conn: sqlite3.Connection, parent_hash: str, tiles: list[tuple[int, str]]):
+
+    if not tiles:
+        return
 
     cursor = conn.cursor()
 
@@ -125,12 +156,13 @@ def check_duplicate_url(conn: sqlite3.Connection, url: str) -> bool:
 
     if not url: return False
     cursor = conn.cursor()
-    cursor.execute('SELECT 1 FROM items WHERE LOWER(source_url) = LOWER(?)', (url.strip(),))
+    cursor.execute('SELECT 1 FROM items WHERE source_url_norm = ?', (normalize_source_url(url),))
     return cursor.fetchone() is not None
 
 def insert_to_database(conn: sqlite3.Connection, filepath: Path, file_hash: str, mime_type: str, target_ext: str, metadata: dict = None, file_size: int = None, timestamp: datetime = None, phash: str = None, audio_hash: bytes = None, visual_embedding: bytes = None, width: int = None, height: int = None):
     metadata = metadata or {}
     source_url = metadata.get('source_url', "")
+    source_url_norm = normalize_source_url(source_url)
     platform = metadata.get('platform', "")
     source_artist = metadata.get('artist', "")
 
@@ -143,8 +175,8 @@ def insert_to_database(conn: sqlite3.Connection, filepath: Path, file_hash: str,
     cursor = conn.cursor()
     cursor.execute('''
         INSERT INTO items
-        (hash, original_filename, file_extension, mime_type, size_bytes, date_added, source_url, platform, source_artist, phash, audio_hash, visual_embedding, width, height)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (hash, original_filename, file_extension, mime_type, size_bytes, date_added, source_url, source_url_norm, platform, source_artist, phash, audio_hash, visual_embedding, width, height)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(hash) DO UPDATE SET
             original_filename = excluded.original_filename,
             file_extension = excluded.file_extension,
@@ -152,6 +184,7 @@ def insert_to_database(conn: sqlite3.Connection, filepath: Path, file_hash: str,
             size_bytes = excluded.size_bytes,
             date_added = excluded.date_added,
             source_url = excluded.source_url,
+            source_url_norm = excluded.source_url_norm,
             platform = excluded.platform,
             source_artist = excluded.source_artist,
             phash = excluded.phash,
@@ -167,6 +200,7 @@ def insert_to_database(conn: sqlite3.Connection, filepath: Path, file_hash: str,
         file_size,
         timestamp,
         source_url,
+        source_url_norm,
         platform,
         source_artist,
         phash,

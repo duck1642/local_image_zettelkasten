@@ -16,7 +16,7 @@ dependencies = [
     "imagehash",
     "numpy",
     "onnxruntime>=1.17.0",
-    "pillow",
+    "pillow>=9.0.0",
     "playwright",
     "pyyaml",
     "sentence-transformers",

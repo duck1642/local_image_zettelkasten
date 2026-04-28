@@ -150,66 +150,6 @@ class BKTreeSearcher(BaseSearcher):
 
         return sorted(results, key=lambda x: x[1])
 
-class FlatVectorSearcher(BaseSearcher):
-
-    def __init__(self):
-        import numpy as np
-        self.np = np
-        self.hashes = []
-        self.matrix = None
-        self._pending_vectors = []
-
-    def add(self, item_hash: str, vector_bytes: bytes):
-
-        if not vector_bytes: return
-
-        vector = self.np.frombuffer(vector_bytes, dtype=self.np.float32).copy()
-
-        norm = self.np.linalg.norm(vector)
-        if norm > 0:
-            vector = vector / norm
-
-        self.hashes.append(item_hash)
-
-        if self.matrix is not None:
-
-            self.matrix = self.np.vstack([self.matrix, vector.reshape(1, -1)])
-        else:
-
-            self._pending_vectors.append(vector)
-
-    def build_index(self):
-
-        if self._pending_vectors:
-            self.matrix = self.np.array(self._pending_vectors)
-            self._pending_vectors = []
-
-    def query(self, query_vector_bytes: bytes, threshold: float = 0.08) -> List[Tuple[str, float]]:
-
-
-        if self._pending_vectors:
-            self.build_index()
-
-        if self.matrix is None or not query_vector_bytes:
-            return []
-
-        query_vec = self.np.frombuffer(query_vector_bytes, dtype=self.np.float32)
-        q_norm = self.np.linalg.norm(query_vec)
-        if q_norm == 0: return []
-        query_vec = query_vec / q_norm
-
-
-        similarities = self.np.dot(self.matrix, query_vec)
-        distances = 1.0 - similarities
-
-        results = []
-        match_indices = self.np.where(distances <= threshold)[0]
-
-        for idx in match_indices:
-            results.append((self.hashes[idx], float(distances[idx])))
-
-        return sorted(results, key=lambda x: x[1])
-
 class URLRegistry:
 
     def __init__(self):
@@ -217,12 +157,14 @@ class URLRegistry:
 
     def add(self, url: str):
         if url:
-            self.seen_urls.add(url.strip().lower())
+            from db.sqlite_operator import normalize_source_url
+            self.seen_urls.add(normalize_source_url(url))
 
     def exists(self, url: str) -> bool:
         if not url:
             return False
-        return url.strip().lower() in self.seen_urls
+        from db.sqlite_operator import normalize_source_url
+        return normalize_source_url(url) in self.seen_urls
 
     def count(self) -> int:
         return len(self.seen_urls)

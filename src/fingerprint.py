@@ -102,19 +102,26 @@ def sample_video_timestamps(duration: float, frame_count: int = 5) -> list[float
 
 def extract_video_frame(video_path: Path, timestamp: float) -> Image.Image:
 
-    frame_cmd = [
-        'ffmpeg', '-y', '-ss', f"{timestamp:.3f}", '-i', str(video_path),
-        '-frames:v', '1', '-f', 'image2pipe', '-vcodec', 'png', '-'
-    ]
-    frame_proc = subprocess.run(frame_cmd, capture_output=True, check=True, timeout=60)
-    return Image.open(BytesIO(frame_proc.stdout)).convert('RGB')
+    try:
+        frame_cmd = [
+            'ffmpeg', '-y', '-ss', f"{timestamp:.3f}", '-i', str(video_path),
+            '-frames:v', '1', '-f', 'image2pipe', '-vcodec', 'png', '-'
+        ]
+        frame_proc = subprocess.run(frame_cmd, capture_output=True, check=True, timeout=60)
+        return Image.open(BytesIO(frame_proc.stdout)).convert('RGB')
+    except Exception as exc:
+        from logs.logger import log_system
+        log_system("WARNING", "Video frame extraction failed", file=str(video_path), timestamp=timestamp, error=str(exc))
+        return None
 
 def extract_sampled_video_frames(video_path: Path, frame_count: int = 5) -> list[tuple[float, Image.Image]]:
 
     duration = get_video_duration(video_path)
     frames = []
     for timestamp in sample_video_timestamps(duration, frame_count):
-        frames.append((timestamp, extract_video_frame(video_path, timestamp)))
+        image = extract_video_frame(video_path, timestamp)
+        if image is not None:
+            frames.append((timestamp, image))
     return frames
 
 def get_visual_embedding(video_path: Path) -> bytes:
