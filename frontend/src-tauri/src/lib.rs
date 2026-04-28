@@ -1,6 +1,15 @@
+#[tauri::command]
+fn copy_file_to_clipboard(path: String) -> Result<(), String> {
+    use clipboard_win::{formats, Clipboard, Setter};
+    let paths = vec![path];
+    let _clip = Clipboard::new_attempts(10).map_err(|e| e.to_string())?;
+    formats::FileList.write_clipboard(&paths.as_slice()).map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
+    .invoke_handler(tauri::generate_handler![copy_file_to_clipboard])
     .plugin(tauri_plugin_shell::init())
     .plugin(tauri_plugin_log::Builder::default()
         .targets([

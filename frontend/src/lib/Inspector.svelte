@@ -1,7 +1,8 @@
 <script lang="ts">
   import type { VaultItem } from './types';
   import { createEventDispatcher } from 'svelte';
-  import { open } from '@tauri-apps/plugin-shell';
+  import { open, Command } from '@tauri-apps/plugin-shell';
+  import { invoke } from '@tauri-apps/api/core';
   import { log as uiLog } from './logger';
   import { apiFetch } from './api';
 
@@ -114,23 +115,29 @@
     try {
         const res = await fetch(`http://localhost:8000/api/items/${item.hash}/path`);
         const data = await res.json();
-        await open(data.absolute_path, 'explorer');
-        uiLog('INFO', `Opened folder for ${item.hash.substring(0, 12)}`);
+        await Command.create('explorer', ['/select,', data.absolute_path]).execute();
+        uiLog('INFO', `Opened folder and selected ${item.hash.substring(0, 12)}`);
     } catch (e) { uiLog('ERROR', 'Failed to open folder', { error: String(e) }); }
   }
 
-  async function openSource() {
-    if (!sourceUrl) return;
+  async function openMarkdown() {
+    if (!item) return;
     try {
-        await open(sourceUrl);
-        uiLog('INFO', `Opened source URL: ${sourceUrl}`);
-    } catch (e) { uiLog('ERROR', 'Failed to open source URL', { error: String(e) }); }
+        const res = await fetch(`http://localhost:8000/api/items/${item.hash}/note_path`);
+        const data = await res.json();
+        await open(data.absolute_path);
+        uiLog('INFO', `Opened markdown note for ${item.hash.substring(0, 12)}`);
+    } catch (e) { uiLog('ERROR', 'Failed to open markdown', { error: String(e) }); }
   }
 
-  function copyData() {
-      if (!fullItem) return;
-      navigator.clipboard.writeText(JSON.stringify(fullItem, null, 2));
-      uiLog('INFO', `Data for ${item.hash.substring(0, 12)} copied to clipboard`);
+  async function copyFile() {
+      if (!item) return;
+      try {
+          const res = await fetch(`http://localhost:8000/api/items/${item.hash}/path`);
+          const data = await res.json();
+          await invoke('copy_file_to_clipboard', { path: data.absolute_path });
+          uiLog('INFO', `File copied to clipboard: ${item.hash.substring(0, 12)}`);
+      } catch (e) { uiLog('ERROR', 'Failed to copy file', { error: String(e) }); }
   }
 
   async function deleteData() {
@@ -149,8 +156,9 @@
 
   function copyHash() {
     if (!item) return;
-    navigator.clipboard.writeText(item.hash);
-    uiLog('DEBUG', 'Hash copied to clipboard');
+    navigator.clipboard.writeText(item.hash)
+        .then(() => uiLog('DEBUG', 'Hash copied to clipboard'))
+        .catch(e => uiLog('ERROR', 'Failed to copy hash', { error: String(e) }));
   }
 
   function toggleFocus(mode: 'wide' | 'fullscreen') {
@@ -237,8 +245,8 @@
 
     <div class="group-container horizontal action-row">
         <button class="flex-grow" on:click={openFolder}>Open Folder</button>
-        <button class="flex-grow" on:click={openSource} disabled={!sourceUrl}>Open Source</button>
-        <button class="flex-grow" on:click={copyData}>Copy Data</button>
+        <button class="flex-grow" on:click={openMarkdown}>Open Note</button>
+        <button class="flex-grow" on:click={copyFile}>Copy File</button>
         <button class="flex-grow delete-btn" on:click={deleteData}>Delete Data</button>
     </div>
 

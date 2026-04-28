@@ -393,6 +393,22 @@ def _get_item_path_sync(item_hash: str):
     finally:
         conn.close()
 
+@app.get("/api/items/{item_hash}/note_path")
+async def get_item_note_path(item_hash: str):
+    return await asyncio.to_thread(_get_item_note_path_sync, item_hash)
+
+def _get_item_note_path_sync(item_hash: str):
+    conn = init_database()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT hash FROM items WHERE hash = ?", (item_hash,))
+        row = cursor.fetchone()
+        if not row: raise HTTPException(status_code=404)
+        path = note_path_for(item_hash)
+        return {"absolute_path": str(path.resolve())}
+    finally:
+        conn.close()
+
 class ItemUpdate(BaseModel):
     artist: str = None
     source_url: str = None
