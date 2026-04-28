@@ -3,36 +3,42 @@ import sys
 import json
 import asyncio
 import traceback
+import secrets
+import threading
 from pathlib import Path
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from db.sqlite_operator import init_database
-from utils import VAULT_DIR, DB_PATH, get_config, ASSETS_DIR, LOGS_DIR, REVIEW_DIR, note_path_for, asset_path_for
+from utils import get_config, ASSETS_DIR, REVIEW_DIR, note_path_for, asset_path_for
 from processor import process_file
-from logs.logger import log_svelte, log_system, log_ingestion, RAW_LOGS_DIR, STRUCTURED_LOGS_DIR
+from logs.logger import log_svelte, log_system, RAW_LOGS_DIR, STRUCTURED_LOGS_DIR
 from md_generator import load_note_topics, load_note_wd_tags, generate_markdown
 from tagging import load_tag_cache, tag_media
 from thumbnails import get_or_generate_thumbnail
+from utils import SECRETS_DIR, WD_TAGS_DIR, atomic_write_text
 
-# --- TERMINAL LOG REDIRECTION ---
-# This ensures raw terminal output (like tracebacks) goes to a log file
 class TerminalLogger:
     def __init__(self, filename, original_stream):
         self.terminal = original_stream
         self.log_path = RAW_LOGS_DIR / filename
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.Lock()
+        self._handle = open(self.log_path, "a", encoding="utf-8")
 
     def write(self, message):
         self.terminal.write(message)
-        with open(self.log_path, "a", encoding="utf-8") as f:
-            f.write(message)
+        with self._lock:
+            self._handle.write(message)
+            self._handle.flush()
 
     def flush(self):
         self.terminal.flush()
+        with self._lock:
+            self._handle.flush()
 
     def isatty(self):
         return hasattr(self.terminal, 'isatty') and self.terminal.isatty()
@@ -40,27 +46,113 @@ class TerminalLogger:
     def __getattr__(self, attr):
         return getattr(self.terminal, attr)
 
-# Redirect both stdout and stderr to terminal.log
 sys.stdout = TerminalLogger("terminal.log", sys.stdout)
 sys.stderr = TerminalLogger("terminal.log", sys.stderr)
 
 app = FastAPI(title="LIZ API")
 
-# Enable CORS
+ALLOWED_ORIGINS = {
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "tauri://localhost",
+    "http://tauri.localhost",
+    "https://tauri.localhost",
+}
+
+MUTATING_METHODS = {"POST", "PATCH", "DELETE"}
+LOG_FILES = {
+    "system.jsonl": STRUCTURED_LOGS_DIR / "system.jsonl",
+    "svelte.jsonl": STRUCTURED_LOGS_DIR / "svelte.jsonl",
+    "ingestion.jsonl": STRUCTURED_LOGS_DIR / "ingestion.jsonl",
+    "activity.jsonl": STRUCTURED_LOGS_DIR / "activity.jsonl",
+    "terminal.log": RAW_LOGS_DIR / "terminal.log",
+}
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=sorted(ALLOWED_ORIGINS),
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Static mounts
+def _api_key_path() -> Path:
+    return SECRETS_DIR / ".api_key"
+
+def _api_key() -> str:
+    path = _api_key_path()
+    if path.exists():
+        value = path.read_text(encoding="utf-8").strip()
+        if value:
+            return value
+    value = secrets.token_urlsafe(32)
+    atomic_write_text(path, value)
+    return value
+
+def _validate_origin(origin: str | None):
+    if origin and origin not in ALLOWED_ORIGINS:
+        raise HTTPException(status_code=403, detail="Origin not allowed")
+
+def _require_api_key(request: Request):
+    provided = request.headers.get("X-LIZ-API-KEY", "")
+    expected = _api_key()
+    if not secrets.compare_digest(provided, expected):
+        raise HTTPException(status_code=403, detail="Invalid API key")
+
+def _log_file_for(filename: str) -> Path:
+    if filename not in LOG_FILES:
+        raise HTTPException(status_code=400, detail="Invalid log file")
+    return LOG_FILES[filename]
+
+def _queue_name(queue_name: str, allow_failed: bool = True) -> str:
+    allowed = {"normal", "force", "failed"} if allow_failed else {"normal", "force"}
+    if queue_name not in allowed:
+        raise HTTPException(status_code=400, detail="Invalid queue")
+    return queue_name
+
+def _review_path(filename: str) -> Path:
+    if Path(filename).name != filename:
+        raise HTTPException(status_code=400, detail="Invalid review filename")
+    path = (REVIEW_DIR / filename).resolve()
+    review_root = REVIEW_DIR.resolve()
+    if path.parent != review_root:
+        raise HTTPException(status_code=400, detail="Invalid review filename")
+    return path
+
+def _tail_lines(path: Path, count: int = 150) -> list[str]:
+    if not path.exists():
+        return []
+    with path.open("rb") as handle:
+        handle.seek(0, os.SEEK_END)
+        end = handle.tell()
+        block_size = 8192
+        data = b""
+        position = end
+        while position > 0 and data.count(b"\n") <= count:
+            read_size = min(block_size, position)
+            position -= read_size
+            handle.seek(position)
+            data = handle.read(read_size) + data
+        return data.decode("utf-8", errors="replace").splitlines()[-count:]
+
+@app.middleware("http")
+async def local_api_guard(request: Request, call_next):
+    if request.method in MUTATING_METHODS:
+        try:
+            _validate_origin(request.headers.get("origin"))
+            _require_api_key(request)
+        except HTTPException as exc:
+            return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+    return await call_next(request)
+
+@app.get("/api/session-key")
+async def get_session_key(request: Request):
+    _validate_origin(request.headers.get("origin"))
+    return {"key": _api_key()}
+
 if ASSETS_DIR.exists():
     app.mount("/vault", StaticFiles(directory=str(ASSETS_DIR)), name="vault")
 if REVIEW_DIR.exists():
     app.mount("/review-assets", StaticFiles(directory=str(REVIEW_DIR)), name="review-assets")
-
-# --- CORE LOGIC ENDPOINTS ---
 
 @app.get("/api/stats")
 async def get_stats():
@@ -284,6 +376,9 @@ async def update_item(item_hash: str, update: ItemUpdate):
     conn = init_database()
     cursor = conn.cursor()
     try:
+        cursor.execute("SELECT 1 FROM items WHERE hash = ?", (item_hash,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404)
         if update.artist is not None:
             cursor.execute("UPDATE items SET source_artist = ? WHERE hash = ?", (update.artist, item_hash))
         if update.source_url is not None:
@@ -306,24 +401,25 @@ async def update_item(item_hash: str, update: ItemUpdate):
 async def delete_item(item_hash: str):
     conn = init_database()
     cursor = conn.cursor()
+    cleanup_paths = []
     try:
         cursor.execute("SELECT file_extension, mime_type FROM items WHERE hash = ?", (item_hash,))
         row = cursor.fetchone()
         if not row: raise HTTPException(status_code=404)
 
-        # Using utils instead of ui
         asset_path = asset_path_for(item_hash, row[0] or "", row[1] or "")
-        if asset_path.exists(): asset_path.unlink()
-
         note_path = note_path_for(item_hash)
-        if note_path.exists(): note_path.unlink()
-
-        from utils import WD_TAGS_DIR
         tags_path = WD_TAGS_DIR / item_hash[:2] / f"{item_hash}.json"
-        if tags_path.exists(): tags_path.unlink()
+        cleanup_paths = [asset_path, note_path, tags_path]
 
         cursor.execute("DELETE FROM items WHERE hash = ?", (item_hash,))
         conn.commit()
+        for path in cleanup_paths:
+            try:
+                if path.exists():
+                    path.unlink()
+            except OSError as exc:
+                log_system("WARNING", "Deleted DB row but file cleanup failed", hash=item_hash, path=str(path), error=str(exc))
         log_system("INFO", f"Deleted item {item_hash}")
         return {"status": "success"}
     finally:
@@ -337,11 +433,12 @@ async def trigger_tagging(item_hash: str):
         try:
             cursor.execute("SELECT file_extension, mime_type FROM items WHERE hash = ?", (item_hash,))
             row = cursor.fetchone()
-            if not row: return None
+            if not row:
+                raise HTTPException(status_code=404)
             
-            # Using utils instead of ui
             asset_path = asset_path_for(item_hash, row[0] or "", row[1] or "")
-            if not asset_path.exists(): return None
+            if not asset_path.exists():
+                raise HTTPException(status_code=404, detail="Asset missing")
 
             log_system("INFO", f"Triggering AI tagging for {item_hash}")
             tag_media(asset_path, item_hash=item_hash, config=get_config())
@@ -360,29 +457,23 @@ async def trigger_tagging(item_hash: str):
 
     try:
         return await asyncio.to_thread(sync_tagging)
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"!!! TAGGING CRASH !!!\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# --- LOGGING ENDPOINTS ---
-
 @app.get("/api/logs")
 async def stream_logs(filename: str = Query("system.jsonl")):
-    if filename.endswith(".jsonl"):
-        log_file = STRUCTURED_LOGS_DIR / filename
-    else:
-        log_file = RAW_LOGS_DIR / filename
+    log_file = _log_file_for(filename)
 
     if not log_file.exists():
         log_file.parent.mkdir(parents=True, exist_ok=True)
         log_file.touch()
     
     async def log_generator():
-        # Last 150 lines for terminal
-        with open(log_file, "r", encoding="utf-8", errors="replace") as f:
-            lines = f.readlines()
-            for line in lines[-150:]:
-                yield f"data: {line}\n\n"
+        for line in _tail_lines(log_file, 150):
+            yield f"data: {line}\n\n"
 
         try:
             with open(log_file, "r", encoding="utf-8", errors="replace") as f:
@@ -409,10 +500,7 @@ async def post_ui_log(entry: UILogEntry):
 
 @app.post("/api/logs/open")
 async def open_log_external(filename: str = Query(...)):
-    if filename.endswith(".jsonl"):
-        log_file = STRUCTURED_LOGS_DIR / filename
-    else:
-        log_file = RAW_LOGS_DIR / filename
+    log_file = _log_file_for(filename)
         
     if not log_file.exists(): raise HTTPException(status_code=404)
     try:
@@ -437,22 +525,24 @@ async def clear_all_logs():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# --- QUEUE & INGESTION ---
 class QueueUpdate(BaseModel):
     content: str
 from queue_service import read_queue, write_queue, queue_counts, INGESTION_LOCK, run_queue, clear_failed, move_failed_urls, parse_urls, queue_path
 
 @app.get("/api/queue/{queue_name}")
 async def get_queue(queue_name: str):
+    queue_name = _queue_name(queue_name)
     return {"content": read_queue(queue_name), "count": queue_counts().get(queue_name, 0)}
 
 @app.post("/api/queue/{queue_name}")
 async def save_queue(queue_name: str, update: QueueUpdate):
+    queue_name = _queue_name(queue_name)
     write_queue(queue_name, update.content)
     return {"status": "success", "count": queue_counts().get(queue_name, 0)}
 
 @app.post("/api/queue/{queue_name}/parse")
 async def parse_queue_content(queue_name: str, update: QueueUpdate):
+    _queue_name(queue_name)
     return {"count": len(parse_urls(update.content))}
 
 @app.post("/api/queue/actions/clear-failed")
@@ -471,6 +561,7 @@ async def api_retry_failed(body: RetryFailedBody):
 
 @app.post("/api/queue/{queue_name}/open")
 async def open_queue_external(queue_name: str):
+    queue_name = _queue_name(queue_name)
     path = queue_path(queue_name)
     if not path.exists():
         read_queue(queue_name) # creates it if missing
@@ -485,18 +576,22 @@ async def open_queue_external(queue_name: str):
 
 @app.post("/api/ingest/{queue_name}")
 async def start_ingestion(queue_name: str):
-    if INGESTION_LOCK.locked(): return {"status": "error", "message": "Already running"}
+    queue_name = _queue_name(queue_name, allow_failed=False)
+    if not INGESTION_LOCK.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="Already running")
     def run_in_background():
-        with INGESTION_LOCK:
-            try: run_queue(queue_name)
-            except Exception as e: print(e)
+        try:
+            run_queue(queue_name)
+        except Exception as e:
+            log_system("ERROR", "Ingestion worker crashed", error=str(e), traceback=traceback.format_exc())
+        finally:
+            INGESTION_LOCK.release()
     asyncio.get_running_loop().run_in_executor(None, run_in_background)
     return {"status": "success"}
 
 @app.get("/api/queue-stats")
 async def get_queue_stats(): return queue_counts()
 
-# --- REVIEW ---
 @app.get("/api/review")
 async def get_review_items():
     if not REVIEW_DIR.exists(): return []
@@ -523,7 +618,9 @@ async def get_review_items():
 
 @app.post("/api/review/{filename}/action")
 async def review_action(filename: str, action: str):
-    file_path = REVIEW_DIR / filename
+    if action not in {"delete", "keep", "variant"}:
+        raise HTTPException(status_code=400, detail="Invalid review action")
+    file_path = _review_path(filename)
     if not file_path.exists(): raise HTTPException(status_code=404)
     if action == "delete":
         file_path.unlink()
@@ -537,7 +634,6 @@ async def review_action(filename: str, action: str):
         process_file(file_path, get_config(), metadata=meta, delete_source=True)
     return {"status": "success"}
 
-# --- CONFIG ---
 @app.get("/api/config")
 async def get_app_config(): return get_config()
 
@@ -545,8 +641,7 @@ async def get_app_config(): return get_config()
 async def update_app_config(new_config: dict):
     from utils import CONFIG_PATH
     import yaml
-    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-        yaml.dump(new_config, f, default_flow_style=False, allow_unicode=True)
+    atomic_write_text(CONFIG_PATH, yaml.dump(new_config, default_flow_style=False, allow_unicode=True))
     return {"status": "success"}
 
 @app.get("/")

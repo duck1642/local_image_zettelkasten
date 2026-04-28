@@ -13,8 +13,6 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 class JSONFormatter(logging.Formatter):
     def format(self, record):
-        # Use the logger name (e.g. liz_system -> system) instead of record.module
-        # which always resolves to 'logger' since all calls go through this file
         module_name = record.name.replace('liz_', '') if record.name.startswith('liz_') else record.name
         log_record = {
             "timestamp": datetime.datetime.fromtimestamp(record.created).strftime("%Y-%m-%d %H:%M:%S"),
@@ -23,7 +21,11 @@ class JSONFormatter(logging.Formatter):
             "message": record.getMessage()
         }
         if hasattr(record, 'extra_data') and isinstance(record.extra_data, dict):
-            log_record.update(record.extra_data)
+            for key, value in record.extra_data.items():
+                safe_key = key if key not in log_record else f"extra_{key}"
+                log_record[safe_key] = value
+        if record.exc_info:
+            log_record["exception"] = self.formatException(record.exc_info)
         return json.dumps(log_record)
 
 # 1. System Logger (The Brain / FastAPI)
@@ -49,15 +51,21 @@ if not ingestion_logger.handlers: ingestion_logger.addHandler(ingestion_handler)
 
 # --- Helper Functions ---
 
+def _log(logger, level, message, **kwargs):
+    level_name = str(level or "INFO").upper()
+    if level_name not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
+        level_name = "INFO"
+        kwargs = {"invalid_level": level, **kwargs}
+    logger.log(getattr(logging, level_name), message, extra={"extra_data": kwargs} if kwargs else {})
+
 def log_system(level, message, **kwargs):
-    getattr(system_logger, level.lower(), system_logger.info)(message, extra={"extra_data": kwargs} if kwargs else {})
+    _log(system_logger, level, message, **kwargs)
 
 def log_svelte(level, message, **kwargs):
-    getattr(svelte_logger, level.lower(), svelte_logger.info)(message, extra={"extra_data": kwargs} if kwargs else {})
+    _log(svelte_logger, level, message, **kwargs)
 
 def log_ingestion(level, message, **kwargs):
-    extra = {"extra_data": kwargs} if kwargs else {}
-    getattr(ingestion_logger, level.lower(), ingestion_logger.info)(message, extra=extra)
+    _log(ingestion_logger, level, message, **kwargs)
 
 # activity logging remains unchanged
 activity_logger = logging.getLogger("liz_activity")

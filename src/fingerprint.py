@@ -26,7 +26,7 @@ def is_silent(video_path: Path, threshold_db: float = -60.0) -> bool:
             '-f', 'null', '-'
         ]
 
-        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        result = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=60)
 
 
         import re
@@ -53,7 +53,8 @@ def get_audio_fingerprint(video_path: Path) -> bytes:
             ['fpcalc', '-raw', '-json', '-length', '120', str(video_path)],
             capture_output=True,
             text=True,
-            check=False
+            check=False,
+            timeout=120
         )
 
         if result.stdout:
@@ -74,7 +75,8 @@ def get_video_duration(video_path: Path) -> float:
             ['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', str(video_path)],
             capture_output=True,
             text=True,
-            check=False
+            check=False,
+            timeout=30
         )
         if probe.returncode != 0:
             from logs.logger import log_system
@@ -104,7 +106,7 @@ def extract_video_frame(video_path: Path, timestamp: float) -> Image.Image:
         'ffmpeg', '-y', '-ss', f"{timestamp:.3f}", '-i', str(video_path),
         '-frames:v', '1', '-f', 'image2pipe', '-vcodec', 'png', '-'
     ]
-    frame_proc = subprocess.run(frame_cmd, capture_output=True, check=True)
+    frame_proc = subprocess.run(frame_cmd, capture_output=True, check=True, timeout=60)
     return Image.open(BytesIO(frame_proc.stdout)).convert('RGB')
 
 def extract_sampled_video_frames(video_path: Path, frame_count: int = 5) -> list[tuple[float, Image.Image]]:
@@ -180,6 +182,8 @@ def compare_embeddings(emb1_bytes: bytes, emb2_bytes: bytes) -> float:
     emb1 = np.frombuffer(emb1_bytes, dtype=np.float32)
     emb2 = np.frombuffer(emb2_bytes, dtype=np.float32)
 
+    if len(emb1) != len(emb2) or len(emb1) == 0:
+        return 0.0
 
     dot_product = np.dot(emb1, emb2)
     norm1 = np.linalg.norm(emb1)

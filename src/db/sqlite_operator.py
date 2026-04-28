@@ -25,7 +25,9 @@ def init_database():
             source_artist TEXT,
             phash TEXT,
             audio_hash BLOB,
-            visual_embedding BLOB
+            visual_embedding BLOB,
+            width INTEGER,
+            height INTEGER
         )
     ''')
 
@@ -95,7 +97,7 @@ def insert_tiles(conn: sqlite3.Connection, parent_hash: str, tiles: list[tuple[i
         VALUES (?, ?, ?)
     ''', [(parent_hash, index, phash) for index, phash in tiles])
 
-def get_all_video_signatures(conn: sqlite3.Connection) -> list[tuple[str, str, bytes]]:
+def get_all_video_signatures(conn: sqlite3.Connection) -> list[tuple[str, bytes, bytes]]:
 
     cursor = conn.cursor()
     cursor.execute('SELECT hash, audio_hash, visual_embedding FROM items WHERE audio_hash IS NOT NULL OR visual_embedding IS NOT NULL')
@@ -104,14 +106,20 @@ def get_all_video_signatures(conn: sqlite3.Connection) -> list[tuple[str, str, b
 def reset_database():
 
     conn = sqlite3.connect(DB_PATH, timeout=5)
-    cursor = conn.cursor()
-    cursor.execute('DROP TABLE IF EXISTS item_tiles')
-    cursor.execute('DROP TABLE IF EXISTS items')
-    conn.commit()
-    conn.close()
-    conn = init_database()
-    conn.close()
-    print("Y1 Database reset complete: All records cleared.")
+    try:
+        cursor = conn.cursor()
+        cursor.execute('PRAGMA foreign_keys = ON;')
+        cursor.execute('BEGIN IMMEDIATE')
+        cursor.execute('DROP TABLE IF EXISTS item_tiles')
+        cursor.execute('DROP TABLE IF EXISTS items')
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    with init_database() as conn:
+        conn.commit()
 
 def check_duplicate_url(conn: sqlite3.Connection, url: str) -> bool:
 
@@ -120,7 +128,7 @@ def check_duplicate_url(conn: sqlite3.Connection, url: str) -> bool:
     cursor.execute('SELECT 1 FROM items WHERE LOWER(source_url) = LOWER(?)', (url.strip(),))
     return cursor.fetchone() is not None
 
-def insert_to_database(conn: sqlite3.Connection, filepath: Path, file_hash: str, mime_type: str, target_ext: str, metadata: dict = None, file_size: int = None, timestamp: datetime = None, phash: str = None, audio_hash: str = None, visual_embedding: bytes = None, width: int = None, height: int = None):
+def insert_to_database(conn: sqlite3.Connection, filepath: Path, file_hash: str, mime_type: str, target_ext: str, metadata: dict = None, file_size: int = None, timestamp: datetime = None, phash: str = None, audio_hash: bytes = None, visual_embedding: bytes = None, width: int = None, height: int = None):
     metadata = metadata or {}
     source_url = metadata.get('source_url', "")
     platform = metadata.get('platform', "")
@@ -134,9 +142,23 @@ def insert_to_database(conn: sqlite3.Connection, filepath: Path, file_hash: str,
 
     cursor = conn.cursor()
     cursor.execute('''
-        INSERT OR REPLACE INTO items
+        INSERT INTO items
         (hash, original_filename, file_extension, mime_type, size_bytes, date_added, source_url, platform, source_artist, phash, audio_hash, visual_embedding, width, height)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(hash) DO UPDATE SET
+            original_filename = excluded.original_filename,
+            file_extension = excluded.file_extension,
+            mime_type = excluded.mime_type,
+            size_bytes = excluded.size_bytes,
+            date_added = excluded.date_added,
+            source_url = excluded.source_url,
+            platform = excluded.platform,
+            source_artist = excluded.source_artist,
+            phash = excluded.phash,
+            audio_hash = excluded.audio_hash,
+            visual_embedding = excluded.visual_embedding,
+            width = excluded.width,
+            height = excluded.height
     ''', (
         file_hash,
         filepath.name,

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { log as uiLog } from './logger';
+  import { apiFetch } from './api';
 
   let currentQueue: 'normal' | 'force' | 'failed' = 'normal';
   let queueContent = '';
@@ -61,7 +62,7 @@
   async function saveQueue() {
     saving = true;
     try {
-      await fetch(`http://localhost:8000/api/queue/${currentQueue}`, {
+      await apiFetch(`/api/queue/${currentQueue}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content: queueContent })
@@ -81,7 +82,7 @@
     running = true;
     uiLog('INFO', `Starting ingestion for queue: ${currentQueue}`);
     try {
-      await fetch(`http://localhost:8000/api/ingest/${currentQueue}`, { method: 'POST' });
+      await apiFetch(`/api/ingest/${currentQueue}`, { method: 'POST' });
     } finally { 
         setTimeout(() => running = false, 5000); 
     }
@@ -92,7 +93,7 @@
     clearTimeout(parseTimer);
     parseTimer = setTimeout(async () => {
         try {
-            const res = await fetch(`http://localhost:8000/api/queue/${currentQueue}/parse`, {
+            const res = await apiFetch(`/api/queue/${currentQueue}/parse`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ content: queueContent })
@@ -112,7 +113,7 @@
           }
       }
       try {
-          await fetch(`http://localhost:8000/api/queue/${currentQueue}/open`, { method: 'POST' });
+          await apiFetch(`/api/queue/${currentQueue}/open`, { method: 'POST' });
       } catch (e) { console.error(e); }
   }
 
@@ -127,7 +128,7 @@
       const target = prompt(`Retry ${counts.failed} failed URLs?\n\nType 'normal' or 'force' to choose destination:`, "normal");
       if (target === 'normal' || target === 'force') {
           try {
-              const res = await fetch(`http://localhost:8000/api/queue/actions/retry-failed`, {
+              const res = await apiFetch(`/api/queue/actions/retry-failed`, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ target })
@@ -152,7 +153,7 @@
       }
       if (confirm("Clear failed_links.md?")) {
           try {
-              const res = await fetch(`http://localhost:8000/api/queue/actions/clear-failed`, { method: 'POST' });
+              const res = await apiFetch(`/api/queue/actions/clear-failed`, { method: 'POST' });
               const data = await res.json();
               counts = data.counts;
               if (currentQueue === 'failed') loadQueue('failed');

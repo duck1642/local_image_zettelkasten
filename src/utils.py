@@ -2,6 +2,9 @@
 import sys
 import hashlib
 import yaml
+import os
+import shutil
+import tempfile
 from pathlib import Path
 from typing import Optional
 
@@ -119,8 +122,7 @@ def validate_config_schema(config: dict):
     errors = []
 
     if not isinstance(config, dict):
-        print("[ERROR] Configuration Error: config.yaml must be a dictionary.")
-        sys.exit(1)
+        raise ValueError("config.yaml must be a dictionary")
 
     if 'paths' not in config:
         errors.append("Missing mandatory section: 'paths'")
@@ -144,11 +146,7 @@ def validate_config_schema(config: dict):
         errors.append("Missing mandatory key: 'hash_algorithm'")
 
     if errors:
-        print(" Configuration Error in config.yaml:")
-        for err in errors:
-            print(f"   - {err}")
-        print("Please fix these issues before running LIZ.")
-        sys.exit(1)
+        raise ValueError("Configuration Error in config.yaml: " + "; ".join(errors))
 
 def load_secrets() -> dict:
 
@@ -165,7 +163,7 @@ def load_secrets() -> dict:
 def get_config() -> dict:
 
     try:
-        with open(CONFIG_PATH, 'r') as f:
+        with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
             config = yaml.safe_load(f)
             validate_config_schema(config)
 
@@ -220,6 +218,29 @@ def get_config() -> dict:
                 }
             }
         }
+
+def atomic_write_text(path: Path, text: str, encoding: str = "utf-8"):
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temp_name = tempfile.mkstemp(prefix="liztmp-", suffix=".tmp", dir=str(path.parent))
+    temp_path = Path(temp_name)
+    try:
+        with os.fdopen(fd, "w", encoding=encoding) as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        try:
+            temp_path.replace(path)
+        except PermissionError:
+            if path.exists():
+                path.unlink()
+            shutil.move(str(temp_path), str(path))
+    except Exception:
+        try:
+            temp_path.unlink()
+        except OSError:
+            pass
+        raise
 
 def calculate_file_hash(filepath: Path, algorithm: str = 'sha256') -> str:
 

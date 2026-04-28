@@ -13,8 +13,10 @@ def main():
 
 
     conn = init_database()
-    search_manager.hydrate(conn)
-    conn.close()
+    try:
+        search_manager.hydrate(conn)
+    finally:
+        conn.close()
 
     log_ingestion('INFO', f"\nY LIZ Unified System - Starting")
     log_ingestion('INFO', f"Input: {INPUT_DIR}")
@@ -36,9 +38,9 @@ def main():
             log_ingestion('INFO', f"Found {filename} [{mode_str}]. Starting Ingestion...")
             ingestor = ExternalIngestor(str(links_file), skip_validation=skip_val)
             ext_stats = ingestor.run()
-            stats["processed"] += ext_stats["processed"]
+            stats["processed"] += ext_stats.get("processed", 0)
             stats["skipped"] += ext_stats.get("skipped", 0)
-            stats["errors"] += ext_stats["errors"]
+            stats["errors"] += ext_stats.get("errors", 0)
         else:
             log_ingestion('INFO', f"  No {filename} found. Skipping.")
 

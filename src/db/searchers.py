@@ -26,9 +26,7 @@ class VPTreeSearcher(BaseSearcher):
 
         if signature is not None:
             self.items.append((item_hash, signature))
-            if self.tree is not None:
-
-                self.tree = self._make_tree(self.items)
+            self.tree = self._make_tree(self.items)
 
     def build_index(self):
 
@@ -101,7 +99,7 @@ class BKTreeSearcher(BaseSearcher):
 
             return (val1 ^ val2).bit_count()
         except (ValueError, TypeError):
-            return 65
+            return max(len(str(h1 or "")), len(str(h2 or ""))) * 4 + 1
 
     def add(self, item_hash: str, phash_str: str):
 

@@ -82,8 +82,9 @@ def load_note_frontmatter(file_hash: str) -> dict:
         return {}
     try:
         text = path.read_text(encoding="utf-8")
-    except OSError:
+    except (OSError, UnicodeDecodeError):
         return {}
+    text = text.lstrip("\ufeff")
     if not text.startswith("---"):
         return {}
     parts = text.split("---", 2)

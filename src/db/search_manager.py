@@ -5,14 +5,21 @@ from typing import List, Tuple, Optional
 
 from db.searchers import BKTreeSearcher, URLRegistry, VPTreeSearcher
 from db.sqlite_operator import get_all_phashes, get_all_tiles, get_all_urls, get_all_video_signatures
+from logs.logger import log_ingestion
 
 def _cosine_dist(v1_bytes: bytes, v2_bytes: bytes) -> float:
 
     import numpy as np
     v1 = np.frombuffer(v1_bytes, dtype=np.float32)
     v2 = np.frombuffer(v2_bytes, dtype=np.float32)
+    if len(v1) != len(v2) or len(v1) == 0:
+        return 1.0
+    norm1 = np.linalg.norm(v1)
+    norm2 = np.linalg.norm(v2)
+    if norm1 == 0 or norm2 == 0:
+        return 1.0
 
-    sim = np.dot(v1, v2)
+    sim = np.dot(v1, v2) / (norm1 * norm2)
     return 1.0 - float(sim)
 
 def _hamming_dist_audio(fp1_bytes: bytes, fp2_bytes: bytes) -> float:

@@ -10,7 +10,7 @@ from PIL import Image
 
 from fingerprint import extract_sampled_video_frames
 from logs.logger import log_system
-from utils import MODELS_DIR, calculate_file_hash, get_config, wd_tag_cache_path_for
+from utils import MODELS_DIR, atomic_write_text, calculate_file_hash, get_config, wd_tag_cache_path_for
 from validators import get_mime_type
 
 
@@ -52,17 +52,22 @@ def tag_media(media_path: str | Path, item_hash: str = None, config: dict = None
     video_frame_count = int(video_config.get("frame_count", 5))
     merge_min_frames = int(video_config.get("merge_min_frames", 2))
     merge_high_confidence = float(video_config.get("merge_high_confidence", 0.75))
-    if not item_hash and media_path.exists():
-        item_hash = calculate_file_hash(media_path)
-    item_hash = item_hash or ""
+    try:
+        if not item_hash and media_path.exists():
+            item_hash = calculate_file_hash(media_path)
+        item_hash = item_hash or ""
 
-    if not tag_config.get("enabled", True):
-        result = _result(item_hash, media_path, model_repo, device, "", threshold, max_tags, "skipped", error="tagging disabled")
-        _write_result(result)
-        return result
+        if not tag_config.get("enabled", True):
+            result = _result(item_hash, media_path, model_repo, device, "", threshold, max_tags, "skipped", error="tagging disabled")
+            _write_result(result)
+            return result
 
-    if not media_path.exists():
-        result = _result(item_hash, media_path, model_repo, device, "", threshold, max_tags, "failed", error="media path does not exist")
+        if not media_path.exists():
+            result = _result(item_hash, media_path, model_repo, device, "", threshold, max_tags, "failed", error="media path does not exist")
+            _write_result(result)
+            return result
+    except Exception as exc:
+        result = _result(item_hash or "", media_path, model_repo, device, "", threshold, max_tags, "failed", error=str(exc))
         _write_result(result)
         return result
 
@@ -148,8 +153,7 @@ def _write_result(result: TagResult):
     if not result.hash:
         return
     target = wd_tag_cache_path_for(result.hash)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(json.dumps(result.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8")
+    atomic_write_text(target, json.dumps(result.to_dict(), indent=2, ensure_ascii=False))
 
 
 def _ensure_model_files(model_repo: str, hf_hub_download):
@@ -194,6 +198,8 @@ def _providers_for_device(device: str, ort):
 def _predict_image_tags(session, input_meta, output_meta, labels: list[dict[str, str]], image: Image.Image, threshold: float, max_tags: int):
     image_array = _prepare_pil_image(image, input_meta.shape)
     predictions = session.run([output_meta.name], {input_meta.name: image_array})[0][0].astype(float)
+    if len(labels) != len(predictions):
+        raise ValueError(f"WD label/prediction count mismatch: {len(labels)} labels, {len(predictions)} predictions")
     return _tags_from_predictions(labels, predictions, threshold, max_tags)
 
 
@@ -217,7 +223,7 @@ def _prepare_pil_image(image: Image.Image, input_shape) -> np.ndarray:
     if max_dim != target_size:
         padded = padded.resize((target_size, target_size), Image.Resampling.BICUBIC)
     array = np.asarray(padded, dtype=np.float32)
-    array = array[:, :, ::-1]
+    array = np.ascontiguousarray(array[:, :, ::-1])
     if channel_first:
         array = np.transpose(array, (2, 0, 1))
     return np.expand_dims(array, axis=0)

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { log as uiLog } from './logger';
+  import { apiFetch } from './api';
 
   interface LogEntry {
     timestamp: string;
@@ -34,7 +35,6 @@
     { label: 'svelte.jsonl (Frontend)', value: 'svelte.jsonl' },
     { label: 'ingestion.jsonl (Worker)', value: 'ingestion.jsonl' },
     { label: 'activity.jsonl (Audit)', value: 'activity.jsonl' },
-    { label: 'pyui.jsonl (Legacy)', value: 'pyui.jsonl' }
   ];
 
   // Fields to exclude from inline extras (already shown in columns)
@@ -121,14 +121,14 @@
 
   async function openExternal() {
     try {
-      await fetch(`http://localhost:8000/api/logs/open?filename=${currentFile}`, { method: 'POST' });
+      await apiFetch(`/api/logs/open?filename=${currentFile}`, { method: 'POST' });
     } catch (e) { console.error(e); }
   }
 
   async function clearLogs() {
     if (!confirm("Are you sure you want to clear all log files? This cannot be undone.")) return;
     try {
-        await fetch(`http://localhost:8000/api/logs/clear`, { method: 'POST' });
+        await apiFetch(`/api/logs/clear`, { method: 'POST' });
         logs = [];
         uiLog('INFO', 'All logs cleared by user.');
         connectToLogs();

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { apiFetch } from './api';
 
   interface ReviewItem {
     filename: string;
@@ -30,7 +31,7 @@
     acting = true;
     try {
       const filename = items[currentIndex].filename;
-      await fetch(`http://localhost:8000/api/review/${filename}/action?action=${action}`, { method: 'POST' });
+      await apiFetch(`/api/review/${filename}/action?action=${action}`, { method: 'POST' });
       items = items.filter((_, i) => i !== currentIndex);
       if (currentIndex >= items.length && items.length > 0) currentIndex = items.length - 1;
     } finally { acting = false; }

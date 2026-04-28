@@ -38,8 +38,9 @@ def _opener(config: dict):
         try:
             jar.load(str(cookie_path), ignore_discard=True, ignore_expires=True)
             handlers.append(HTTPCookieProcessor(jar))
-        except Exception:
-            pass
+        except Exception as exc:
+            from logs.logger import log_ingestion
+            log_ingestion("WARNING", "Cookie jar load failed", path=str(cookie_path), error=str(exc))
     proxy = config.get('external_tools', {}).get('proxy')
     if proxy:
         handlers.append(ProxyHandler({'http': proxy, 'https': proxy}))
@@ -306,7 +307,7 @@ def download_video(url: str, metadata_info: dict = None) -> tuple[bool, dict]:
     session_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        meta_cmd = ["yt-dlp", "--print", "%(uploader)s|%(filesize)s|%(filesize_approx)s|%(title)s"]
+        meta_cmd = ["yt-dlp", "--dump-single-json", "--skip-download", "--no-playlist"]
         if cookie_path:
             meta_cmd.extend(["--cookies", str(cookie_path)])
         if ext_tools.get('proxy'):
@@ -317,36 +318,21 @@ def download_video(url: str, metadata_info: dict = None) -> tuple[bool, dict]:
         meta_cmd.append(url)
 
         print(f"   [INFO] Fetching YouTube metadata...")
-        meta_res = subprocess.run(meta_cmd, capture_output=True, text=True)
+        meta_res = subprocess.run(meta_cmd, capture_output=True, text=True, timeout=120)
 
         artist = "Unknown"
         title = ""
         expected_size = None
 
         if meta_res.returncode == 0:
-            data_line = None
-            for line in meta_res.stdout.splitlines():
-                if '|' in line:
-                    data_line = line.strip()
-                    break
-
-            if data_line:
-                parts = data_line.split('|', maxsplit=3)
-                if len(parts) >= 1:
-                    artist = parts[0]
-                if len(parts) >= 4:
-                    title = parts[3]
-
-                if len(parts) >= 3:
-                    f_size = parts[1] if parts[1] not in ('NA', '') else None
-                    f_approx = parts[2] if parts[2] not in ('NA', '') else None
-                    try:
-                        if f_size:
-                            expected_size = int(float(f_size))
-                        elif f_approx:
-                            expected_size = int(float(f_approx))
-                    except (ValueError, TypeError):
-                        expected_size = None
+            try:
+                metadata = json.loads(meta_res.stdout)
+                artist = metadata.get("uploader") or metadata.get("channel") or "Unknown"
+                title = metadata.get("title") or ""
+                expected_raw = metadata.get("filesize") or metadata.get("filesize_approx")
+                expected_size = int(float(expected_raw)) if expected_raw else None
+            except (json.JSONDecodeError, ValueError, TypeError):
+                expected_size = None
 
         dl_cmd = ["yt-dlp", "-o", f"{session_dir}/1.%(ext)s", "--no-playlist"]
         if cookie_path:
@@ -359,13 +345,13 @@ def download_video(url: str, metadata_info: dict = None) -> tuple[bool, dict]:
         dl_cmd.append(url)
 
         print(f"   [INFO] Running yt-dlp for YouTube...")
-        dl_res = subprocess.run(dl_cmd, capture_output=True, text=True)
+        dl_res = subprocess.run(dl_cmd, capture_output=True, text=True, timeout=600)
 
         if dl_res.returncode != 0:
             shutil.rmtree(session_dir, ignore_errors=True)
             return False, {"error": dl_res.stderr}
 
-        actual_files = [f for f in session_dir.rglob('*') if f.is_file()]
+        actual_files = _valid_media_files(session_dir, config)
 
         if not actual_files:
             shutil.rmtree(session_dir, ignore_errors=True)

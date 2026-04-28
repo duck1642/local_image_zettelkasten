@@ -9,7 +9,7 @@ def get_mime_type(filepath: Path) -> Optional[str]:
         mime = magic.from_file(str(filepath), mime=True)
         return mime.lower() if mime else None
 
-    except ImportError:
+    except Exception:
 
         ext_map = {
             '.jpg': 'image/jpeg',
@@ -26,4 +26,4 @@ def get_mime_type(filepath: Path) -> Optional[str]:
 
 def is_allowed_mime(mime_type: str, allowed_list: list) -> bool:
 
-    return mime_type in allowed_list
+    return mime_type in set(allowed_list or [])

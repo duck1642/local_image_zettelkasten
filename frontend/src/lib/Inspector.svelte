@@ -3,6 +3,7 @@
   import { createEventDispatcher } from 'svelte';
   import { open } from '@tauri-apps/plugin-shell';
   import { log as uiLog } from './logger';
+  import { apiFetch } from './api';
 
   export let item: VaultItem | null = null;
   export let group: { id: string, items: VaultItem[] } | null = null;
@@ -58,7 +59,7 @@
   async function save() {
     if (!item) return;
     try {
-      const res = await fetch(`http://localhost:8000/api/items/${item.hash}`, {
+      const res = await apiFetch(`/api/items/${item.hash}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ artist, source_url: sourceUrl, platform, topics })
@@ -78,7 +79,7 @@
       tagging = true;
       uiLog('INFO', `Manual tagging started for ${item.hash.substring(0, 12)}`);
       try {
-          const res = await fetch(`http://localhost:8000/api/items/${item.hash}/tag`, { method: 'POST' });
+          const res = await apiFetch(`/api/items/${item.hash}/tag`, { method: 'POST' });
           if (!res.ok) {
               const err = await res.json();
               throw new Error(err.detail || 'Tagging failed');
@@ -136,7 +137,7 @@
       if (!item) return;
       if (!confirm("Are you sure you want to permanently delete this item? This will delete the file, note, and database entry.")) return;
       try {
-          const res = await fetch(`http://localhost:8000/api/items/${item.hash}`, { method: 'DELETE' });
+          const res = await apiFetch(`/api/items/${item.hash}`, { method: 'DELETE' });
           if (res.ok) {
               uiLog('INFO', `Item deleted: ${item.hash}`);
               dispatch('deleted', item.hash);

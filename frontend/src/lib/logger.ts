@@ -8,7 +8,7 @@ export async function log(level: 'INFO' | 'WARNING' | 'ERROR' | 'DEBUG', message
     console.log(`%c[${level}] %c${message}`, `color: ${colors[level]}; font-weight: bold;`, 'color: inherit;', extra);
 
     try {
-        await fetch('http://localhost:8000/api/logs/ui', {
+        await apiFetch('/api/logs/ui', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ level, message, extra })
@@ -17,3 +17,4 @@ export async function log(level: 'INFO' | 'WARNING' | 'ERROR' | 'DEBUG', message
         // Silently fail if backend is down
     }
 }
+import { apiFetch } from './api';

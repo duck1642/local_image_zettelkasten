@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { apiFetch } from './api';
   let config: any = null;
   let initialConfigStr: string = '';
   let loading = true;
@@ -19,7 +20,7 @@
   async function saveConfig() {
     saving = true;
     try {
-      await fetch('http://localhost:8000/api/config', {
+      await apiFetch('/api/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(config)

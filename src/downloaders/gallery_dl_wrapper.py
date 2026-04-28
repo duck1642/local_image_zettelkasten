@@ -3,6 +3,7 @@ import json
 import shutil
 import subprocess
 from pathlib import Path
+from urllib.parse import urlparse
 
 from utils import INPUT_DIR, get_config, get_cookie_path
 from validators import get_mime_type, is_allowed_mime
@@ -43,20 +44,20 @@ def _extract_artist(data: dict, platform: str) -> str:
 
 
 def _normalized_url(url: str) -> str:
-    u_low = url.lower()
-    if "x.com" in u_low or "twitter.com" in u_low:
-        if '?' in url:
-            url = url.split('?')[0]
-        url = url.replace("www.x.com", "twitter.com").replace("x.com", "twitter.com")
+    parsed = urlparse(url)
+    host = parsed.netloc.lower()
+    if host in {"x.com", "www.x.com", "twitter.com", "www.twitter.com"}:
+        path = parsed.path
+        return f"{parsed.scheme or 'https'}://twitter.com{path}"
     return url
 
 
 def _platform_for_url(url: str) -> str:
-    u_low = url.lower()
-    if 'pixiv' in u_low: return "Pixiv"
-    if 'pinterest' in u_low: return "Pinterest"
-    if 'instagram' in u_low: return "Instagram"
-    if 'twitter' in u_low: return "X"
+    host = urlparse(url).netloc.lower()
+    if host.endswith('pixiv.net'): return "Pixiv"
+    if host.endswith('pinterest.com') or host.endswith('pin.it'): return "Pinterest"
+    if host.endswith('instagram.com'): return "Instagram"
+    if host.endswith('twitter.com') or host.endswith('x.com'): return "X"
     return "Unknown"
 
 
@@ -171,7 +172,7 @@ def inspect_gallery(url: str) -> tuple[bool, dict]:
     original_url = url
     download_url = _normalized_url(url)
     meta_cmd = ["gallery-dl", "-j"] + _base_args(download_url) + [download_url]
-    result = subprocess.run(meta_cmd, capture_output=True, text=True)
+    result = subprocess.run(meta_cmd, capture_output=True, text=True, timeout=120)
 
     if result.returncode != 0:
         return False, {"error": f"Metadata failed: {result.stderr}"}
@@ -259,7 +260,7 @@ def download_gallery(url: str, metadata_info: dict = None) -> tuple[bool, dict]:
         dl_cmd.append(download_url)
 
         print(f"   [INFO] Running gallery-dl for {platform}...")
-        dl_res = subprocess.run(dl_cmd, capture_output=True, text=True)
+        dl_res = subprocess.run(dl_cmd, capture_output=True, text=True, timeout=300)
 
         if dl_res.returncode != 0:
             shutil.rmtree(session_dir, ignore_errors=True)
