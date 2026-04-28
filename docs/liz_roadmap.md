@@ -180,7 +180,7 @@ Build a practical desktop interface for vault management, add local AI tagging, 
 - YouTube community posts still fail/retry if one expected image fails.
 - Existing `source_url_norm` values are backfilled lazily on DB init, not through a standalone migration tool.
 - Frontend still has Svelte accessibility warnings.
-- `src/` has not been renamed to `backend/`.
+- `src/` has been successfully renamed to `backend/`.
 
 ---
 
@@ -196,7 +196,7 @@ Make the current Tauri/Svelte + FastAPI system scale better and remove the remai
 - Optimize video embedding frame extraction.
 - Resolve Svelte accessibility warnings.
 - Consolidate remaining duplicate helper logic.
-- Decide whether to rename `src/` to `backend/`.
+- [x] Rename `src/` to `backend/`.
 
 ---
 

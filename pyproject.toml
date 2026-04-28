@@ -41,7 +41,7 @@ gpu = [
 liz = "core:main"
 
 [tool.setuptools]
-package-dir = {"" = "src"}
+package-dir = {"" = "backend"}
 py-modules = [
     "core",
     "external_ingestion",
@@ -53,7 +53,7 @@ py-modules = [
 ]
 
 [tool.setuptools.packages.find]
-where = ["src"]
+where = ["backend"]
 include = ["db", "downloaders", "logs", "scripts", "tagging"]
 exclude = ["backups", "program", "tools", "tests", "data", "secrets"]
 

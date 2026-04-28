@@ -8,7 +8,7 @@ from pathlib import Path
 def run():
     # 1. Paths
     root = Path(__file__).parent
-    api_script = root / "src" / "web_api.py"
+    api_script = root / "backend" / "web_api.py"
     frontend_dir = root / "frontend"
     
     print("🚀 Starting LIZ Development Stack...")
@@ -17,7 +17,7 @@ def run():
     print("--- Starting Python FastAPI (Backend) ---")
     api_proc = subprocess.Popen(
         [sys.executable, str(api_script)],
-        cwd=str(root / "src"),
+        cwd=str(root / "backend"),
         env=os.environ.copy()
     )
 

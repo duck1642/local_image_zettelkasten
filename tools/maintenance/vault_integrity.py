@@ -9,7 +9,7 @@ from pathlib import Path
 import yaml
 
 PROJECT_ROOT_PATH = Path(__file__).resolve().parents[2]
-SRC_DIR = PROJECT_ROOT_PATH / "src"
+SRC_DIR = PROJECT_ROOT_PATH / "backend"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 

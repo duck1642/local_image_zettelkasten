@@ -19,10 +19,10 @@ local_image_zettelkasten/
   config/
     config.yaml
   frontend/
-    src/
+    backend/
       lib/
     src-tauri/
-  src/
+  backend/
     core.py
     web_api.py
     external_ingestion.py
@@ -65,7 +65,7 @@ local_image_zettelkasten/
 - `python main.py` runs CLI ingestion.
 - `liz` runs `core:main` when installed.
 
-The old `gui.py`, `src/ui/`, and `liz-gui` PySide entry point are removed.
+The old `gui.py`, `backend/ui/`, and `liz-gui` PySide entry point are removed.
 
 ## Core Data Flow
 
@@ -153,7 +153,7 @@ Used for fragment/tile-level pHash support:
 
 ## API Architecture
 
-`src/web_api.py` exposes local HTTP endpoints for the Tauri/Svelte frontend.
+`backend/web_api.py` exposes local HTTP endpoints for the Tauri/Svelte frontend.
 
 Important API properties:
 
@@ -226,7 +226,7 @@ Behavior:
 
 ## Tagging Architecture
 
-Local WD tagging lives under `src/tagging/`.
+Local WD tagging lives under `backend/tagging/`.
 
 Behavior:
 

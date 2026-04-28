@@ -17,7 +17,7 @@ python main.py
 liz
 ```
 
-The old Flet and PySide/PyQt UI paths are no longer active. `gui.py`, `src/ui/`, PySide dependencies, and the `liz-gui` entry point were removed.
+The old Flet and PySide/PyQt UI paths are no longer active. `gui.py`, `backend/ui/`, PySide dependencies, and the `liz-gui` entry point were removed.
 
 ## Working Areas
 
@@ -40,8 +40,8 @@ The old Flet and PySide/PyQt UI paths are no longer active. `gui.py`, `src/ui/`,
 ## Current Architecture Snapshot
 
 - UI: Tauri + Svelte.
-- Backend API: `src/web_api.py`.
-- Ingestion CLI: `src/core.py`, launched by `main.py` or `liz`.
+- Backend API: `backend/web_api.py`.
+- Ingestion CLI: `backend/core.py`, launched by `main.py` or `liz`.
 - Runtime database: `data/db/liz_main.db`.
 - Vault assets: `data/vault/assets/{hash[:2]}/{hash}.{ext}`.
 - Vault notes: `data/vault/notes/{hash[:2]}/{hash}.md`.
@@ -84,14 +84,14 @@ SQLite stores runtime asset/index metadata only. Manual topics and WD tags live 
 - Timestamp consistency: local Python timestamps and SQLite UTC defaults still coexist.
 - Thumbnail helper cleanup: `thumbnails.py` still has a small asset-path helper duplication.
 - Frontend accessibility warnings remain in Svelte build output.
-- `src/` has not been renamed to `backend/`.
+- `src/` has been successfully renamed to `backend/`.
 
 ## Useful Checks
 
 ```powershell
-$env:PYTHONPATH='src'
+$env:PYTHONPATH='backend'
 python -B -c "import core, web_api, db.sqlite_operator, db.search_manager, queue_service, tagging.service; print('IMPORT OK')"
-python -B -c "import ast, pathlib; [ast.parse(path.read_text(encoding='utf-8'), filename=str(path)) for path in pathlib.Path('src').rglob('*.py')]; print('AST OK')"
+python -B -c "import ast, pathlib; [ast.parse(path.read_text(encoding='utf-8'), filename=str(path)) for path in pathlib.Path('backend').rglob('*.py')]; print('AST OK')"
 cd frontend
 npm run build
 ```
