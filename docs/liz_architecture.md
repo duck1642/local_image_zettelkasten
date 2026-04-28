@@ -64,6 +64,7 @@ local_image_zettelkasten/
 - `python dev.py` launches the modern Tauri/Svelte + FastAPI development stack.
 - `python main.py` runs CLI ingestion.
 - `liz` runs `core:main` when installed.
+- `cd frontend; npm run build:sidecar` builds the production Tauri sidecar binary.
 
 The old `gui.py`, old Python UI package, and `liz-gui` PySide entry point are removed.
 
@@ -164,8 +165,23 @@ Important API properties:
 - Heavy synchronous work is routed through thread helpers in the main API paths.
 - Logs stream through Server-Sent Events.
 - Static vault/review assets are served from local runtime folders.
+- Frontend API, asset, and SSE URLs are centralized in `frontend/src/lib/api.ts`.
 
 Frontend API calls use `frontend/src/lib/api.ts` so mutating requests automatically include the session key.
+
+## Tauri Packaging
+
+Development uses `python dev.py`, which starts the Python backend directly and then launches Tauri.
+
+Production Tauri builds expect an external sidecar named `liz-api`. Build it before packaging:
+
+```powershell
+cd frontend
+npm run build:sidecar
+npm run tauri build
+```
+
+The sidecar builder uses PyInstaller against `backend/web_api.py` and writes Tauri's target-specific binary into `frontend/src-tauri/bin/`.
 
 ## Ingestion Integrity
 
@@ -256,3 +272,4 @@ The UI can show readable normal logs or raw JSONL records.
 - Keep manual topics and WD tags out of SQLite.
 - Prefer batch-safe ingestion for multi-media posts.
 - Do not reintroduce Flet or PySide UI code.
+- Build the production sidecar before production Tauri packaging.

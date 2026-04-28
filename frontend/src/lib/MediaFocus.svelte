@@ -3,6 +3,7 @@
   import { onDestroy } from 'svelte';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { log as uiLog } from './logger';
+  import { assetUrl as resolveAssetUrl } from './api';
 
   export let item: any;
   export let mode: 'wide' | 'fullscreen' = 'wide';
@@ -12,7 +13,7 @@
   let videoElement: HTMLVideoElement;
   const appWindow = getCurrentWindow();
 
-  $: assetUrl = `http://localhost:8000${item.url}`;
+  $: assetUrl = resolveAssetUrl(item.url);
 
   $: handleModeChange(mode);
 

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { apiFetch } from './api';
+  import { apiFetch, assetUrl } from './api';
 
   interface ReviewItem {
     filename: string;
@@ -21,12 +21,12 @@
   async function loadReview() {
     loading = true;
     try {
-      const res = await fetch('http://localhost:8000/api/review');
+      const res = await apiFetch('/api/review');
       items = await res.json();
     } finally { loading = false; }
   }
 
-  async function handleAction(action: 'keep' | 'delete') {
+  async function handleAction(action: 'keep' | 'delete' | 'variant') {
     if (!items[currentIndex] || acting) return;
     acting = true;
     try {
@@ -54,11 +54,11 @@
 
     <div class="panes">
         <div class="pane">
-            <img src={`http://localhost:8000${current.url}`} alt="New" />
+            <img src={assetUrl(current.url)} alt="New" />
         </div>
         <div class="pane">
             {#if current.best_match}
-                <img src={`http://localhost:8000${current.best_match.url}`} alt="Match" />
+                <img src={assetUrl(current.best_match.url)} alt="Match" />
             {:else}
                 <div class="no-match">No duplicates found.</div>
             {/if}

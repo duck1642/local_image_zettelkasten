@@ -11,7 +11,7 @@
   async function loadConfig() {
     loading = true;
     try {
-      const res = await fetch('http://localhost:8000/api/config');
+      const res = await apiFetch('/api/config');
       config = await res.json();
       initialConfigStr = JSON.stringify(config);
     } finally { loading = false; }

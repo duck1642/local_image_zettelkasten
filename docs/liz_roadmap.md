@@ -173,6 +173,12 @@ Build a practical desktop interface for vault management, add local AI tagging, 
 - Added indexed `source_url_norm` duplicate checks.
 - Shared gallery-dl/yt-dlp valid media filtering.
 - Renamed the Python source root from `src/` to `backend/`.
+- Centralized frontend API, asset, and SSE URL construction.
+- Fixed command-triggered layout saves to use authenticated API requests.
+- Added shared infinite-scroll loading for masonry and grid vault layouts.
+- Added a PyInstaller sidecar build path for production Tauri packaging.
+- Replaced sidecar startup panics with logged errors.
+- Added a practical Tauri CSP for local backend/media access.
 
 ### Remaining Caveats
 - Search/index hydration still bulk-loads runtime signatures into RAM.
@@ -181,6 +187,7 @@ Build a practical desktop interface for vault management, add local AI tagging, 
 - YouTube community posts still fail/retry if one expected image fails.
 - Existing `source_url_norm` values are backfilled lazily on DB init, not through a standalone migration tool.
 - Frontend still has Svelte accessibility warnings.
+- Production sidecar packaging exists but still needs release-build validation.
 
 ---
 
@@ -196,6 +203,7 @@ Make the current Tauri/Svelte + FastAPI system scale better and remove the remai
 - Optimize video embedding frame extraction.
 - Resolve Svelte accessibility warnings.
 - Consolidate remaining duplicate helper logic.
+- Validate production Tauri sidecar packaging on a clean machine.
 
 ---
 

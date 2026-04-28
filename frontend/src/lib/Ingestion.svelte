@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { log as uiLog } from './logger';
-  import { apiFetch } from './api';
+  import { apiFetch, eventSourceUrl } from './api';
 
   let currentQueue: 'normal' | 'force' | 'failed' = 'normal';
   let queueContent = '';
@@ -18,8 +18,7 @@
 
   function connectMonitor() {
     if (logSource) logSource.close();
-    // Read from the structured ingestion log
-    logSource = new EventSource(`http://localhost:8000/api/logs?filename=ingestion.jsonl`);
+    logSource = new EventSource(eventSourceUrl('/api/logs?filename=ingestion.jsonl'));
     logSource.onmessage = (e) => {
         try {
             const entry = JSON.parse(e.data);
@@ -36,7 +35,7 @@
 
   async function loadQueue(name: string) {
     try {
-      const res = await fetch(`http://localhost:8000/api/queue/${name}`);
+      const res = await apiFetch(`/api/queue/${name}`);
       const data = await res.json();
       queueContent = data.content;
       isDirty = false;
@@ -46,7 +45,7 @@
   async function fetchStats() {
     if (isDirty) return; // don't overwrite live counts while editing
     try {
-      const res = await fetch('http://localhost:8000/api/queue-stats');
+      const res = await apiFetch('/api/queue-stats');
       counts = await res.json();
     } catch (e) { console.error(e); }
   }

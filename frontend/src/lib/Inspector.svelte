@@ -4,7 +4,7 @@
   import { open, Command } from '@tauri-apps/plugin-shell';
   import { invoke } from '@tauri-apps/api/core';
   import { log as uiLog } from './logger';
-  import { apiFetch } from './api';
+  import { apiFetch, assetUrl } from './api';
 
   export let item: VaultItem | null = null;
   export let group: { id: string, items: VaultItem[] } | null = null;
@@ -37,10 +37,10 @@
     fullItem = null;
     loading = true;
     try {
-        const res = await fetch(`http://localhost:8000/api/items/${hash}`, { signal });
+        const res = await apiFetch(`/api/items/${hash}`, { signal });
         if (!res.ok) throw new Error('API error');
         fullItem = await res.json();
-        
+
         artist = fullItem.artist || '';
         sourceUrl = fullItem.source_url || '';
         platform = fullItem.platform || '';
@@ -69,8 +69,8 @@
       isDirty = false;
       dispatch('updated', { hash: item.hash, artist, source_url: sourceUrl, platform });
       uiLog('INFO', `Metadata saved for ${item.hash.substring(0, 12)}`);
-    } catch (e) { 
-        uiLog('ERROR', 'Save failed', { error: String(e) }); 
+    } catch (e) {
+        uiLog('ERROR', 'Save failed', { error: String(e) });
         alert('Failed to save changes.');
     }
   }
@@ -113,7 +113,7 @@
   async function openFolder() {
     if (!item) return;
     try {
-        const res = await fetch(`http://localhost:8000/api/items/${item.hash}/path`);
+        const res = await apiFetch(`/api/items/${item.hash}/path`);
         const data = await res.json();
         await Command.create('explorer', ['/select,', data.absolute_path]).execute();
         uiLog('INFO', `Opened folder and selected ${item.hash.substring(0, 12)}`);
@@ -123,7 +123,7 @@
   async function openMarkdown() {
     if (!item) return;
     try {
-        const res = await fetch(`http://localhost:8000/api/items/${item.hash}/note_path`);
+        const res = await apiFetch(`/api/items/${item.hash}/note_path`);
         const data = await res.json();
         await open(data.absolute_path);
         uiLog('INFO', `Opened markdown note for ${item.hash.substring(0, 12)}`);
@@ -133,7 +133,7 @@
   async function copyFile() {
       if (!item) return;
       try {
-          const res = await fetch(`http://localhost:8000/api/items/${item.hash}/path`);
+          const res = await apiFetch(`/api/items/${item.hash}/path`);
           const data = await res.json();
           await invoke('copy_file_to_clipboard', { path: data.absolute_path });
           uiLog('INFO', `File copied to clipboard: ${item.hash.substring(0, 12)}`);
@@ -211,15 +211,15 @@
     {#if fullItem}
     <div class="group-container media-preview">
         {#if item.mime_type.startsWith('image/')}
-            <img src={`http://localhost:8000${item.url}`} alt="Preview" />
+            <img src={assetUrl(item.url)} alt="Preview" />
         {:else}
-            <video 
+            <video
                 bind:this={videoElement}
-                src={`http://localhost:8000${item.url}`} 
-                controls 
+                src={assetUrl(item.url)}
+                controls
                 controlslist="nofullscreen"
-                muted 
-                loop 
+                muted
+                loop
                 autoplay
             ></video>
         {/if}
@@ -406,11 +406,11 @@
 
   .section-label { font-size: 11px; color: var(--text-muted); font-weight: 500; }
   .muted-title { font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 4px; }
-  
-  .value-text { 
-    color: #6a737d; 
-    font-style: italic; 
-    font-weight: normal; 
+
+  .value-text {
+    color: #6a737d;
+    font-style: italic;
+    font-weight: normal;
     font-size: 13px;
     padding: 2px 0;
   }

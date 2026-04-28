@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { log as uiLog } from './logger';
-  import { apiFetch } from './api';
+  import { apiFetch, eventSourceUrl } from './api';
 
   interface LogEntry {
     timestamp: string;
@@ -85,7 +85,7 @@
     if (eventSource) eventSource.close();
     logs = [];
     
-    eventSource = new EventSource(`http://localhost:8000/api/logs?filename=${currentFile}`);
+    eventSource = new EventSource(eventSourceUrl(`/api/logs?filename=${currentFile}`));
     eventSource.onmessage = (e) => {
       try {
         const raw = e.data;

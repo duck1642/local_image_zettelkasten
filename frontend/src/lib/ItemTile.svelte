@@ -1,9 +1,10 @@
 <script lang="ts">
     import type { VaultItem } from './types';
+    import { assetUrl } from './api';
     export let item: VaultItem;
     
-    $: thumbnailUrl = `http://localhost:8000${item.thumbnail_url}`;
-    $: fullUrl = `http://localhost:8000${item.url}`;
+    $: thumbnailUrl = assetUrl(item.thumbnail_url);
+    $: fullUrl = assetUrl(item.url);
 </script>
 
 <div class="tile">

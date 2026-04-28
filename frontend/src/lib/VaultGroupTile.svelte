@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { VaultItem } from './types';
   import { createEventDispatcher } from 'svelte';
+  import { assetUrl } from './api';
   
   export let group: { id: string, items: VaultItem[] };
   export let selectedHash: string | undefined = '';
@@ -10,8 +11,8 @@
   let index = 0;
 
   $: current = group.items[index];
-  $: thumbnailUrl = `http://localhost:8000${current.thumbnail_url}`;
-  $: fullUrl = `http://localhost:8000${current.url}`;
+  $: thumbnailUrl = assetUrl(current.thumbnail_url);
+  $: fullUrl = assetUrl(current.url);
   $: isSelected = current.hash === selectedHash;
   $: aspectStyle = (current.width && current.height)
     ? `aspect-ratio: ${current.width} / ${current.height}`

@@ -25,18 +25,31 @@ pub fn run() {
       {
         use tauri_plugin_shell::ShellExt;
         let shell = _app.shell();
-        let sidecar_command = shell.sidecar("liz-api").unwrap();
-        let (mut rx, _child) = sidecar_command
-          .spawn()
-          .expect("Failed to spawn sidecar");
-
-        tauri::async_runtime::spawn(async move {
-          while let Some(event) = rx.recv().await {
-              if let tauri_plugin_shell::process::CommandEvent::Stdout(line) = event {
-                  println!("Sidecar: {}", String::from_utf8_lossy(&line));
-              }
+        match shell.sidecar("liz-api") {
+          Ok(sidecar_command) => match sidecar_command.spawn() {
+            Ok((mut rx, _child)) => {
+              tauri::async_runtime::spawn(async move {
+                while let Some(event) = rx.recv().await {
+                  match event {
+                    tauri_plugin_shell::process::CommandEvent::Stdout(line) => {
+                      println!("Sidecar: {}", String::from_utf8_lossy(&line));
+                    }
+                    tauri_plugin_shell::process::CommandEvent::Stderr(line) => {
+                      eprintln!("Sidecar: {}", String::from_utf8_lossy(&line));
+                    }
+                    _ => {}
+                  }
+                }
+              });
+            }
+            Err(error) => {
+              eprintln!("Failed to spawn liz-api sidecar: {error}");
+            }
+          },
+          Err(error) => {
+            eprintln!("Failed to create liz-api sidecar command: {error}");
           }
-        });
+        }
       }
 
       Ok(())

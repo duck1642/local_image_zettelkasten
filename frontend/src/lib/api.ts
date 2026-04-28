@@ -1,9 +1,19 @@
-const API_BASE = 'http://localhost:8000';
+const DEFAULT_API_BASE = 'http://localhost:8000';
+const configuredApiBase = import.meta.env.VITE_API_BASE;
+const API_BASE = import.meta.env.DEV && configuredApiBase === undefined ? '' : (configuredApiBase || DEFAULT_API_BASE);
 
 let apiKeyPromise: Promise<string> | null = null;
 
 export function apiUrl(path: string) {
   return `${API_BASE}${path}`;
+}
+
+export function assetUrl(path: string) {
+  return apiUrl(path);
+}
+
+export function eventSourceUrl(path: string) {
+  return apiUrl(path);
 }
 
 async function getApiKey() {

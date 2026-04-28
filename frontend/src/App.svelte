@@ -9,6 +9,7 @@
   import VaultGroupTile from './lib/VaultGroupTile.svelte';
   import MediaFocus from './lib/MediaFocus.svelte';
   import { log as uiLog } from './lib/logger';
+  import { apiFetch } from './lib/api';
 
   let items: VaultItem[] = [];
   let stats = { total_items: 0 };
@@ -39,10 +40,14 @@
 
   let nextCursor: string | null = null;
   let hasMore = false;
+  let sentinelEl: HTMLElement | null = null;
+  let observer: IntersectionObserver | null = null;
+  let observedSentinel: HTMLElement | null = null;
+  let observedLayout = '';
 
   async function fetchConfig() {
     try {
-      const res = await fetch('http://localhost:8000/api/config');
+      const res = await apiFetch('/api/config');
       configCache = await res.json();
       if (configCache?.ui?.vault_layout) {
           currentLayout = configCache.ui.vault_layout;
@@ -60,10 +65,6 @@
     });
     return orderedKeys.map(key => ({ id: key, items: groups[key] }));
   })();
-
-  $: if (activeTab === 'vault') {
-      fetchConfig();
-  }
 
   function parseSearchQuery(query: string) {
     const filters: { artist?: string; platform?: string; filename?: string; topic?: string; wd_tag?: string; command?: string } = {};
@@ -87,22 +88,26 @@
     if (!append) { nextCursor = null; isSearching = true; }
     else { isLoadingMore = true; }
     try {
-      let url = `http://localhost:8000/api/items?sort=${currentSort}&media_type=${currentMediaType}&limit=50`;
-      if (append && nextCursor) url += `&cursor=${encodeURIComponent(nextCursor)}`;
-      if (activeFilters.artist) url += `&artist=${encodeURIComponent(activeFilters.artist)}`;
-      if (activeFilters.platform) url += `&platform=${encodeURIComponent(activeFilters.platform)}`;
-      if (activeFilters.filename) url += `&filename=${encodeURIComponent(activeFilters.filename)}`;
-      if (activeFilters.topic) url += `&topic=${encodeURIComponent(activeFilters.topic)}`;
-      if (activeFilters.wd_tag) url += `&wd_tag=${encodeURIComponent(activeFilters.wd_tag)}`;
+      const params = new URLSearchParams({
+        sort: currentSort,
+        media_type: currentMediaType,
+        limit: '50'
+      });
+      if (append && nextCursor) params.set('cursor', nextCursor);
+      if (activeFilters.artist) params.set('artist', activeFilters.artist);
+      if (activeFilters.platform) params.set('platform', activeFilters.platform);
+      if (activeFilters.filename) params.set('filename', activeFilters.filename);
+      if (activeFilters.topic) params.set('topic', activeFilters.topic);
+      if (activeFilters.wd_tag) params.set('wd_tag', activeFilters.wd_tag);
 
-      const response = await fetch(url);
+      const response = await apiFetch(`/api/items?${params.toString()}`);
       const data = await response.json();
       const newItems: VaultItem[] = Array.isArray(data.items) ? data.items : [];
       items = append ? [...items, ...newItems] : newItems;
       nextCursor = data.next_cursor || null;
       hasMore = data.has_more || false;
 
-      const statsRes = await fetch('http://localhost:8000/api/stats');
+      const statsRes = await apiFetch('/api/stats');
       stats = await statsRes.json();
       await fetchSecondaryStats();
     } catch (error) { uiLog('ERROR', 'Failed to fetch items', { error });
@@ -138,7 +143,7 @@
                 if (configCache) {
                     if (!configCache.ui) configCache.ui = {};
                     configCache.ui.vault_layout = currentLayout;
-                    fetch('http://localhost:8000/api/config', {
+                    apiFetch('/api/config', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(configCache)
@@ -217,9 +222,9 @@
 
   async function fetchSecondaryStats() {
     try {
-        const qStatsRes = await fetch('http://localhost:8000/api/queue-stats');
+        const qStatsRes = await apiFetch('/api/queue-stats');
         queueStats = await qStatsRes.json();
-        const reviewRes = await fetch('http://localhost:8000/api/review');
+        const reviewRes = await apiFetch('/api/review');
         const reviewData = await reviewRes.json();
         reviewCount = reviewData.length;
     } catch (e) { }
@@ -259,7 +264,25 @@
       }
   }
 
-  let sentinelEl: HTMLElement | null = null;
+  function attachInfiniteScroll(node: HTMLElement | null, layout: string, tab: string) {
+    if (!node || tab !== 'vault') {
+      observer?.disconnect();
+      observer = null;
+      observedSentinel = null;
+      observedLayout = '';
+      return;
+    }
+    if (observer && observedSentinel === node && observedLayout === layout) return;
+    observer?.disconnect();
+    observedSentinel = node;
+    observedLayout = layout;
+    observer = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting && hasMore && !isSearching && !isLoadingMore) loadMore();
+    }, { rootMargin: '400px' });
+    observer.observe(node);
+  }
+
+  $: attachInfiniteScroll(sentinelEl, currentLayout, activeTab);
 
   onMount(() => {
     uiLog('INFO', 'Svelte UI initialized and mounted');
@@ -267,12 +290,7 @@
     fetchItems();
     const interval = setInterval(fetchSecondaryStats, 5000);
 
-    const observer = new IntersectionObserver(([entry]) => {
-      if (entry.isIntersecting && hasMore && !isSearching && !isLoadingMore) loadMore();
-    }, { rootMargin: '400px' });
-    if (sentinelEl) observer.observe(sentinelEl);
-
-    return () => { clearInterval(interval); observer.disconnect(); };
+    return () => { clearInterval(interval); observer?.disconnect(); };
   });
 </script>
 
@@ -370,12 +388,9 @@
                   />
                 {/each}
               </div>
-              {#if hasMore}
-                <div class="load-more">
-                  <button on:click={loadMore} disabled={isLoadingMore || isSearching}>
-                    {isLoadingMore ? 'Loading...' : 'Load More'}
-                  </button>
-                </div>
+              <div bind:this={sentinelEl} class="scroll-sentinel"></div>
+              {#if isLoadingMore}
+                <div class="loading-more">Loading more...</div>
               {/if}
             </div>
           {/if}
@@ -458,9 +473,6 @@
   }
   .scroll-sentinel { height: 1px; }
   .loading-more { text-align: center; padding: 15px; color: var(--text-muted); font-size: 12px; }
-  .load-more { text-align: center; padding: 20px; }
-  .load-more button { background: var(--bg-panel); border: 1px solid var(--border-dim); color: var(--text-main); padding: 10px 30px; border-radius: 6px; cursor: pointer; font-weight: bold; }
-  .load-more button:hover { border-color: var(--accent-primary); }
   .bottom-status { height: 25px; background: #010409; border-top: 1px solid var(--border-dim); padding: 0; display: flex; align-items: center; justify-content: space-between; font-size: 11px; color: var(--text-muted); flex-shrink: 0; z-index: 200; width: 100%; box-sizing: border-box; }
   .status-left { padding-left: 15px; }
   .status-right { padding-right: 15px; }
