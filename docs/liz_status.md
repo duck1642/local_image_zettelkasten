@@ -29,7 +29,7 @@ The old Flet and PySide/PyQt UI paths are no longer active. `gui.py`, the old Py
 - Markdown note generation with note-frontmatter topics.
 - Local WD tag cache under `data/wd-tags/{hash[:2]}/{hash}.json`.
 - Distilled WD tags in markdown frontmatter.
-- Svelte vault UI with masonry/grid layouts.
+- Svelte vault UI with masonry/grid layouts, advanced filtering, smart command prefixes (e.g. `>grid`), and decoupled live-search/infinite-scroll.
 - Svelte inspector with metadata editing, grouped source navigation, tagging action, copy/delete/open actions.
 - Markdown queue ingestion workbench.
 - Review view.
@@ -54,6 +54,9 @@ SQLite stores runtime asset/index metadata only. Manual topics and WD tags live 
 
 ## Recent Hardening Completed
 
+- Structured logging system implemented with color-coded `.jsonl` streams.
+- Live search UI glitch fixed by decoupling `isSearching` and `isLoadingMore` states to prevent flicker.
+- Layout toggle commands (`>grid`, `>masonry`) added with auto-complete dropdown and keyboard navigation.
 - Mutating API endpoints now require a local UI session key.
 - CORS is restricted to local/Tauri origins.
 - Log, queue, and review endpoints validate requested paths.

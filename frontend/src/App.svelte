@@ -14,11 +14,18 @@
   let stats = { total_items: 0 };
   let queueStats = { normal: 0, force: 0, failed: 0 };
   let reviewCount = 0;
-  let loading = true;
+  let isSearching = true;
+  let isLoadingMore = false;
   let selectedItem: VaultItem | null = null;
   let selectedGroup: { id: string, items: VaultItem[] } | null = null;
   let activeTab: 'vault' | 'logs' | 'ingest' | 'review' | 'settings' = 'vault';
   let searchQuery = '';
+  let showCommandSuggestions = false;
+  let activeSuggestionIndex = 0;
+  const availableCommands = ['>grid', '>masonry'];
+  $: commandSuggestions = searchQuery.trim().startsWith('>') 
+      ? availableCommands.filter(cmd => cmd.startsWith(searchQuery.trim().toLowerCase()))
+      : [];
   
   let focusMode: 'normal' | 'wide' | 'fullscreen' = 'normal';
   let focusStartTime = 0;
@@ -77,8 +84,8 @@
   }
 
   async function fetchItems(append = false) {
-    if (!append) { items = []; nextCursor = null; }
-    loading = true;
+    if (!append) { nextCursor = null; isSearching = true; }
+    else { isLoadingMore = true; }
     try {
       let url = `http://localhost:8000/api/items?sort=${currentSort}&media_type=${currentMediaType}&limit=50`;
       if (append && nextCursor) url += `&cursor=${encodeURIComponent(nextCursor)}`;
@@ -99,11 +106,14 @@
       stats = await statsRes.json();
       await fetchSecondaryStats();
     } catch (error) { uiLog('ERROR', 'Failed to fetch items', { error });
-    } finally { loading = false; }
+    } finally { 
+      if (!append) { isSearching = false; }
+      else { isLoadingMore = false; }
+    }
   }
 
   function loadMore() {
-    if (hasMore && !loading) fetchItems(true);
+    if (hasMore && !isSearching && !isLoadingMore) fetchItems(true);
   }
 
   function applySearch(immediate: boolean = false) {
@@ -118,6 +128,31 @@
       return;
     }
     activeFilters = parseSearchQuery(text);
+
+    // Handle commands ONLY when the user hits Enter (immediate = true)
+    if ('command' in activeFilters) {
+        if (immediate) {
+            const cmd = (activeFilters.command || '').toLowerCase();
+            if (cmd === 'grid' || cmd === 'masonry') {
+                currentLayout = cmd;
+                if (configCache) {
+                    if (!configCache.ui) configCache.ui = {};
+                    configCache.ui.vault_layout = currentLayout;
+                    fetch('http://localhost:8000/api/config', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(configCache)
+                    }).catch(e => console.error('Failed to save command-triggered layout change:', e));
+                }
+            }
+            searchQuery = '';
+            activeFilters = {};
+            fetchItems();
+        }
+        // If they are just typing a command, do NOT trigger the live search debounce
+        return;
+    }
+
     if (immediate) {
       fetchItems();
     } else {
@@ -136,12 +171,45 @@
   }
 
   function handleSearchInput() {
+    if (searchQuery.trim().startsWith('>')) {
+      showCommandSuggestions = true;
+      activeSuggestionIndex = 0;
+    } else {
+      showCommandSuggestions = false;
+    }
     applySearch(false);
   }
 
+  function selectSuggestion(cmd: string) {
+    searchQuery = cmd;
+    showCommandSuggestions = false;
+    applySearch(true);
+    activeTab = 'vault';
+  }
+
   function handleSearchKeydown(event: KeyboardEvent) {
+    if (showCommandSuggestions && commandSuggestions.length > 0) {
+      if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        activeSuggestionIndex = (activeSuggestionIndex + 1) % commandSuggestions.length;
+        return;
+      } else if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        activeSuggestionIndex = (activeSuggestionIndex - 1 + commandSuggestions.length) % commandSuggestions.length;
+        return;
+      } else if (event.key === 'Enter') {
+        event.preventDefault();
+        selectSuggestion(commandSuggestions[activeSuggestionIndex]);
+        return;
+      } else if (event.key === 'Escape') {
+        showCommandSuggestions = false;
+        return;
+      }
+    }
+
     if (event.key === 'Enter') {
       event.preventDefault();
+      showCommandSuggestions = false;
       applySearch(true);
       activeTab = 'vault';
     }
@@ -200,7 +268,7 @@
     const interval = setInterval(fetchSecondaryStats, 5000);
 
     const observer = new IntersectionObserver(([entry]) => {
-      if (entry.isIntersecting && hasMore && !loading) loadMore();
+      if (entry.isIntersecting && hasMore && !isSearching && !isLoadingMore) loadMore();
     }, { rootMargin: '400px' });
     if (sentinelEl) observer.observe(sentinelEl);
 
@@ -240,6 +308,15 @@
           {#if searchQuery.trim() || Object.keys(activeFilters).length > 0}
               <button class="clear-search" on:click={clearSearch} title="Clear Search">✖</button>
           {/if}
+          {#if showCommandSuggestions && commandSuggestions.length > 0}
+            <ul class="suggestions-dropdown">
+              {#each commandSuggestions as suggestion, i}
+                <li class:active={i === activeSuggestionIndex} on:click={() => selectSuggestion(suggestion)}>
+                  {suggestion}
+                </li>
+              {/each}
+            </ul>
+          {/if}
         </div>
       </div>
       <div class="header-actions" class:with-inspector={activeTab === 'vault'}>
@@ -262,8 +339,8 @@
     <div class="view-and-inspector">
       <div class="viewport">
         {#if activeTab === 'vault'}
-          {#if loading && items.length === 0}
-            <div class="loading">Loading...</div>
+          {#if isSearching && items.length === 0}
+            <!-- Silently loading initial items -->
           {:else if currentLayout === 'masonry'}
             <div class="masonry-scroll">
               <div class="vault-layout masonry">
@@ -277,7 +354,7 @@
                 {/each}
               </div>
               <div bind:this={sentinelEl} class="scroll-sentinel"></div>
-              {#if loading && items.length > 0}
+              {#if isLoadingMore}
                 <div class="loading-more">Loading more...</div>
               {/if}
             </div>
@@ -295,8 +372,8 @@
               </div>
               {#if hasMore}
                 <div class="load-more">
-                  <button on:click={loadMore} disabled={loading}>
-                    {loading ? 'Loading...' : 'Load More'}
+                  <button on:click={loadMore} disabled={isLoadingMore || isSearching}>
+                    {isLoadingMore ? 'Loading...' : 'Load More'}
                   </button>
                 </div>
               {/if}
@@ -357,6 +434,9 @@
   .search-container { flex-grow: 1; }
   .search-wrapper { position: relative; width: 100%; display: flex; align-items: center; }
   .search-wrapper input { width: 100%; max-width: 100%; padding-right: 35px; }
+  .suggestions-dropdown { position: absolute; top: 100%; left: 0; width: 100%; max-width: 300px; background: var(--bg-panel); border: 1px solid var(--border-dim); border-radius: 6px; margin-top: 5px; padding: 5px 0; list-style: none; z-index: 1000; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
+  .suggestions-dropdown li { padding: 8px 15px; font-size: 13px; color: var(--text-main); cursor: pointer; }
+  .suggestions-dropdown li:hover, .suggestions-dropdown li.active { background: var(--accent-primary); color: white; }
   .clear-search { position: absolute; right: 8px; background: transparent; border: none; color: var(--text-muted); font-size: 14px; cursor: pointer; padding: 4px; }
   .clear-search:hover { color: var(--accent-danger); background: transparent; border: none; }
   .header-actions { display: flex; align-items: center; gap: 10px; }

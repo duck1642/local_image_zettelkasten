@@ -56,12 +56,6 @@
       <label>Platform Prefix</label>
       <input type="text" bind:value={config.ui.prefixes.platform} />
 
-      <label>Vault Layout</label>
-      <select bind:value={config.ui.vault_layout}>
-          <option value="masonry">masonry</option>
-          <option value="grid">grid</option>
-      </select>
-
       <div class="grid-spacer"></div>
       <div class="checkbox-group">
           <label class="check-label"><input type="checkbox" bind:checked={config.processing.flatten_transparency} /> Flatten Transparency</label>
@@ -117,6 +111,15 @@
             <div class="shortcut-row">
                 <span class="key">F</span>
                 <span class="desc">Toggle Fullscreen (in Inspector)</span>
+            </div>
+            <div class="divider"></div>
+            <div class="shortcut-row">
+                <span class="key">&gt;grid</span>
+                <span class="desc">Switch Vault to Grid Layout</span>
+            </div>
+            <div class="shortcut-row">
+                <span class="key">&gt;masonry</span>
+                <span class="desc">Switch Vault to Masonry Layout</span>
             </div>
         </div>
     </div>
