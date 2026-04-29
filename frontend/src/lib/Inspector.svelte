@@ -1,7 +1,6 @@
 <script lang="ts">
   import type { VaultItem } from './types';
   import { createEventDispatcher } from 'svelte';
-  import { open, Command } from '@tauri-apps/plugin-shell';
   import { invoke } from '@tauri-apps/api/core';
   import { log as uiLog } from './logger';
   import { apiFetch, assetUrl } from './api';
@@ -63,7 +62,7 @@
       const res = await apiFetch(`/api/items/${item.hash}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ artist, source_url: sourceUrl, platform, topics })
+        body: JSON.stringify({ artist, source_url: sourceUrl, platform })
       });
       if (!res.ok) throw new Error('Failed to save');
       isDirty = false;
@@ -86,7 +85,6 @@
               throw new Error(err.detail || 'Tagging failed');
           }
           fullItem = await res.json();
-          // Update topics from the new markdown note
           topics = fullItem.topics || [];
           uiLog('INFO', `Tagging complete for ${item.hash.substring(0, 12)}`);
       } catch (e) {
@@ -97,25 +95,11 @@
       }
   }
 
-  function addTagToTopics(tagName: string) {
-      if (!topics.includes(tagName)) {
-          topics = [...topics, tagName];
-          isDirty = true;
-          uiLog('DEBUG', `Added tag to topics: ${tagName}`);
-      }
-  }
-
-  function removeTopic(tagName: string) {
-      topics = topics.filter(t => t !== tagName);
-      isDirty = true;
-  }
-
   async function openFolder() {
     if (!item) return;
     try {
-        const res = await apiFetch(`/api/items/${item.hash}/path`);
-        const data = await res.json();
-        await Command.create('explorer', ['/select,', data.absolute_path]).execute();
+        const res = await apiFetch(`/api/items/${item.hash}/open_folder`, { method: 'POST' });
+        if (!res.ok) throw new Error(`Open folder failed: ${res.status}`);
         uiLog('INFO', `Opened folder and selected ${item.hash.substring(0, 12)}`);
     } catch (e) { uiLog('ERROR', 'Failed to open folder', { error: String(e) }); }
   }
@@ -123,9 +107,8 @@
   async function openMarkdown() {
     if (!item) return;
     try {
-        const res = await apiFetch(`/api/items/${item.hash}/note_path`);
-        const data = await res.json();
-        await open(data.absolute_path);
+        const res = await apiFetch(`/api/items/${item.hash}/open_note`, { method: 'POST' });
+        if (!res.ok) throw new Error(`Open note failed: ${res.status}`);
         uiLog('INFO', `Opened markdown note for ${item.hash.substring(0, 12)}`);
     } catch (e) { uiLog('ERROR', 'Failed to open markdown', { error: String(e) }); }
   }
@@ -171,7 +154,7 @@
       if (e.repeat) return;
       const target = e.target as HTMLElement;
       if (['INPUT', 'TEXTAREA'].includes(target.tagName)) return;
-      if (document.querySelector('.focus-overlay')) return; // Let MediaFocus handle it if it's open
+      if (document.querySelector('.focus-overlay')) return;
 
       if (e.key.toLowerCase() === 'w') {
           e.preventDefault();
@@ -229,7 +212,6 @@
         </div>
     </div>
 
-    <!-- Group Navigation Row -->
     {#if group && group.items.length > 1}
         <div class="group-nav group-container horizontal">
             <button on:click={prevItem}>&lt;</button>
@@ -273,7 +255,7 @@
       <label class="section-label">My Topics</label>
       <div class="tags-list">
           {#each (topics || []) as tag}
-              <span class="tag-chip topic" on:click={() => removeTopic(tag)} title="Click to remove">
+              <span class="tag-chip topic">
                   {tag}
               </span>
           {/each}
@@ -289,7 +271,7 @@
         <span class="muted-title">Rating</span>
         <div class="tags-list">
             {#if fullItem.wd_tags?.rating && fullItem.wd_tags.rating !== 'None'}
-                <span class="tag-chip rating" on:click={() => addTagToTopics(fullItem.wd_tags.rating)}>
+                <span class="tag-chip rating">
                     {fullItem.wd_tags.rating}
                 </span>
             {:else}
@@ -301,7 +283,7 @@
         <span class="muted-title">Character Tags</span>
         <div class="tags-list">
             {#each (fullItem.wd_tags?.characters || []) as tag}
-                <span class="tag-chip character" on:click={() => addTagToTopics(tag)}>
+                <span class="tag-chip character">
                     {tag}
                 </span>
             {/each}
@@ -314,7 +296,7 @@
         <span class="muted-title">Visual Tags</span>
         <div class="tags-list">
             {#each (fullItem.wd_tags?.general || []) as tag}
-                <span class="tag-chip visual" on:click={() => addTagToTopics(tag)}>
+                <span class="tag-chip visual">
                     {tag}
                 </span>
             {/each}
@@ -443,7 +425,6 @@
       background: var(--bg-hover);
       color: var(--text-main);
       border: 1px solid var(--border-dim);
-      cursor: pointer;
       user-select: none;
   }
 

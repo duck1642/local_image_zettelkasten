@@ -136,6 +136,12 @@
     uiLog('DEBUG', `Selected item: ${item.hash.substring(0, 12)}`);
   }
 
+  function setSingleSelection(item: VaultItem) {
+    selectedItem = item;
+    selectedHashes = new Set([item.hash]);
+    lastSelectedHash = item.hash;
+  }
+
   function clearSelection() {
     selectedHashes = new Set();
     lastSelectedHash = null;
@@ -240,7 +246,7 @@
 
 <div class="view-and-inspector">
   <div class="viewport">
-    {#if selectedHashes.size > 0}
+    {#if selectedHashes.size > 1}
       <div class="bulk-action-bar">
         <span class="selection-count">{selectedHashes.size} selected</span>
         <button on:click={clearSelection}>Clear Selection</button>
@@ -296,7 +302,7 @@
     on:close={clearSelection}
     on:updated={handleUpdate}
     on:focus={handleFocusMode}
-    on:changeItem={(event) => selectedItem = event.detail}
+    on:changeItem={(event) => setSingleSelection(event.detail)}
     on:deleted={() => { clearSelection(); fetchItems(); }}
   />
 </div>
@@ -317,9 +323,9 @@
   .header-actions.with-inspector { width: calc(400px - 15px); min-width: calc(400px - 15px); justify-content: flex-start; padding-left: 15px; border-left: 1px solid var(--border-dim); }
   .filter-select { background: var(--bg-input); border: 1px solid var(--border-dim); color: var(--text-main); padding: 5px 10px; border-radius: 6px; font-size: 12px; cursor: pointer; height: 32px; }
   .view-and-inspector { flex-grow: 1; display: flex; overflow: hidden; }
-  .viewport { flex-grow: 1; display: flex; flex-direction: column; overflow: hidden; }
-  .bulk-action-bar { display: flex; align-items: center; gap: 10px; padding: 10px 15px; border-bottom: 1px solid var(--border-dim); background: var(--bg-main); flex-shrink: 0; }
-  .selection-count { color: var(--text-bright); font-weight: 600; margin-right: auto; }
+  .viewport { flex-grow: 1; display: flex; flex-direction: column; overflow: hidden; position: relative; }
+  .bulk-action-bar { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 60; display: flex; align-items: center; gap: 10px; padding: 9px 12px; border: 1px solid var(--border-dim); border-radius: 8px; background: rgba(13, 17, 23, 0.96); box-shadow: 0 10px 30px rgba(0,0,0,0.35); }
+  .selection-count { color: var(--text-bright); font-weight: 600; white-space: nowrap; }
   .grid-scroll { flex-grow: 1; overflow-y: auto; padding: 15px; }
   .masonry-scroll { flex-grow: 1; overflow-y: auto; padding: 15px; }
   .vault-layout.masonry { column-count: 5; column-gap: 12px; }

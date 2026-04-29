@@ -547,6 +547,50 @@ def _get_item_note_path_sync(item_hash: str):
     finally:
         conn.close()
 
+@app.post("/api/items/{item_hash}/open_folder")
+async def open_item_folder(item_hash: str):
+    return await asyncio.to_thread(_open_item_folder_sync, item_hash)
+
+def _open_item_folder_sync(item_hash: str):
+    conn = init_database()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT file_extension, mime_type FROM items WHERE hash = ?", (item_hash,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404)
+        path = asset_path_for(item_hash, row[0] or "", row[1] or "")
+        if not path.exists():
+            raise HTTPException(status_code=404, detail="Asset missing")
+        if sys.platform == "win32":
+            import subprocess
+            subprocess.Popen(["explorer", "/select,", str(path.resolve())])
+        else:
+            _open_path_external(path.parent)
+        return {"status": "success"}
+    finally:
+        conn.close()
+
+@app.post("/api/items/{item_hash}/open_note")
+async def open_item_note(item_hash: str):
+    return await asyncio.to_thread(_open_item_note_sync, item_hash)
+
+def _open_item_note_sync(item_hash: str):
+    conn = init_database()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT hash FROM items WHERE hash = ?", (item_hash,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404)
+        path = note_path_for(item_hash)
+        if not path.exists():
+            raise HTTPException(status_code=404, detail="Note missing")
+        _open_path_external(path)
+        return {"status": "success"}
+    finally:
+        conn.close()
+
 class ItemUpdate(BaseModel):
     artist: str = None
     source_url: str = None

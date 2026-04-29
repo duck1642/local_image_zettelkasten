@@ -49,15 +49,15 @@
     <aside class="sidebar">
       <div class="nav-group">
         <button class:active={activeTab === 'vault'} on:click={() => activeTab = 'vault'}>Vault</button>
-        <button class:active={activeTab === 'review'} on:click={() => activeTab = 'review'}>
-          Review {#if reviewCount > 0}<span class="badge warn">{reviewCount}</span>{/if}
-        </button>
         <button class:active={activeTab === 'ingest'} on:click={() => activeTab = 'ingest'}>
           Ingestion {#if (queueStats.normal + queueStats.force) > 0}<span class="badge">{queueStats.normal + queueStats.force}</span>{/if}
         </button>
+        <button class:active={activeTab === 'review'} on:click={() => activeTab = 'review'}>
+          Review {#if reviewCount > 0}<span class="badge warn">{reviewCount}</span>{/if}
+        </button>
         <button class:active={activeTab === 'stats'} on:click={() => activeTab = 'stats'}>Stats</button>
-        <button class:active={activeTab === 'logs'} on:click={() => activeTab = 'logs'}>App Logs</button>
         <button class:active={activeTab === 'settings'} on:click={() => activeTab = 'settings'}>Settings</button>
+        <button class:active={activeTab === 'logs'} on:click={() => activeTab = 'logs'}>App Logs</button>
       </div>
     </aside>
 
