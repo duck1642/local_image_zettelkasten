@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import type { VaultItem } from './lib/types';
   import Inspector from './lib/Inspector.svelte';
   import LogsView from './lib/LogsView.svelte';
@@ -21,12 +21,12 @@
   let selectedGroup: { id: string, items: VaultItem[] } | null = null;
   let activeTab: 'vault' | 'logs' | 'ingest' | 'review' | 'settings' = 'vault';
   let searchQuery = '';
-  let showCommandSuggestions = false;
+  let showSuggestions = false;
   let activeSuggestionIndex = 0;
+  let suggestions: string[] = [];
+  let suggestionLeft = 0;
+  let searchInputEl: HTMLInputElement;
   const availableCommands = ['>grid', '>masonry'];
-  $: commandSuggestions = searchQuery.trim().startsWith('>') 
-      ? availableCommands.filter(cmd => cmd.startsWith(searchQuery.trim().toLowerCase()))
-      : [];
   
   let focusMode: 'normal' | 'wide' | 'fullscreen' = 'normal';
   let focusStartTime = 0;
@@ -35,7 +35,10 @@
 
   let currentSort = 'newest';
   let currentMediaType = 'all';
-  let activeFilters: { artist?: string; platform?: string; filename?: string; topic?: string; wd_tag?: string; command?: string } = {};
+  type SuggestionKind = 'none' | 'command' | 'artist' | 'platform' | 'topic' | 'wd_tag';
+  type SearchFilters = { artists: string[]; platforms: string[]; topics: string[]; wd_tags: string[]; text_terms: string[]; command?: string };
+  type ActiveSegment = { kind: SuggestionKind; prefix: string; value: string; segmentStart: number; segmentEnd: number; valueStart: number };
+  let activeFilters: SearchFilters = emptyFilters();
   let searchDebounceTimer: number | null = null;
 
   let nextCursor: string | null = null;
@@ -66,21 +69,39 @@
     return orderedKeys.map(key => ({ id: key, items: groups[key] }));
   })();
 
-  function parseSearchQuery(query: string) {
-    const filters: { artist?: string; platform?: string; filename?: string; topic?: string; wd_tag?: string; command?: string } = {};
-    const tokens = query.trim().split(/\s+/);
-    const bareWords: string[] = [];
+  function emptyFilters(): SearchFilters {
+    return { artists: [], platforms: [], topics: [], wd_tags: [], text_terms: [] };
+  }
 
-    for (const token of tokens) {
-      if (token.startsWith('a:')) filters.artist = token.slice(2).trim();
-      else if (token.startsWith('@')) filters.platform = token.slice(1).trim();
-      else if (token.startsWith('#')) filters.topic = token.slice(1).trim();
-      else if (token.startsWith('*')) filters.wd_tag = token.slice(1).trim();
-      else if (token.startsWith('>')) filters.command = token.slice(1).trim();
-      else if (token) bareWords.push(token);
+  function hasActiveFilters(filters: SearchFilters) {
+    return Boolean(filters.command || filters.artists.length || filters.platforms.length || filters.topics.length || filters.wd_tags.length || filters.text_terms.length);
+  }
+
+  function parseSearchQuery(query: string): SearchFilters {
+    const filters = emptyFilters();
+    const segments = query.split(';').map(segment => segment.trim()).filter(Boolean);
+
+    for (const segment of segments) {
+      if (segment.startsWith('a:')) {
+        const value = segment.slice(2).trim();
+        if (value) filters.artists.push(value);
+      } else if (segment.startsWith('@')) {
+        const value = segment.slice(1).trim();
+        if (value) filters.platforms.push(value);
+      } else if (segment.startsWith('#')) {
+        const value = segment.slice(1).trim();
+        if (value) filters.topics.push(value);
+      } else if (segment.startsWith('*')) {
+        const value = segment.slice(1).trim();
+        if (value) filters.wd_tags.push(value);
+      } else if (segment.startsWith('>')) {
+        const value = segment.slice(1).trim();
+        if (value) filters.command = value;
+      } else {
+        filters.text_terms.push(...segment.split(/\s+/).map(term => term.trim()).filter(Boolean));
+      }
     }
 
-    if (bareWords.length > 0) filters.filename = bareWords.join(' ');
     return filters;
   }
 
@@ -94,11 +115,11 @@
         limit: '50'
       });
       if (append && nextCursor) params.set('cursor', nextCursor);
-      if (activeFilters.artist) params.set('artist', activeFilters.artist);
-      if (activeFilters.platform) params.set('platform', activeFilters.platform);
-      if (activeFilters.filename) params.set('filename', activeFilters.filename);
-      if (activeFilters.topic) params.set('topic', activeFilters.topic);
-      if (activeFilters.wd_tag) params.set('wd_tag', activeFilters.wd_tag);
+      activeFilters.artists.forEach(value => params.append('artist', value));
+      activeFilters.platforms.forEach(value => params.append('platform', value));
+      activeFilters.topics.forEach(value => params.append('topic', value));
+      activeFilters.wd_tags.forEach(value => params.append('wd_tag', value));
+      activeFilters.text_terms.forEach(value => params.append('text', value));
 
       const response = await apiFetch(`/api/items?${params.toString()}`);
       const data = await response.json();
@@ -128,7 +149,7 @@
     }
     const text = searchQuery.trim();
     if (!text) {
-      activeFilters = {};
+      activeFilters = emptyFilters();
       fetchItems();
       return;
     }
@@ -151,7 +172,7 @@
                 }
             }
             searchQuery = '';
-            activeFilters = {};
+            activeFilters = emptyFilters();
             fetchItems();
         }
         // If they are just typing a command, do NOT trigger the live search debounce
@@ -167,7 +188,9 @@
 
   function clearSearch() {
     searchQuery = '';
-    activeFilters = {};
+    activeFilters = emptyFilters();
+    showSuggestions = false;
+    suggestions = [];
     if (searchDebounceTimer !== null) {
       clearTimeout(searchDebounceTimer);
       searchDebounceTimer = null;
@@ -175,46 +198,136 @@
     fetchItems();
   }
 
-  function handleSearchInput() {
-    if (searchQuery.trim().startsWith('>')) {
-      showCommandSuggestions = true;
-      activeSuggestionIndex = 0;
-    } else {
-      showCommandSuggestions = false;
+  function getActiveSegment(): ActiveSegment {
+    const cursor = searchInputEl?.selectionStart ?? searchQuery.length;
+    const segmentStart = searchQuery.lastIndexOf(';', Math.max(0, cursor - 1)) + 1;
+    const nextSeparator = searchQuery.indexOf(';', cursor);
+    const segmentEnd = nextSeparator === -1 ? searchQuery.length : nextSeparator;
+    const rawSegment = searchQuery.slice(segmentStart, segmentEnd);
+    const leadingLength = rawSegment.length - rawSegment.trimStart().length;
+    const contentStart = segmentStart + leadingLength;
+    const content = searchQuery.slice(contentStart, segmentEnd);
+
+    if (content.startsWith('a:')) return { kind: 'artist', prefix: 'a:', value: searchQuery.slice(contentStart + 2, cursor).trimStart(), segmentStart: contentStart, segmentEnd, valueStart: contentStart + 2 };
+    if (content.startsWith('@')) return { kind: 'platform', prefix: '@', value: searchQuery.slice(contentStart + 1, cursor).trimStart(), segmentStart: contentStart, segmentEnd, valueStart: contentStart + 1 };
+    if (content.startsWith('#')) return { kind: 'topic', prefix: '#', value: searchQuery.slice(contentStart + 1, cursor).trimStart(), segmentStart: contentStart, segmentEnd, valueStart: contentStart + 1 };
+    if (content.startsWith('*')) return { kind: 'wd_tag', prefix: '*', value: searchQuery.slice(contentStart + 1, cursor).trimStart(), segmentStart: contentStart, segmentEnd, valueStart: contentStart + 1 };
+    if (content.startsWith('>')) return { kind: 'command', prefix: '>', value: searchQuery.slice(contentStart + 1, cursor).trimStart(), segmentStart: contentStart, segmentEnd, valueStart: contentStart + 1 };
+    return { kind: 'none', prefix: '', value: '', segmentStart: contentStart, segmentEnd, valueStart: contentStart };
+  }
+
+  function measureInputText(text: string) {
+    if (!searchInputEl) return 0;
+    const style = window.getComputedStyle(searchInputEl);
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d');
+    if (!context) return 0;
+    context.font = `${style.fontStyle} ${style.fontVariant} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+    return context.measureText(text).width;
+  }
+
+  function updateSuggestionPosition(active: ActiveSegment) {
+    if (!searchInputEl) return;
+    const style = window.getComputedStyle(searchInputEl);
+    const paddingLeft = parseFloat(style.paddingLeft || '0');
+    const before = searchQuery.slice(0, active.segmentStart);
+    const left = paddingLeft + measureInputText(before) - searchInputEl.scrollLeft;
+    const maxLeft = Math.max(0, searchInputEl.clientWidth - 320);
+    suggestionLeft = Math.max(0, Math.min(left, maxLeft));
+  }
+
+  async function refreshSuggestions() {
+    await tick();
+    const active = getActiveSegment();
+    updateSuggestionPosition(active);
+
+    if (active.kind === 'none') {
+      showSuggestions = false;
+      suggestions = [];
+      return;
     }
+
+    if (active.kind === 'command') {
+      const query = active.value.toLowerCase();
+      suggestions = availableCommands.filter(cmd => cmd.toLowerCase().startsWith(`>${query}`) || cmd.toLowerCase().slice(1).startsWith(query));
+      showSuggestions = suggestions.length > 0;
+      activeSuggestionIndex = 0;
+      return;
+    }
+
+    const requestKind = active.kind;
+    const requestValue = active.value;
+    try {
+      const params = new URLSearchParams({ kind: requestKind, q: requestValue });
+      const response = await apiFetch(`/api/search/suggestions?${params.toString()}`);
+      const data = await response.json();
+      const latest = getActiveSegment();
+      if (latest.kind !== requestKind || latest.value !== requestValue) return;
+      suggestions = Array.isArray(data.suggestions) ? data.suggestions : [];
+      showSuggestions = suggestions.length > 0;
+      activeSuggestionIndex = 0;
+      updateSuggestionPosition(latest);
+    } catch (error) {
+      uiLog('ERROR', 'Failed to fetch search suggestions', { error });
+      showSuggestions = false;
+      suggestions = [];
+    }
+  }
+
+  function handleSearchInput() {
+    refreshSuggestions();
     applySearch(false);
   }
 
-  function selectSuggestion(cmd: string) {
-    searchQuery = cmd;
-    showCommandSuggestions = false;
-    applySearch(true);
-    activeTab = 'vault';
+  async function selectSuggestion(value: string) {
+    const active = getActiveSegment();
+    if (active.kind === 'command') {
+      searchQuery = value;
+      showSuggestions = false;
+      suggestions = [];
+      applySearch(true);
+      activeTab = 'vault';
+      return;
+    }
+    if (active.kind === 'none') return;
+
+    const before = searchQuery.slice(0, active.segmentStart);
+    const after = searchQuery.slice(active.segmentEnd).replace(/^;\s*/, '').replace(/^\s*/, '');
+    const nextSegment = `${active.prefix}${value}; `;
+    searchQuery = `${before}${nextSegment}${after}`;
+    showSuggestions = false;
+    suggestions = [];
+    activeFilters = parseSearchQuery(searchQuery);
+    applySearch(false);
+    await tick();
+    const position = before.length + nextSegment.length;
+    searchInputEl?.setSelectionRange(position, position);
+    searchInputEl?.focus();
   }
 
   function handleSearchKeydown(event: KeyboardEvent) {
-    if (showCommandSuggestions && commandSuggestions.length > 0) {
+    if (showSuggestions && suggestions.length > 0) {
       if (event.key === 'ArrowDown') {
         event.preventDefault();
-        activeSuggestionIndex = (activeSuggestionIndex + 1) % commandSuggestions.length;
+        activeSuggestionIndex = (activeSuggestionIndex + 1) % suggestions.length;
         return;
       } else if (event.key === 'ArrowUp') {
         event.preventDefault();
-        activeSuggestionIndex = (activeSuggestionIndex - 1 + commandSuggestions.length) % commandSuggestions.length;
+        activeSuggestionIndex = (activeSuggestionIndex - 1 + suggestions.length) % suggestions.length;
         return;
-      } else if (event.key === 'Enter') {
+      } else if (event.key === 'Enter' || event.key === 'Tab') {
         event.preventDefault();
-        selectSuggestion(commandSuggestions[activeSuggestionIndex]);
+        selectSuggestion(suggestions[activeSuggestionIndex]);
         return;
       } else if (event.key === 'Escape') {
-        showCommandSuggestions = false;
+        showSuggestions = false;
         return;
       }
     }
 
     if (event.key === 'Enter') {
       event.preventDefault();
-      showCommandSuggestions = false;
+      showSuggestions = false;
       applySearch(true);
       activeTab = 'vault';
     }
@@ -318,19 +431,23 @@
         <div class="search-wrapper">
           <input 
             type="text" 
-            placeholder="a: artist  # topic  * wd-tag  @ platform  > cmd" 
+            placeholder="a: artist; # topic; * wd-tag; @ platform; > cmd"
+            bind:this={searchInputEl}
             bind:value={searchQuery}
             on:input={handleSearchInput}
             on:keydown={handleSearchKeydown}
+            on:click={refreshSuggestions}
           />
-          {#if searchQuery.trim() || Object.keys(activeFilters).length > 0}
+          {#if searchQuery.trim() || hasActiveFilters(activeFilters)}
               <button class="clear-search" on:click={clearSearch} title="Clear Search">✖</button>
           {/if}
-          {#if showCommandSuggestions && commandSuggestions.length > 0}
-            <ul class="suggestions-dropdown">
-              {#each commandSuggestions as suggestion, i}
-                <li class:active={i === activeSuggestionIndex} on:click={() => selectSuggestion(suggestion)}>
-                  {suggestion}
+          {#if showSuggestions && suggestions.length > 0}
+            <ul class="suggestions-dropdown" style={`left: ${suggestionLeft}px;`}>
+              {#each suggestions as suggestion, i}
+                <li>
+                  <button type="button" class:active={i === activeSuggestionIndex} on:click={() => selectSuggestion(suggestion)}>
+                    {suggestion}
+                  </button>
                 </li>
               {/each}
             </ul>
@@ -449,9 +566,10 @@
   .search-container { flex-grow: 1; }
   .search-wrapper { position: relative; width: 100%; display: flex; align-items: center; }
   .search-wrapper input { width: 100%; max-width: 100%; padding-right: 35px; }
-  .suggestions-dropdown { position: absolute; top: 100%; left: 0; width: 100%; max-width: 300px; background: var(--bg-panel); border: 1px solid var(--border-dim); border-radius: 6px; margin-top: 5px; padding: 5px 0; list-style: none; z-index: 1000; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
-  .suggestions-dropdown li { padding: 8px 15px; font-size: 13px; color: var(--text-main); cursor: pointer; }
-  .suggestions-dropdown li:hover, .suggestions-dropdown li.active { background: var(--accent-primary); color: white; }
+  .suggestions-dropdown { position: absolute; top: 100%; width: 300px; max-width: calc(100% - 10px); background: var(--bg-panel); border: 1px solid var(--border-dim); border-radius: 6px; margin-top: 5px; padding: 5px 0; list-style: none; z-index: 1000; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
+  .suggestions-dropdown li { padding: 0; }
+  .suggestions-dropdown button { width: 100%; padding: 8px 15px; border: 0; border-radius: 0; background: transparent; color: var(--text-main); text-align: left; font-size: 13px; cursor: pointer; }
+  .suggestions-dropdown button:hover, .suggestions-dropdown button.active { background: var(--accent-primary); color: white; }
   .clear-search { position: absolute; right: 8px; background: transparent; border: none; color: var(--text-muted); font-size: 14px; cursor: pointer; padding: 4px; }
   .clear-search:hover { color: var(--accent-danger); background: transparent; border: none; }
   .header-actions { display: flex; align-items: center; gap: 10px; }

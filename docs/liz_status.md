@@ -91,6 +91,32 @@ SQLite stores runtime asset/index metadata only. Manual topics and WD tags live 
 - Frontend accessibility warnings remain in Svelte build output.
 - CSP is practical rather than strict and should be revisited after production packaging is stable.
 
+## Current Task
+
+Search/filter implementation:
+
+- Current search parsing lives mostly in `frontend/src/App.svelte`.
+- Current backend item filtering lives in `backend/web_api.py`.
+- Supported prefixes:
+  - `a:` filters artist.
+  - `@` filters platform.
+  - `#` filters note-frontmatter topics.
+  - `*` filters WD tags.
+  - `>` triggers commands such as `>grid` and `>masonry`.
+- Search now uses structured filter arrays internally.
+- Repeated filters are supported for WD tags, topics, platforms, and artists.
+- Dropdown suggestion sources now exist for commands, artist, platform, topic, and WD tag prefixes.
+- Use `;` as the separator for prefixed search filters because comma may appear in normal text later.
+- Position the dropdown relative to the active prefix/value being typed, not just under the whole search bar.
+- Use AND between different prefix types.
+- Use OR within repeated `a:` artist filters.
+- Use OR within repeated `@` platform filters.
+- Use AND within repeated `#` topic filters.
+- Use AND within repeated `*` WD tag filters.
+- Use AND for plain text terms.
+- Backend item filtering uses repeated query params, not comma-encoded strings.
+- The visible UI remains a single search input; chips are still deferred.
+
 ## Still Deferred
 
 - Search/index scaling: RAM hydration still bulk-loads pHash, tile, URL, and video signatures.

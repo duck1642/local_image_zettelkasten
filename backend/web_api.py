@@ -168,6 +168,65 @@ def _get_stats_sync():
     finally:
         conn.close()
 
+@app.get("/api/search/suggestions")
+async def get_search_suggestions(kind: str, q: str = "", limit: int = 20):
+    return await asyncio.to_thread(_get_search_suggestions_sync, kind, q, limit)
+
+def _add_suggestion(values, value, needle, limit):
+    text = str(value or "").strip()
+    if not text:
+        return
+    key = text.lower()
+    if needle and needle not in key:
+        return
+    if key not in values:
+        values[key] = text
+
+def _get_search_suggestions_sync(kind: str, q: str = "", limit: int = 20):
+    kind = (kind or "").strip().lower()
+    needle = (q or "").strip().lower()
+    limit = max(1, min(int(limit or 20), 50))
+
+    if kind == "command":
+        commands = [">grid", ">masonry"]
+        return {"suggestions": [cmd for cmd in commands if cmd.lower().startswith(f">{needle}") or cmd.lower().lstrip(">").startswith(needle)][:limit]}
+
+    if kind not in {"artist", "platform", "topic", "wd_tag"}:
+        raise HTTPException(status_code=400, detail="Invalid suggestion kind")
+
+    conn = init_database()
+    cursor = conn.cursor()
+    try:
+        if kind in {"artist", "platform"}:
+            column = "source_artist" if kind == "artist" else "platform"
+            if needle:
+                cursor.execute(
+                    f"SELECT DISTINCT {column} FROM items WHERE {column} IS NOT NULL AND TRIM({column}) != '' AND {column} LIKE ? ORDER BY {column} COLLATE NOCASE ASC LIMIT ?",
+                    (f"%{needle}%", limit)
+                )
+            else:
+                cursor.execute(
+                    f"SELECT DISTINCT {column} FROM items WHERE {column} IS NOT NULL AND TRIM({column}) != '' ORDER BY {column} COLLATE NOCASE ASC LIMIT ?",
+                    (limit,)
+                )
+            return {"suggestions": [row[0] for row in cursor.fetchall() if row[0]]}
+
+        cursor.execute("SELECT hash FROM items ORDER BY date_added DESC")
+        values = {}
+        for row in cursor.fetchall():
+            item_hash = row[0]
+            if kind == "topic":
+                for topic in load_note_topics(item_hash):
+                    _add_suggestion(values, topic, needle, limit)
+            else:
+                for tag in _wd_names_for_hash(item_hash):
+                    _add_suggestion(values, tag, needle, limit)
+            if len(values) >= limit:
+                break
+        return {"suggestions": sorted(values.values(), key=str.lower)[:limit]}
+    finally:
+        conn.close()
+
 @app.get("/api/thumbnails/{item_hash}")
 async def get_thumbnail(item_hash: str):
     return await asyncio.to_thread(_get_thumbnail_sync, item_hash)
@@ -192,14 +251,14 @@ def _get_thumbnail_sync(item_hash: str):
 async def get_items(
     field: str = None, value: str = None,
     sort: str = 'newest', media_type: str = 'all',
-    artist: str = None, platform: str = None,
-    filename: str = None, topic: str = None,
-    wd_tag: str = None,
+    artist: list[str] = Query(default=[]), platform: list[str] = Query(default=[]),
+    filename: list[str] = Query(default=[]), topic: list[str] = Query(default=[]),
+    wd_tag: list[str] = Query(default=[]), text: list[str] = Query(default=[]),
     cursor: str = None, limit: int = 50
 ):
     return await asyncio.to_thread(
         _get_items_sync,
-        field, value, sort, media_type, artist, platform, filename, topic, wd_tag, cursor, limit
+        field, value, sort, media_type, artist, platform, filename, topic, wd_tag, text, cursor, limit
     )
 
 def _item_after_cursor(item: dict, cursor: str, sort: str) -> bool:
@@ -215,8 +274,60 @@ def _item_after_cursor(item: dict, cursor: str, sort: str) -> bool:
         return item_key > cursor_key
     return item_key < cursor_key
 
-def _get_items_sync(field, value, sort, media_type, artist, platform, filename, topic, wd_tag, cursor, limit):
+def _clean_filter_values(values):
+    if values is None:
+        return []
+    if isinstance(values, str):
+        values = [values]
+    cleaned = []
+    for value in values:
+        text = str(value or "").strip()
+        if text:
+            cleaned.append(text)
+    return cleaned
+
+def _append_or_like(conditions, params, column, values):
+    values = _clean_filter_values(values)
+    if not values:
+        return
+    conditions.append("(" + " OR ".join([f"{column} LIKE ?"] * len(values)) + ")")
+    params.extend([f"%{value}%" for value in values])
+
+def _append_text_terms(conditions, params, terms):
+    for term in _clean_filter_values(terms):
+        conditions.append("(original_filename LIKE ? OR hash LIKE ? OR source_url LIKE ? OR source_artist LIKE ? OR platform LIKE ?)")
+        params.extend([f"%{term}%"] * 5)
+
+def _wd_names_for_hash(item_hash: str) -> list[str]:
+    wd_data = load_note_wd_tags(item_hash)
+    if wd_data.get("status") != "ok":
+        cache_data = load_tag_cache(item_hash)
+        if cache_data.get("status") == "ok":
+            wd_data = {
+                "rating": cache_data.get("rating") or {},
+                "character_tags": cache_data.get("character_tags") or [],
+                "tags": cache_data.get("tags") or []
+            }
+    names = []
+    rating = wd_data.get("rating", {})
+    if rating:
+        names.append(rating.get("label", "") or rating.get("name", ""))
+    for tag in wd_data.get("character_tags", []):
+        if isinstance(tag, str):
+            names.append(tag)
+        elif isinstance(tag, dict):
+            names.append(tag.get("display_name", "") or tag.get("name", ""))
+    for tag in wd_data.get("tags", []):
+        if isinstance(tag, str):
+            names.append(tag)
+        elif isinstance(tag, dict):
+            names.append(tag.get("display_name", "") or tag.get("name", ""))
+    return [name for name in names if name]
+
+def _get_items_sync(field, value, sort, media_type, artist, platform, filename, topic, wd_tag, text, cursor, limit):
     limit = max(1, min(limit, 100))
+    topic_filters = _clean_filter_values(topic)
+    wd_tag_filters = _clean_filter_values(wd_tag)
     conn = init_database()
     cursor_obj = conn.cursor()
     try:
@@ -230,22 +341,17 @@ def _get_items_sync(field, value, sort, media_type, artist, platform, filename, 
                 conditions.append(f"{field} LIKE ?")
                 params.append(f"%{value}%")
 
-        if artist:
-            conditions.append("source_artist LIKE ?")
-            params.append(f"%{artist}%")
-        if platform:
-            conditions.append("platform LIKE ?")
-            params.append(f"%{platform}%")
-        if filename:
-            conditions.append("original_filename LIKE ?")
-            params.append(f"%{filename}%")
+        _append_or_like(conditions, params, "source_artist", artist)
+        _append_or_like(conditions, params, "platform", platform)
+        _append_or_like(conditions, params, "original_filename", filename)
+        _append_text_terms(conditions, params, text)
 
         if media_type == 'image':
             conditions.append("mime_type LIKE 'image/%'")
         elif media_type == 'video':
             conditions.append("mime_type LIKE 'video/%'")
 
-        has_frontmatter_filter = topic or wd_tag
+        has_frontmatter_filter = bool(topic_filters or wd_tag_filters)
 
         if cursor and not has_frontmatter_filter:
             try:
@@ -273,28 +379,21 @@ def _get_items_sync(field, value, sort, media_type, artist, platform, filename, 
         rows = cursor_obj.fetchall()
 
         items = []
-        topic_lower = (topic or "").lower()
-        wd_tag_lower = (wd_tag or "").lower()
+        topic_lowers = [value.lower() for value in topic_filters]
+        wd_tag_lowers = [value.lower() for value in wd_tag_filters]
 
         for row in rows:
             h, ext = row[0], (row[1] or "")
 
-            if topic_lower:
+            if topic_lowers:
                 note_topics = load_note_topics(h)
-                if not any(topic_lower in t.lower() for t in note_topics):
+                topic_strings = [t.lower() for t in note_topics]
+                if not all(any(topic_value in topic_string for topic_string in topic_strings) for topic_value in topic_lowers):
                     continue
 
-            if wd_tag_lower:
-                wd_data = load_note_wd_tags(h)
-                wd_strings = []
-                rating = wd_data.get("rating", {})
-                if rating:
-                    wd_strings.append(rating.get("label", "") or rating.get("name", ""))
-                for t in wd_data.get("character_tags", []):
-                    wd_strings.append(t.get("display_name", "") or t.get("name", ""))
-                for t in wd_data.get("tags", []):
-                    wd_strings.append(t.get("display_name", "") or t.get("name", ""))
-                if not any(wd_tag_lower in s.lower() for s in wd_strings if s):
+            if wd_tag_lowers:
+                wd_strings = [name.lower() for name in _wd_names_for_hash(h)]
+                if not all(any(wd_value in wd_string for wd_string in wd_strings) for wd_value in wd_tag_lowers):
                     continue
 
             items.append({
