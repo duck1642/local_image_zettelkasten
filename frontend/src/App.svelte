@@ -20,6 +20,9 @@
   let isLoadingMore = false;
   let selectedItem: VaultItem | null = null;
   let selectedGroup: { id: string, items: VaultItem[] } | null = null;
+  let selectedHashes = new Set<string>();
+  let lastSelectedHash: string | null = null;
+  let bulkDeleting = false;
   let activeTab: 'vault' | 'logs' | 'ingest' | 'review' | 'stats' | 'settings' = 'vault';
   let searchQuery = '';
   let showSuggestions = false;
@@ -27,6 +30,7 @@
   let suggestions: FacetSuggestion[] = [];
   let suggestionLeft = 0;
   let searchInputEl: HTMLInputElement;
+  let suggestionsListEl: HTMLUListElement;
   const availableCommands = ['>grid', '>masonry'];
   
   let focusMode: 'normal' | 'wide' | 'fullscreen' = 'normal';
@@ -238,6 +242,12 @@
     suggestionLeft = Math.max(0, Math.min(left, maxLeft));
   }
 
+  async function scrollActiveSuggestionIntoView() {
+    await tick();
+    const active = suggestionsListEl?.querySelector('button.active');
+    active?.scrollIntoView({ block: 'nearest' });
+  }
+
   async function refreshSuggestions() {
     await tick();
     const active = getActiveSegment();
@@ -262,7 +272,7 @@
     const requestKind = active.kind;
     const requestValue = active.value;
     try {
-      const params = new URLSearchParams({ kind: requestKind, q: requestValue });
+      const params = new URLSearchParams({ kind: requestKind, q: requestValue, limit: '100' });
       const response = await apiFetch(`/api/search/suggestions?${params.toString()}`);
       const data = await response.json();
       const latest = getActiveSegment();
@@ -320,10 +330,12 @@
       if (event.key === 'ArrowDown') {
         event.preventDefault();
         activeSuggestionIndex = (activeSuggestionIndex + 1) % suggestions.length;
+        scrollActiveSuggestionIntoView();
         return;
       } else if (event.key === 'ArrowUp') {
         event.preventDefault();
         activeSuggestionIndex = (activeSuggestionIndex - 1 + suggestions.length) % suggestions.length;
+        scrollActiveSuggestionIntoView();
         return;
       } else if (event.key === 'Enter' || event.key === 'Tab') {
         event.preventDefault();
@@ -353,10 +365,68 @@
     } catch (e) { }
   }
 
-  function handleSelectItem(item: VaultItem, group: any) {
+  function loadedHashOrder() {
+    return items.map((item) => item.hash);
+  }
+
+  function handleSelectItem(item: VaultItem, group: any, event?: MouseEvent) {
     selectedItem = item;
     selectedGroup = group;
+    const additive = Boolean(event?.ctrlKey || event?.metaKey);
+    const range = Boolean(event?.shiftKey && lastSelectedHash);
+    if (range) {
+      const order = loadedHashOrder();
+      const start = order.indexOf(lastSelectedHash || '');
+      const end = order.indexOf(item.hash);
+      if (start >= 0 && end >= 0) {
+        const [from, to] = start <= end ? [start, end] : [end, start];
+        const next = new Set(selectedHashes);
+        for (const hash of order.slice(from, to + 1)) next.add(hash);
+        selectedHashes = next;
+      } else {
+        selectedHashes = new Set([item.hash]);
+      }
+    } else if (additive) {
+      const next = new Set(selectedHashes);
+      if (next.has(item.hash)) next.delete(item.hash);
+      else next.add(item.hash);
+      selectedHashes = next;
+      lastSelectedHash = item.hash;
+    } else {
+      selectedHashes = new Set([item.hash]);
+      lastSelectedHash = item.hash;
+    }
     uiLog('DEBUG', `Selected item: ${item.hash.substring(0, 12)}`);
+  }
+
+  function clearSelection() {
+    selectedHashes = new Set();
+    lastSelectedHash = null;
+    selectedItem = null;
+    selectedGroup = null;
+  }
+
+  async function deleteSelected() {
+    const hashes = Array.from(selectedHashes);
+    if (!hashes.length || bulkDeleting) return;
+    const confirmed = confirm(`Delete ${hashes.length} selected item${hashes.length === 1 ? '' : 's'}? This removes DB rows, vault files, notes, and WD tag cache.`);
+    if (!confirmed) return;
+    bulkDeleting = true;
+    try {
+      for (const hash of hashes) {
+        const response = await apiFetch(`/api/items/${hash}`, { method: 'DELETE' });
+        if (!response.ok) throw new Error(`Delete failed for ${hash}: ${response.status}`);
+      }
+      uiLog('INFO', 'Bulk delete completed', { count: hashes.length });
+      clearSelection();
+      await fetchItems();
+    } catch (error) {
+      uiLog('ERROR', 'Bulk delete failed', { error: String(error) });
+      alert('Delete failed. Check App Logs for details.');
+      await fetchItems();
+    } finally {
+      bulkDeleting = false;
+    }
   }
 
   function handleUpdate(event: CustomEvent) {
@@ -453,7 +523,7 @@
               <button class="clear-search" on:click={clearSearch} title="Clear Search">✖</button>
           {/if}
           {#if showSuggestions && suggestions.length > 0}
-            <ul class="suggestions-dropdown" style={`left: ${suggestionLeft}px;`}>
+            <ul bind:this={suggestionsListEl} class="suggestions-dropdown" style={`left: ${suggestionLeft}px;`}>
               {#each suggestions as suggestion, i}
                 <li>
                   <button type="button" class:active={i === activeSuggestionIndex} on:click={() => selectSuggestion(suggestion.value)}>
@@ -488,6 +558,15 @@
     <div class="view-and-inspector">
       <div class="viewport">
         {#if activeTab === 'vault'}
+          {#if selectedHashes.size > 0}
+            <div class="bulk-action-bar">
+              <span class="selection-count">{selectedHashes.size} selected</span>
+              <button on:click={clearSelection}>Clear Selection</button>
+              <button class="danger" on:click={deleteSelected} disabled={bulkDeleting}>
+                {bulkDeleting ? 'Deleting...' : 'Delete Selected'}
+              </button>
+            </div>
+          {/if}
           {#if isSearching && items.length === 0}
             <!-- Silently loading initial items -->
           {:else if currentLayout === 'masonry'}
@@ -498,7 +577,8 @@
                     {group} 
                     layout="masonry"
                     selectedHash={selectedItem?.hash}
-                    on:select={(e) => handleSelectItem(e.detail, group)} 
+                    {selectedHashes}
+                    on:select={(e) => handleSelectItem(e.detail.item, group, e.detail.event)}
                   />
                 {/each}
               </div>
@@ -515,7 +595,8 @@
                     {group} 
                     layout="grid"
                     selectedHash={selectedItem?.hash}
-                    on:select={(e) => handleSelectItem(e.detail, group)} 
+                    {selectedHashes}
+                    on:select={(e) => handleSelectItem(e.detail.item, group, e.detail.event)}
                   />
                 {/each}
               </div>
@@ -542,11 +623,11 @@
         <Inspector 
             item={selectedItem} 
             group={selectedGroup}
-            on:close={() => { selectedItem = null; selectedGroup = null; }} 
+            on:close={clearSelection}
             on:updated={handleUpdate} 
             on:focus={handleFocusMode}
             on:changeItem={(e) => selectedItem = e.detail}
-            on:deleted={() => { selectedItem = null; selectedGroup = null; fetchItems(); }}
+            on:deleted={() => { clearSelection(); fetchItems(); }}
         />
       {/if}
     </div>
@@ -582,7 +663,7 @@
   .search-container { flex-grow: 1; }
   .search-wrapper { position: relative; width: 100%; display: flex; align-items: center; }
   .search-wrapper input { width: 100%; max-width: 100%; padding-right: 35px; }
-  .suggestions-dropdown { position: absolute; top: 100%; width: 300px; max-width: calc(100% - 10px); background: var(--bg-panel); border: 1px solid var(--border-dim); border-radius: 6px; margin-top: 5px; padding: 5px 0; list-style: none; z-index: 1000; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
+  .suggestions-dropdown { position: absolute; top: 100%; width: 300px; max-width: calc(100% - 10px); max-height: min(520px, calc(100vh - 110px)); overflow-y: auto; background: var(--bg-panel); border: 1px solid var(--border-dim); border-radius: 6px; margin-top: 5px; padding: 5px 0; list-style: none; z-index: 1000; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
   .suggestions-dropdown li { padding: 0; }
   .suggestions-dropdown button { width: 100%; padding: 8px 15px; border: 0; border-radius: 0; background: transparent; color: var(--text-main); text-align: left; font-size: 13px; cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
   .suggestions-dropdown button:hover, .suggestions-dropdown button.active { background: var(--accent-primary); color: white; }
@@ -596,6 +677,8 @@
   .filter-select { background: var(--bg-input); border: 1px solid var(--border-dim); color: var(--text-main); padding: 5px 10px; border-radius: 6px; font-size: 12px; cursor: pointer; height: 32px; }
   .view-and-inspector { flex-grow: 1; display: flex; overflow: hidden; }
   .viewport { flex-grow: 1; display: flex; flex-direction: column; overflow: hidden; }
+  .bulk-action-bar { display: flex; align-items: center; gap: 10px; padding: 10px 15px; border-bottom: 1px solid var(--border-dim); background: var(--bg-main); flex-shrink: 0; }
+  .selection-count { color: var(--text-bright); font-weight: 600; margin-right: auto; }
   .grid-scroll { flex-grow: 1; overflow-y: auto; padding: 15px; }
   .masonry-scroll { flex-grow: 1; overflow-y: auto; padding: 15px; }
   .vault-layout.masonry {

@@ -86,7 +86,6 @@ SQLite stores runtime asset/index metadata only. Manual topics and WD tags live 
 
 ## Current Issues
 
-- Next session: improve search stacking behavior and add dropdown views for other search prefixes.
 - Production sidecar packaging has a build path, but the generated sidecar still needs release-build validation on a clean machine.
 - Frontend accessibility warnings remain in Svelte build output.
 - CSP is practical rather than strict and should be revisited after production packaging is stable.
@@ -107,6 +106,8 @@ Search/filter implementation:
 - Repeated filters are supported for WD tags, topics, platforms, and artists.
 - Dropdown suggestion sources now exist for commands, artist, platform, topic, and WD tag prefixes.
 - Dropdown suggestions now show global facet counts when available.
+- Dropdown suggestion lists are scrollable and support mouse selection, ArrowUp/ArrowDown navigation, Enter selection, and Tab autocomplete.
+- Non-command dropdowns request a larger suggestion set so high-count WD tags, artists, platforms, and topics can be browsed.
 - A read-only Stats tab shows global counts for WD tags, artists, platforms, and topics.
 - Use `;` as the separator for prefixed search filters because comma may appear in normal text later.
 - Position the dropdown relative to the active prefix/value being typed, not just under the whole search bar.

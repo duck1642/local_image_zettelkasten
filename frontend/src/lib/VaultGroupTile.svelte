@@ -5,6 +5,7 @@
   
   export let group: { id: string, items: VaultItem[] };
   export let selectedHash: string | undefined = '';
+  export let selectedHashes: Set<string> = new Set();
   export let layout: 'masonry' | 'grid' = 'masonry';
   
   const dispatch = createEventDispatcher();
@@ -13,7 +14,7 @@
   $: current = group.items[index];
   $: thumbnailUrl = assetUrl(current.thumbnail_url);
   $: fullUrl = assetUrl(current.url);
-  $: isSelected = current.hash === selectedHash;
+  $: isSelected = current.hash === selectedHash || selectedHashes.has(current.hash);
   $: aspectStyle = (current.width && current.height)
     ? `aspect-ratio: ${current.width} / ${current.height}`
     : '';
@@ -28,8 +29,8 @@
     index = (index - 1 + group.items.length) % group.items.length;
   }
 
-  function select() {
-    dispatch('select', current);
+  function select(event: MouseEvent) {
+    dispatch('select', { item: current, event });
   }
 
   function playVideo(e: MouseEvent & { currentTarget: HTMLVideoElement }) {
