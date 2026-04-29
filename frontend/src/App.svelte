@@ -6,6 +6,7 @@
   import Ingestion from './lib/Ingestion.svelte';
   import ReviewView from './lib/ReviewView.svelte';
   import SettingsView from './lib/SettingsView.svelte';
+  import StatsView from './lib/StatsView.svelte';
   import VaultGroupTile from './lib/VaultGroupTile.svelte';
   import MediaFocus from './lib/MediaFocus.svelte';
   import { log as uiLog } from './lib/logger';
@@ -19,11 +20,11 @@
   let isLoadingMore = false;
   let selectedItem: VaultItem | null = null;
   let selectedGroup: { id: string, items: VaultItem[] } | null = null;
-  let activeTab: 'vault' | 'logs' | 'ingest' | 'review' | 'settings' = 'vault';
+  let activeTab: 'vault' | 'logs' | 'ingest' | 'review' | 'stats' | 'settings' = 'vault';
   let searchQuery = '';
   let showSuggestions = false;
   let activeSuggestionIndex = 0;
-  let suggestions: string[] = [];
+  let suggestions: FacetSuggestion[] = [];
   let suggestionLeft = 0;
   let searchInputEl: HTMLInputElement;
   const availableCommands = ['>grid', '>masonry'];
@@ -36,6 +37,7 @@
   let currentSort = 'newest';
   let currentMediaType = 'all';
   type SuggestionKind = 'none' | 'command' | 'artist' | 'platform' | 'topic' | 'wd_tag';
+  type FacetSuggestion = { value: string; count?: number };
   type SearchFilters = { artists: string[]; platforms: string[]; topics: string[]; wd_tags: string[]; text_terms: string[]; command?: string };
   type ActiveSegment = { kind: SuggestionKind; prefix: string; value: string; segmentStart: number; segmentEnd: number; valueStart: number };
   let activeFilters: SearchFilters = emptyFilters();
@@ -249,7 +251,9 @@
 
     if (active.kind === 'command') {
       const query = active.value.toLowerCase();
-      suggestions = availableCommands.filter(cmd => cmd.toLowerCase().startsWith(`>${query}`) || cmd.toLowerCase().slice(1).startsWith(query));
+      suggestions = availableCommands
+        .filter(cmd => cmd.toLowerCase().startsWith(`>${query}`) || cmd.toLowerCase().slice(1).startsWith(query))
+        .map(value => ({ value }));
       showSuggestions = suggestions.length > 0;
       activeSuggestionIndex = 0;
       return;
@@ -263,7 +267,13 @@
       const data = await response.json();
       const latest = getActiveSegment();
       if (latest.kind !== requestKind || latest.value !== requestValue) return;
-      suggestions = Array.isArray(data.suggestions) ? data.suggestions : [];
+      if (Array.isArray(data.items)) {
+        suggestions = data.items
+          .filter((item: any) => item && item.value)
+          .map((item: any) => ({ value: String(item.value), count: Number(item.count || 0) }));
+      } else {
+        suggestions = Array.isArray(data.suggestions) ? data.suggestions.map((value: string) => ({ value })) : [];
+      }
       showSuggestions = suggestions.length > 0;
       activeSuggestionIndex = 0;
       updateSuggestionPosition(latest);
@@ -317,7 +327,7 @@
         return;
       } else if (event.key === 'Enter' || event.key === 'Tab') {
         event.preventDefault();
-        selectSuggestion(suggestions[activeSuggestionIndex]);
+        selectSuggestion(suggestions[activeSuggestionIndex].value);
         return;
       } else if (event.key === 'Escape') {
         showSuggestions = false;
@@ -420,6 +430,7 @@
       <button class:active={activeTab === 'ingest'} on:click={() => activeTab = 'ingest'}>
         Ingestion {#if (queueStats.normal + queueStats.force) > 0}<span class="badge">{(queueStats.normal + queueStats.force)}</span>{/if}
       </button>
+      <button class:active={activeTab === 'stats'} on:click={() => activeTab = 'stats'}>Stats</button>
       <button class:active={activeTab === 'logs'} on:click={() => activeTab = 'logs'}>App Logs</button>
       <button class:active={activeTab === 'settings'} on:click={() => activeTab = 'settings'}>Settings</button>
     </div>
@@ -445,8 +456,11 @@
             <ul class="suggestions-dropdown" style={`left: ${suggestionLeft}px;`}>
               {#each suggestions as suggestion, i}
                 <li>
-                  <button type="button" class:active={i === activeSuggestionIndex} on:click={() => selectSuggestion(suggestion)}>
-                    {suggestion}
+                  <button type="button" class:active={i === activeSuggestionIndex} on:click={() => selectSuggestion(suggestion.value)}>
+                    <span class="suggestion-value">{suggestion.value}</span>
+                    {#if suggestion.count}
+                      <span class="suggestion-count">{suggestion.count}</span>
+                    {/if}
                   </button>
                 </li>
               {/each}
@@ -515,6 +529,8 @@
           <ReviewView />
         {:else if activeTab === 'ingest'}
           <Ingestion />
+        {:else if activeTab === 'stats'}
+          <StatsView />
         {:else if activeTab === 'settings'}
           <SettingsView />
         {:else}
@@ -568,8 +584,11 @@
   .search-wrapper input { width: 100%; max-width: 100%; padding-right: 35px; }
   .suggestions-dropdown { position: absolute; top: 100%; width: 300px; max-width: calc(100% - 10px); background: var(--bg-panel); border: 1px solid var(--border-dim); border-radius: 6px; margin-top: 5px; padding: 5px 0; list-style: none; z-index: 1000; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
   .suggestions-dropdown li { padding: 0; }
-  .suggestions-dropdown button { width: 100%; padding: 8px 15px; border: 0; border-radius: 0; background: transparent; color: var(--text-main); text-align: left; font-size: 13px; cursor: pointer; }
+  .suggestions-dropdown button { width: 100%; padding: 8px 15px; border: 0; border-radius: 0; background: transparent; color: var(--text-main); text-align: left; font-size: 13px; cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
   .suggestions-dropdown button:hover, .suggestions-dropdown button.active { background: var(--accent-primary); color: white; }
+  .suggestion-value { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .suggestion-count { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+  .suggestions-dropdown button:hover .suggestion-count, .suggestions-dropdown button.active .suggestion-count { color: rgba(255,255,255,0.8); }
   .clear-search { position: absolute; right: 8px; background: transparent; border: none; color: var(--text-muted); font-size: 14px; cursor: pointer; padding: 4px; }
   .clear-search:hover { color: var(--accent-danger); background: transparent; border: none; }
   .header-actions { display: flex; align-items: center; gap: 10px; }

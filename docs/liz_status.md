@@ -106,6 +106,8 @@ Search/filter implementation:
 - Search now uses structured filter arrays internally.
 - Repeated filters are supported for WD tags, topics, platforms, and artists.
 - Dropdown suggestion sources now exist for commands, artist, platform, topic, and WD tag prefixes.
+- Dropdown suggestions now show global facet counts when available.
+- A read-only Stats tab shows global counts for WD tags, artists, platforms, and topics.
 - Use `;` as the separator for prefixed search filters because comma may appear in normal text later.
 - Position the dropdown relative to the active prefix/value being typed, not just under the whole search bar.
 - Use AND between different prefix types.
@@ -115,11 +117,15 @@ Search/filter implementation:
 - Use AND within repeated `*` WD tag filters.
 - Use AND for plain text terms.
 - Backend item filtering uses repeated query params, not comma-encoded strings.
+- Backend exposes `/api/facets` for global facet count queries.
 - The visible UI remains a single search input; chips are still deferred.
+- Future planned feature: context-aware suggestions. Example: after `*kisaki; *`, WD suggestions should come only from items already matching `*kisaki`, excluding already-selected tags.
+- Possible context-aware suggestion approaches to compare later: scan current matches for V1, build an in-memory facet index for long-term speed, or add SQLite facet tables if durable indexed search becomes worth the schema cost.
 
 ## Still Deferred
 
 - Search/index scaling: RAM hydration still bulk-loads pHash, tile, URL, and video signatures.
+- Context-aware search suggestions are deferred until similar programs are reviewed.
 - Config caching: `get_config()` still reparses YAML often; caching needs explicit invalidation for Settings edits.
 - Video embedding performance: V1 still extracts five frames using separate ffmpeg calls.
 - YouTube community partial policy: one failed expected image still makes the post incomplete and retryable.

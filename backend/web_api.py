@@ -5,6 +5,7 @@ import asyncio
 import traceback
 import secrets
 import threading
+from collections import Counter
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -172,15 +173,9 @@ def _get_stats_sync():
 async def get_search_suggestions(kind: str, q: str = "", limit: int = 20):
     return await asyncio.to_thread(_get_search_suggestions_sync, kind, q, limit)
 
-def _add_suggestion(values, value, needle, limit):
-    text = str(value or "").strip()
-    if not text:
-        return
-    key = text.lower()
-    if needle and needle not in key:
-        return
-    if key not in values:
-        values[key] = text
+@app.get("/api/facets")
+async def get_facets(kind: str, q: str = "", limit: int = 100):
+    return await asyncio.to_thread(_get_facets_sync, kind, q, limit)
 
 def _get_search_suggestions_sync(kind: str, q: str = "", limit: int = 20):
     kind = (kind or "").strip().lower()
@@ -189,41 +184,85 @@ def _get_search_suggestions_sync(kind: str, q: str = "", limit: int = 20):
 
     if kind == "command":
         commands = [">grid", ">masonry"]
-        return {"suggestions": [cmd for cmd in commands if cmd.lower().startswith(f">{needle}") or cmd.lower().lstrip(">").startswith(needle)][:limit]}
+        items = [
+            {"value": cmd, "count": 0}
+            for cmd in commands
+            if cmd.lower().startswith(f">{needle}") or cmd.lower().lstrip(">").startswith(needle)
+        ][:limit]
+        return {"suggestions": [item["value"] for item in items], "items": items}
 
     if kind not in {"artist", "platform", "topic", "wd_tag"}:
         raise HTTPException(status_code=400, detail="Invalid suggestion kind")
+
+    result = _get_facets_sync(kind, q, limit)
+    return {"suggestions": [item["value"] for item in result["items"]], "items": result["items"]}
+
+def _sort_facets(items, needle, limit):
+    needle = needle.lower()
+    filtered = [
+        item for item in items
+        if not needle or needle in item["value"].lower()
+    ]
+    filtered.sort(
+        key=lambda item: (
+            0 if needle and item["value"].lower().startswith(needle) else 1,
+            -item["count"],
+            item["value"].lower()
+        )
+    )
+    return filtered[:limit]
+
+def _count_python_facets(rows, value_loader, needle, limit):
+    counts = Counter()
+    display_values = {}
+    for row in rows:
+        seen = set()
+        for value in value_loader(row[0]):
+            text = str(value or "").strip()
+            if not text:
+                continue
+            key = text.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            counts[key] += 1
+            display_values.setdefault(key, text)
+    items = [{"value": display_values[key], "count": count} for key, count in counts.items()]
+    return _sort_facets(items, needle, limit)
+
+def _get_facets_sync(kind: str, q: str = "", limit: int = 100):
+    kind = (kind or "").strip().lower()
+    needle = (q or "").strip().lower()
+    limit = max(1, min(int(limit or 100), 500))
+
+    if kind not in {"artist", "platform", "topic", "wd_tag"}:
+        raise HTTPException(status_code=400, detail="Invalid facet kind")
 
     conn = init_database()
     cursor = conn.cursor()
     try:
         if kind in {"artist", "platform"}:
             column = "source_artist" if kind == "artist" else "platform"
+            conditions = [f"{column} IS NOT NULL", f"TRIM({column}) != ''"]
+            params = []
             if needle:
-                cursor.execute(
-                    f"SELECT DISTINCT {column} FROM items WHERE {column} IS NOT NULL AND TRIM({column}) != '' AND {column} LIKE ? ORDER BY {column} COLLATE NOCASE ASC LIMIT ?",
-                    (f"%{needle}%", limit)
-                )
-            else:
-                cursor.execute(
-                    f"SELECT DISTINCT {column} FROM items WHERE {column} IS NOT NULL AND TRIM({column}) != '' ORDER BY {column} COLLATE NOCASE ASC LIMIT ?",
-                    (limit,)
-                )
-            return {"suggestions": [row[0] for row in cursor.fetchall() if row[0]]}
+                conditions.append(f"{column} LIKE ?")
+                params.append(f"%{needle}%")
+            where_clause = " AND ".join(conditions)
+            cursor.execute(
+                f"SELECT {column}, COUNT(*) FROM items WHERE {where_clause} GROUP BY {column}",
+                tuple(params)
+            )
+            items = [{"value": row[0], "count": row[1]} for row in cursor.fetchall() if row[0]]
+            return {"kind": kind, "items": _sort_facets(items, needle, limit)}
 
         cursor.execute("SELECT hash FROM items ORDER BY date_added DESC")
-        values = {}
-        for row in cursor.fetchall():
-            item_hash = row[0]
-            if kind == "topic":
-                for topic in load_note_topics(item_hash):
-                    _add_suggestion(values, topic, needle, limit)
-            else:
-                for tag in _wd_names_for_hash(item_hash):
-                    _add_suggestion(values, tag, needle, limit)
-            if len(values) >= limit:
-                break
-        return {"suggestions": sorted(values.values(), key=str.lower)[:limit]}
+        rows = cursor.fetchall()
+        if kind == "topic":
+            items = _count_python_facets(rows, load_note_topics, needle, limit)
+        else:
+            items = _count_python_facets(rows, _wd_names_for_hash, needle, limit)
+        return {"kind": kind, "items": items}
     finally:
         conn.close()
 
