@@ -151,12 +151,25 @@
     return items.map((item) => item.hash);
   }
 
+  function findGroupForItem(target: VaultItem | null) {
+    if (!target) return null;
+    return groupedItems.find((group) => group.items.some((item) => item.hash === target.hash)) || null;
+  }
+
   function handleSelectItem(item: VaultItem, group: VaultGroup, event?: MouseEvent) {
-    selectedItem = item;
-    selectedGroup = group;
     const next = updateSelection(selectedHashes, loadedHashOrder(), item.hash, lastSelectedHash, event);
     selectedHashes = next.selectedHashes;
     lastSelectedHash = next.lastSelectedHash;
+    if (selectedHashes.has(item.hash)) {
+      selectedItem = item;
+      selectedGroup = group;
+    } else if (selectedHashes.size > 0) {
+      selectedItem = items.find((candidate) => selectedHashes.has(candidate.hash)) || null;
+      selectedGroup = findGroupForItem(selectedItem);
+    } else {
+      selectedItem = null;
+      selectedGroup = null;
+    }
     uiLog('DEBUG', `Selected item: ${item.hash.substring(0, 12)}`);
   }
 

@@ -90,7 +90,11 @@
   }
 
   .tile-group:hover { border-color: var(--border-hover); }
-  .tile-group.selected { border-color: var(--accent-primary); background: rgba(31, 111, 235, 0.05); }
+  .tile-group.selected {
+    border-color: #f0b429;
+    background: rgba(240, 180, 41, 0.08);
+    box-shadow: 0 0 0 2px rgba(240, 180, 41, 0.35);
+  }
 
   .media-stack { position: relative; width: 100%; background: #000; min-height: 100px; display: flex; align-items: center; justify-content: center; }
   
