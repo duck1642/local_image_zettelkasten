@@ -194,3 +194,4 @@ backups/
 *.sqlite3
 cookies.txt
 .secrets.yaml
+config.yaml

@@ -37,7 +37,7 @@
   let loadMoreCheckTimer: number | null = null;
 
   $: groupedItems = groupVaultItems(items);
-  $: emitStatus();
+  $: emitStatus(stats.total_items, groupedItems.length, hasMore);
   $: attachInfiniteScroll(sentinelEl, currentLayout);
 
   function groupVaultItems(rows: VaultItem[]): VaultGroup[] {
@@ -54,8 +54,8 @@
     return orderedKeys.map((key) => ({ id: key, items: groups[key] }));
   }
 
-  function emitStatus() {
-    dispatch('status', { totalItems: stats.total_items, groups: groupedItems.length, hasMore });
+  function emitStatus(totalItems: number, groups: number, moreAvailable: boolean) {
+    dispatch('status', { totalItems, groups, hasMore: moreAvailable });
   }
 
   async function fetchConfig() {
