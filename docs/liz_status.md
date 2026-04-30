@@ -89,6 +89,7 @@ SQLite stores runtime asset/index metadata only. Manual topics and WD tags live 
 - Production sidecar packaging has a build path, but the generated sidecar still needs release-build validation on a clean machine.
 - Frontend accessibility warnings remain in Svelte build output.
 - CSP is practical rather than strict and should be revisited after production packaging is stable.
+- Shift-click range selection in masonry view follows loaded/DOM order, not visual masonry column order. Grid behaves correctly because visual order matches DOM order. Need to decide whether masonry range selection should use visual order or stay load-order based.
 
 ### Logic & Architecture Bugs
 - **The "Already Intersecting" Infinite Scroll Bug:** `VaultView.svelte` uses an `IntersectionObserver` attached to `sentinelEl`. The observer's callback only fires when the sentinel **crosses** the threshold. If the sentinel is already intersecting after the first fetch finishes (e.g. on a large monitor), it does not fire again. Needs a reactive statement to re-evaluate or an action modifier.
@@ -129,6 +130,7 @@ Search/filter implementation:
 - Backend item filtering uses repeated query params, not comma-encoded strings.
 - Backend exposes `/api/facets` for global facet count queries.
 - Planned optimization: add an in-memory facet cache for Stats and dropdown counts. Markdown remains the source of truth for topics and WD tags, but backend should build topic/WD counts once and invalidate/rebuild after tagging, note update, delete, or ingestion.
+- Planned vault layout work, Option C: replace CSS-column masonry with a real computed masonry layout that enforces minimum tile width, calculates responsive column count from the vault viewport, places each tile into the shortest column, and exposes visual order so shift-click range selection can follow what the user sees.
 - The visible UI remains a single search input; chips are still deferred.
 - Future planned feature: context-aware suggestions. Example: after `*kisaki; *`, WD suggestions should come only from items already matching `*kisaki`, excluding already-selected tags.
 - Possible context-aware suggestion approaches to compare later: scan current matches for V1, build an in-memory facet index for long-term speed, or add SQLite facet tables if durable indexed search becomes worth the schema cost.
