@@ -83,6 +83,16 @@ SQLite stores runtime asset/index metadata only. Manual topics and WD tags live 
 - Markdown frontmatter parsing handles BOM and line-delimited YAML fences.
 - Pillow is pinned to `>=9.0.0`.
 - Python source root was renamed from `src/` to `backend/`.
+- Vault layout modes were simplified to `masonry` and `grid`; old `masonry-js`/`grid-js` values are compatibility-only.
+- Runtime config now uses `ui.vault_layout_mode` and `ui.vault_tile_min_width`.
+- Sensitive Pixiv/cookie credentials were removed from `config/config.yaml`; `secrets/.secrets.yaml` remains the credential source.
+- The old misleading Vault `Add Files` button was removed.
+- Terminal stdout/stderr logging is initialized at API startup instead of mutating streams during import.
+- Backend command suggestions include `>masonry`, `>grid`, `>zoom-in`, and `>zoom-out`.
+- Shared stats polling, review count, inspector action feedback, bulk delete, and infinite-scroll rechecks are implemented.
+- Safe frontend media-type helpers replaced direct `mime_type.startsWith(...)` checks, so missing MIME values no longer crash tile/inspector/focus rendering.
+- Search suggestion positioning now reuses one canvas/context instead of creating a new canvas on every keypress.
+- A shared frontend config store was added and Settings now uses it. Vault layout/zoom still needs to be wired back through the shared store after the layout revert.
 
 ## Current Issues
 
@@ -90,28 +100,55 @@ SQLite stores runtime asset/index metadata only. Manual topics and WD tags live 
 - Frontend accessibility warnings remain in Svelte build output.
 - CSP is practical rather than strict and should be revisited after production packaging is stable.
 - Shift-click range selection in masonry view follows loaded/DOM order, not visual masonry column order. Grid behaves correctly because visual order matches DOM order. Need to decide whether masonry range selection should use visual order or stay load-order based.
-
-### Logic & Architecture Bugs
-- **The "Already Intersecting" Infinite Scroll Bug:** `VaultView.svelte` uses an `IntersectionObserver` attached to `sentinelEl`. The observer's callback only fires when the sentinel **crosses** the threshold. If the sentinel is already intersecting after the first fetch finishes (e.g. on a large monitor), it does not fire again. Needs a reactive statement to re-evaluate or an action modifier.
 - **Sidecar Port 8000 Binding (Brittleness):** The compiled `liz-api` binary internally hardcodes `uvicorn.run(port=8000)`. If port 8000 is occupied by another app, the backend fails to bind and the Tauri app renders a white screen. Production sidecars should dynamically bind to an available port provided by Tauri.
-- **Redundant Network Polling (State Duplication):** `App.svelte` blindly polls `fetchSecondaryStats()` every 5 seconds. `Ingestion.svelte` and `ReviewView.svelte` also independently poll their respective stats. These should be moved into a central Svelte Store (`svelte/store`) to cut network spam.
-- **Silent Failures on Action Buttons (UX):** In `Inspector.svelte`, if `openFolder()` or `openMarkdown()` fails (e.g. missing file), the `catch` block only writes to `uiLog('ERROR')`. There is no visual feedback or `alert()` to inform the user that the action failed.
-- **`svelte-check` Accessibility Debt:** Running `npm run check` generates 21 warnings. Missing `for` attributes on `<label>` elements and missing `role="button"`/`tabindex="0"` on clickable `<div>` and `<span>` elements.
-- **Sequential Bulk Deletion (Performance):** Bulk deletion in `VaultView.svelte` fires individual `DELETE` API requests for every selected item sequentially. For large selections, this results in hundreds of separate SQLite transactions. A `/api/items/bulk_delete` endpoint is needed for scale.
-- **Heavy Global Review Polling (Performance):** `App.svelte` polls the full `/api/review` endpoint every 5 seconds just to update the sidebar badge count. This triggers a heavy filesystem scan and SQLite database join in the background repeatedly. A lightweight `/api/review/count` endpoint is needed to eliminate this disk usage.
+- **`svelte-check` Accessibility Debt:** Running `npm run check` currently reports accessibility warnings around labels, clickable divs, and media captions.
+- **Vault DOM Growth:** The current Svelte vault appends fetched groups and renders all loaded tiles. `content-visibility: auto` helps painting, but it does not remove DOM nodes or `<video>` elements. Large vault sessions need virtualization/windowing.
+- **Resize-Time Masonry Rebuild:** `ResizeObserver` updates `vaultWidth`, which recomputes JS masonry columns over all loaded groups. This needs throttling/debouncing before large-vault use.
+- **Config Save Race, Partially Fixed:** `SettingsView.svelte` now uses the shared config store, but the reverted `VaultView.svelte` still saves layout/zoom through its local config cache. Vault must be rewired to the shared store.
+- **Grouped Tile Navigation Compatibility:** `VaultGroupTile.svelte` now emits parent-controlled `indexChange`, but the reverted `VaultView.svelte` does not currently persist/pass per-group active indexes. Grouped post prev/next may need a compatibility fix.
+- **Masonry Virtualization Design:** The attempted absolute-position virtual masonry was reverted because estimated heights caused overlap. The current stable masonry uses browser column flow, but a scalable future version needs measured tile heights or another virtualization strategy.
 
 ## Current Task
 
+Vault view optimization:
+
+- Current state:
+  - `masonry` is back to the old JS column assignment plus normal browser vertical flow.
+  - `grid` is back to the old rendered grid path.
+  - This is visually stable and avoids the absolute-position overlap bug.
+  - It is not a final large-vault solution because all loaded groups remain mounted.
+- Problem to solve next:
+  - Optimize both masonry and grid without reintroducing overlap or glitching.
+  - Keep videos outside the viewport from staying mounted in large sessions.
+  - Keep masonry visually stable at narrow widths.
+  - Keep grouped-media active index stable across scrolling and layout changes.
+- Rejected/reverted attempt:
+  - Absolute-position virtualization with estimated masonry heights caused overlapping tiles.
+  - The failure mode was height-estimate drift: the wrapper position/height became the layout contract, but actual tile height could differ.
+- External repo review:
+  - `PrabhuKiran8790/portfolio` and `janzheng/svelte-masonry` both use rendered DOM measurement/CSS-grid style masonry refreshes.
+  - Their useful lesson is that measured real height is safer than guessed height.
+  - They are not enough as-is for LIZ because they still expect rendered DOM items, so they do not solve large-vault DOM growth by themselves.
+- Candidate direction:
+  - Keep old column-flow masonry as the stable fallback while designing the next method.
+  - For scalable masonry, render/window visible items, measure actual tile heights, cache by group id/active index/tile width, then compute positions from measured heights.
+  - For grid, use a simpler virtual row window because grid height is predictable.
+  - Do not rely on hardcoded masonry height estimates as the final positioning source.
+- Smaller cleanup needed before the next layout attempt:
+  - Rewire `VaultView.svelte` to the shared config store.
+  - Restore grouped-post index handling in `VaultView.svelte` or revert `VaultGroupTile.svelte` to local index ownership.
+  - Debounce/throttle `ResizeObserver` updates if old masonry remains active during testing.
+
 Search/filter implementation:
 
-- Current search parsing lives mostly in `frontend/src/App.svelte`.
+- Current search parsing lives in `frontend/src/lib/search.ts` and `frontend/src/lib/SearchBar.svelte`.
 - Current backend item filtering lives in `backend/web_api.py`.
 - Supported prefixes:
   - `a:` filters artist.
   - `@` filters platform.
   - `#` filters note-frontmatter topics.
   - `*` filters WD tags.
-  - `>` triggers commands such as `>grid` and `>masonry`.
+  - `>` triggers commands such as `>grid`, `>masonry`, `>zoom-in`, and `>zoom-out`.
 - Search now uses structured filter arrays internally.
 - Repeated filters are supported for WD tags, topics, platforms, and artists.
 - Dropdown suggestion sources now exist for commands, artist, platform, topic, and WD tag prefixes.
@@ -130,7 +167,7 @@ Search/filter implementation:
 - Backend item filtering uses repeated query params, not comma-encoded strings.
 - Backend exposes `/api/facets` for global facet count queries.
 - Planned optimization: add an in-memory facet cache for Stats and dropdown counts. Markdown remains the source of truth for topics and WD tags, but backend should build topic/WD counts once and invalidate/rebuild after tagging, note update, delete, or ingestion.
-- Planned vault layout work, Option C: replace CSS-column masonry with a real computed masonry layout that enforces minimum tile width, calculates responsive column count from the vault viewport, places each tile into the shortest column, and exposes visual order so shift-click range selection can follow what the user sees.
+- Vault layout currently uses computed JS masonry/grid with configurable tile minimum width.
 - The visible UI remains a single search input; chips are still deferred.
 - Future planned feature: context-aware suggestions. Example: after `*kisaki; *`, WD suggestions should come only from items already matching `*kisaki`, excluding already-selected tags.
 - Possible context-aware suggestion approaches to compare later: scan current matches for V1, build an in-memory facet index for long-term speed, or add SQLite facet tables if durable indexed search becomes worth the schema cost.

@@ -17,6 +17,8 @@
   let searchInputEl: HTMLInputElement;
   let suggestionsListEl: HTMLUListElement;
   let searchDebounceTimer: number | null = null;
+  let measureCanvas: HTMLCanvasElement | null = null;
+  let measureContext: CanvasRenderingContext2D | null = null;
 
   function emitFilters(immediate = false) {
     dispatch('filtersChanged', { filters: activeFilters, immediate });
@@ -30,11 +32,13 @@
   function measureInputText(text: string) {
     if (!searchInputEl) return 0;
     const style = window.getComputedStyle(searchInputEl);
-    const canvas = document.createElement('canvas');
-    const context = canvas.getContext('2d');
-    if (!context) return 0;
-    context.font = `${style.fontStyle} ${style.fontVariant} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
-    return context.measureText(text).width;
+    if (!measureCanvas) {
+      measureCanvas = document.createElement('canvas');
+      measureContext = measureCanvas.getContext('2d');
+    }
+    if (!measureContext) return 0;
+    measureContext.font = `${style.fontStyle} ${style.fontVariant} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+    return measureContext.measureText(text).width;
   }
 
   function updateSuggestionPosition(active: ActiveSegment) {

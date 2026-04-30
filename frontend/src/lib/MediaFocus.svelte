@@ -4,6 +4,7 @@
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { log as uiLog } from './logger';
   import { assetUrl as resolveAssetUrl } from './api';
+  import { isImageMedia, isVideoMedia } from './media';
 
   export let item: any;
   export let mode: 'wide' | 'fullscreen' = 'wide';
@@ -85,9 +86,9 @@
 
 <div class="focus-overlay" class:fullscreen={mode === 'fullscreen'} on:click={close}>
     <div class="media-container" on:click|stopPropagation>
-        {#if item.mime_type.startsWith('image/')}
+        {#if isImageMedia(item)}
             <img src={assetUrl} alt="Focused View" />
-        {:else}
+        {:else if isVideoMedia(item)}
             <video 
                 bind:this={videoElement}
                 src={assetUrl} 
@@ -97,6 +98,8 @@
                 loop
                 on:loadedmetadata={handleLoaded}
             ></video>
+        {:else}
+            <div class="unsupported-media">Unknown media type</div>
         {/if}
         
         <div class="controls">
@@ -139,6 +142,16 @@
         max-height: calc(100vh - 140px);
         box-shadow: 0 0 50px rgba(0,0,0,0.5);
         object-fit: contain;
+    }
+    .unsupported-media {
+        min-width: 320px;
+        min-height: 180px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--text-muted);
+        border: 1px solid var(--border-dim);
+        border-radius: 8px;
     }
 
     .fullscreen img, .fullscreen video {

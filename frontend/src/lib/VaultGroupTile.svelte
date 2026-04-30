@@ -2,35 +2,39 @@
   import type { VaultItem } from './types';
   import { createEventDispatcher } from 'svelte';
   import { assetUrl } from './api';
+  import { isImageMedia, isVideoMedia } from './media';
   
   export let group: { id: string, items: VaultItem[] };
   export let selectedHash: string | undefined = '';
   export let selectedHashes: Set<string> = new Set();
   export let layout: 'masonry' | 'grid' = 'masonry';
+  export let activeIndex = 0;
   
   const dispatch = createEventDispatcher();
-  let index = 0;
 
+  $: index = Math.min(Math.max(activeIndex || 0, 0), Math.max(0, group.items.length - 1));
   $: current = group.items[index];
-  $: thumbnailUrl = assetUrl(current.thumbnail_url);
-  $: fullUrl = assetUrl(current.url);
-  $: isSelected = current.hash === selectedHash || selectedHashes.has(current.hash);
-  $: aspectStyle = (current.width && current.height)
+  $: thumbnailUrl = current ? assetUrl(current.thumbnail_url) : '';
+  $: fullUrl = current ? assetUrl(current.url) : '';
+  $: isSelected = current ? current.hash === selectedHash || selectedHashes.has(current.hash) : false;
+  $: aspectStyle = (current?.width && current?.height)
     ? `aspect-ratio: ${current.width} / ${current.height}`
     : '';
 
   function next(e: MouseEvent) {
     e.stopPropagation();
-    index = (index + 1) % group.items.length;
+    const nextIndex = (index + 1) % group.items.length;
+    dispatch('indexChange', { groupId: group.id, index: nextIndex });
   }
 
   function prev(e: MouseEvent) {
     e.stopPropagation();
-    index = (index - 1 + group.items.length) % group.items.length;
+    const nextIndex = (index - 1 + group.items.length) % group.items.length;
+    dispatch('indexChange', { groupId: group.id, index: nextIndex });
   }
 
   function select(event: MouseEvent) {
-    dispatch('select', { item: current, event });
+    if (current) dispatch('select', { item: current, event });
   }
 
   function playVideo(e: MouseEvent & { currentTarget: HTMLVideoElement }) {
@@ -46,12 +50,14 @@
 
 <div class="tile-group {layout}" class:selected={isSelected} on:click={select}>
     <div class="media-stack" style={layout !== 'grid' ? aspectStyle : ''}>
-        {#if current.mime_type.startsWith('image/')}
+        {#if current && isImageMedia(current)}
             <img src={thumbnailUrl} alt="Vault Item" loading="lazy"
                  width={current.width || undefined} height={current.height || undefined} />
-        {:else}
+        {:else if current && isVideoMedia(current)}
             <video src={fullUrl} poster={thumbnailUrl} preload="none" muted loop
                    on:mouseenter={playVideo} on:mouseleave={pauseVideo}></video>
+        {:else}
+            <div class="unsupported-media">Unknown media</div>
         {/if}
 
         {#if group.items.length > 1}
@@ -64,8 +70,8 @@
     </div>
 
     <div class="info">
-        <span class="hash">{current.hash.substring(0, 12)}</span>
-        <span class="artist">{current.artist || 'Unknown'}</span>
+        <span class="hash">{current ? current.hash.substring(0, 12) : ''}</span>
+        <span class="artist">{current?.artist || 'Unknown'}</span>
     </div>
 </div>
 
@@ -138,6 +144,7 @@
   .nav-btn:hover { border-color: var(--accent-primary); }
 
   .counter { font-size: 10px; color: #8b949e; font-weight: bold; }
+  .unsupported-media { min-height: 100px; display: flex; align-items: center; justify-content: center; color: var(--text-muted); font-size: 11px; }
 
   .info {
     padding: 8px;

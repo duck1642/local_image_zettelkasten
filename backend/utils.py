@@ -189,7 +189,8 @@ def get_config() -> dict:
                 'wd_tags': str(WD_TAGS_DIR),
             },
             'ui': {
-                'vault_layout': 'grid',
+                'vault_layout_mode': 'masonry',
+                'vault_tile_min_width': 190,
                 'prefixes': {
                     'command': '>',
                     'platform': '@',

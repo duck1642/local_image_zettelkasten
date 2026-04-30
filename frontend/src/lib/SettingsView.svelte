@@ -1,148 +1,149 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { apiFetch } from './api';
-  import { TILE_MIN_WIDTH_CEILING, TILE_MIN_WIDTH_FLOOR, normalizeLayoutMode, normalizeTileMinWidth } from './layout';
-  let config: any = null;
-  let initialConfigStr: string = '';
-  let loading = true;
-  let saving = false;
+  import { TILE_MIN_WIDTH_CEILING, TILE_MIN_WIDTH_FLOOR } from './layout';
+  import { config, configDirty, configLoading, configSaving, loadConfig, saveCurrentConfig, updateConfig } from './configStore';
 
-  $: isDirty = config ? JSON.stringify(config) !== initialConfigStr : false;
-
-  async function loadConfig() {
-    loading = true;
-    try {
-      const res = await apiFetch('/api/config');
-      config = await res.json();
-      if (!config.ui) config.ui = {};
-      config.ui.vault_layout_mode = normalizeLayoutMode(config);
-      config.ui.vault_tile_min_width = normalizeTileMinWidth(config.ui.vault_tile_min_width);
-      initialConfigStr = JSON.stringify(config);
-    } finally { loading = false; }
+  function setConfig(mutator: (draft: any) => void) {
+    updateConfig(mutator, false);
   }
 
-  async function saveConfig() {
-    saving = true;
-    try {
-      await apiFetch('/api/config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(config)
-      });
-      initialConfigStr = JSON.stringify(config);
-    } finally { saving = false; }
+  function textValue(event: Event) {
+    return (event.currentTarget as HTMLInputElement | HTMLSelectElement).value;
   }
 
-  onMount(loadConfig);
+  function numberValue(event: Event) {
+    return Number((event.currentTarget as HTMLInputElement).value);
+  }
+
+  function checkedValue(event: Event) {
+    return (event.currentTarget as HTMLInputElement).checked;
+  }
+
+  onMount(() => {
+    loadConfig();
+  });
 </script>
 
 <div class="settings-container">
-  {#if loading}
+  {#if $configLoading || !$config}
     <div class="centered">Loading...</div>
-  {:else if config}
+  {:else}
     <div class="header-row">
-        <h3>System Settings</h3>
-        {#if isDirty}
-            <span class="status-label unsaved">● Unsaved Changes</span>
-        {/if}
+      <h3>System Settings</h3>
+      {#if $configDirty}
+        <span class="status-label unsaved">Unsaved Changes</span>
+      {/if}
     </div>
-    
+
     <div class="form-grid">
       <label>Command Prefix</label>
-      <input type="text" bind:value={config.ui.prefixes.command} />
+      <input type="text" value={$config.ui.prefixes.command} on:input={(event) => setConfig((draft) => draft.ui.prefixes.command = textValue(event))} />
 
       <label>Artist Prefix</label>
-      <input type="text" bind:value={config.ui.prefixes.artist} />
+      <input type="text" value={$config.ui.prefixes.artist} on:input={(event) => setConfig((draft) => draft.ui.prefixes.artist = textValue(event))} />
 
       <label>Tag Prefix</label>
-      <input type="text" bind:value={config.ui.prefixes.tag} />
+      <input type="text" value={$config.ui.prefixes.tag} on:input={(event) => setConfig((draft) => draft.ui.prefixes.tag = textValue(event))} />
 
       <label>Platform Prefix</label>
-      <input type="text" bind:value={config.ui.prefixes.platform} />
+      <input type="text" value={$config.ui.prefixes.platform} on:input={(event) => setConfig((draft) => draft.ui.prefixes.platform = textValue(event))} />
 
       <label>Vault Layout Mode</label>
-      <select bind:value={config.ui.vault_layout_mode}>
-          <option value="masonry">Masonry</option>
-          <option value="grid">Grid</option>
+      <select value={$config.ui.vault_layout_mode} on:change={(event) => setConfig((draft) => draft.ui.vault_layout_mode = textValue(event))}>
+        <option value="masonry">Masonry</option>
+        <option value="grid">Grid</option>
       </select>
 
       <label>Vault Min Tile Width</label>
-      <input type="number" min={TILE_MIN_WIDTH_FLOOR} max={TILE_MIN_WIDTH_CEILING} step="10" bind:value={config.ui.vault_tile_min_width} />
+      <input
+        type="number"
+        min={TILE_MIN_WIDTH_FLOOR}
+        max={TILE_MIN_WIDTH_CEILING}
+        step="10"
+        value={$config.ui.vault_tile_min_width}
+        on:input={(event) => setConfig((draft) => draft.ui.vault_tile_min_width = numberValue(event))}
+      />
 
       <div class="grid-spacer"></div>
       <div class="checkbox-group">
-          <label class="check-label"><input type="checkbox" bind:checked={config.processing.flatten_transparency} /> Flatten Transparency</label>
-          <label class="check-label"><input type="checkbox" bind:checked={config.tagging.enabled} /> Enable Tagging</label>
+        <label class="check-label">
+          <input type="checkbox" checked={$config.processing.flatten_transparency} on:change={(event) => setConfig((draft) => draft.processing.flatten_transparency = checkedValue(event))} />
+          Flatten Transparency
+        </label>
+        <label class="check-label">
+          <input type="checkbox" checked={$config.tagging.enabled} on:change={(event) => setConfig((draft) => draft.tagging.enabled = checkedValue(event))} />
+          Enable Tagging
+        </label>
       </div>
 
       <label>Tag Model Repo</label>
-      <input type="text" bind:value={config.tagging.model_repo} />
+      <input type="text" value={$config.tagging.model_repo} on:input={(event) => setConfig((draft) => draft.tagging.model_repo = textValue(event))} />
 
       <label>Tag Device</label>
-      <select bind:value={config.tagging.device}>
-          <option value="cpu">cpu</option>
-          <option value="cuda">cuda</option>
-          <option value="auto">auto</option>
+      <select value={$config.tagging.device} on:change={(event) => setConfig((draft) => draft.tagging.device = textValue(event))}>
+        <option value="cpu">cpu</option>
+        <option value="cuda">cuda</option>
+        <option value="auto">auto</option>
       </select>
 
       <label>Tag Threshold</label>
       <div class="multi-input">
-        <input type="number" step="0.05" bind:value={config.tagging.threshold} />
+        <input type="number" step="0.05" value={$config.tagging.threshold} on:input={(event) => setConfig((draft) => draft.tagging.threshold = numberValue(event))} />
         <label class="inline-label">Max Tags</label>
-        <input type="number" bind:value={config.tagging.max_tags} />
+        <input type="number" value={$config.tagging.max_tags} on:input={(event) => setConfig((draft) => draft.tagging.max_tags = numberValue(event))} />
       </div>
 
       <div class="grid-spacer"></div>
-      <button class="save-large" class:primary={isDirty} on:click={saveConfig} disabled={!isDirty || saving}>
-        {saving ? 'Saving...' : 'Save Settings'}
+      <button class="save-large" class:primary={$configDirty} on:click={saveCurrentConfig} disabled={!$configDirty || $configSaving}>
+        {$configSaving ? 'Saving...' : 'Save Settings'}
       </button>
     </div>
 
     <div class="shortcuts-guide">
-        <h4>Keyboard Shortcuts & Search Prefixes</h4>
-        <div class="shortcuts-grid">
-            <div class="shortcut-row">
-                <span class="key">Enter</span>
-                <span class="desc">Execute Search</span>
-            </div>
-            <div class="shortcut-row">
-                <span class="key">F5</span>
-                <span class="desc">Refresh Vault (from Database)</span>
-            </div>
-            <div class="shortcut-row">
-                <span class="key">Ctrl+F5</span>
-                <span class="desc">Full App Reload</span>
-            </div>
-            <div class="shortcut-row">
-                <span class="key">Esc</span>
-                <span class="desc">Close Media Focus</span>
-            </div>
-            <div class="shortcut-row">
-                <span class="key">W</span>
-                <span class="desc">Toggle Wide View (in Inspector)</span>
-            </div>
-            <div class="shortcut-row">
-                <span class="key">F</span>
-                <span class="desc">Toggle Fullscreen (in Inspector)</span>
-            </div>
-            <div class="divider"></div>
-            <div class="shortcut-row">
-                <span class="key">&gt;grid</span>
-                <span class="desc">Switch Vault to Grid Layout</span>
-            </div>
-            <div class="shortcut-row">
-                <span class="key">&gt;masonry</span>
-                <span class="desc">Switch Vault to Masonry Layout</span>
-            </div>
-            <div class="shortcut-row">
-                <span class="key">&gt;zoom-in</span>
-                <span class="desc">Increase JS Vault Tile Size</span>
-            </div>
-            <div class="shortcut-row">
-                <span class="key">&gt;zoom-out</span>
-                <span class="desc">Decrease JS Vault Tile Size</span>
-            </div>
+      <h4>Keyboard Shortcuts & Search Prefixes</h4>
+      <div class="shortcuts-grid">
+        <div class="shortcut-row">
+          <span class="key">Enter</span>
+          <span class="desc">Execute Search</span>
         </div>
+        <div class="shortcut-row">
+          <span class="key">F5</span>
+          <span class="desc">Refresh Vault from Database</span>
+        </div>
+        <div class="shortcut-row">
+          <span class="key">Ctrl+F5</span>
+          <span class="desc">Full App Reload</span>
+        </div>
+        <div class="shortcut-row">
+          <span class="key">Esc</span>
+          <span class="desc">Close Media Focus</span>
+        </div>
+        <div class="shortcut-row">
+          <span class="key">W</span>
+          <span class="desc">Toggle Wide View</span>
+        </div>
+        <div class="shortcut-row">
+          <span class="key">F</span>
+          <span class="desc">Toggle Fullscreen</span>
+        </div>
+        <div class="divider"></div>
+        <div class="shortcut-row">
+          <span class="key">&gt;grid</span>
+          <span class="desc">Switch Vault to Grid Layout</span>
+        </div>
+        <div class="shortcut-row">
+          <span class="key">&gt;masonry</span>
+          <span class="desc">Switch Vault to Masonry Layout</span>
+        </div>
+        <div class="shortcut-row">
+          <span class="key">&gt;zoom-in</span>
+          <span class="desc">Increase Vault Tile Size</span>
+        </div>
+        <div class="shortcut-row">
+          <span class="key">&gt;zoom-out</span>
+          <span class="desc">Decrease Vault Tile Size</span>
+        </div>
+      </div>
     </div>
   {/if}
 </div>
@@ -179,16 +180,16 @@
   }
 
   label { font-size: 13px; color: var(--text-main); }
-  
-  input[type="text"], input[type="number"], select { 
-      background: var(--bg-panel); 
-      border: 1px solid var(--border-dim); 
-      padding: 8px 12px;
-      color: var(--text-main);
-      border-radius: 6px;
-      font-size: 13px;
-      width: 100%;
-      box-sizing: border-box;
+
+  input[type="text"], input[type="number"], select {
+    background: var(--bg-panel);
+    border: 1px solid var(--border-dim);
+    padding: 8px 12px;
+    color: var(--text-main);
+    border-radius: 6px;
+    font-size: 13px;
+    width: 100%;
+    box-sizing: border-box;
   }
 
   .grid-spacer { display: block; }

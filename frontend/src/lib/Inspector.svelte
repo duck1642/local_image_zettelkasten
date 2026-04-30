@@ -4,6 +4,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { log as uiLog } from './logger';
   import { apiFetch, assetUrl } from './api';
+  import { isImageMedia, isVideoMedia } from './media';
 
   export let item: VaultItem | null = null;
   export let group: { id: string, items: VaultItem[] } | null = null;
@@ -209,9 +210,9 @@
     {/if}
     {#if fullItem}
     <div class="group-container media-preview">
-        {#if item.mime_type.startsWith('image/')}
+        {#if isImageMedia(item)}
             <img src={assetUrl(item.url)} alt="Preview" />
-        {:else}
+        {:else if isVideoMedia(item)}
             <video
                 bind:this={videoElement}
                 src={assetUrl(item.url)}
@@ -221,6 +222,8 @@
                 loop
                 autoplay
             ></video>
+        {:else}
+            <div class="unsupported-media">Unknown media type</div>
         {/if}
         <div class="media-overlay">
             <button class="overlay-btn" title="Wide View" on:click={() => toggleFocus('wide')}>W</button>
@@ -373,6 +376,7 @@
     height: 100%;
     object-fit: contain;
   }
+  .unsupported-media { min-height: 200px; display: flex; align-items: center; justify-content: center; color: var(--text-muted); font-size: 12px; }
 
   .media-overlay {
       position: absolute;

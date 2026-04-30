@@ -47,8 +47,17 @@ class TerminalLogger:
     def __getattr__(self, attr):
         return getattr(self.terminal, attr)
 
-sys.stdout = TerminalLogger("terminal.log", sys.stdout)
-sys.stderr = TerminalLogger("terminal.log", sys.stderr)
+_terminal_logging_configured = False
+
+def configure_terminal_logging():
+    global _terminal_logging_configured
+    if _terminal_logging_configured:
+        return
+    if not isinstance(sys.stdout, TerminalLogger):
+        sys.stdout = TerminalLogger("terminal.log", sys.stdout)
+    if not isinstance(sys.stderr, TerminalLogger):
+        sys.stderr = TerminalLogger("terminal.log", sys.stderr)
+    _terminal_logging_configured = True
 
 app = FastAPI(title="LIZ API")
 
@@ -137,6 +146,7 @@ def _tail_lines(path: Path, count: int = 150) -> list[str]:
 
 @app.middleware("http")
 async def local_api_guard(request: Request, call_next):
+    configure_terminal_logging()
     if request.method in MUTATING_METHODS:
         try:
             _validate_origin(request.headers.get("origin"))
@@ -183,7 +193,7 @@ def _get_search_suggestions_sync(kind: str, q: str = "", limit: int = 20):
     limit = max(1, min(int(limit or 20), 50))
 
     if kind == "command":
-        commands = [">grid", ">masonry"]
+        commands = [">masonry", ">grid", ">zoom-in", ">zoom-out"]
         items = [
             {"value": cmd, "count": 0}
             for cmd in commands

@@ -18,10 +18,6 @@
     vaultStatus = event.detail;
   }
 
-  function navigate(event: CustomEvent<AppTab>) {
-    activeTab = event.detail;
-  }
-
   onMount(() => {
     uiLog('INFO', 'Svelte UI initialized and mounted');
     return startSharedStatsPolling();
@@ -47,7 +43,7 @@
 
     <main class="main-content">
       <div class:hidden={activeTab !== 'vault'} class="tab-panel">
-        <VaultView on:status={handleVaultStatus} on:navigate={navigate} />
+        <VaultView on:status={handleVaultStatus} />
       </div>
       {#if activeTab === 'review'}
         <div class="view-shell"><ReviewView /></div>
