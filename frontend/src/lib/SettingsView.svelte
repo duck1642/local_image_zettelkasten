@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { apiFetch } from './api';
+  import { TILE_MIN_WIDTH_CEILING, TILE_MIN_WIDTH_FLOOR, normalizeLayoutMode, normalizeTileMinWidth } from './layout';
   let config: any = null;
   let initialConfigStr: string = '';
   let loading = true;
@@ -13,6 +14,9 @@
     try {
       const res = await apiFetch('/api/config');
       config = await res.json();
+      if (!config.ui) config.ui = {};
+      config.ui.vault_layout_mode = normalizeLayoutMode(config);
+      config.ui.vault_tile_min_width = normalizeTileMinWidth(config.ui.vault_tile_min_width);
       initialConfigStr = JSON.stringify(config);
     } finally { loading = false; }
   }
@@ -55,6 +59,15 @@
 
       <label>Platform Prefix</label>
       <input type="text" bind:value={config.ui.prefixes.platform} />
+
+      <label>Vault Layout Mode</label>
+      <select bind:value={config.ui.vault_layout_mode}>
+          <option value="masonry">Masonry</option>
+          <option value="grid">Grid</option>
+      </select>
+
+      <label>Vault Min Tile Width</label>
+      <input type="number" min={TILE_MIN_WIDTH_FLOOR} max={TILE_MIN_WIDTH_CEILING} step="10" bind:value={config.ui.vault_tile_min_width} />
 
       <div class="grid-spacer"></div>
       <div class="checkbox-group">
@@ -120,6 +133,14 @@
             <div class="shortcut-row">
                 <span class="key">&gt;masonry</span>
                 <span class="desc">Switch Vault to Masonry Layout</span>
+            </div>
+            <div class="shortcut-row">
+                <span class="key">&gt;zoom-in</span>
+                <span class="desc">Increase JS Vault Tile Size</span>
+            </div>
+            <div class="shortcut-row">
+                <span class="key">&gt;zoom-out</span>
+                <span class="desc">Decrease JS Vault Tile Size</span>
             </div>
         </div>
     </div>

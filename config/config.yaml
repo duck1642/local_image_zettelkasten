@@ -92,4 +92,5 @@ ui:
     command: '>'
     platform: '@'
     tag: '#'
-  vault_layout: masonry
+  vault_layout_mode: masonry
+  vault_tile_min_width: 200

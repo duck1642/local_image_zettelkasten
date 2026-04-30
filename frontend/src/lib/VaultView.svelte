@@ -3,6 +3,8 @@
   import type { SearchFilters, VaultGroup, VaultItem } from './types';
   import { apiFetch } from './api';
   import { log as uiLog } from './logger';
+  import type { VaultLayoutMode } from './layout';
+  import { DEFAULT_TILE_MIN_WIDTH, buildMasonryColumns, columnCountFor, normalizeLayoutMode, normalizeTileMinWidth, visualOrderForRenderedGroups } from './layout';
   import { buildItemQueryParams, emptyFilters } from './search';
   import { updateSelection } from './selection';
   import Inspector from './Inspector.svelte';
@@ -23,7 +25,7 @@
   let bulkDeleting = false;
   let focusMode: 'normal' | 'wide' | 'fullscreen' = 'normal';
   let focusStartTime = 0;
-  let currentLayout: 'masonry' | 'grid' = 'masonry';
+  let currentLayoutMode: VaultLayoutMode = 'masonry';
   let configCache: any = null;
   let currentSort = 'newest';
   let currentMediaType = 'all';
@@ -35,10 +37,26 @@
   let observedSentinel: HTMLElement | null = null;
   let observedLayout = '';
   let loadMoreCheckTimer: number | null = null;
+  let layoutHostEl: HTMLElement | null = null;
+  let observedLayoutHost: HTMLElement | null = null;
+  let resizeObserver: ResizeObserver | null = null;
+  let vaultWidth = 0;
+  let tileMinWidth = DEFAULT_TILE_MIN_WIDTH;
+  let tileSizeSaveTimer: number | null = null;
 
   $: groupedItems = groupVaultItems(items);
   $: emitStatus(stats.total_items, groupedItems.length, hasMore);
-  $: attachInfiniteScroll(sentinelEl, currentLayout);
+  $: jsMasonryColumns = currentLayoutMode === 'masonry' ? buildMasonryColumns(groupedItems, vaultWidth, tileMinWidth) : [];
+  $: jsGridColumnCount = currentLayoutMode === 'grid' ? columnCountFor(vaultWidth, tileMinWidth) : 1;
+  $: jsGap = currentLayoutMode === 'grid' ? 15 : 12;
+  $: jsColumnWidth = Math.max(tileMinWidth, (vaultWidth - jsGap * (Math.max(jsGridColumnCount, jsMasonryColumns.length || 1) - 1)) / Math.max(jsGridColumnCount, jsMasonryColumns.length || 1));
+  $: jsVisualHashOrder = currentLayoutMode === 'masonry'
+    ? visualOrderForRenderedGroups(jsMasonryColumns)
+    : currentLayoutMode === 'grid'
+      ? groupedItems.flatMap((group) => group.items.map((item) => item.hash))
+      : [];
+  $: attachInfiniteScroll(sentinelEl, currentLayoutMode);
+  $: observeLayoutHost(layoutHostEl);
 
   function groupVaultItems(rows: VaultItem[]): VaultGroup[] {
     const groups: { [key: string]: VaultItem[] } = {};
@@ -62,18 +80,20 @@
     try {
       const res = await apiFetch('/api/config');
       configCache = await res.json();
-      if (configCache?.ui?.vault_layout) currentLayout = configCache.ui.vault_layout;
+      currentLayoutMode = normalizeLayoutMode(configCache);
+      tileMinWidth = normalizeTileMinWidth(configCache?.ui?.vault_tile_min_width);
     } catch (error) {
       uiLog('ERROR', 'Failed to fetch config', { error });
     }
   }
 
-  async function saveLayout(layout: 'masonry' | 'grid') {
-    currentLayout = layout;
+  async function saveLayoutMode(mode: VaultLayoutMode) {
+    currentLayoutMode = mode;
     scheduleLoadMoreCheck();
     if (!configCache) return;
     if (!configCache.ui) configCache.ui = {};
-    configCache.ui.vault_layout = currentLayout;
+    configCache.ui.vault_layout_mode = currentLayoutMode;
+    configCache.ui.vault_tile_min_width = tileMinWidth;
     try {
       await apiFetch('/api/config', {
         method: 'POST',
@@ -81,8 +101,48 @@
         body: JSON.stringify(configCache)
       });
     } catch (error) {
-      uiLog('ERROR', 'Failed to save layout command', { error });
+      uiLog('ERROR', 'Failed to save layout mode command', { error });
     }
+  }
+
+  function saveTileSizeDebounced() {
+    if (!configCache) return;
+    if (tileSizeSaveTimer !== null) window.clearTimeout(tileSizeSaveTimer);
+    tileSizeSaveTimer = window.setTimeout(async () => {
+      tileSizeSaveTimer = null;
+      if (!configCache.ui) configCache.ui = {};
+      configCache.ui.vault_tile_min_width = tileMinWidth;
+      configCache.ui.vault_layout_mode = currentLayoutMode;
+      try {
+        await apiFetch('/api/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(configCache)
+        });
+      } catch (error) {
+        uiLog('ERROR', 'Failed to save vault zoom', { error });
+      }
+    }, 500);
+  }
+
+  function zoomTileSize(delta: number) {
+    const next = normalizeTileMinWidth(tileMinWidth + delta);
+    if (next === tileMinWidth) return;
+    tileMinWidth = next;
+    if (!configCache) configCache = {};
+    if (!configCache.ui) configCache.ui = {};
+    configCache.ui.vault_tile_min_width = tileMinWidth;
+    configCache.ui.vault_layout_mode = currentLayoutMode;
+    scheduleLoadMoreCheck();
+    saveTileSizeDebounced();
+  }
+
+  function zoomIn() {
+    zoomTileSize(20);
+  }
+
+  function zoomOut() {
+    zoomTileSize(-20);
   }
 
   async function fetchItems(append = false) {
@@ -144,11 +204,17 @@
 
   function handleCommand(event: CustomEvent) {
     const command = event.detail.command;
-    if (command === 'grid' || command === 'masonry') saveLayout(command);
+    if (command === 'masonry' || command === 'grid') {
+      saveLayoutMode(command);
+    } else if (command === 'zoom-in') {
+      zoomIn();
+    } else if (command === 'zoom-out') {
+      zoomOut();
+    }
   }
 
   function loadedHashOrder() {
-    return items.map((item) => item.hash);
+    return jsVisualHashOrder.length ? jsVisualHashOrder : items.map((item) => item.hash);
   }
 
   function findGroupForItem(target: VaultItem | null) {
@@ -240,6 +306,18 @@
   }
 
   function handleGlobalKeydown(event: KeyboardEvent) {
+    const target = event.target as HTMLElement | null;
+    const editing = target?.closest('input, textarea, select, [contenteditable="true"]');
+    if (!editing && (event.code === 'NumpadAdd' || event.key === '+')) {
+      event.preventDefault();
+      zoomIn();
+      return;
+    }
+    if (!editing && (event.code === 'NumpadSubtract' || event.key === '-')) {
+      event.preventDefault();
+      zoomOut();
+      return;
+    }
     if (event.key === 'F5') {
       if (event.ctrlKey) {
         uiLog('INFO', 'Ctrl+F5 pressed: Reloading full app');
@@ -250,6 +328,13 @@
         fetchItems();
       }
     }
+  }
+
+  function handleVaultWheel(event: WheelEvent) {
+    if (!event.ctrlKey) return;
+    event.preventDefault();
+    if (event.deltaY < 0) zoomIn();
+    else if (event.deltaY > 0) zoomOut();
   }
 
   function attachInfiniteScroll(node: HTMLElement | null, layout: string) {
@@ -271,11 +356,32 @@
     scheduleLoadMoreCheck();
   }
 
+  function observeLayoutHost(node: HTMLElement | null) {
+    if (!node) {
+      resizeObserver?.disconnect();
+      resizeObserver = null;
+      observedLayoutHost = null;
+      vaultWidth = 0;
+      return;
+    }
+    if (observedLayoutHost === node) return;
+    resizeObserver?.disconnect();
+    observedLayoutHost = node;
+    vaultWidth = Math.floor(node.clientWidth);
+    resizeObserver = new ResizeObserver(([entry]) => {
+      vaultWidth = Math.floor(entry.contentRect.width);
+      scheduleLoadMoreCheck();
+    });
+    resizeObserver.observe(node);
+  }
+
   onMount(() => {
     fetchConfig();
     fetchItems();
     return () => {
       observer?.disconnect();
+      resizeObserver?.disconnect();
+      if (tileSizeSaveTimer !== null) window.clearTimeout(tileSizeSaveTimer);
       if (loadMoreCheckTimer !== null) window.clearTimeout(loadMoreCheckTimer);
     };
   });
@@ -303,7 +409,7 @@
 </header>
 
 <div class="view-and-inspector">
-  <div class="viewport">
+  <div class="viewport" on:wheel={handleVaultWheel}>
     {#if selectedHashes.size > 1}
       <div class="bulk-action-bar">
         <span class="selection-count">{selectedHashes.size} selected</span>
@@ -315,17 +421,21 @@
     {/if}
     {#if isSearching && items.length === 0}
       <div class="initial-loading"></div>
-    {:else if currentLayout === 'masonry'}
-      <div class="masonry-scroll">
-        <div class="vault-layout masonry">
-          {#each groupedItems as group (group.id)}
-            <VaultGroupTile
-              {group}
-              layout="masonry"
-              selectedHash={selectedItem?.hash}
-              {selectedHashes}
-              on:select={(event) => handleSelectItem(event.detail.item, group, event.detail.event)}
-            />
+    {:else if currentLayoutMode === 'masonry'}
+      <div class="js-layout-scroll" bind:this={layoutHostEl}>
+        <div class="vault-layout masonry" style={`--tile-width: ${jsColumnWidth}px;`}>
+          {#each jsMasonryColumns as column}
+            <div class="js-column">
+              {#each column as group (group.id)}
+                <VaultGroupTile
+                  {group}
+                  layout="masonry"
+                  selectedHash={selectedItem?.hash}
+                  {selectedHashes}
+                  on:select={(event) => handleSelectItem(event.detail.item, group, event.detail.event)}
+                />
+              {/each}
+            </div>
           {/each}
         </div>
         <div bind:this={sentinelEl} class="scroll-sentinel"></div>
@@ -334,8 +444,8 @@
         {/if}
       </div>
     {:else}
-      <div class="grid-scroll">
-        <div class="vault-layout grid">
+      <div class="js-layout-scroll" bind:this={layoutHostEl}>
+        <div class="vault-layout grid" style={`grid-template-columns: repeat(${jsGridColumnCount}, minmax(${tileMinWidth}px, 1fr)); --tile-width: ${jsColumnWidth}px;`}>
           {#each groupedItems as group (group.id)}
             <VaultGroupTile
               {group}
@@ -384,10 +494,10 @@
   .viewport { flex-grow: 1; display: flex; flex-direction: column; overflow: hidden; position: relative; }
   .bulk-action-bar { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 60; display: flex; align-items: center; gap: 10px; padding: 9px 12px; border: 1px solid var(--border-dim); border-radius: 8px; background: rgba(13, 17, 23, 0.96); box-shadow: 0 10px 30px rgba(0,0,0,0.35); }
   .selection-count { color: var(--text-bright); font-weight: 600; white-space: nowrap; }
-  .grid-scroll { flex-grow: 1; overflow-y: auto; padding: 15px; }
-  .masonry-scroll { flex-grow: 1; overflow-y: auto; padding: 15px; }
-  .vault-layout.masonry { column-width: 180px; column-gap: 12px; }
-  .vault-layout.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 15px; align-items: stretch; }
+  .js-layout-scroll { flex-grow: 1; overflow: auto; padding: 15px; }
+  .vault-layout { display: flex; align-items: flex-start; gap: 12px; }
+  .vault-layout.grid { display: grid; gap: 15px; align-items: stretch; }
+  .js-column { flex: 0 0 var(--tile-width); width: var(--tile-width); min-width: var(--tile-width); }
   .scroll-sentinel { height: 1px; }
   .initial-loading { flex-grow: 1; }
   .loading-more { text-align: center; padding: 15px; color: var(--text-muted); font-size: 12px; }
