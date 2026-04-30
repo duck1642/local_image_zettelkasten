@@ -195,3 +195,4 @@ backups/
 cookies.txt
 .secrets.yaml
 config.yaml
+config/config.yaml
