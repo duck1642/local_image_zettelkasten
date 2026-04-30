@@ -1,7 +1,8 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount } from 'svelte';
   import { log as uiLog } from './logger';
   import { apiFetch, eventSourceUrl } from './api';
+  import { queueStats, refreshQueueStats, setQueueStats } from './statsStore';
 
   let currentQueue: 'normal' | 'force' | 'failed' = 'normal';
   let queueContent = '';
@@ -16,14 +17,15 @@
   let logSource: EventSource | null = null;
   let monitorContainer: HTMLElement;
 
+  $: counts = $queueStats;
+
   function connectMonitor() {
     if (logSource) logSource.close();
     logSource = new EventSource(eventSourceUrl('/api/logs?filename=ingestion.jsonl'));
     logSource.onmessage = (e) => {
         try {
             const entry = JSON.parse(e.data);
-            monitorLogs = [...monitorLogs, entry].slice(-150);
-            setTimeout(() => { if (monitorContainer) monitorContainer.scrollTop = monitorContainer.scrollHeight; }, 30);
+            appendMonitorLog(entry);
             // Auto-reload queue when ingestion finishes
             if (entry.message && entry.message.includes('Ingestion cycle complete')) {
                 fetchStats();
@@ -31,6 +33,18 @@
             }
         } catch { }
     };
+  }
+
+  function isNearBottom(node: HTMLElement) {
+      return node.scrollHeight - node.scrollTop - node.clientHeight < 48;
+  }
+
+  function appendMonitorLog(entry: any) {
+      const shouldScroll = !monitorContainer || isNearBottom(monitorContainer);
+      monitorLogs = [...monitorLogs, entry].slice(-150);
+      if (shouldScroll) {
+          setTimeout(() => { if (monitorContainer) monitorContainer.scrollTop = monitorContainer.scrollHeight; }, 30);
+      }
   }
 
   async function loadQueue(name: string) {
@@ -45,8 +59,7 @@
   async function fetchStats() {
     if (isDirty) return; // don't overwrite live counts while editing
     try {
-      const res = await apiFetch('/api/queue-stats');
-      counts = await res.json();
+      await refreshQueueStats();
     } catch (e) { console.error(e); }
   }
 
@@ -67,7 +80,7 @@
         body: JSON.stringify({ content: queueContent })
       });
       isDirty = false;
-      await fetchStats();
+      await refreshQueueStats();
       uiLog('INFO', `Queue ${currentQueue} saved`);
     } finally { saving = false; }
   }
@@ -98,7 +111,7 @@
                 body: JSON.stringify({ content: queueContent })
             });
             const data = await res.json();
-            counts = { ...counts, [currentQueue]: data.count };
+            setQueueStats({ ...counts, [currentQueue]: data.count });
         } catch {}
     }, 400);
   }
@@ -134,7 +147,7 @@
               });
               const data = await res.json();
               alert(`Moved ${data.moved} URLs to ${target}.`);
-              counts = data.counts;
+              setQueueStats(data.counts);
               if (currentQueue === target || currentQueue === 'failed') {
                   loadQueue(currentQueue);
               }
@@ -154,7 +167,7 @@
           try {
               const res = await apiFetch(`/api/queue/actions/clear-failed`, { method: 'POST' });
               const data = await res.json();
-              counts = data.counts;
+              setQueueStats(data.counts);
               if (currentQueue === 'failed') loadQueue('failed');
           } catch(e) { console.error(e); }
       }
@@ -166,9 +179,7 @@
     loadQueue('normal');
     fetchStats();
     connectMonitor();
-    const interval = setInterval(fetchStats, 5000);
     return () => {
-        clearInterval(interval);
         logSource?.close();
     };
   });

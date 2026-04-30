@@ -101,8 +101,7 @@
           extras: extractExtras(parsed)
         };
 
-        logs = [...logs, entry].slice(-400);
-        setTimeout(() => { if (logContainer) logContainer.scrollTop = logContainer.scrollHeight; }, 30);
+        appendLog(entry);
       } catch {
           // Raw terminal line with ANSI or unknown text
           const entry: LogEntry = {
@@ -113,10 +112,23 @@
               raw: e.data,
               isRaw: true
           };
-          logs = [...logs, entry].slice(-400);
-          setTimeout(() => { if (logContainer) logContainer.scrollTop = logContainer.scrollHeight; }, 30);
+          appendLog(entry);
       }
     };
+  }
+
+  function isNearBottom(node: HTMLElement) {
+    return node.scrollHeight - node.scrollTop - node.clientHeight < 48;
+  }
+
+  function appendLog(entry: LogEntry) {
+    const shouldScroll = !logContainer || isNearBottom(logContainer);
+    logs = [...logs, entry].slice(-400);
+    if (shouldScroll) {
+      setTimeout(() => {
+        if (logContainer) logContainer.scrollTop = logContainer.scrollHeight;
+      }, 30);
+    }
   }
 
   async function openExternal() {

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { createEventDispatcher, onMount } from 'svelte';
+  import { createEventDispatcher, onMount, tick } from 'svelte';
   import type { SearchFilters, VaultGroup, VaultItem } from './types';
   import { apiFetch } from './api';
   import { log as uiLog } from './logger';
@@ -34,6 +34,7 @@
   let observer: IntersectionObserver | null = null;
   let observedSentinel: HTMLElement | null = null;
   let observedLayout = '';
+  let loadMoreCheckTimer: number | null = null;
 
   $: groupedItems = groupVaultItems(items);
   $: emitStatus();
@@ -69,6 +70,7 @@
 
   async function saveLayout(layout: 'masonry' | 'grid') {
     currentLayout = layout;
+    scheduleLoadMoreCheck();
     if (!configCache) return;
     if (!configCache.ui) configCache.ui = {};
     configCache.ui.vault_layout = currentLayout;
@@ -106,11 +108,33 @@
     } finally {
       if (!append) isSearching = false;
       else isLoadingMore = false;
+      scheduleLoadMoreCheck();
     }
   }
 
   function loadMore() {
-    if (hasMore && !isSearching && !isLoadingMore) fetchItems(true);
+    if (hasMore && nextCursor && !isSearching && !isLoadingMore) fetchItems(true);
+  }
+
+  function sentinelIsNearViewport() {
+    if (!sentinelEl) return false;
+    const rect = sentinelEl.getBoundingClientRect();
+    return rect.top <= window.innerHeight + 400 && rect.bottom >= -400;
+  }
+
+  function scheduleLoadMoreCheck() {
+    if (loadMoreCheckTimer !== null) window.clearTimeout(loadMoreCheckTimer);
+    loadMoreCheckTimer = window.setTimeout(() => {
+      loadMoreCheckTimer = null;
+      maybeLoadMore();
+    }, 50);
+  }
+
+  async function maybeLoadMore() {
+    await tick();
+    if (hasMore && nextCursor && !isSearching && !isLoadingMore && sentinelIsNearViewport()) {
+      loadMore();
+    }
   }
 
   function handleFiltersChanged(event: CustomEvent) {
@@ -156,11 +180,19 @@
     if (!confirmed) return;
     bulkDeleting = true;
     try {
-      for (const hash of hashes) {
-        const response = await apiFetch(`/api/items/${hash}`, { method: 'DELETE' });
-        if (!response.ok) throw new Error(`Delete failed for ${hash}: ${response.status}`);
+      const response = await apiFetch('/api/items/bulk_delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hashes })
+      });
+      if (!response.ok) throw new Error(await responseErrorText(response, `HTTP ${response.status}`));
+      const result = await response.json();
+      if (result.failed_cleanup_count > 0) {
+        uiLog('WARNING', 'Bulk delete completed with cleanup failures', result);
+        alert(`Deleted ${result.deleted_count} item(s), but ${result.failed_cleanup_count} cleanup operation(s) failed. Check App Logs.`);
+      } else {
+        uiLog('INFO', 'Bulk delete completed', result);
       }
-      uiLog('INFO', 'Bulk delete completed', { count: hashes.length });
       clearSelection();
       await fetchItems();
     } catch (error) {
@@ -169,6 +201,15 @@
       await fetchItems();
     } finally {
       bulkDeleting = false;
+    }
+  }
+
+  async function responseErrorText(response: Response, fallback: string) {
+    try {
+      const data = await response.json();
+      return data?.detail || data?.message || fallback;
+    } catch {
+      return fallback;
     }
   }
 
@@ -214,12 +255,16 @@
       if (entry.isIntersecting && hasMore && !isSearching && !isLoadingMore) loadMore();
     }, { rootMargin: '400px' });
     observer.observe(node);
+    scheduleLoadMoreCheck();
   }
 
   onMount(() => {
     fetchConfig();
     fetchItems();
-    return () => observer?.disconnect();
+    return () => {
+      observer?.disconnect();
+      if (loadMoreCheckTimer !== null) window.clearTimeout(loadMoreCheckTimer);
+    };
   });
 </script>
 
@@ -328,7 +373,7 @@
   .selection-count { color: var(--text-bright); font-weight: 600; white-space: nowrap; }
   .grid-scroll { flex-grow: 1; overflow-y: auto; padding: 15px; }
   .masonry-scroll { flex-grow: 1; overflow-y: auto; padding: 15px; }
-  .vault-layout.masonry { column-count: 5; column-gap: 12px; }
+  .vault-layout.masonry { column-width: 180px; column-gap: 12px; }
   .vault-layout.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 15px; align-items: stretch; }
   .scroll-sentinel { height: 1px; }
   .initial-loading { flex-grow: 1; }

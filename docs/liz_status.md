@@ -90,6 +90,15 @@ SQLite stores runtime asset/index metadata only. Manual topics and WD tags live 
 - Frontend accessibility warnings remain in Svelte build output.
 - CSP is practical rather than strict and should be revisited after production packaging is stable.
 
+### Logic & Architecture Bugs
+- **The "Already Intersecting" Infinite Scroll Bug:** `VaultView.svelte` uses an `IntersectionObserver` attached to `sentinelEl`. The observer's callback only fires when the sentinel **crosses** the threshold. If the sentinel is already intersecting after the first fetch finishes (e.g. on a large monitor), it does not fire again. Needs a reactive statement to re-evaluate or an action modifier.
+- **Sidecar Port 8000 Binding (Brittleness):** The compiled `liz-api` binary internally hardcodes `uvicorn.run(port=8000)`. If port 8000 is occupied by another app, the backend fails to bind and the Tauri app renders a white screen. Production sidecars should dynamically bind to an available port provided by Tauri.
+- **Redundant Network Polling (State Duplication):** `App.svelte` blindly polls `fetchSecondaryStats()` every 5 seconds. `Ingestion.svelte` and `ReviewView.svelte` also independently poll their respective stats. These should be moved into a central Svelte Store (`svelte/store`) to cut network spam.
+- **Silent Failures on Action Buttons (UX):** In `Inspector.svelte`, if `openFolder()` or `openMarkdown()` fails (e.g. missing file), the `catch` block only writes to `uiLog('ERROR')`. There is no visual feedback or `alert()` to inform the user that the action failed.
+- **`svelte-check` Accessibility Debt:** Running `npm run check` generates 21 warnings. Missing `for` attributes on `<label>` elements and missing `role="button"`/`tabindex="0"` on clickable `<div>` and `<span>` elements.
+- **Sequential Bulk Deletion (Performance):** Bulk deletion in `VaultView.svelte` fires individual `DELETE` API requests for every selected item sequentially. For large selections, this results in hundreds of separate SQLite transactions. A `/api/items/bulk_delete` endpoint is needed for scale.
+- **Heavy Global Review Polling (Performance):** `App.svelte` polls the full `/api/review` endpoint every 5 seconds just to update the sidebar badge count. This triggers a heavy filesystem scan and SQLite database join in the background repeatedly. A lightweight `/api/review/count` endpoint is needed to eliminate this disk usage.
+
 ## Current Task
 
 Search/filter implementation:
@@ -119,6 +128,7 @@ Search/filter implementation:
 - Use AND for plain text terms.
 - Backend item filtering uses repeated query params, not comma-encoded strings.
 - Backend exposes `/api/facets` for global facet count queries.
+- Planned optimization: add an in-memory facet cache for Stats and dropdown counts. Markdown remains the source of truth for topics and WD tags, but backend should build topic/WD counts once and invalidate/rebuild after tagging, note update, delete, or ingestion.
 - The visible UI remains a single search input; chips are still deferred.
 - Future planned feature: context-aware suggestions. Example: after `*kisaki; *`, WD suggestions should come only from items already matching `*kisaki`, excluding already-selected tags.
 - Possible context-aware suggestion approaches to compare later: scan current matches for V1, build an in-memory facet index for long-term speed, or add SQLite facet tables if durable indexed search becomes worth the schema cost.

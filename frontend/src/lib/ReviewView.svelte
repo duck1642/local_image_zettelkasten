@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { apiFetch, assetUrl } from './api';
+  import { refreshReviewCount } from './statsStore';
 
   interface ReviewItem {
     filename: string;
@@ -23,6 +24,7 @@
     try {
       const res = await apiFetch('/api/review');
       items = await res.json();
+      await refreshReviewCount();
     } finally { loading = false; }
   }
 
@@ -34,6 +36,7 @@
       await apiFetch(`/api/review/${filename}/action?action=${action}`, { method: 'POST' });
       items = items.filter((_, i) => i !== currentIndex);
       if (currentIndex >= items.length && items.length > 0) currentIndex = items.length - 1;
+      await refreshReviewCount();
     } finally { acting = false; }
   }
 

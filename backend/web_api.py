@@ -597,6 +597,9 @@ class ItemUpdate(BaseModel):
     platform: str = None
     topics: list[str] = None
 
+class BulkDeleteRequest(BaseModel):
+    hashes: list[str]
+
 @app.patch("/api/items/{item_hash}")
 async def update_item(item_hash: str, update: ItemUpdate):
     return await asyncio.to_thread(_update_item_sync, item_hash, update)
@@ -630,30 +633,81 @@ def _update_item_sync(item_hash: str, update: ItemUpdate):
 async def delete_item(item_hash: str):
     return await asyncio.to_thread(_delete_item_sync, item_hash)
 
+@app.post("/api/items/bulk_delete")
+async def bulk_delete_items(request: BulkDeleteRequest):
+    return await asyncio.to_thread(_bulk_delete_items_sync, request.hashes)
+
+def _delete_item_row(cursor, conn, item_hash: str):
+    cursor.execute("SELECT file_extension, mime_type FROM items WHERE hash = ?", (item_hash,))
+    row = cursor.fetchone()
+    if not row:
+        return {"hash": item_hash, "status": "missing", "cleanup_errors": []}
+
+    cleanup_paths = [
+        asset_path_for(item_hash, row[0] or "", row[1] or ""),
+        note_path_for(item_hash),
+        WD_TAGS_DIR / item_hash[:2] / f"{item_hash}.json",
+    ]
+
+    cursor.execute("DELETE FROM items WHERE hash = ?", (item_hash,))
+    conn.commit()
+
+    cleanup_errors = []
+    for path in cleanup_paths:
+        try:
+            if path.exists():
+                path.unlink()
+        except OSError as exc:
+            error = {"hash": item_hash, "path": str(path), "error": str(exc)}
+            cleanup_errors.append(error)
+            log_system("WARNING", "Deleted DB row but file cleanup failed", hash=item_hash, path=str(path), error=str(exc))
+
+    log_system("INFO", f"Deleted item {item_hash}")
+    return {"hash": item_hash, "status": "deleted", "cleanup_errors": cleanup_errors}
+
 def _delete_item_sync(item_hash: str):
     conn = init_database()
     cursor = conn.cursor()
-    cleanup_paths = []
     try:
-        cursor.execute("SELECT file_extension, mime_type FROM items WHERE hash = ?", (item_hash,))
-        row = cursor.fetchone()
-        if not row: raise HTTPException(status_code=404)
+        result = _delete_item_row(cursor, conn, item_hash)
+        if result["status"] == "missing":
+            raise HTTPException(status_code=404)
+        return {"status": "success", "cleanup_errors": result["cleanup_errors"]}
+    finally:
+        conn.close()
 
-        asset_path = asset_path_for(item_hash, row[0] or "", row[1] or "")
-        note_path = note_path_for(item_hash)
-        tags_path = WD_TAGS_DIR / item_hash[:2] / f"{item_hash}.json"
-        cleanup_paths = [asset_path, note_path, tags_path]
+def _bulk_delete_items_sync(hashes: list[str]):
+    unique_hashes = []
+    seen = set()
+    for value in hashes or []:
+        item_hash = str(value or "").strip()
+        if item_hash and item_hash not in seen:
+            unique_hashes.append(item_hash)
+            seen.add(item_hash)
 
-        cursor.execute("DELETE FROM items WHERE hash = ?", (item_hash,))
-        conn.commit()
-        for path in cleanup_paths:
-            try:
-                if path.exists():
-                    path.unlink()
-            except OSError as exc:
-                log_system("WARNING", "Deleted DB row but file cleanup failed", hash=item_hash, path=str(path), error=str(exc))
-        log_system("INFO", f"Deleted item {item_hash}")
-        return {"status": "success"}
+    conn = init_database()
+    cursor = conn.cursor()
+    deleted = []
+    missing = []
+    failed_cleanup = []
+    try:
+        for item_hash in unique_hashes:
+            result = _delete_item_row(cursor, conn, item_hash)
+            if result["status"] == "missing":
+                missing.append(item_hash)
+            else:
+                deleted.append(item_hash)
+                failed_cleanup.extend(result["cleanup_errors"])
+        return {
+            "status": "success",
+            "requested_count": len(unique_hashes),
+            "deleted_count": len(deleted),
+            "missing_count": len(missing),
+            "failed_cleanup_count": len(failed_cleanup),
+            "deleted": deleted,
+            "missing": missing,
+            "failed_cleanup": failed_cleanup,
+        }
     finally:
         conn.close()
 
@@ -847,6 +901,19 @@ async def start_ingestion(queue_name: str):
 
 @app.get("/api/queue-stats")
 async def get_queue_stats(): return await asyncio.to_thread(queue_counts)
+
+@app.get("/api/review/count")
+async def get_review_count():
+    return await asyncio.to_thread(_get_review_count_sync)
+
+def _get_review_count_sync():
+    if not REVIEW_DIR.exists():
+        return {"count": 0}
+    count = sum(
+        1 for path in REVIEW_DIR.iterdir()
+        if path.is_file() and path.suffix.lower() not in [".json", ".md"]
+    )
+    return {"count": count}
 
 @app.get("/api/review")
 async def get_review_items():

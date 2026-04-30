@@ -6,27 +6,13 @@
   import SettingsView from './lib/SettingsView.svelte';
   import StatsView from './lib/StatsView.svelte';
   import VaultView from './lib/VaultView.svelte';
-  import { apiFetch } from './lib/api';
   import { log as uiLog } from './lib/logger';
+  import { queueStats, reviewCount, startSharedStatsPolling } from './lib/statsStore';
 
   type AppTab = 'vault' | 'logs' | 'ingest' | 'review' | 'stats' | 'settings';
 
   let activeTab: AppTab = 'vault';
-  let queueStats = { normal: 0, force: 0, failed: 0 };
-  let reviewCount = 0;
   let vaultStatus = { totalItems: 0, groups: 0, hasMore: false };
-
-  async function fetchSecondaryStats() {
-    try {
-      const qStatsRes = await apiFetch('/api/queue-stats');
-      queueStats = await qStatsRes.json();
-      const reviewRes = await apiFetch('/api/review');
-      const reviewData = await reviewRes.json();
-      reviewCount = reviewData.length;
-    } catch (error) {
-      uiLog('ERROR', 'Failed to fetch sidebar stats', { error });
-    }
-  }
 
   function handleVaultStatus(event: CustomEvent) {
     vaultStatus = event.detail;
@@ -38,9 +24,7 @@
 
   onMount(() => {
     uiLog('INFO', 'Svelte UI initialized and mounted');
-    fetchSecondaryStats();
-    const interval = setInterval(fetchSecondaryStats, 5000);
-    return () => clearInterval(interval);
+    return startSharedStatsPolling();
   });
 </script>
 
@@ -50,10 +34,10 @@
       <div class="nav-group">
         <button class:active={activeTab === 'vault'} on:click={() => activeTab = 'vault'}>Vault</button>
         <button class:active={activeTab === 'ingest'} on:click={() => activeTab = 'ingest'}>
-          Ingestion {#if (queueStats.normal + queueStats.force) > 0}<span class="badge">{queueStats.normal + queueStats.force}</span>{/if}
+          Ingestion {#if ($queueStats.normal + $queueStats.force) > 0}<span class="badge">{$queueStats.normal + $queueStats.force}</span>{/if}
         </button>
         <button class:active={activeTab === 'review'} on:click={() => activeTab = 'review'}>
-          Review {#if reviewCount > 0}<span class="badge warn">{reviewCount}</span>{/if}
+          Review {#if $reviewCount > 0}<span class="badge warn">{$reviewCount}</span>{/if}
         </button>
         <button class:active={activeTab === 'stats'} on:click={() => activeTab = 'stats'}>Stats</button>
         <button class:active={activeTab === 'settings'} on:click={() => activeTab = 'settings'}>Settings</button>
@@ -84,10 +68,10 @@
       <span class="status-left">Total Items: {vaultStatus.totalItems} | DB: WAL | LIZ Tauri</span>
       <span class="status-right">Showing {vaultStatus.groups} groups{vaultStatus.hasMore ? ' (more available)' : ''}</span>
     {:else if activeTab === 'ingest'}
-      <span class="status-left">Ingestion | Normal: {queueStats.normal} | Force: {queueStats.force} | Failed: {queueStats.failed}</span>
+      <span class="status-left">Ingestion | Normal: {$queueStats.normal} | Force: {$queueStats.force} | Failed: {$queueStats.failed}</span>
       <span class="status-right">LIZ Tauri</span>
     {:else if activeTab === 'review'}
-      <span class="status-left">Review | Pending: {reviewCount}</span>
+      <span class="status-left">Review | Pending: {$reviewCount}</span>
       <span class="status-right">LIZ Tauri</span>
     {:else}
       <span class="status-left">{activeTab === 'logs' ? 'App Logs' : activeTab === 'stats' ? 'Stats' : 'Settings'}</span>

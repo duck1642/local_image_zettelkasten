@@ -56,6 +56,21 @@
 
   function handleInput() { isDirty = true; }
 
+  async function responseErrorText(response: Response, fallback: string) {
+    try {
+      const data = await response.json();
+      return data?.detail || data?.message || fallback;
+    } catch {
+      return fallback;
+    }
+  }
+
+  function reportActionFailure(action: string, error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    uiLog('ERROR', `${action} failed`, { error: message });
+    alert(`${action} failed: ${message}`);
+  }
+
   async function save() {
     if (!item) return;
     try {
@@ -99,28 +114,29 @@
     if (!item) return;
     try {
         const res = await apiFetch(`/api/items/${item.hash}/open_folder`, { method: 'POST' });
-        if (!res.ok) throw new Error(`Open folder failed: ${res.status}`);
+        if (!res.ok) throw new Error(await responseErrorText(res, `HTTP ${res.status}`));
         uiLog('INFO', `Opened folder and selected ${item.hash.substring(0, 12)}`);
-    } catch (e) { uiLog('ERROR', 'Failed to open folder', { error: String(e) }); }
+    } catch (e) { reportActionFailure('Open folder', e); }
   }
 
   async function openMarkdown() {
     if (!item) return;
     try {
         const res = await apiFetch(`/api/items/${item.hash}/open_note`, { method: 'POST' });
-        if (!res.ok) throw new Error(`Open note failed: ${res.status}`);
+        if (!res.ok) throw new Error(await responseErrorText(res, `HTTP ${res.status}`));
         uiLog('INFO', `Opened markdown note for ${item.hash.substring(0, 12)}`);
-    } catch (e) { uiLog('ERROR', 'Failed to open markdown', { error: String(e) }); }
+    } catch (e) { reportActionFailure('Open note', e); }
   }
 
   async function copyFile() {
       if (!item) return;
       try {
           const res = await apiFetch(`/api/items/${item.hash}/path`);
+          if (!res.ok) throw new Error(await responseErrorText(res, `HTTP ${res.status}`));
           const data = await res.json();
           await invoke('copy_file_to_clipboard', { path: data.absolute_path });
           uiLog('INFO', `File copied to clipboard: ${item.hash.substring(0, 12)}`);
-      } catch (e) { uiLog('ERROR', 'Failed to copy file', { error: String(e) }); }
+      } catch (e) { reportActionFailure('Copy file', e); }
   }
 
   async function deleteData() {
