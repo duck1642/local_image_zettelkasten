@@ -7,12 +7,16 @@
   import { DEFAULT_TILE_MIN_WIDTH, buildMasonryColumns, columnCountFor, normalizeLayoutMode, normalizeTileMinWidth, visualOrderForRenderedGroups } from './layout';
   import { buildItemQueryParams, emptyFilters } from './search';
   import { updateSelection } from './selection';
+  import ExperimentalMasonryView from './ExperimentalMasonryView.svelte';
+  import MeasuredMasonryView from './experimental/measuredMasonry/MeasuredMasonryView.svelte';
+  import { computeMeasuredMasonryLayout, visualOrderFromMeasuredPositions } from './experimental/measuredMasonry/measuredMasonryLayout';
   import Inspector from './Inspector.svelte';
   import MediaFocus from './MediaFocus.svelte';
   import SearchBar from './SearchBar.svelte';
   import VaultGroupTile from './VaultGroupTile.svelte';
 
   const dispatch = createEventDispatcher();
+  type ActiveVaultLayoutMode = VaultLayoutMode | 'masonry-exp' | 'masonry-measured';
 
   let items: VaultItem[] = [];
   let stats = { total_items: 0 };
@@ -25,7 +29,7 @@
   let bulkDeleting = false;
   let focusMode: 'normal' | 'wide' | 'fullscreen' = 'normal';
   let focusStartTime = 0;
-  let currentLayoutMode: VaultLayoutMode = 'masonry';
+  let currentLayoutMode: ActiveVaultLayoutMode = 'masonry';
   let configCache: any = null;
   let currentSort = 'newest';
   let currentMediaType = 'all';
@@ -43,15 +47,20 @@
   let vaultWidth = 0;
   let tileMinWidth = DEFAULT_TILE_MIN_WIDTH;
   let tileSizeSaveTimer: number | null = null;
+  let groupIndexes: Record<string, number> = {};
+  let measuredVisualHashOrder: string[] = [];
 
   $: groupedItems = groupVaultItems(items);
-  $: emitStatus(stats.total_items, groupedItems.length, hasMore);
-  $: jsMasonryColumns = currentLayoutMode === 'masonry' ? buildMasonryColumns(groupedItems, vaultWidth, tileMinWidth) : [];
+  $: emitStatus(stats.total_items, groupedItems.length, hasMore, currentLayoutMode);
+  $: jsMasonryColumns = currentLayoutMode === 'masonry' || currentLayoutMode === 'masonry-exp' ? buildMasonryColumns(groupedItems, vaultWidth, tileMinWidth) : [];
+  $: measuredPreviewLayout = currentLayoutMode === 'masonry-measured' ? computeMeasuredMasonryLayout(groupedItems, vaultWidth, tileMinWidth, groupIndexes) : null;
   $: jsGridColumnCount = currentLayoutMode === 'grid' ? columnCountFor(vaultWidth, tileMinWidth) : 1;
   $: jsGap = currentLayoutMode === 'grid' ? 15 : 12;
   $: jsColumnWidth = Math.max(tileMinWidth, (vaultWidth - jsGap * (Math.max(jsGridColumnCount, jsMasonryColumns.length || 1) - 1)) / Math.max(jsGridColumnCount, jsMasonryColumns.length || 1));
-  $: jsVisualHashOrder = currentLayoutMode === 'masonry'
+  $: jsVisualHashOrder = currentLayoutMode === 'masonry' || currentLayoutMode === 'masonry-exp'
     ? visualOrderForRenderedGroups(jsMasonryColumns)
+    : currentLayoutMode === 'masonry-measured'
+      ? (measuredVisualHashOrder.length ? measuredVisualHashOrder : (measuredPreviewLayout ? visualOrderFromMeasuredPositions(measuredPreviewLayout.positions) : []))
     : currentLayoutMode === 'grid'
       ? groupedItems.flatMap((group) => group.items.map((item) => item.hash))
       : [];
@@ -72,8 +81,8 @@
     return orderedKeys.map((key) => ({ id: key, items: groups[key] }));
   }
 
-  function emitStatus(totalItems: number, groups: number, moreAvailable: boolean) {
-    dispatch('status', { totalItems, groups, hasMore: moreAvailable });
+  function emitStatus(totalItems: number, groups: number, moreAvailable: boolean, layoutMode: ActiveVaultLayoutMode) {
+    dispatch('status', { totalItems, groups, hasMore: moreAvailable, layoutMode });
   }
 
   async function fetchConfig() {
@@ -112,7 +121,7 @@
       tileSizeSaveTimer = null;
       if (!configCache.ui) configCache.ui = {};
       configCache.ui.vault_tile_min_width = tileMinWidth;
-      configCache.ui.vault_layout_mode = currentLayoutMode;
+      configCache.ui.vault_layout_mode = currentLayoutMode === 'masonry-exp' || currentLayoutMode === 'masonry-measured' ? normalizeLayoutMode(configCache) : currentLayoutMode;
       try {
         await apiFetch('/api/config', {
           method: 'POST',
@@ -132,7 +141,7 @@
     if (!configCache) configCache = {};
     if (!configCache.ui) configCache.ui = {};
     configCache.ui.vault_tile_min_width = tileMinWidth;
-    configCache.ui.vault_layout_mode = currentLayoutMode;
+    configCache.ui.vault_layout_mode = currentLayoutMode === 'masonry-exp' || currentLayoutMode === 'masonry-measured' ? normalizeLayoutMode(configCache) : currentLayoutMode;
     scheduleLoadMoreCheck();
     saveTileSizeDebounced();
   }
@@ -206,6 +215,12 @@
     const command = event.detail.command;
     if (command === 'masonry' || command === 'grid') {
       saveLayoutMode(command);
+    } else if (command === 'masonry-exp') {
+      currentLayoutMode = 'masonry-exp';
+      scheduleLoadMoreCheck();
+    } else if (command === 'masonry-measured') {
+      currentLayoutMode = 'masonry-measured';
+      scheduleLoadMoreCheck();
     } else if (command === 'zoom-in') {
       zoomIn();
     } else if (command === 'zoom-out') {
@@ -237,6 +252,10 @@
       selectedGroup = null;
     }
     uiLog('DEBUG', `Selected item: ${item.hash.substring(0, 12)}`);
+  }
+
+  function handleGroupIndexChange(groupId: string, index: number) {
+    groupIndexes = { ...groupIndexes, [groupId]: index };
   }
 
   function setSingleSelection(item: VaultItem) {
@@ -430,9 +449,11 @@
                 <VaultGroupTile
                   {group}
                   layout="masonry"
+                  activeIndex={groupIndexes[group.id] || 0}
                   selectedHash={selectedItem?.hash}
                   {selectedHashes}
                   on:select={(event) => handleSelectItem(event.detail.item, group, event.detail.event)}
+                  on:indexChange={(event) => handleGroupIndexChange(event.detail.groupId, event.detail.index)}
                 />
               {/each}
             </div>
@@ -443,6 +464,34 @@
           <div class="loading-more">Loading more...</div>
         {/if}
       </div>
+    {:else if currentLayoutMode === 'masonry-exp'}
+      <ExperimentalMasonryView
+        columns={jsMasonryColumns}
+        columnWidth={jsColumnWidth}
+        selectedHash={selectedItem?.hash}
+        {selectedHashes}
+        activeIndexes={groupIndexes}
+        bind:sentinelEl
+        bind:hostEl={layoutHostEl}
+        {isLoadingMore}
+        onSelectItem={handleSelectItem}
+        onIndexChange={handleGroupIndexChange}
+      />
+    {:else if currentLayoutMode === 'masonry-measured'}
+      <MeasuredMasonryView
+        groups={groupedItems}
+        viewportWidth={vaultWidth}
+        {tileMinWidth}
+        selectedHash={selectedItem?.hash}
+        {selectedHashes}
+        activeIndexes={groupIndexes}
+        bind:sentinelEl
+        bind:hostEl={layoutHostEl}
+        {isLoadingMore}
+        onSelectItem={handleSelectItem}
+        onIndexChange={handleGroupIndexChange}
+        onVisualOrderChange={(hashes) => measuredVisualHashOrder = hashes}
+      />
     {:else}
       <div class="js-layout-scroll" bind:this={layoutHostEl}>
         <div class="vault-layout grid" style={`grid-template-columns: repeat(${jsGridColumnCount}, minmax(${tileMinWidth}px, 1fr)); --tile-width: ${jsColumnWidth}px;`}>
@@ -450,9 +499,11 @@
             <VaultGroupTile
               {group}
               layout="grid"
+              activeIndex={groupIndexes[group.id] || 0}
               selectedHash={selectedItem?.hash}
               {selectedHashes}
               on:select={(event) => handleSelectItem(event.detail.item, group, event.detail.event)}
+              on:indexChange={(event) => handleGroupIndexChange(event.detail.groupId, event.detail.index)}
             />
           {/each}
         </div>
