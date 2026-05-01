@@ -196,3 +196,6 @@ cookies.txt
 .secrets.yaml
 config.yaml
 config/config.yaml
+stable_grid.svelte.txt
+stable_layout_notes.ts.txt
+stable_masonry.svelte.txt

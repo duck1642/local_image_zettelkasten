@@ -4,14 +4,14 @@
   import type { VaultGroup, VaultItem } from '../../types';
   import { log as uiLog } from '../../logger';
   import {
-    MEASURED_MASONRY_DRIFT_THRESHOLD,
-    MEASURED_MASONRY_OVERSCAN,
-    computeMeasuredMasonryLayout,
-    visibleMeasuredPositions,
-    visualOrderFromMeasuredPositions,
-    type MeasuredMasonryPosition
-  } from './measuredMasonryLayout';
-  import { withMeasurement, type MeasurementStore } from './measurementStore';
+    MASONRY_DRIFT_THRESHOLD,
+    MASONRY_OVERSCAN,
+    computeMasonryLayout,
+    visibleMasonryPositions,
+    visualOrderFromMasonryPositions,
+    type MasonryPosition
+  } from './masonryLayout';
+  import type { MeasurementStore } from './measurementStore';
 
   export let groups: VaultGroup[] = [];
   export let viewportWidth = 0;
@@ -29,17 +29,19 @@
   let scrollTop = 0;
   let viewportHeight = 0;
   let measurements: MeasurementStore = {};
-  let pendingMeasurements: Record<string, { width: number; height: number; position: MeasuredMasonryPosition }> = {};
+  let pendingMeasurements: Record<string, { width: number; height: number; position: MasonryPosition }> = {};
   let measurementFrame: number | null = null;
   let scrollFrame: number | null = null;
   let recomputeCount = 0;
   let lastSummaryLog = 0;
   let lastSummaryKey = '';
   let lastVisualOrderKey = '';
+  let measureObserver: ResizeObserver | null = null;
+  const measuredNodes = new Map<HTMLElement, MasonryPosition>();
   const loggedDrifts = new Set<string>();
 
-  $: layout = computeMeasuredMasonryLayout(groups, viewportWidth, tileMinWidth, activeIndexes, measurements);
-  $: visiblePositions = visibleMeasuredPositions(layout.positions, scrollTop, viewportHeight, MEASURED_MASONRY_OVERSCAN);
+  $: layout = computeMasonryLayout(groups, viewportWidth, tileMinWidth, activeIndexes, measurements);
+  $: visiblePositions = visibleMasonryPositions(layout.positions, scrollTop, viewportHeight, MASONRY_OVERSCAN);
   $: emitVisualOrder();
   $: if (hostEl) {
     scrollTop = hostEl.scrollTop;
@@ -49,43 +51,50 @@
 
   function handleScroll(event: Event) {
     const target = event.currentTarget as HTMLElement;
+    const nextScrollTop = target.scrollTop;
+    const nextViewportHeight = target.clientHeight;
     if (scrollFrame !== null) return;
     scrollFrame = window.requestAnimationFrame(() => {
-      scrollTop = target.scrollTop;
-      viewportHeight = target.clientHeight;
+      scrollTop = nextScrollTop;
+      viewportHeight = nextViewportHeight;
       scrollFrame = null;
     });
   }
 
   function emitVisualOrder() {
-    const hashes = visualOrderFromMeasuredPositions(layout.positions);
+    const hashes = visualOrderFromMasonryPositions(layout.positions);
     const key = hashes.join('|');
     if (key === lastVisualOrderKey) return;
     lastVisualOrderKey = key;
     onVisualOrderChange(hashes);
   }
 
-  function measureTile(node: HTMLElement, position: MeasuredMasonryPosition) {
-    let cancelled = false;
-    const observer = new ResizeObserver(() => {
-      if (cancelled) return;
-      queueMeasurement(node, position);
-    });
-    observer.observe(node);
+  function measureTile(node: HTMLElement, position: MasonryPosition) {
+    if (!measureObserver) {
+      measureObserver = new ResizeObserver((entries) => {
+        for (const entry of entries) {
+          const target = entry.target as HTMLElement;
+          const currentPosition = measuredNodes.get(target);
+          if (currentPosition) queueMeasurement(target, currentPosition);
+        }
+      });
+    }
+    measuredNodes.set(node, position);
+    measureObserver.observe(node);
     queueMeasurement(node, position);
     return {
-      update(nextPosition: MeasuredMasonryPosition) {
-        position = nextPosition;
-        queueMeasurement(node, position);
+      update(nextPosition: MasonryPosition) {
+        measuredNodes.set(node, nextPosition);
+        queueMeasurement(node, nextPosition);
       },
       destroy() {
-        cancelled = true;
-        observer.disconnect();
+        measureObserver?.unobserve(node);
+        measuredNodes.delete(node);
       }
     };
   }
 
-  function queueMeasurement(node: HTMLElement, position: MeasuredMasonryPosition) {
+  function queueMeasurement(node: HTMLElement, position: MasonryPosition) {
     const width = node.getBoundingClientRect().width;
     const height = node.getBoundingClientRect().height;
     if (width <= 0 || height <= 10) return;
@@ -98,14 +107,14 @@
     measurementFrame = null;
     const pending = pendingMeasurements;
     pendingMeasurements = {};
-    let next = measurements;
+    const next: MeasurementStore = { ...measurements };
     let changed = false;
     for (const [groupId, measurement] of Object.entries(pending)) {
       const diff = Math.abs(measurement.height - measurement.position.height);
       const key = `${groupId}:${Math.round(measurement.width)}:${Math.round(measurement.height)}`;
-      if (!measurement.position.estimated && diff > MEASURED_MASONRY_DRIFT_THRESHOLD && !loggedDrifts.has(key)) {
+      if (!measurement.position.estimated && diff > MASONRY_DRIFT_THRESHOLD && !loggedDrifts.has(key)) {
         loggedDrifts.add(key);
-        uiLog('WARNING', 'Measured masonry height drift', {
+        uiLog('WARNING', 'Masonry renderer height drift', {
           group_id: groupId,
           hash: measurement.position.group.items[0]?.hash,
           estimated_height: Math.round(measurement.position.height),
@@ -114,9 +123,19 @@
           tile_width: Math.round(measurement.width)
         });
       }
-      const updated = withMeasurement(next, groupId, measurement.width, measurement.height);
-      if (updated !== next) {
-        next = updated;
+      const updated = {
+        width: measurement.width,
+        height: measurement.height,
+        ratio: measurement.height / measurement.width
+      };
+      const current = next[groupId];
+      if (
+        !current ||
+        Math.abs(current.width - updated.width) >= 1 ||
+        Math.abs(current.height - updated.height) >= 1 ||
+        Math.abs(current.ratio - updated.ratio) >= 0.002
+      ) {
+        next[groupId] = updated;
         changed = true;
       }
     }
@@ -141,7 +160,7 @@
     if (key === lastSummaryKey || now - lastSummaryLog < 500) return;
     lastSummaryKey = key;
     lastSummaryLog = now;
-    uiLog('INFO', 'Measured masonry layout summary', {
+    uiLog('INFO', 'Masonry renderer layout summary', {
       total_groups: groups.length,
       mounted_tiles: visiblePositions.length,
       unmounted_tiles: Math.max(0, groups.length - visiblePositions.length),
@@ -158,6 +177,8 @@
   onDestroy(() => {
     if (scrollFrame !== null) window.cancelAnimationFrame(scrollFrame);
     if (measurementFrame !== null) window.cancelAnimationFrame(measurementFrame);
+    measureObserver?.disconnect();
+    measuredNodes.clear();
   });
 </script>
 

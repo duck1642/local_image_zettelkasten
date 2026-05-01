@@ -29,7 +29,7 @@ The old Flet and PySide/PyQt UI paths are no longer active. `gui.py`, the old Py
 - Markdown note generation with note-frontmatter topics.
 - Local WD tag cache under `data/wd-tags/{hash[:2]}/{hash}.json`.
 - Distilled WD tags in markdown frontmatter.
-- Svelte vault UI with masonry/grid layouts, advanced filtering, command prefixes, and shared infinite-scroll loading.
+- Svelte vault UI with virtualized masonry/grid layouts, advanced filtering, command prefixes, and shared infinite-scroll loading.
 - Svelte inspector with metadata editing, grouped source navigation, tagging action, copy/delete/open actions.
 - Markdown queue ingestion workbench.
 - Review view.
@@ -88,62 +88,39 @@ SQLite stores runtime asset/index metadata only. Manual topics and WD tags live 
 - Sensitive Pixiv/cookie credentials were removed from `config/config.yaml`; `secrets/.secrets.yaml` remains the credential source.
 - The old misleading Vault `Add Files` button was removed.
 - Terminal stdout/stderr logging is initialized at API startup instead of mutating streams during import.
-- Backend command suggestions include `>masonry`, `>grid`, `>masonry-exp`, `>grid-exp`, `>zoom-in`, and `>zoom-out`.
+- Backend command suggestions include `>masonry`, `>grid`, `>zoom-in`, and `>zoom-out`.
 - Shared stats polling, review count, inspector action feedback, bulk delete, and infinite-scroll rechecks are implemented.
 - Safe frontend media-type helpers replaced direct `mime_type.startsWith(...)` checks, so missing MIME values no longer crash tile/inspector/focus rendering.
 - Search suggestion positioning now reuses one canvas/context instead of creating a new canvas on every keypress.
-- A shared frontend config store was added and Settings now uses it. Vault layout/zoom still needs to be wired back through the shared store after the layout revert.
+- Vault layout and zoom now use the shared frontend config store, so Settings saves no longer overwrite vault layout or tile size changes.
+- Virtualized masonry and grid renderers are now the active `masonry` and `grid` layouts.
+- Old full-DOM masonry/grid renderer snippets were archived under `frontend/src/lib/renderers/archive/stable/` as non-compiled reference files.
 
 ## Current Issues
 
 - Production sidecar packaging has a build path, but the generated sidecar still needs release-build validation on a clean machine.
 - Frontend accessibility warnings remain in Svelte build output.
 - CSP is practical rather than strict and should be revisited after production packaging is stable.
-- Shift-click range selection in masonry view follows loaded/DOM order, not visual masonry column order. Grid behaves correctly because visual order matches DOM order. Need to decide whether masonry range selection should use visual order or stay load-order based.
+- Shift-click range selection now uses renderer-emitted visual order for both masonry and grid. It still needs real-use validation on large mixed media vaults.
 - **Sidecar Port 8000 Binding (Brittleness):** The compiled `liz-api` binary internally hardcodes `uvicorn.run(port=8000)`. If port 8000 is occupied by another app, the backend fails to bind and the Tauri app renders a white screen. Production sidecars should dynamically bind to an available port provided by Tauri.
 - **`svelte-check` Accessibility Debt:** Running `npm run check` currently reports accessibility warnings around labels, clickable divs, and media captions.
-- **Vault DOM Growth:** The current Svelte vault appends fetched groups and renders all loaded tiles. `content-visibility: auto` helps painting, but it does not remove DOM nodes or `<video>` elements. Large vault sessions need virtualization/windowing.
-- **Resize-Time Masonry Rebuild:** `ResizeObserver` updates `vaultWidth`, which recomputes JS masonry columns over all loaded groups. This needs throttling/debouncing before large-vault use.
-- **Config Save Race, Partially Fixed:** `SettingsView.svelte` now uses the shared config store, but the reverted `VaultView.svelte` still saves layout/zoom through its local config cache. Vault must be rewired to the shared store.
-- **Grouped Tile Navigation Compatibility:** `VaultGroupTile.svelte` now emits parent-controlled `indexChange`, but the reverted `VaultView.svelte` does not currently persist/pass per-group active indexes. Grouped post prev/next may need a compatibility fix.
-- **Experimental Vault Renderers:** Stable `masonry` and `grid` remain available. Runtime-only `masonry-exp` and `grid-exp` are now available for virtualization testing and are not persisted to config.
+- **Virtual Renderer Validation:** Masonry and grid now use virtualized renderers. Large-vault behavior, video unmount behavior, zoom stability, and grouped-media persistence should be validated in real browsing sessions.
 
 ## Current Task
 
 Vault view optimization:
 
 - Current state:
-  - `masonry` is back to the old JS column assignment plus normal browser vertical flow.
-  - `grid` is back to the old rendered grid path.
-  - `masonry-exp` is the measured absolute-position masonry experiment.
-  - `grid-exp` is the virtualized fixed-row grid experiment.
-  - This is visually stable and avoids the absolute-position overlap bug.
-  - It is not a final large-vault solution because all loaded groups remain mounted.
-- Problem to solve next:
-  - Optimize both masonry and grid without reintroducing overlap or glitching.
-  - Keep videos outside the viewport from staying mounted in large sessions.
-  - Keep masonry visually stable at narrow widths.
-  - Keep grouped-media active index stable across scrolling and layout changes.
-- Rejected/reverted attempt:
-  - Absolute-position virtualization with estimated masonry heights caused overlapping tiles.
-  - The failure mode was height-estimate drift: the wrapper position/height became the layout contract, but actual tile height could differ.
-- External repo review:
-  - `PrabhuKiran8790/portfolio` and `janzheng/svelte-masonry` both use rendered DOM measurement/CSS-grid style masonry refreshes.
-  - Their useful lesson is that measured real height is safer than guessed height.
-  - They are not enough as-is for LIZ because they still expect rendered DOM items, so they do not solve large-vault DOM growth by themselves.
-- Candidate direction:
-  - Keep old column-flow masonry as the stable fallback while designing the next method.
-  - For scalable masonry, render/window visible items, measure actual tile heights, cache by group id/active index/tile width, then compute positions from measured heights.
-  - For grid, use a simpler virtual row window because grid height is predictable.
-  - Do not rely on hardcoded masonry height estimates as the final positioning source.
-- Current experiment commands:
-  - `>masonry-exp` switches to the measured masonry experiment for the current session only.
-  - `>grid-exp` switches to the virtualized grid experiment for the current session only.
-  - `>masonry` and `>grid` remain stable persisted layout commands.
-- Smaller cleanup needed before the next layout attempt:
-  - Rewire `VaultView.svelte` to the shared config store.
-  - Restore grouped-post index handling in `VaultView.svelte` or revert `VaultGroupTile.svelte` to local index ownership.
-  - Debounce/throttle `ResizeObserver` updates if old masonry remains active during testing.
+  - `masonry` uses the measured virtual masonry renderer.
+  - `grid` uses the virtual fixed-row grid renderer.
+  - Both renderers live under `frontend/src/lib/renderers/`.
+  - The old full-DOM renderer snippets are archived for analysis only and are not imported.
+  - Layout/zoom changes are saved through the shared config store.
+- Validation still needed:
+  - Confirm masonry has no overlap after long scroll sessions.
+  - Confirm offscreen video tiles unmount.
+  - Confirm grouped media keeps active index after scroll out/in.
+  - Confirm zoom remains stable in narrow and wide windows.
 
 Search/filter implementation:
 
@@ -154,7 +131,7 @@ Search/filter implementation:
   - `@` filters platform.
   - `#` filters note-frontmatter topics.
   - `*` filters WD tags.
-  - `>` triggers commands such as `>grid`, `>masonry`, `>masonry-exp`, `>grid-exp`, `>zoom-in`, and `>zoom-out`.
+  - `>` triggers commands such as `>grid`, `>masonry`, `>zoom-in`, and `>zoom-out`.
 - Search now uses structured filter arrays internally.
 - Repeated filters are supported for WD tags, topics, platforms, and artists.
 - Dropdown suggestion sources now exist for commands, artist, platform, topic, and WD tag prefixes.

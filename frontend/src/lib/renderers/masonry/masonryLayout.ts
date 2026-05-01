@@ -2,14 +2,14 @@ import { DEFAULT_TILE_MIN_WIDTH, columnCountFor, normalizeTileMinWidth } from '.
 import type { VaultGroup, VaultItem } from '../../types';
 import { measuredHeightFor, type MeasurementStore } from './measurementStore';
 
-export const MEASURED_MASONRY_GAP = 12;
-export const MEASURED_MASONRY_OVERSCAN = 1200;
-export const MEASURED_MASONRY_DRIFT_THRESHOLD = 20;
+export const MASONRY_GAP = 12;
+export const MASONRY_OVERSCAN = 1200;
+export const MASONRY_DRIFT_THRESHOLD = 20;
 const ESTIMATED_CHROME_HEIGHT = 34; // 16px padding + 14px text + 4px border
 const CSS_BORDER_WIDTH = 4; // 2px solid border on left/right
 const MIN_MEDIA_HEIGHT = 100;
 
-export type MeasuredMasonryPosition = {
+export type MasonryPosition = {
   group: VaultGroup;
   columnIndex: number;
   left: number;
@@ -20,8 +20,8 @@ export type MeasuredMasonryPosition = {
   estimated: boolean;
 };
 
-export type MeasuredMasonryLayout = {
-  positions: MeasuredMasonryPosition[];
+export type MasonryLayout = {
+  positions: MasonryPosition[];
   columnCount: number;
   columnWidth: number;
   totalHeight: number;
@@ -33,7 +33,7 @@ function activeItem(group: VaultGroup, activeIndex: number): VaultItem | undefin
   return group.items[index] || group.items[0];
 }
 
-export function estimateMeasuredGroupHeight(group: VaultGroup, columnWidth: number, activeIndex = 0, store: MeasurementStore = {}) {
+export function estimateMasonryGroupHeight(group: VaultGroup, columnWidth: number, activeIndex = 0, store: MeasurementStore = {}) {
   const measured = measuredHeightFor(store, group.id, columnWidth);
   if (measured !== null) return { height: measured, estimated: false };
   const item = activeItem(group, activeIndex);
@@ -43,20 +43,20 @@ export function estimateMeasuredGroupHeight(group: VaultGroup, columnWidth: numb
   return { height: mediaHeight + ESTIMATED_CHROME_HEIGHT, estimated: true };
 }
 
-export function computeMeasuredMasonryLayout(
+export function computeMasonryLayout(
   groups: VaultGroup[],
   width: number,
   minWidth = DEFAULT_TILE_MIN_WIDTH,
   activeIndexes: Record<string, number> = {},
   store: MeasurementStore = {},
-  gap = MEASURED_MASONRY_GAP
-): MeasuredMasonryLayout {
+  gap = MASONRY_GAP
+): MasonryLayout {
   const normalizedMinWidth = normalizeTileMinWidth(minWidth);
   const safeWidth = Math.max(1, width);
   const columnCount = columnCountFor(safeWidth, normalizedMinWidth);
   const columnWidth = Math.max(1, (safeWidth - gap * (columnCount - 1)) / columnCount);
   const columnHeights = Array.from({ length: columnCount }, () => 0);
-  const positions: MeasuredMasonryPosition[] = [];
+  const positions: MasonryPosition[] = [];
 
   for (const group of groups) {
     let columnIndex = 0;
@@ -64,7 +64,7 @@ export function computeMeasuredMasonryLayout(
       if (columnHeights[index] < columnHeights[columnIndex]) columnIndex = index;
     }
     const top = columnHeights[columnIndex];
-    const { height, estimated } = estimateMeasuredGroupHeight(group, columnWidth, activeIndexes[group.id] || 0, store);
+    const { height, estimated } = estimateMasonryGroupHeight(group, columnWidth, activeIndexes[group.id] || 0, store);
     const left = columnIndex * (columnWidth + gap);
     const bottom = top + height;
     positions.push({ group, columnIndex, left, top, width: columnWidth, height, bottom, estimated });
@@ -81,18 +81,22 @@ export function computeMeasuredMasonryLayout(
   };
 }
 
-export function visibleMeasuredPositions(
-  positions: MeasuredMasonryPosition[],
+export function visibleMasonryPositions(
+  positions: MasonryPosition[],
   scrollTop: number,
   viewportHeight: number,
-  overscan = MEASURED_MASONRY_OVERSCAN
+  overscan = MASONRY_OVERSCAN
 ) {
   const min = scrollTop - overscan;
   const max = scrollTop + viewportHeight + overscan;
-  return positions.filter((position) => position.bottom >= min && position.top <= max);
+  const visible: MasonryPosition[] = [];
+  for (const position of positions) {
+    if (position.bottom >= min && position.top <= max) visible.push(position);
+  }
+  return visible;
 }
 
-export function visualOrderFromMeasuredPositions(positions: MeasuredMasonryPosition[]) {
+export function visualOrderFromMasonryPositions(positions: MasonryPosition[]) {
   return [...positions]
     .sort((left, right) => left.top - right.top || left.left - right.left)
     .flatMap((position) => position.group.items.map((item) => item.hash));

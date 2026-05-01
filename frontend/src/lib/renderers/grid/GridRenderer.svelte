@@ -4,11 +4,11 @@
   import type { VaultGroup, VaultItem } from '../../types';
   import { log as uiLog } from '../../logger';
   import {
-    computeGridExpLayout,
-    visibleGridExpPositions,
-    visualOrderFromGridExpPositions,
-    GRID_EXP_OVERSCAN
-  } from './gridExpLayout';
+    computeGridLayout,
+    visibleGridPositions,
+    visualOrderFromGridPositions,
+    GRID_OVERSCAN
+  } from './gridLayout';
 
   export let groups: VaultGroup[] = [];
   export let viewportWidth = 0;
@@ -30,14 +30,14 @@
   let lastSummaryKey = '';
   let lastVisualOrderKey = '';
 
-  $: layout = computeGridExpLayout(groups, viewportWidth, tileMinWidth);
-  $: visiblePositions = visibleGridExpPositions(
+  $: layout = computeGridLayout(groups, viewportWidth, tileMinWidth);
+  $: visiblePositions = visibleGridPositions(
     layout.positions,
     scrollTop,
     viewportHeight,
     layout.rowHeight,
     layout.columnCount,
-    GRID_EXP_OVERSCAN
+    GRID_OVERSCAN
   );
   $: emitVisualOrder();
   $: if (hostEl) {
@@ -48,16 +48,18 @@
 
   function handleScroll(event: Event) {
     const target = event.currentTarget as HTMLElement;
+    const nextScrollTop = target.scrollTop;
+    const nextViewportHeight = target.clientHeight;
     if (scrollFrame !== null) return;
     scrollFrame = window.requestAnimationFrame(() => {
-      scrollTop = target.scrollTop;
-      viewportHeight = target.clientHeight;
+      scrollTop = nextScrollTop;
+      viewportHeight = nextViewportHeight;
       scrollFrame = null;
     });
   }
 
   function emitVisualOrder() {
-    const hashes = visualOrderFromGridExpPositions(layout.positions);
+    const hashes = visualOrderFromGridPositions(layout.positions);
     const key = hashes.join('|');
     if (key === lastVisualOrderKey) return;
     lastVisualOrderKey = key;
@@ -78,7 +80,7 @@
     if (key === lastSummaryKey || now - lastSummaryLog < 500) return;
     lastSummaryKey = key;
     lastSummaryLog = now;
-    uiLog('INFO', 'Grid experiment layout summary', {
+    uiLog('INFO', 'Grid renderer layout summary', {
       total_groups: groups.length,
       mounted_tiles: visiblePositions.length,
       unmounted_tiles: Math.max(0, groups.length - visiblePositions.length),
@@ -96,11 +98,11 @@
   });
 </script>
 
-<div class="grid-exp-scroll" bind:this={hostEl} on:scroll={handleScroll}>
-  <div class="grid-exp-surface" style={`height: ${layout.totalHeight}px;`}>
+<div class="grid-renderer-scroll" bind:this={hostEl} on:scroll={handleScroll}>
+  <div class="grid-renderer-surface" style={`height: ${layout.totalHeight}px;`}>
     {#each visiblePositions as position (position.group.id)}
       <div
-        class="grid-exp-item"
+        class="grid-renderer-item"
         style={`width: ${position.width}px; height: ${position.height}px; transform: translate3d(${position.left}px, ${position.top}px, 0);`}
       >
         <VaultGroupTile
@@ -123,7 +125,7 @@
 </div>
 
 <style>
-  .grid-exp-scroll {
+  .grid-renderer-scroll {
     flex-grow: 1;
     overflow-y: auto;
     overflow-x: hidden;
@@ -133,18 +135,18 @@
     box-sizing: border-box;
   }
 
-  .grid-exp-surface {
+  .grid-renderer-surface {
     position: relative;
     min-height: 1px;
   }
 
-  .grid-exp-item {
+  .grid-renderer-item {
     position: absolute;
     top: 0;
     left: 0;
   }
 
-  .grid-exp-item :global(.tile-group) {
+  .grid-renderer-item :global(.tile-group) {
     margin-bottom: 0;
     height: 100%;
     content-visibility: visible;
