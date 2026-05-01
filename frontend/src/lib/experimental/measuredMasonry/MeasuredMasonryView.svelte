@@ -1,5 +1,6 @@
 <script lang="ts">
   import VaultGroupTile from '../../VaultGroupTile.svelte';
+  import { onDestroy } from 'svelte';
   import type { VaultGroup, VaultItem } from '../../types';
   import { log as uiLog } from '../../logger';
   import {
@@ -30,6 +31,7 @@
   let measurements: MeasurementStore = {};
   let pendingMeasurements: Record<string, { width: number; height: number; position: MeasuredMasonryPosition }> = {};
   let measurementFrame: number | null = null;
+  let scrollFrame: number | null = null;
   let recomputeCount = 0;
   let lastSummaryLog = 0;
   let lastSummaryKey = '';
@@ -47,8 +49,12 @@
 
   function handleScroll(event: Event) {
     const target = event.currentTarget as HTMLElement;
-    scrollTop = target.scrollTop;
-    viewportHeight = target.clientHeight;
+    if (scrollFrame !== null) return;
+    scrollFrame = window.requestAnimationFrame(() => {
+      scrollTop = target.scrollTop;
+      viewportHeight = target.clientHeight;
+      scrollFrame = null;
+    });
   }
 
   function emitVisualOrder() {
@@ -148,6 +154,11 @@
       measured_count: Object.keys(measurements).length
     });
   }
+
+  onDestroy(() => {
+    if (scrollFrame !== null) window.cancelAnimationFrame(scrollFrame);
+    if (measurementFrame !== null) window.cancelAnimationFrame(measurementFrame);
+  });
 </script>
 
 <div class="measured-scroll" bind:this={hostEl} on:scroll={handleScroll}>
@@ -161,6 +172,7 @@
         <VaultGroupTile
           group={position.group}
           layout="masonry"
+          eagerImages={true}
           activeIndex={activeIndexes[position.group.id] || 0}
           {selectedHash}
           {selectedHashes}

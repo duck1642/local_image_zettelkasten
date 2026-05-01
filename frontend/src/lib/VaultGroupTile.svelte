@@ -9,6 +9,7 @@
   export let selectedHashes: Set<string> = new Set();
   export let layout: 'masonry' | 'grid' = 'masonry';
   export let activeIndex = 0;
+  export let eagerImages = false;
   
   const dispatch = createEventDispatcher();
 
@@ -51,7 +52,7 @@
 <div class="tile-group {layout}" class:selected={isSelected} on:click={select}>
     <div class="media-stack" style={layout !== 'grid' ? aspectStyle : ''}>
         {#if current && isImageMedia(current)}
-            <img src={thumbnailUrl} alt="Vault Item" loading="lazy"
+            <img src={thumbnailUrl} alt="Vault Item" loading={eagerImages ? 'eager' : 'lazy'}
                  width={current.width || undefined} height={current.height || undefined} />
         {:else if current && isVideoMedia(current)}
             <video src={fullUrl} poster={thumbnailUrl} preload="none" muted loop

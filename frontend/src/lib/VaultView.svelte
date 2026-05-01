@@ -7,15 +7,17 @@
   import { DEFAULT_TILE_MIN_WIDTH, buildMasonryColumns, columnCountFor, normalizeLayoutMode, normalizeTileMinWidth, visualOrderForRenderedGroups } from './layout';
   import { buildItemQueryParams, emptyFilters } from './search';
   import { updateSelection } from './selection';
+  import GridExpView from './experimental/gridExp/GridExpView.svelte';
   import MeasuredMasonryView from './experimental/measuredMasonry/MeasuredMasonryView.svelte';
   import { computeMeasuredMasonryLayout, visualOrderFromMeasuredPositions } from './experimental/measuredMasonry/measuredMasonryLayout';
+  import { computeGridExpLayout, visualOrderFromGridExpPositions } from './experimental/gridExp/gridExpLayout';
   import Inspector from './Inspector.svelte';
   import MediaFocus from './MediaFocus.svelte';
   import SearchBar from './SearchBar.svelte';
   import VaultGroupTile from './VaultGroupTile.svelte';
 
   const dispatch = createEventDispatcher();
-  type ActiveVaultLayoutMode = VaultLayoutMode | 'masonry-measured';
+  type ActiveVaultLayoutMode = VaultLayoutMode | 'masonry-exp' | 'grid-exp';
 
   let items: VaultItem[] = [];
   let stats = { total_items: 0 };
@@ -47,19 +49,23 @@
   let tileMinWidth = DEFAULT_TILE_MIN_WIDTH;
   let tileSizeSaveTimer: number | null = null;
   let groupIndexes: Record<string, number> = {};
-  let measuredVisualHashOrder: string[] = [];
+  let masonryExpVisualHashOrder: string[] = [];
+  let gridExpVisualHashOrder: string[] = [];
 
   $: groupedItems = groupVaultItems(items);
   $: emitStatus(stats.total_items, groupedItems.length, hasMore, currentLayoutMode);
   $: jsMasonryColumns = currentLayoutMode === 'masonry' ? buildMasonryColumns(groupedItems, vaultWidth, tileMinWidth) : [];
-  $: measuredPreviewLayout = currentLayoutMode === 'masonry-measured' ? computeMeasuredMasonryLayout(groupedItems, vaultWidth, tileMinWidth, groupIndexes) : null;
+  $: masonryExpPreviewLayout = currentLayoutMode === 'masonry-exp' ? computeMeasuredMasonryLayout(groupedItems, vaultWidth, tileMinWidth, groupIndexes) : null;
+  $: gridExpPreviewLayout = currentLayoutMode === 'grid-exp' ? computeGridExpLayout(groupedItems, vaultWidth, tileMinWidth) : null;
   $: jsGridColumnCount = currentLayoutMode === 'grid' ? columnCountFor(vaultWidth, tileMinWidth) : 1;
   $: jsGap = currentLayoutMode === 'grid' ? 15 : 12;
   $: jsColumnWidth = Math.max(1, (Math.max(1, vaultWidth) - jsGap * (Math.max(jsGridColumnCount, jsMasonryColumns.length || 1) - 1)) / Math.max(jsGridColumnCount, jsMasonryColumns.length || 1));
   $: jsVisualHashOrder = currentLayoutMode === 'masonry'
     ? visualOrderForRenderedGroups(jsMasonryColumns)
-    : currentLayoutMode === 'masonry-measured'
-      ? (measuredVisualHashOrder.length ? measuredVisualHashOrder : (measuredPreviewLayout ? visualOrderFromMeasuredPositions(measuredPreviewLayout.positions) : []))
+    : currentLayoutMode === 'masonry-exp'
+      ? (masonryExpVisualHashOrder.length ? masonryExpVisualHashOrder : (masonryExpPreviewLayout ? visualOrderFromMeasuredPositions(masonryExpPreviewLayout.positions) : []))
+    : currentLayoutMode === 'grid-exp'
+      ? (gridExpVisualHashOrder.length ? gridExpVisualHashOrder : (gridExpPreviewLayout ? visualOrderFromGridExpPositions(gridExpPreviewLayout.positions) : []))
     : currentLayoutMode === 'grid'
       ? groupedItems.flatMap((group) => group.items.map((item) => item.hash))
       : [];
@@ -120,7 +126,7 @@
       tileSizeSaveTimer = null;
       if (!configCache.ui) configCache.ui = {};
       configCache.ui.vault_tile_min_width = tileMinWidth;
-      configCache.ui.vault_layout_mode = currentLayoutMode === 'masonry-measured' ? normalizeLayoutMode(configCache) : currentLayoutMode;
+      configCache.ui.vault_layout_mode = currentLayoutMode === 'masonry-exp' || currentLayoutMode === 'grid-exp' ? normalizeLayoutMode(configCache) : currentLayoutMode;
       try {
         await apiFetch('/api/config', {
           method: 'POST',
@@ -140,7 +146,7 @@
     if (!configCache) configCache = {};
     if (!configCache.ui) configCache.ui = {};
     configCache.ui.vault_tile_min_width = tileMinWidth;
-    configCache.ui.vault_layout_mode = currentLayoutMode === 'masonry-measured' ? normalizeLayoutMode(configCache) : currentLayoutMode;
+    configCache.ui.vault_layout_mode = currentLayoutMode === 'masonry-exp' || currentLayoutMode === 'grid-exp' ? normalizeLayoutMode(configCache) : currentLayoutMode;
     scheduleLoadMoreCheck();
     saveTileSizeDebounced();
   }
@@ -214,8 +220,8 @@
     const command = event.detail.command;
     if (command === 'masonry' || command === 'grid') {
       saveLayoutMode(command);
-    } else if (command === 'masonry-measured') {
-      currentLayoutMode = 'masonry-measured';
+    } else if (command === 'masonry-exp' || command === 'grid-exp') {
+      currentLayoutMode = command;
       scheduleLoadMoreCheck();
     } else if (command === 'zoom-in') {
       zoomIn();
@@ -471,7 +477,7 @@
           <div class="loading-more">Loading more...</div>
         {/if}
       </div>
-    {:else if currentLayoutMode === 'masonry-measured'}
+    {:else if currentLayoutMode === 'masonry-exp'}
       <MeasuredMasonryView
         groups={groupedItems}
         viewportWidth={vaultWidth}
@@ -484,7 +490,22 @@
         {isLoadingMore}
         onSelectItem={handleSelectItem}
         onIndexChange={handleGroupIndexChange}
-        onVisualOrderChange={(hashes) => measuredVisualHashOrder = hashes}
+        onVisualOrderChange={(hashes) => masonryExpVisualHashOrder = hashes}
+      />
+    {:else if currentLayoutMode === 'grid-exp'}
+      <GridExpView
+        groups={groupedItems}
+        viewportWidth={vaultWidth}
+        {tileMinWidth}
+        selectedHash={selectedItem?.hash}
+        {selectedHashes}
+        activeIndexes={groupIndexes}
+        bind:sentinelEl
+        bind:hostEl={layoutHostEl}
+        {isLoadingMore}
+        onSelectItem={handleSelectItem}
+        onIndexChange={handleGroupIndexChange}
+        onVisualOrderChange={(hashes) => gridExpVisualHashOrder = hashes}
       />
     {:else}
       <div class="js-layout-scroll" bind:this={layoutHostEl}>

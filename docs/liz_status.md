@@ -88,7 +88,7 @@ SQLite stores runtime asset/index metadata only. Manual topics and WD tags live 
 - Sensitive Pixiv/cookie credentials were removed from `config/config.yaml`; `secrets/.secrets.yaml` remains the credential source.
 - The old misleading Vault `Add Files` button was removed.
 - Terminal stdout/stderr logging is initialized at API startup instead of mutating streams during import.
-- Backend command suggestions include `>masonry`, `>grid`, `>zoom-in`, and `>zoom-out`.
+- Backend command suggestions include `>masonry`, `>grid`, `>masonry-exp`, `>grid-exp`, `>zoom-in`, and `>zoom-out`.
 - Shared stats polling, review count, inspector action feedback, bulk delete, and infinite-scroll rechecks are implemented.
 - Safe frontend media-type helpers replaced direct `mime_type.startsWith(...)` checks, so missing MIME values no longer crash tile/inspector/focus rendering.
 - Search suggestion positioning now reuses one canvas/context instead of creating a new canvas on every keypress.
@@ -106,7 +106,7 @@ SQLite stores runtime asset/index metadata only. Manual topics and WD tags live 
 - **Resize-Time Masonry Rebuild:** `ResizeObserver` updates `vaultWidth`, which recomputes JS masonry columns over all loaded groups. This needs throttling/debouncing before large-vault use.
 - **Config Save Race, Partially Fixed:** `SettingsView.svelte` now uses the shared config store, but the reverted `VaultView.svelte` still saves layout/zoom through its local config cache. Vault must be rewired to the shared store.
 - **Grouped Tile Navigation Compatibility:** `VaultGroupTile.svelte` now emits parent-controlled `indexChange`, but the reverted `VaultView.svelte` does not currently persist/pass per-group active indexes. Grouped post prev/next may need a compatibility fix.
-- **Masonry Virtualization Design:** The attempted absolute-position virtual masonry was reverted because estimated heights caused overlap. The current stable masonry uses browser column flow, but a scalable future version needs measured tile heights or another virtualization strategy.
+- **Experimental Vault Renderers:** Stable `masonry` and `grid` remain available. Runtime-only `masonry-exp` and `grid-exp` are now available for virtualization testing and are not persisted to config.
 
 ## Current Task
 
@@ -115,6 +115,8 @@ Vault view optimization:
 - Current state:
   - `masonry` is back to the old JS column assignment plus normal browser vertical flow.
   - `grid` is back to the old rendered grid path.
+  - `masonry-exp` is the measured absolute-position masonry experiment.
+  - `grid-exp` is the virtualized fixed-row grid experiment.
   - This is visually stable and avoids the absolute-position overlap bug.
   - It is not a final large-vault solution because all loaded groups remain mounted.
 - Problem to solve next:
@@ -134,6 +136,10 @@ Vault view optimization:
   - For scalable masonry, render/window visible items, measure actual tile heights, cache by group id/active index/tile width, then compute positions from measured heights.
   - For grid, use a simpler virtual row window because grid height is predictable.
   - Do not rely on hardcoded masonry height estimates as the final positioning source.
+- Current experiment commands:
+  - `>masonry-exp` switches to the measured masonry experiment for the current session only.
+  - `>grid-exp` switches to the virtualized grid experiment for the current session only.
+  - `>masonry` and `>grid` remain stable persisted layout commands.
 - Smaller cleanup needed before the next layout attempt:
   - Rewire `VaultView.svelte` to the shared config store.
   - Restore grouped-post index handling in `VaultView.svelte` or revert `VaultGroupTile.svelte` to local index ownership.
@@ -148,7 +154,7 @@ Search/filter implementation:
   - `@` filters platform.
   - `#` filters note-frontmatter topics.
   - `*` filters WD tags.
-  - `>` triggers commands such as `>grid`, `>masonry`, `>zoom-in`, and `>zoom-out`.
+  - `>` triggers commands such as `>grid`, `>masonry`, `>masonry-exp`, `>grid-exp`, `>zoom-in`, and `>zoom-out`.
 - Search now uses structured filter arrays internally.
 - Repeated filters are supported for WD tags, topics, platforms, and artists.
 - Dropdown suggestion sources now exist for commands, artist, platform, topic, and WD tag prefixes.
