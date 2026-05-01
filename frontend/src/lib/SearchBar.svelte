@@ -6,7 +6,7 @@
   import { log as uiLog } from './logger';
 
   const dispatch = createEventDispatcher();
-  const availableCommands = ['>masonry', '>masonry-exp', '>masonry-measured', '>grid', '>zoom-in', '>zoom-out'];
+  const availableCommands = ['>masonry', '>masonry-measured', '>grid', '>zoom-in', '>zoom-out'];
 
   let searchQuery = '';
   let activeFilters: SearchFilters = emptyFilters();
