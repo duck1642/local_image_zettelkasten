@@ -1,4 +1,4 @@
-<script lang="ts">
+﻿<script lang="ts">
   import { onMount } from 'svelte';
   import { apiFetch, assetUrl } from './api';
   import { log as uiLog } from './logger';
@@ -50,9 +50,9 @@
   }
 
   onMount(() => {
-    window.addEventListener('liz:refresh', handleGlobalRefresh);
+    window.addEventListener('lmz:refresh', handleGlobalRefresh);
     loadReview();
-    return () => window.removeEventListener('liz:refresh', handleGlobalRefresh);
+    return () => window.removeEventListener('lmz:refresh', handleGlobalRefresh);
   });
   $: current = items[currentIndex];
 </script>

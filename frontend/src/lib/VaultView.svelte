@@ -1,4 +1,4 @@
-<script lang="ts">
+﻿<script lang="ts">
   import { createEventDispatcher, onMount, tick } from 'svelte';
   import type { SearchFilters, VaultGroup, VaultItem } from './types';
   import { apiFetch } from './api';
@@ -380,11 +380,11 @@
   }
 
   onMount(() => {
-    window.addEventListener('liz:refresh', handleGlobalRefresh);
+    window.addEventListener('lmz:refresh', handleGlobalRefresh);
     fetchConfig();
     fetchItems();
     return () => {
-      window.removeEventListener('liz:refresh', handleGlobalRefresh);
+      window.removeEventListener('lmz:refresh', handleGlobalRefresh);
       observer?.disconnect();
       resizeObserver?.disconnect();
       if (tileSizeSaveTimer !== null) window.clearTimeout(tileSizeSaveTimer);

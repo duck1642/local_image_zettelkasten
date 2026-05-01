@@ -1,4 +1,4 @@
-
+﻿
 
 import json
 import shutil
@@ -16,7 +16,7 @@ def interactive_menu():
         items = get_review_items()
 
         print("\n" + "="*50)
-        print("Y LIZ VISUAL DUPLICATE REVIEW")
+        print("Y LMZ VISUAL DUPLICATE REVIEW")
         print("="*50)
 
         if not items:

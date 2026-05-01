@@ -1,4 +1,4 @@
-<script lang="ts">
+﻿<script lang="ts">
   import { onMount } from 'svelte';
   import { apiFetch } from './api';
   import { log as uiLog } from './logger';
@@ -59,10 +59,10 @@
   }
 
   onMount(() => {
-    window.addEventListener('liz:refresh', handleGlobalRefresh);
+    window.addEventListener('lmz:refresh', handleGlobalRefresh);
     loadFacets();
     return () => {
-      window.removeEventListener('liz:refresh', handleGlobalRefresh);
+      window.removeEventListener('lmz:refresh', handleGlobalRefresh);
       if (debounceTimer !== null) clearTimeout(debounceTimer);
     };
   });

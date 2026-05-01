@@ -1,4 +1,4 @@
-import os
+﻿import os
 import sys
 import json
 import asyncio
@@ -59,7 +59,7 @@ def configure_terminal_logging():
         sys.stderr = TerminalLogger("terminal.log", sys.stderr)
     _terminal_logging_configured = True
 
-app = FastAPI(title="LIZ API")
+app = FastAPI(title="LMZ API")
 
 ALLOWED_ORIGINS = {
     "http://localhost:5173",
@@ -103,7 +103,7 @@ def _validate_origin(origin: str | None):
         raise HTTPException(status_code=403, detail="Origin not allowed")
 
 def _require_api_key(request: Request):
-    provided = request.headers.get("X-LIZ-API-KEY", "")
+    provided = request.headers.get("X-LMZ-API-KEY", "")
     expected = _api_key()
     if not secrets.compare_digest(provided, expected):
         raise HTTPException(status_code=403, detail="Invalid API key")
@@ -994,7 +994,7 @@ def _update_app_config_sync(new_config: dict):
     return {"status": "success"}
 
 @app.get("/")
-async def root(): return {"status": "LIZ API Running"}
+async def root(): return {"status": "LMZ API Running"}
 
 if __name__ == "__main__":
     import uvicorn

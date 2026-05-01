@@ -1,8 +1,8 @@
-# LIZ Architecture
+# LMZ Architecture
 
 ## Summary
 
-LIZ is a local media archive and zettelkasten system for images, GIFs, and videos.
+LMZ is a local media archive and zettelkasten system for images, GIFs, and videos.
 
 It ingests local files and external URLs, validates media, stores files by SHA256 hash, indexes runtime metadata in SQLite, generates Obsidian-compatible markdown notes, keeps local WD tag suggestions in JSON cache files, and exposes a Tauri/Svelte desktop UI through a local FastAPI backend.
 
@@ -11,7 +11,7 @@ Runtime state stays outside source code under root-level `data/`, `logs/`, and `
 ## Current Project Shape
 
 ```text
-local_image_zettelkasten/
+local_media_zettelkasten/
   main.py
   dev.py
   pyproject.toml
@@ -63,10 +63,10 @@ local_image_zettelkasten/
 
 - `python dev.py` launches the modern Tauri/Svelte + FastAPI development stack.
 - `python main.py` runs CLI ingestion.
-- `liz` runs `core:main` when installed.
+- `lmz` runs `core:main` when installed.
 - `cd frontend; npm run build:sidecar` builds the production Tauri sidecar binary.
 
-The old `gui.py`, old Python UI package, and `liz-gui` PySide entry point are removed.
+The old `gui.py`, old Python UI package, and PySide entry point are removed.
 
 ## Core Data Flow
 
@@ -93,7 +93,7 @@ processor.py
         +--> optional local WD tagging
         |
         v
-data/vault/assets + data/vault/notes + data/db/liz_main.db + data/wd-tags
+data/vault/assets + data/vault/notes + data/db/lmz_main.db + data/wd-tags
 ```
 
 ## Storage Model
@@ -158,7 +158,7 @@ Used for fragment/tile-level pHash support:
 
 Important API properties:
 
-- Mutating endpoints require `X-LIZ-API-KEY`.
+- Mutating endpoints require `X-LMZ-API-KEY`.
 - Session key is created under `secrets/.api_key`.
 - CORS is limited to localhost/Tauri origins.
 - Queue/log/review path inputs are allowlisted or root-checked.
@@ -173,7 +173,7 @@ Frontend API calls use `frontend/src/lib/api.ts` so mutating requests automatica
 
 Development uses `python dev.py`, which starts the Python backend directly and then launches Tauri.
 
-Production Tauri builds expect an external sidecar named `liz-api`. Build it before packaging:
+Production Tauri builds expect an external sidecar named `lmz-api`. Build it before packaging:
 
 ```powershell
 cd frontend

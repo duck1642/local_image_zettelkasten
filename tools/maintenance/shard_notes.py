@@ -1,4 +1,4 @@
-import argparse
+﻿import argparse
 import shutil
 import sys
 from datetime import datetime
@@ -9,7 +9,7 @@ SRC_DIR = PROJECT_ROOT / "backend"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from utils import NOTES_DIR, PROJECT_ROOT as LIZ_ROOT, note_path_for
+from utils import NOTES_DIR, PROJECT_ROOT as LMZ_ROOT, note_path_for
 
 
 def flat_notes() -> list[Path]:
@@ -19,7 +19,7 @@ def flat_notes() -> list[Path]:
 
 
 def backup_notes() -> Path:
-    backup_root = LIZ_ROOT / "backups"
+    backup_root = LMZ_ROOT / "backups"
     backup_root.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     backup_path = backup_root / f"notes_before_shard_{stamp}"

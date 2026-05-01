@@ -48,7 +48,7 @@ OUTPUT_DIR = VAULT_DIR
 ASSETS_DIR = OUTPUT_DIR / "assets"
 NOTES_DIR = OUTPUT_DIR / "notes"
 
-DB_PATH = _resolve_path('db', "data/db/liz_main.db")
+DB_PATH = _resolve_path('db', "data/db/lmz_main.db")
 
 LOGS_DIR = _resolve_path('logs', "logs")
 
@@ -223,7 +223,7 @@ def get_config() -> dict:
 def atomic_write_text(path: Path, text: str, encoding: str = "utf-8"):
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd, temp_name = tempfile.mkstemp(prefix="liztmp-", suffix=".tmp", dir=str(path.parent))
+    fd, temp_name = tempfile.mkstemp(prefix="lmztmp-", suffix=".tmp", dir=str(path.parent))
     temp_path = Path(temp_name)
     try:
         with os.fdopen(fd, "w", encoding=encoding) as handle:

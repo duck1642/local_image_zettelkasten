@@ -1,4 +1,4 @@
-﻿# LIZ — Roadmap
+﻿# LMZ — Roadmap
 
 ---
 
@@ -150,7 +150,7 @@ Build a practical desktop interface for vault management, add local AI tagging, 
 
 ### Completed
 - Replaced the broken Flet/PySide direction with a Tauri + Svelte desktop UI backed by FastAPI.
-- Removed old PySide UI code, `gui.py`, PySide dependencies, and the `liz-gui` entry point.
+- Removed old PySide UI code, `gui.py`, PySide dependencies.
 - Added a Svelte vault with masonry/grid layouts, grouped source URL tiles, infinite loading, and media filters.
 - Added a Svelte inspector for metadata editing, source URL group navigation, copy/delete/open actions, and clickable WD suggestions.
 - Added image/video wide and fullscreen focus behavior through the modern frontend.
@@ -232,4 +232,3 @@ Encrypt `.secrets.yaml` and `cookies.txt` at rest and implement improved credent
 
 ### Task
 Implement "Orphan/Ghost" integrity checks and periodic SHA256 re-verification to detect bit-rot.
-

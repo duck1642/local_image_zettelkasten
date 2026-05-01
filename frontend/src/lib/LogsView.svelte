@@ -1,4 +1,4 @@
-<script lang="ts">
+﻿<script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { log as uiLog } from './logger';
   import { apiFetch, eventSourceUrl } from './api';
@@ -170,7 +170,7 @@
   function formatExtraValue(value: any): string {
     let str = typeof value === 'string' ? value : JSON.stringify(value);
     // Truncate long values (paths, urls) for readability
-    if (str.length > 80) str = str.substring(0, 77) + '…';
+    if (str.length > 80) str = str.substring(0, 77) + 'â€¦';
     return str;
   }
 
@@ -188,11 +188,11 @@
   });
 
   onMount(() => {
-    window.addEventListener('liz:refresh', handleGlobalRefresh);
+    window.addEventListener('lmz:refresh', handleGlobalRefresh);
     connectToLogs();
   });
   onDestroy(() => {
-    window.removeEventListener('liz:refresh', handleGlobalRefresh);
+    window.removeEventListener('lmz:refresh', handleGlobalRefresh);
     eventSource?.close();
   });
 </script>

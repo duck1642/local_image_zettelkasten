@@ -1,4 +1,4 @@
-<script lang="ts">
+﻿<script lang="ts">
   import { onMount } from 'svelte';
   import { log as uiLog } from './logger';
   import { apiFetch, eventSourceUrl } from './api';
@@ -186,12 +186,12 @@
   $: readyCount = (counts.normal || 0) + (counts.force || 0);
 
   onMount(() => {
-    window.addEventListener('liz:refresh', handleGlobalRefresh);
+    window.addEventListener('lmz:refresh', handleGlobalRefresh);
     loadQueue('normal');
     fetchStats();
     connectMonitor();
     return () => {
-        window.removeEventListener('liz:refresh', handleGlobalRefresh);
+        window.removeEventListener('lmz:refresh', handleGlobalRefresh);
         logSource?.close();
     };
   });
@@ -210,7 +210,7 @@
         Failed {counts.failed || 0}
       </button>
       <span class="status-label" style="color: var(--text-main); font-weight: bold;">Ready: {readyCount}</span>
-      <span class="status-label saved">{isDirty ? '● Unsaved' : 'Saved'}</span>
+      <span class="status-label saved">{isDirty ? 'â— Unsaved' : 'Saved'}</span>
     </div>
 
     <div class="action-group">

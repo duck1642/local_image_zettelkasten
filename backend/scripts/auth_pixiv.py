@@ -1,4 +1,4 @@
-
+﻿
 import base64
 import hashlib
 import os
@@ -21,9 +21,9 @@ def generate_pkce():
 
 def run_auth():
 
-    print("\n LIZ Pixiv Authenticator ")
+    print("\n LMZ Pixiv Authenticator ")
     print("------------------------------")
-    print("This tool will securely generate a Pixiv Refresh Token so LIZ can bypass API walls.")
+    print("This tool will securely generate a Pixiv Refresh Token so LMZ can bypass API walls.")
 
     verifier, challenge = generate_pkce()
 
@@ -80,7 +80,7 @@ def run_auth():
             if refresh_token:
                 save_token(refresh_token)
                 print(f" Success! Your Pixiv Refresh Token has been securely saved to .secrets.yaml.")
-                print("   LIZ will now automatically authenticate and download from Pixiv.")
+                print("   LMZ will now automatically authenticate and download from Pixiv.")
             else:
                 print(f"\n Failed to extract refresh_token from response.")
     except urllib.error.HTTPError as e:
@@ -104,7 +104,7 @@ def save_token(token):
     else:
 
         new_content = (
-            "# LIZ Secrets  Sensitive credentials\n"
+            "# LMZ Secrets  Sensitive credentials\n"
             "# This file contains sensitive credentials. Do not share it.\n\n"
             f'pixiv_token: "{token}"\n'
         )

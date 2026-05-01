@@ -1,9 +1,9 @@
-[build-system]
+﻿[build-system]
 requires = ["setuptools>=69", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "local-image-zettelkasten"
+name = "local-media-zettelkasten"
 version = "0.1.0"
 description = "Local image and media zettelkasten ingestion, deduplication, and Tauri/Svelte UI."
 readme = "README.md"
@@ -41,7 +41,7 @@ tauri = [
 ]
 
 [project.scripts]
-liz = "core:main"
+lmz = "core:main"
 
 [tool.setuptools]
 package-dir = {"" = "backend"}

@@ -1,4 +1,4 @@
-<script lang="ts">
+﻿<script lang="ts">
   import { onMount } from 'svelte';
   import { TILE_MIN_WIDTH_CEILING, TILE_MIN_WIDTH_FLOOR } from './layout';
   import { config, configDirty, configLoading, configSaving, loadConfig, saveCurrentConfig, updateConfig } from './configStore';
@@ -29,9 +29,9 @@
   }
 
   onMount(() => {
-    window.addEventListener('liz:refresh', handleGlobalRefresh);
+    window.addEventListener('lmz:refresh', handleGlobalRefresh);
     loadConfig();
-    return () => window.removeEventListener('liz:refresh', handleGlobalRefresh);
+    return () => window.removeEventListener('lmz:refresh', handleGlobalRefresh);
   });
 </script>
 

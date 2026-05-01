@@ -1,4 +1,4 @@
-
+﻿
 from pathlib import Path
 from typing import List, Optional, Dict, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -453,7 +453,7 @@ class ExternalIngestor:
             mode = 'a' if failure_file.exists() else 'w'
             with open(failure_file, mode, encoding='utf-8') as f:
                 if mode == 'w':
-                    f.write("# LIZ Failed Links Log\n")
+                    f.write("# LMZ Failed Links Log\n")
                     f.write("# This file tracks URLs that failed to process correctly.\n\n")
                 f.write(f"[{timestamp}] {url} | Reason: {reason}\n")
 
@@ -515,7 +515,7 @@ class ExternalIngestor:
 
         with open(self.links_file, 'w', encoding='utf-8') as f:
             if links:
-                f.write("# Remaining links for LIZ Ingestion\n")
+                f.write("# Remaining links for LMZ Ingestion\n")
                 for link in links:
                     f.write(f"{link}\n")
             else:

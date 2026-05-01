@@ -1,4 +1,4 @@
-
+﻿
 import subprocess
 import sys
 import os
@@ -7,7 +7,7 @@ from pathlib import Path
 
 def update_tools():
 
-    print("Y i   LIZ Maintenance - Updating External Tools...")
+    print("Y i   LMZ Maintenance - Updating External Tools...")
 
     tools = ["yt-dlp", "gallery-dl"]
 
@@ -31,7 +31,7 @@ def update_tools():
 
 def regenerate_markdowns():
 
-    print("Y LIZ Maintenance - Regenerating all Markdown files from Database...")
+    print("Y LMZ Maintenance - Regenerating all Markdown files from Database...")
     from db.sqlite_operator import init_database
     from utils import DB_PATH, NOTES_DIR, note_path_for
     from md_generator import generate_markdown

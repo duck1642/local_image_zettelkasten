@@ -1,4 +1,4 @@
-const DEFAULT_API_BASE = 'http://localhost:8000';
+﻿const DEFAULT_API_BASE = 'http://localhost:8000';
 const configuredApiBase = import.meta.env.VITE_API_BASE;
 const API_BASE = import.meta.env.DEV && configuredApiBase === undefined ? '' : (configuredApiBase || DEFAULT_API_BASE);
 
@@ -32,7 +32,7 @@ export async function apiFetch(path: string, init: RequestInit = {}) {
   const method = (init.method || 'GET').toUpperCase();
   const headers = new Headers(init.headers || {});
   if (['POST', 'PATCH', 'DELETE'].includes(method)) {
-    headers.set('X-LIZ-API-KEY', await getApiKey());
+    headers.set('X-LMZ-API-KEY', await getApiKey());
   }
   return fetch(apiUrl(path), { ...init, headers });
 }

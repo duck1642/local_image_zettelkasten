@@ -1,4 +1,4 @@
-
+﻿
 import sqlite3
 import os
 from pathlib import Path
@@ -9,7 +9,7 @@ from fingerprint import get_audio_fingerprint, get_visual_embedding
 from utils import ASSETS_DIR, DB_PATH
 
 def migrate():
-    print(f"[INFO] LIZ Signature Migration - Target: {DB_PATH}")
+    print(f"[INFO] LMZ Signature Migration - Target: {DB_PATH}")
     conn = init_database()
     cursor = conn.cursor()
 

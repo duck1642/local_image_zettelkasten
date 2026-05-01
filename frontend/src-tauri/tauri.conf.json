@@ -1,8 +1,8 @@
-{
+﻿{
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "LIZ",
+  "productName": "LMZ",
   "version": "0.1.0",
-  "identifier": "com.liz.app",
+  "identifier": "com.lmz.app",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5173",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "LIZ - Management Center",
+        "title": "LMZ - Management Center",
         "width": 1280,
         "height": 800,
         "resizable": true,
@@ -26,7 +26,7 @@
   "bundle": {
     "active": true,
     "externalBin": [
-      "bin/liz-api"
+      "bin/lmz-api"
     ],
     "targets": "all",
     "icon": [

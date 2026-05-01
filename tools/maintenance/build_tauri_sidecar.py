@@ -1,4 +1,4 @@
-import argparse
+﻿import argparse
 import platform
 import subprocess
 import sys
@@ -26,7 +26,7 @@ def main() -> int:
     entry = root / "backend" / "web_api.py"
     bin_dir = root / "frontend" / "src-tauri" / "bin"
     work_dir = root / "build" / "tauri-sidecar"
-    target_name = f"liz-api-{args.target_triple}"
+    target_name = f"lmz-api-{args.target_triple}"
 
     if not entry.exists():
         print(f"missing backend entry: {entry}", file=sys.stderr)

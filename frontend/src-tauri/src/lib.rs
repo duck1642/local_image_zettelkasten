@@ -1,4 +1,4 @@
-#[tauri::command]
+﻿#[tauri::command]
 fn copy_file_to_clipboard(path: String) -> Result<(), String> {
     use clipboard_win::{formats, Clipboard, Setter};
     let file_path = std::path::PathBuf::from(&path);
@@ -32,7 +32,7 @@ pub fn run() {
       {
         use tauri_plugin_shell::ShellExt;
         let shell = _app.shell();
-        match shell.sidecar("liz-api") {
+        match shell.sidecar("lmz-api") {
           Ok(sidecar_command) => match sidecar_command.spawn() {
             Ok((mut rx, _child)) => {
               tauri::async_runtime::spawn(async move {
@@ -50,11 +50,11 @@ pub fn run() {
               });
             }
             Err(error) => {
-              eprintln!("Failed to spawn liz-api sidecar: {error}");
+              eprintln!("Failed to spawn lmz-api sidecar: {error}");
             }
           },
           Err(error) => {
-            eprintln!("Failed to create liz-api sidecar command: {error}");
+            eprintln!("Failed to create lmz-api sidecar command: {error}");
           }
         }
       }

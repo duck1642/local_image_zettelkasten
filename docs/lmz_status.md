@@ -1,8 +1,8 @@
-# LIZ Current Status
+# LMZ Current Status
 
 ## Current State
 
-LIZ is a Tauri + Svelte desktop app backed by a local FastAPI service and the existing Python ingestion pipeline.
+LMZ is a Tauri + Svelte desktop app backed by a local FastAPI service and the existing Python ingestion pipeline.
 
 Current launch command:
 
@@ -14,10 +14,10 @@ Backend ingestion still runs through:
 
 ```powershell
 python main.py
-liz
+lmz
 ```
 
-The old Flet and PySide/PyQt UI paths are no longer active. `gui.py`, the old Python UI package, PySide dependencies, and the `liz-gui` entry point were removed.
+The old Flet and PySide/PyQt UI paths are no longer active. `gui.py`, the old Python UI package, PySide dependencies, and the PySide entry point was removed.
 
 ## Working Areas
 
@@ -41,8 +41,8 @@ The old Flet and PySide/PyQt UI paths are no longer active. `gui.py`, the old Py
 
 - UI: Tauri + Svelte.
 - Backend API: `backend/web_api.py`.
-- Ingestion CLI: `backend/core.py`, launched by `main.py` or `liz`.
-- Runtime database: `data/db/liz_main.db`.
+- Ingestion CLI: `backend/core.py`, launched by `main.py` or `lmz`.
+- Runtime database: `data/db/lmz_main.db`.
 - Vault assets: `data/vault/assets/{hash[:2]}/{hash}.{ext}`.
 - Vault notes: `data/vault/notes/{hash[:2]}/{hash}.md`.
 - WD cache: `data/wd-tags/{hash[:2]}/{hash}.json`.
@@ -102,7 +102,7 @@ SQLite stores runtime asset/index metadata only. Manual topics and WD tags live 
 - Frontend accessibility warnings remain in Svelte build output.
 - CSP is practical rather than strict and should be revisited after production packaging is stable.
 - Shift-click range selection now uses renderer-emitted visual order for both masonry and grid. It still needs real-use validation on large mixed media vaults.
-- **Sidecar Port 8000 Binding (Brittleness):** The compiled `liz-api` binary internally hardcodes `uvicorn.run(port=8000)`. If port 8000 is occupied by another app, the backend fails to bind and the Tauri app renders a white screen. Production sidecars should dynamically bind to an available port provided by Tauri.
+- **Sidecar Port 8000 Binding (Brittleness):** The compiled `lmz-api` binary internally hardcodes `uvicorn.run(port=8000)`. If port 8000 is occupied by another app, the backend fails to bind and the Tauri app renders a white screen. Production sidecars should dynamically bind to an available port provided by Tauri.
 - **`svelte-check` Accessibility Debt:** Running `npm run check` currently reports accessibility warnings around labels, clickable divs, and media captions.
 - **Virtual Renderer Validation:** Masonry and grid now use virtualized renderers. Large-vault behavior, video unmount behavior, zoom stability, and grouped-media persistence should be validated in real browsing sessions.
 
@@ -182,6 +182,6 @@ Known build note: Vite may need to run outside the sandbox because it spawns hel
 ## Documentation Notes
 
 - `docs/` is local and ignored by GitHub uploads.
-- `liz_architecture.md` contains durable architecture details.
-- `liz_roadmap.md` contains phase history and future work.
+- `lmz_architecture.md` contains durable architecture details.
+- `lmz_roadmap.md` contains phase history and future work.
 - This file is the short current snapshot.

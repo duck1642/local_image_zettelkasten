@@ -1,4 +1,4 @@
-
+﻿
 from logs.logger import log_ingestion
 from utils import setup_directories, get_config, INPUT_DIR, VAULT_DIR, DB_PATH, REVIEW_DIR, QUEUES_DIR
 from processor import process_file
@@ -18,7 +18,7 @@ def main():
     finally:
         conn.close()
 
-    log_ingestion('INFO', f"\nY LIZ Unified System - Starting")
+    log_ingestion('INFO', f"\nY LMZ Unified System - Starting")
     log_ingestion('INFO', f"Input: {INPUT_DIR}")
     log_ingestion('INFO', f"Vault: {VAULT_DIR}")
     log_ingestion('INFO', f"DB: {DB_PATH}\n")

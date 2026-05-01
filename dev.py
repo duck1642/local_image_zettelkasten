@@ -1,4 +1,4 @@
-import subprocess
+﻿import subprocess
 import sys
 import time
 import os
@@ -11,7 +11,7 @@ def run():
     api_script = root / "backend" / "web_api.py"
     frontend_dir = root / "frontend"
     
-    print("🚀 Starting LIZ Development Stack...")
+    print("Starting LMZ Development Stack...")
 
     # 2. Start Python API
     print("--- Starting Python FastAPI (Backend) ---")
@@ -38,7 +38,7 @@ def run():
         tauri_proc.wait()
 
     except KeyboardInterrupt:
-        print("\n🛑 Shutting down...")
+        print("\nðŸ›‘ Shutting down...")
     finally:
         # 5. Cleanup
         print("--- Cleaning up processes ---")
@@ -52,7 +52,7 @@ def run():
                 api_proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 api_proc.kill()
-        print("✅ Done.")
+        print("âœ… Done.")
 
 if __name__ == "__main__":
     run()

@@ -48,7 +48,7 @@ def _backup_database(db_path: Path) -> Path:
     backup_dir = ROOT / "backups"
     backup_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    backup_path = backup_dir / f"liz_main_before_drop_topics_{timestamp}.db"
+    backup_path = backup_dir / f"lmz_main_before_drop_topics_{timestamp}.db"
     conn = _connect(db_path)
     try:
         conn.execute("PRAGMA wal_checkpoint(FULL);")

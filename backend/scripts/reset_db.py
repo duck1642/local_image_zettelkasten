@@ -1,11 +1,11 @@
-
+﻿
 import shutil
 from db.sqlite_operator import reset_database
 from utils import ASSETS_DIR, NOTES_DIR, DB_PATH
 
 def main():
 
-    print("Y  LIZ System Reset - Starting")
+    print("Y  LMZ System Reset - Starting")
 
     if DB_PATH.exists():
         reset_database()
@@ -26,7 +26,7 @@ def main():
         else:
             print(f"as i   Folder not found, skipping: {folder}")
 
-    print("\n[OK] LIZ System is now clean and ready for a fresh start.")
+    print("\n[OK] LMZ System is now clean and ready for a fresh start.")
 
 if __name__ == "__main__":
     main()

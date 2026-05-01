@@ -1,4 +1,4 @@
-import argparse
+﻿import argparse
 import os
 import platform
 import shutil
@@ -47,7 +47,7 @@ def get_version(package_name):
 
 def generate_fix_script(missing_bins, missing_libs):
 
-    script_lines = ["# LIZ Windows Fix Script", "Write-Host 'Checking for Winget...'"]
+    script_lines = ["# LMZ Windows Fix Script", "Write-Host 'Checking for Winget...'"]
 
     if missing_bins:
         script_lines.append("\n# --- System Binaries ---")
@@ -95,7 +95,7 @@ def install_missing_python_libs(missing_libs):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Check LIZ system readiness.")
+    parser = argparse.ArgumentParser(description="Check LMZ system readiness.")
     parser.add_argument(
         "--non-interactive",
         action="store_true",
@@ -108,7 +108,7 @@ def main():
     )
     args = parser.parse_args()
 
-    print_line(f"--- LIZ SYSTEM READINESS REPORT ({PLATFORM_STR}) ---")
+    print_line(f"--- LMZ SYSTEM READINESS REPORT ({PLATFORM_STR}) ---")
 
     missing_bins = []
     missing_libs = []
@@ -168,7 +168,7 @@ def main():
 
     print_line("\n" + "=" * 40)
     if not missing_bins and not missing_libs:
-        print_line("[READY] LIZ is ready to launch.")
+        print_line("[READY] LMZ is ready to launch.")
     else:
         print_line(f"{WARN} Found {len(missing_bins) + len(missing_libs)} missing components.")
 

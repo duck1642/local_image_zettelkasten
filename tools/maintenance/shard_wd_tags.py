@@ -1,4 +1,4 @@
-import argparse
+﻿import argparse
 import shutil
 import sys
 from datetime import datetime
@@ -9,10 +9,10 @@ SRC_DIR = PROJECT_ROOT / "backend"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from utils import PROJECT_ROOT as LIZ_ROOT, WD_TAGS_DIR, wd_tag_cache_path_for
+from utils import PROJECT_ROOT as LMZ_ROOT, WD_TAGS_DIR, wd_tag_cache_path_for
 
 
-LEGACY_TOPICS_DIR = LIZ_ROOT / "data" / "topics"
+LEGACY_TOPICS_DIR = LMZ_ROOT / "data" / "topics"
 
 
 def legacy_json_files() -> list[Path]:
@@ -22,7 +22,7 @@ def legacy_json_files() -> list[Path]:
 
 
 def backup_wd_tags() -> Path:
-    backup_root = LIZ_ROOT / "backups"
+    backup_root = LMZ_ROOT / "backups"
     backup_root.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     backup_path = backup_root / f"wd_tags_before_shard_{stamp}"

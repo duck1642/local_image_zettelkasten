@@ -1,4 +1,4 @@
-<script lang="ts">
+﻿<script lang="ts">
   import { onMount } from 'svelte';
   import Ingestion from './lib/Ingestion.svelte';
   import LogsView from './lib/LogsView.svelte';
@@ -27,7 +27,7 @@
       return;
     }
     uiLog('INFO', 'F5 pressed: refreshing active view', { tab: activeTab });
-    window.dispatchEvent(new CustomEvent('liz:refresh', { detail: { tab: activeTab } }));
+    window.dispatchEvent(new CustomEvent('lmz:refresh', { detail: { tab: activeTab } }));
   }
 
   onMount(() => {
@@ -75,17 +75,17 @@
 
   <footer class="bottom-status">
     {#if activeTab === 'vault'}
-      <span class="status-left">Total Items: {vaultStatus.totalItems} | View: {vaultStatus.layoutMode} | DB: WAL | LIZ Tauri</span>
+      <span class="status-left">Total Items: {vaultStatus.totalItems} | View: {vaultStatus.layoutMode} | DB: WAL | LMZ Tauri</span>
       <span class="status-right">Showing {vaultStatus.groups} groups{vaultStatus.hasMore ? ' (more available)' : ''}</span>
     {:else if activeTab === 'ingest'}
       <span class="status-left">Ingestion | Normal: {$queueStats.normal} | Force: {$queueStats.force} | Failed: {$queueStats.failed}</span>
-      <span class="status-right">LIZ Tauri</span>
+      <span class="status-right">LMZ Tauri</span>
     {:else if activeTab === 'review'}
       <span class="status-left">Review | Pending: {$reviewCount}</span>
-      <span class="status-right">LIZ Tauri</span>
+      <span class="status-right">LMZ Tauri</span>
     {:else}
       <span class="status-left">{activeTab === 'logs' ? 'App Logs' : activeTab === 'stats' ? 'Stats' : 'Settings'}</span>
-      <span class="status-right">LIZ Tauri</span>
+      <span class="status-right">LMZ Tauri</span>
     {/if}
   </footer>
 </div>

@@ -1,4 +1,4 @@
-
+﻿
 import re
 import urllib.request
 import urllib.parse
@@ -20,7 +20,7 @@ def run_auth_auto():
         run_auth()
         return
 
-    print("\nY  LIZ Pixiv Authenticator (Auto Mode) Y ")
+    print("\nY  LMZ Pixiv Authenticator (Auto Mode) Y ")
     print("-------------------------------------------")
     print("A browser window will open. Log in to your Pixiv account.")
     print("The auth code will be captured automatically - no F12 needed!\n")
@@ -150,7 +150,7 @@ def run_auth_auto():
             if refresh_token:
                 save_token(refresh_token)
                 print(f"\nYZ Success! Your Pixiv Refresh Token has been securely saved to .secrets.yaml.")
-                print("   LIZ will now automatically authenticate and download from Pixiv.")
+                print("   LMZ will now automatically authenticate and download from Pixiv.")
             else:
                 print(f"\na Failed to extract refresh_token from response.")
                 print(f"   Response: {json.dumps(resp_data, indent=2)[:200]}")

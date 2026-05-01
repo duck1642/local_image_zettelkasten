@@ -160,7 +160,7 @@ def backup_db() -> Path:
     BACKUPS_DIR = PROJECT_ROOT / "backups"
     BACKUPS_DIR.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    backup_path = BACKUPS_DIR / f"liz_main_{stamp}.db"
+    backup_path = BACKUPS_DIR / f"lmz_main_{stamp}.db"
     shutil.copy2(DB_PATH, backup_path)
     return backup_path
 

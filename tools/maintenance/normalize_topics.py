@@ -1,4 +1,4 @@
-import argparse
+﻿import argparse
 import shutil
 import sys
 from datetime import datetime
@@ -12,7 +12,7 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 from md_generator import normalize_topic_list
-from utils import NOTES_DIR, PROJECT_ROOT as LIZ_ROOT
+from utils import NOTES_DIR, PROJECT_ROOT as LMZ_ROOT
 
 
 def split_frontmatter(text: str):
@@ -25,7 +25,7 @@ def split_frontmatter(text: str):
 
 
 def backup_notes() -> Path:
-    backup_root = LIZ_ROOT / "backups"
+    backup_root = LMZ_ROOT / "backups"
     backup_root.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     backup_path = backup_root / f"notes_before_topic_normalize_{stamp}"

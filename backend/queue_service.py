@@ -1,4 +1,4 @@
-import re
+﻿import re
 import threading
 from pathlib import Path
 
@@ -32,9 +32,9 @@ def ensure_queue_files():
     with QUEUE_LOCK:
         setup_directories()
         defaults = {
-            "normal": "# LIZ Normal Pending Links\n",
-            "force": "# LIZ Force Pending Links\n",
-            "failed": "# LIZ Failed Links Log\n",
+            "normal": "# LMZ Normal Pending Links\n",
+            "force": "# LMZ Force Pending Links\n",
+            "failed": "# LMZ Failed Links Log\n",
         }
         for queue, text in defaults.items():
             path = queue_path(queue)
@@ -106,12 +106,12 @@ def move_failed_urls(target_queue: str) -> int:
         if not urls:
             return 0
         append_urls(target_queue, urls)
-        queue_path("failed").write_text("# LIZ Failed Links Log\n", encoding="utf-8")
+        queue_path("failed").write_text("# LMZ Failed Links Log\n", encoding="utf-8")
         return len(urls)
 
 
 def clear_failed():
-    write_queue("failed", "# LIZ Failed Links Log\n")
+    write_queue("failed", "# LMZ Failed Links Log\n")
 
 
 def run_queue(queue: str) -> dict:
