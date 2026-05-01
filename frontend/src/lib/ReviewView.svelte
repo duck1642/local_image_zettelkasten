@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { apiFetch, assetUrl } from './api';
+  import { log as uiLog } from './logger';
   import { refreshReviewCount } from './statsStore';
 
   interface ReviewItem {
@@ -40,7 +41,19 @@
     } finally { acting = false; }
   }
 
-  onMount(loadReview);
+  function handleGlobalRefresh(event: Event) {
+    const detail = (event as CustomEvent).detail || {};
+    if (detail.tab !== 'review') return;
+    uiLog('INFO', 'Review view refresh requested');
+    currentIndex = 0;
+    loadReview();
+  }
+
+  onMount(() => {
+    window.addEventListener('liz:refresh', handleGlobalRefresh);
+    loadReview();
+    return () => window.removeEventListener('liz:refresh', handleGlobalRefresh);
+  });
   $: current = items[currentIndex];
 </script>
 

@@ -50,8 +50,9 @@ export function computeMeasuredMasonryLayout(
   gap = MEASURED_MASONRY_GAP
 ): MeasuredMasonryLayout {
   const normalizedMinWidth = normalizeTileMinWidth(minWidth);
-  const columnCount = columnCountFor(width, normalizedMinWidth);
-  const columnWidth = Math.max(normalizedMinWidth, (Math.max(0, width) - gap * (columnCount - 1)) / columnCount);
+  const safeWidth = Math.max(1, width);
+  const columnCount = columnCountFor(safeWidth, normalizedMinWidth);
+  const columnWidth = Math.max(1, (safeWidth - gap * (columnCount - 1)) / columnCount);
   const columnHeights = Array.from({ length: columnCount }, () => 0);
   const positions: MeasuredMasonryPosition[] = [];
 

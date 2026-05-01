@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { TILE_MIN_WIDTH_CEILING, TILE_MIN_WIDTH_FLOOR } from './layout';
   import { config, configDirty, configLoading, configSaving, loadConfig, saveCurrentConfig, updateConfig } from './configStore';
+  import { log as uiLog } from './logger';
 
   function setConfig(mutator: (draft: any) => void) {
     updateConfig(mutator, false);
@@ -19,8 +20,18 @@
     return (event.currentTarget as HTMLInputElement).checked;
   }
 
-  onMount(() => {
+  function handleGlobalRefresh(event: Event) {
+    const detail = (event as CustomEvent).detail || {};
+    if (detail.tab !== 'settings') return;
+    if ($configDirty && !confirm('You have unsaved settings. Discard them and refresh?')) return;
+    uiLog('INFO', 'Settings view refresh requested');
     loadConfig();
+  }
+
+  onMount(() => {
+    window.addEventListener('liz:refresh', handleGlobalRefresh);
+    loadConfig();
+    return () => window.removeEventListener('liz:refresh', handleGlobalRefresh);
   });
 </script>
 
@@ -108,7 +119,7 @@
         </div>
         <div class="shortcut-row">
           <span class="key">F5</span>
-          <span class="desc">Refresh Vault from Database</span>
+          <span class="desc">Refresh Active View</span>
         </div>
         <div class="shortcut-row">
           <span class="key">Ctrl+F5</span>

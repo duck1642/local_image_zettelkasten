@@ -37,8 +37,9 @@ export function estimateGroupHeight(group: VaultGroup, columnWidth: number) {
 
 export function buildMasonryColumns(groups: VaultGroup[], width: number, minWidth = DEFAULT_TILE_MIN_WIDTH, gap = 12) {
   const normalizedMinWidth = normalizeTileMinWidth(minWidth);
-  const count = columnCountFor(width, normalizedMinWidth);
-  const columnWidth = Math.max(normalizedMinWidth, (width - gap * (count - 1)) / count);
+  const safeWidth = Math.max(1, width);
+  const count = columnCountFor(safeWidth, normalizedMinWidth);
+  const columnWidth = Math.max(1, (safeWidth - gap * (count - 1)) / count);
   const columns = Array.from({ length: count }, () => ({ height: 0, groups: [] as VaultGroup[] }));
 
   for (const group of groups) {

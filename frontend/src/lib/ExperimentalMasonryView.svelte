@@ -167,7 +167,7 @@
 </div>
 
 <style>
-  .js-layout-scroll { flex-grow: 1; overflow: auto; padding: 15px; }
+  .js-layout-scroll { flex-grow: 1; overflow-y: auto; overflow-x: hidden; padding: 15px; min-width: 0; box-sizing: border-box; }
   .vault-layout { display: flex; align-items: flex-start; gap: 12px; }
   .js-column { flex: 0 0 var(--tile-width); width: var(--tile-width); min-width: var(--tile-width); }
   .experimental-spacer { margin-bottom: 12px; }

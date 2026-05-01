@@ -173,13 +173,25 @@
       }
   }
 
+  function handleGlobalRefresh(event: Event) {
+      const detail = (event as CustomEvent).detail || {};
+      if (detail.tab !== 'ingest') return;
+      if (isDirty && !confirm('You have unsaved queue changes. Discard them and refresh?')) return;
+      uiLog('INFO', 'Ingestion view refresh requested');
+      loadQueue(currentQueue);
+      fetchStats();
+      connectMonitor();
+  }
+
   $: readyCount = (counts.normal || 0) + (counts.force || 0);
 
   onMount(() => {
+    window.addEventListener('liz:refresh', handleGlobalRefresh);
     loadQueue('normal');
     fetchStats();
     connectMonitor();
     return () => {
+        window.removeEventListener('liz:refresh', handleGlobalRefresh);
         logSource?.close();
     };
   });

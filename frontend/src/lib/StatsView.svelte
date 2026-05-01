@@ -51,9 +51,18 @@
     debounceTimer = setTimeout(loadFacets, 200);
   }
 
+  function handleGlobalRefresh(event: Event) {
+    const detail = (event as CustomEvent).detail || {};
+    if (detail.tab !== 'stats') return;
+    uiLog('INFO', 'Stats view refresh requested', { kind: activeKind });
+    loadFacets();
+  }
+
   onMount(() => {
+    window.addEventListener('liz:refresh', handleGlobalRefresh);
     loadFacets();
     return () => {
+      window.removeEventListener('liz:refresh', handleGlobalRefresh);
       if (debounceTimer !== null) clearTimeout(debounceTimer);
     };
   });

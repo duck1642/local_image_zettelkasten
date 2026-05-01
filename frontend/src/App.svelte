@@ -18,11 +18,25 @@
     vaultStatus = event.detail;
   }
 
+  function handleGlobalKeydown(event: KeyboardEvent) {
+    if (event.key !== 'F5') return;
+    event.preventDefault();
+    if (event.ctrlKey) {
+      uiLog('INFO', 'Ctrl+F5 pressed: reloading full app');
+      window.location.reload();
+      return;
+    }
+    uiLog('INFO', 'F5 pressed: refreshing active view', { tab: activeTab });
+    window.dispatchEvent(new CustomEvent('liz:refresh', { detail: { tab: activeTab } }));
+  }
+
   onMount(() => {
     uiLog('INFO', 'Svelte UI initialized and mounted');
     return startSharedStatsPolling();
   });
 </script>
+
+<svelte:window on:keydown={handleGlobalKeydown} />
 
 <div class="root-container">
   <div class="app-container">

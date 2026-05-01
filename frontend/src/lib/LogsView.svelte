@@ -155,6 +155,13 @@
     connectToLogs();
   }
 
+  function handleGlobalRefresh(event: Event) {
+    const detail = (event as CustomEvent).detail || {};
+    if (detail.tab !== 'logs') return;
+    uiLog('INFO', 'Logs view refresh requested', { file: currentFile });
+    connectToLogs();
+  }
+
   function toggleLevel(level: string) {
     levelFilters[level] = !levelFilters[level];
     levelFilters = levelFilters; // trigger reactivity
@@ -180,8 +187,14 @@
     return true;
   });
 
-  onMount(connectToLogs);
-  onDestroy(() => eventSource?.close());
+  onMount(() => {
+    window.addEventListener('liz:refresh', handleGlobalRefresh);
+    connectToLogs();
+  });
+  onDestroy(() => {
+    window.removeEventListener('liz:refresh', handleGlobalRefresh);
+    eventSource?.close();
+  });
 </script>
 
 <div class="logs-container">

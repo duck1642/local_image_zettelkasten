@@ -179,9 +179,12 @@
 <style>
   .measured-scroll {
     flex-grow: 1;
-    overflow: auto;
+    overflow-y: auto;
+    overflow-x: hidden;
     padding: 15px;
     position: relative;
+    min-width: 0;
+    box-sizing: border-box;
   }
 
   .measured-surface {
