@@ -103,7 +103,7 @@
     for (const [groupId, measurement] of Object.entries(pending)) {
       const diff = Math.abs(measurement.height - measurement.position.height);
       const key = `${groupId}:${Math.round(measurement.width)}:${Math.round(measurement.height)}`;
-      if (diff > MEASURED_MASONRY_DRIFT_THRESHOLD && !loggedDrifts.has(key)) {
+      if (!measurement.position.estimated && diff > MEASURED_MASONRY_DRIFT_THRESHOLD && !loggedDrifts.has(key)) {
         loggedDrifts.add(key);
         uiLog('WARNING', 'Measured masonry height drift', {
           group_id: groupId,

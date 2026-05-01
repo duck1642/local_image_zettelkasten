@@ -436,7 +436,6 @@
       <option value="video">Videos Only</option>
     </select>
 
-    <button class="primary" on:click={() => dispatch('navigate', 'ingest')}>Add Files</button>
   </div>
 </header>
 
@@ -554,7 +553,7 @@
 <style>
   .top-header { height: var(--header-height); display: flex; align-items: center; padding: 0 15px; gap: 15px; border-bottom: 1px solid var(--border-dim); flex-shrink: 0; z-index: 100; }
   .header-actions { display: flex; align-items: center; gap: 10px; }
-  .header-actions.with-inspector { width: calc(400px - 15px); min-width: calc(400px - 15px); justify-content: flex-start; padding-left: 15px; border-left: 1px solid var(--border-dim); }
+  .header-actions.with-inspector { width: calc(400px - 15px); min-width: calc(400px - 15px); justify-content: flex-start; padding-left: 15px; border-left: 1px solid var(--border-dim); align-self: stretch; }
   .filter-select { background: var(--bg-input); border: 1px solid var(--border-dim); color: var(--text-main); padding: 5px 10px; border-radius: 6px; font-size: 12px; cursor: pointer; height: 32px; }
   .view-and-inspector { flex-grow: 1; display: flex; overflow: hidden; min-width: 0; }
   .viewport { flex-grow: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; position: relative; }
