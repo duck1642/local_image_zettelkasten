@@ -52,11 +52,18 @@ export function visibleGridExpPositions(
   positions: GridExpPosition[],
   scrollTop: number,
   viewportHeight: number,
-  overscan = GRID_EXP_OVERSCAN
+  rowHeight: number,
+  columnCount: number,
+  overscan = GRID_EXP_OVERSCAN,
+  gap = GRID_EXP_GAP
 ) {
-  const min = scrollTop - overscan;
-  const max = scrollTop + viewportHeight + overscan;
-  return positions.filter((position) => position.bottom >= min && position.top <= max);
+  if (positions.length === 0 || rowHeight <= 0 || columnCount <= 0) return [];
+  const rowPitch = rowHeight + gap;
+  const startRow = Math.max(0, Math.floor((scrollTop - overscan) / rowPitch));
+  const endRow = Math.max(startRow, Math.floor((scrollTop + viewportHeight + overscan) / rowPitch));
+  const startIndex = startRow * columnCount;
+  const endIndex = Math.min(positions.length, (endRow + 1) * columnCount);
+  return positions.slice(startIndex, endIndex);
 }
 
 export function visualOrderFromGridExpPositions(positions: GridExpPosition[]) {

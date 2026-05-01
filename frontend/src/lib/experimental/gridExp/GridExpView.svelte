@@ -6,7 +6,8 @@
   import {
     computeGridExpLayout,
     visibleGridExpPositions,
-    visualOrderFromGridExpPositions
+    visualOrderFromGridExpPositions,
+    GRID_EXP_OVERSCAN
   } from './gridExpLayout';
 
   export let groups: VaultGroup[] = [];
@@ -30,7 +31,14 @@
   let lastVisualOrderKey = '';
 
   $: layout = computeGridExpLayout(groups, viewportWidth, tileMinWidth);
-  $: visiblePositions = visibleGridExpPositions(layout.positions, scrollTop, viewportHeight);
+  $: visiblePositions = visibleGridExpPositions(
+    layout.positions,
+    scrollTop,
+    viewportHeight,
+    layout.rowHeight,
+    layout.columnCount,
+    GRID_EXP_OVERSCAN
+  );
   $: emitVisualOrder();
   $: if (hostEl) {
     scrollTop = hostEl.scrollTop;
@@ -93,7 +101,7 @@
     {#each visiblePositions as position (position.group.id)}
       <div
         class="grid-exp-item"
-        style={`width: ${position.width}px; height: ${position.height}px; transform: translate(${position.left}px, ${position.top}px);`}
+        style={`width: ${position.width}px; height: ${position.height}px; transform: translate3d(${position.left}px, ${position.top}px, 0);`}
       >
         <VaultGroupTile
           group={position.group}
@@ -134,7 +142,6 @@
     position: absolute;
     top: 0;
     left: 0;
-    will-change: transform;
   }
 
   .grid-exp-item :global(.tile-group) {
