@@ -5,7 +5,8 @@ import { measuredHeightFor, type MeasurementStore } from './measurementStore';
 export const MEASURED_MASONRY_GAP = 12;
 export const MEASURED_MASONRY_OVERSCAN = 1200;
 export const MEASURED_MASONRY_DRIFT_THRESHOLD = 20;
-const ESTIMATED_CHROME_HEIGHT = 41;
+const ESTIMATED_CHROME_HEIGHT = 34; // 16px padding + 14px text + 4px border
+const CSS_BORDER_WIDTH = 4; // 2px solid border on left/right
 const MIN_MEDIA_HEIGHT = 100;
 
 export type MeasuredMasonryPosition = {
@@ -37,7 +38,8 @@ export function estimateMeasuredGroupHeight(group: VaultGroup, columnWidth: numb
   if (measured !== null) return { height: measured, estimated: false };
   const item = activeItem(group, activeIndex);
   const ratio = item?.width && item?.height ? item.height / item.width : 1;
-  const mediaHeight = Math.max(MIN_MEDIA_HEIGHT, columnWidth * ratio);
+  const innerWidth = Math.max(1, columnWidth - CSS_BORDER_WIDTH);
+  const mediaHeight = Math.max(MIN_MEDIA_HEIGHT, innerWidth * ratio);
   return { height: mediaHeight + ESTIMATED_CHROME_HEIGHT, estimated: true };
 }
 
