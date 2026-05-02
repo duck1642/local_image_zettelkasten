@@ -210,7 +210,7 @@
         Failed {counts.failed || 0}
       </button>
       <span class="status-label" style="color: var(--text-main); font-weight: bold;">Ready: {readyCount}</span>
-      <span class="status-label saved">{isDirty ? 'â— Unsaved' : 'Saved'}</span>
+      <span class="status-label saved">{isDirty ? '* Unsaved' : 'Saved'}</span>
     </div>
 
     <div class="action-group">

@@ -177,7 +177,7 @@
   function formatExtraValue(value: any): string {
     let str = typeof value === 'string' ? value : JSON.stringify(value);
     // Truncate long values (paths, urls) for readability
-    if (str.length > 80) str = str.substring(0, 77) + 'â€¦';
+    if (str.length > 80) str = str.substring(0, 77) + '...';
     return str;
   }
 

@@ -87,6 +87,8 @@ SQLite stores runtime asset/index metadata only. Manual topics and WD tags live 
 - Runtime config now uses `ui.vault_layout_mode` and `ui.vault_tile_min_width`.
 - Sensitive Pixiv/cookie credentials were removed from `config/config.yaml`; `secrets/.secrets.yaml` remains the credential source.
 - The old misleading Vault `Add Files` button was removed.
+- Visible frontend mojibake in the ingestion dirty marker and log truncation ellipsis was fixed.
+- Unused default Vite/Svelte frontend assets were removed from `frontend/src/assets/`.
 - Terminal stdout/stderr logging is initialized at API startup instead of mutating streams during import.
 - Backend command suggestions include `>masonry`, `>grid`, `>zoom-in`, and `>zoom-out`.
 - Shared stats polling, review count, inspector action feedback, bulk delete, and infinite-scroll rechecks are implemented.
@@ -102,6 +104,14 @@ SQLite stores runtime asset/index metadata only. Manual topics and WD tags live 
 - Frontend accessibility warnings remain in Svelte build output.
 - CSP is practical rather than strict and should be revisited after production packaging is stable.
 - Shift-click range selection now uses renderer-emitted visual order for both masonry and grid. It still needs real-use validation on large mixed media vaults.
+- **Frontend ingestion run state:** `Ingestion.svelte` starts ingestion but does not check the response status and clears the `running` flag after a fixed delay. The backend lock still protects actual ingestion, but the UI can re-enable controls while ingestion is still running or after a failed request.
+- **Frontend SSE reconnect cleanup:** Ingestion and app-log EventSource reconnect timers are not cleared on component teardown. A pending reconnect can recreate a stream after leaving the view.
+- **Review action response handling:** `ReviewView.svelte` removes review rows from local UI state after an API call without checking `response.ok`, so failed backend actions can look successful until reload.
+- **Renderer reactive dependency clarity:** `MasonryRenderer.svelte` and `GridRenderer.svelte` call helper functions from reactive statements with hidden dependencies. This should be made explicit to avoid stale visual-order/log updates after future refactors.
+- **Stats panel request ordering:** `StatsView.svelte` assigns facet responses unconditionally. Fast typing or tab switches can let an older response overwrite newer visible results.
+- **API session-key retry:** `api.ts` caches the `/api/session-key` promise. If backend startup causes one failed session-key request, mutating API calls can keep failing until full app reload.
+- **Vault fetch error boundaries:** `VaultView.svelte` does not check `response.ok` for item/stat requests, and stats failure can be reported as item loading failure.
+- **SearchBar timer cleanup:** Search/debounce timers are not cleared on destroy. Current mounting makes this low-risk, but it should be fixed if the search component becomes conditionally mounted.
 - **Sidecar Port 8000 Binding (Brittleness):** The compiled `lmz-api` binary internally hardcodes `uvicorn.run(port=8000)`. If port 8000 is occupied by another app, the backend fails to bind and the Tauri app renders a white screen. Production sidecars should dynamically bind to an available port provided by Tauri.
 - **`svelte-check` Accessibility Debt:** Running `npm run check` currently reports accessibility warnings around labels, clickable divs, and media captions.
 - **Virtual Renderer Validation:** Masonry and grid now use virtualized renderers. Large-vault behavior, video unmount behavior, zoom stability, and grouped-media persistence should be validated in real browsing sessions.
@@ -121,6 +131,7 @@ Vault view optimization:
   - Confirm offscreen video tiles unmount.
   - Confirm grouped media keeps active index after scroll out/in.
   - Confirm zoom remains stable in narrow and wide windows.
+  - Make renderer visual-order and logging reactivity explicit instead of depending on helper-call side effects.
 
 Search/filter implementation:
 
