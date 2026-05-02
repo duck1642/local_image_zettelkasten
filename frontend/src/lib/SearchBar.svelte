@@ -17,6 +17,7 @@
   let searchInputEl: HTMLInputElement;
   let suggestionsListEl: HTMLUListElement;
   let searchDebounceTimer: number | null = null;
+  let refreshDebounceTimer: number | null = null;
   let measureCanvas: HTMLCanvasElement | null = null;
   let measureContext: CanvasRenderingContext2D | null = null;
 
@@ -78,29 +79,33 @@
       return;
     }
 
-    const requestKind = active.kind;
-    const requestValue = active.value;
-    try {
-      const params = new URLSearchParams({ kind: requestKind, q: requestValue, limit: '100' });
-      const response = await apiFetch(`/api/search/suggestions?${params.toString()}`);
-      const data = await response.json();
-      const latest = getActiveSegment();
-      if (latest.kind !== requestKind || latest.value !== requestValue) return;
-      if (Array.isArray(data.items)) {
-        suggestions = data.items
-          .filter((item: any) => item && item.value)
-          .map((item: any) => ({ value: String(item.value), count: Number(item.count || 0) }));
-      } else {
-        suggestions = Array.isArray(data.suggestions) ? data.suggestions.map((value: string) => ({ value })) : [];
+    if (refreshDebounceTimer !== null) clearTimeout(refreshDebounceTimer);
+    refreshDebounceTimer = window.setTimeout(async () => {
+      refreshDebounceTimer = null;
+      const requestKind = active.kind;
+      const requestValue = active.value;
+      try {
+        const params = new URLSearchParams({ kind: requestKind, q: requestValue, limit: '100' });
+        const response = await apiFetch(`/api/search/suggestions?${params.toString()}`);
+        const data = await response.json();
+        const latest = getActiveSegment();
+        if (latest.kind !== requestKind || latest.value !== requestValue) return;
+        if (Array.isArray(data.items)) {
+          suggestions = data.items
+            .filter((item: any) => item && item.value)
+            .map((item: any) => ({ value: String(item.value), count: Number(item.count || 0) }));
+        } else {
+          suggestions = Array.isArray(data.suggestions) ? data.suggestions.map((value: string) => ({ value })) : [];
+        }
+        showSuggestions = suggestions.length > 0;
+        activeSuggestionIndex = 0;
+        updateSuggestionPosition(latest);
+      } catch (error) {
+        uiLog('ERROR', 'Failed to fetch search suggestions', { error });
+        showSuggestions = false;
+        suggestions = [];
       }
-      showSuggestions = suggestions.length > 0;
-      activeSuggestionIndex = 0;
-      updateSuggestionPosition(latest);
-    } catch (error) {
-      uiLog('ERROR', 'Failed to fetch search suggestions', { error });
-      showSuggestions = false;
-      suggestions = [];
-    }
+    }, 150);
   }
 
   function clearDebounce() {

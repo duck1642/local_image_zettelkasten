@@ -35,7 +35,8 @@
     let reasonStr = typeof reason === 'string' ? reason : 'overlay_or_btn_click';
     uiLog('INFO', `MediaFocus closing because: ${reasonStr}`);
     try {
-        await appWindow.setFullscreen(false);
+        if ((window as any).__TAURI__) await appWindow.setFullscreen(false);
+        else if (document.fullscreenElement) await document.exitFullscreen();
     } catch (e) {
     } finally {
         dispatch('close');
@@ -193,3 +194,4 @@
         border-color: var(--accent-primary);
     }
 </style>
+

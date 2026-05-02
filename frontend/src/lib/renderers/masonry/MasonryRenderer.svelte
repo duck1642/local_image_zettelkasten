@@ -1,4 +1,5 @@
 <script lang="ts">
+  import VirtualScroller from '../VirtualScroller.svelte';
   import VaultGroupTile from '../../VaultGroupTile.svelte';
   import { onDestroy } from 'svelte';
   import type { VaultGroup, VaultItem } from '../../types';
@@ -31,7 +32,6 @@
   let measurements: MeasurementStore = {};
   let pendingMeasurements: Record<string, { width: number; height: number; position: MasonryPosition }> = {};
   let measurementFrame: number | null = null;
-  let scrollFrame: number | null = null;
   let recomputeCount = 0;
   let lastSummaryLog = 0;
   let lastSummaryKey = '';
@@ -43,23 +43,7 @@
   $: layout = computeMasonryLayout(groups, viewportWidth, tileMinWidth, activeIndexes, measurements);
   $: visiblePositions = visibleMasonryPositions(layout.positions, scrollTop, viewportHeight, MASONRY_OVERSCAN);
   $: emitVisualOrder();
-  $: if (hostEl) {
-    scrollTop = hostEl.scrollTop;
-    viewportHeight = hostEl.clientHeight;
-  }
   $: logSummary();
-
-  function handleScroll(event: Event) {
-    const target = event.currentTarget as HTMLElement;
-    const nextScrollTop = target.scrollTop;
-    const nextViewportHeight = target.clientHeight;
-    if (scrollFrame !== null) return;
-    scrollFrame = window.requestAnimationFrame(() => {
-      scrollTop = nextScrollTop;
-      viewportHeight = nextViewportHeight;
-      scrollFrame = null;
-    });
-  }
 
   function emitVisualOrder() {
     const hashes = visualOrderFromMasonryPositions(layout.positions);
@@ -175,15 +159,20 @@
   }
 
   onDestroy(() => {
-    if (scrollFrame !== null) window.cancelAnimationFrame(scrollFrame);
     if (measurementFrame !== null) window.cancelAnimationFrame(measurementFrame);
     measureObserver?.disconnect();
     measuredNodes.clear();
   });
 </script>
 
-<div class="measured-scroll" bind:this={hostEl} on:scroll={handleScroll}>
-  <div class="measured-surface" style={`height: ${layout.totalHeight}px;`}>
+<VirtualScroller
+  totalHeight={layout.totalHeight}
+  bind:sentinelEl
+  bind:hostEl
+  {isLoadingMore}
+  bind:scrollTop
+  bind:viewportHeight
+>
     {#each visiblePositions as position (position.group.id)}
       <div
         class="measured-item"
@@ -202,29 +191,9 @@
         />
       </div>
     {/each}
-  </div>
-  <div bind:this={sentinelEl} class="scroll-sentinel"></div>
-  {#if isLoadingMore}
-    <div class="loading-more">Loading more...</div>
-  {/if}
-</div>
+</VirtualScroller>
 
 <style>
-  .measured-scroll {
-    flex-grow: 1;
-    overflow-y: auto;
-    overflow-x: hidden;
-    padding: 15px;
-    position: relative;
-    min-width: 0;
-    box-sizing: border-box;
-  }
-
-  .measured-surface {
-    position: relative;
-    min-height: 1px;
-  }
-
   .measured-item {
     position: absolute;
     top: 0;
@@ -234,16 +203,5 @@
   .measured-item :global(.tile-group) {
     margin-bottom: 0;
     content-visibility: visible;
-  }
-
-  .scroll-sentinel {
-    height: 1px;
-  }
-
-  .loading-more {
-    text-align: center;
-    padding: 15px;
-    color: var(--text-muted);
-    font-size: 12px;
   }
 </style>

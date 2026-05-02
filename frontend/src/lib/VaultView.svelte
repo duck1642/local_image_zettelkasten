@@ -17,6 +17,7 @@
   const dispatch = createEventDispatcher();
 
   let items: VaultItem[] = [];
+  let groupedItems: VaultGroup[] = [];
   let stats = { total_items: 0 };
   let isSearching = true;
   let isLoadingMore = false;
@@ -47,7 +48,6 @@
   let groupIndexes: Record<string, number> = {};
   let visualHashOrder: string[] = [];
 
-  $: groupedItems = groupVaultItems(items);
   $: emitStatus(stats.total_items, groupedItems.length, hasMore, currentLayoutMode);
   $: jsVisualHashOrder = visualHashOrder.length ? visualHashOrder : groupedItems.flatMap((group) => group.items.map((item) => item.hash));
   $: attachInfiniteScroll(sentinelEl, currentLayoutMode);
@@ -66,18 +66,24 @@
     }
   }
 
-  function groupVaultItems(rows: VaultItem[]): VaultGroup[] {
-    const groups: { [key: string]: VaultItem[] } = {};
-    const orderedKeys: string[] = [];
-    rows.forEach((item) => {
-      const key = item.source_url && item.source_url.trim() !== '' ? item.source_url : `single-${item.hash}`;
-      if (!groups[key]) {
-        groups[key] = [];
-        orderedKeys.push(key);
-      }
-      groups[key].push(item);
+  function appendToGroups(newItems: VaultItem[], currentGroups: VaultGroup[]): VaultGroup[] {
+    const groupsMap: Record<string, VaultGroup> = {};
+    const result: VaultGroup[] = [];
+    currentGroups.forEach(g => {
+      groupsMap[g.id] = { id: g.id, items: [...g.items] };
+      result.push(groupsMap[g.id]);
     });
-    return orderedKeys.map((key) => ({ id: key, items: groups[key] }));
+
+    newItems.forEach((item) => {
+      const key = item.source_url && item.source_url.trim() !== '' ? item.source_url : `single-${item.hash}`;
+      if (!groupsMap[key]) {
+        const newGroup = { id: key, items: [] };
+        groupsMap[key] = newGroup;
+        result.push(newGroup);
+      }
+      groupsMap[key].items.push(item);
+    });
+    return result;
   }
 
   function emitStatus(totalItems: number, groups: number, moreAvailable: boolean, layoutMode: VaultLayoutMode) {
@@ -146,7 +152,13 @@
       const response = await apiFetch(`/api/items?${params.toString()}`);
       const data = await response.json();
       const newItems: VaultItem[] = Array.isArray(data.items) ? data.items : [];
-      items = append ? [...items, ...newItems] : newItems;
+      if (append) {
+        items = [...items, ...newItems];
+        groupedItems = appendToGroups(newItems, groupedItems);
+      } else {
+        items = newItems;
+        groupedItems = appendToGroups(newItems, []);
+      }
       nextCursor = data.next_cursor || null;
       hasMore = data.has_more || false;
 
@@ -438,7 +450,7 @@
         {isLoadingMore}
         onSelectItem={handleSelectItem}
         onIndexChange={handleGroupIndexChange}
-        onVisualOrderChange={(hashes) => visualHashOrder = hashes}
+        onVisualOrderChange={(hashes: string[]) => visualHashOrder = hashes}
       />
     {:else}
       <GridRenderer
@@ -453,7 +465,7 @@
         {isLoadingMore}
         onSelectItem={handleSelectItem}
         onIndexChange={handleGroupIndexChange}
-        onVisualOrderChange={(hashes) => visualHashOrder = hashes}
+        onVisualOrderChange={(hashes: string[]) => visualHashOrder = hashes}
       />
     {/if}
   </div>

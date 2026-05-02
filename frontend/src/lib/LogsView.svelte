@@ -15,6 +15,7 @@
   }
 
   let logs: LogEntry[] = [];
+  let logIdCounter = 0;
   let currentFile = 'system.jsonl';
   let currentMode: 'Normal' | 'Full' = 'Normal';
   let eventSource: EventSource | null = null;
@@ -409,3 +410,4 @@
         font-weight: 600;
     }
 </style>
+style>

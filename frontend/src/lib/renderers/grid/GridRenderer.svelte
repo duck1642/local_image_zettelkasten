@@ -1,4 +1,5 @@
 <script lang="ts">
+  import VirtualScroller from '../VirtualScroller.svelte';
   import VaultGroupTile from '../../VaultGroupTile.svelte';
   import { onDestroy } from 'svelte';
   import type { VaultGroup, VaultItem } from '../../types';
@@ -25,7 +26,6 @@
 
   let scrollTop = 0;
   let viewportHeight = 0;
-  let scrollFrame: number | null = null;
   let lastSummaryLog = 0;
   let lastSummaryKey = '';
   let lastVisualOrderKey = '';
@@ -40,23 +40,7 @@
     GRID_OVERSCAN
   );
   $: emitVisualOrder();
-  $: if (hostEl) {
-    scrollTop = hostEl.scrollTop;
-    viewportHeight = hostEl.clientHeight;
-  }
   $: logSummary();
-
-  function handleScroll(event: Event) {
-    const target = event.currentTarget as HTMLElement;
-    const nextScrollTop = target.scrollTop;
-    const nextViewportHeight = target.clientHeight;
-    if (scrollFrame !== null) return;
-    scrollFrame = window.requestAnimationFrame(() => {
-      scrollTop = nextScrollTop;
-      viewportHeight = nextViewportHeight;
-      scrollFrame = null;
-    });
-  }
 
   function emitVisualOrder() {
     const hashes = visualOrderFromGridPositions(layout.positions);
@@ -93,13 +77,16 @@
     });
   }
 
-  onDestroy(() => {
-    if (scrollFrame !== null) window.cancelAnimationFrame(scrollFrame);
-  });
 </script>
 
-<div class="grid-renderer-scroll" bind:this={hostEl} on:scroll={handleScroll}>
-  <div class="grid-renderer-surface" style={`height: ${layout.totalHeight}px;`}>
+<VirtualScroller
+  totalHeight={layout.totalHeight}
+  bind:sentinelEl
+  bind:hostEl
+  {isLoadingMore}
+  bind:scrollTop
+  bind:viewportHeight
+>
     {#each visiblePositions as position (position.group.id)}
       <div
         class="grid-renderer-item"
@@ -117,29 +104,9 @@
         />
       </div>
     {/each}
-  </div>
-  <div bind:this={sentinelEl} class="scroll-sentinel"></div>
-  {#if isLoadingMore}
-    <div class="loading-more">Loading more...</div>
-  {/if}
-</div>
+</VirtualScroller>
 
 <style>
-  .grid-renderer-scroll {
-    flex-grow: 1;
-    overflow-y: auto;
-    overflow-x: hidden;
-    padding: 15px;
-    position: relative;
-    min-width: 0;
-    box-sizing: border-box;
-  }
-
-  .grid-renderer-surface {
-    position: relative;
-    min-height: 1px;
-  }
-
   .grid-renderer-item {
     position: absolute;
     top: 0;
@@ -150,16 +117,5 @@
     margin-bottom: 0;
     height: 100%;
     content-visibility: visible;
-  }
-
-  .scroll-sentinel {
-    height: 1px;
-  }
-
-  .loading-more {
-    text-align: center;
-    padding: 15px;
-    color: var(--text-muted);
-    font-size: 12px;
   }
 </style>

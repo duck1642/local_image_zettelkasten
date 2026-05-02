@@ -51,7 +51,7 @@
             uiLog('ERROR', 'Failed to load item details', { hash, error: String(e) });
         }
     } finally {
-        loading = false;
+        if (!signal.aborted) loading = false;
     }
   }
 
@@ -496,3 +496,4 @@
   .action-row button:hover { border-color: var(--border-hover); color: var(--text-bright); }
   .action-row button.delete-btn:hover { border-color: var(--accent-danger); color: var(--accent-danger); }
 </style>
+

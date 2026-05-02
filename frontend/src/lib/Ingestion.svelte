@@ -193,6 +193,7 @@
     return () => {
         window.removeEventListener('lmz:refresh', handleGlobalRefresh);
         logSource?.close();
+        if (parseTimer) clearTimeout(parseTimer);
     };
   });
 </script>
