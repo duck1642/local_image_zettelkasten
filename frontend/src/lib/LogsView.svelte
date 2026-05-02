@@ -4,6 +4,7 @@
   import { apiFetch, eventSourceUrl } from './api';
 
   interface LogEntry {
+    id?: number;
     timestamp: string;
     level: string;
     module: string;
@@ -116,6 +117,10 @@
           appendLog(entry);
       }
     };
+    eventSource.onerror = () => {
+        eventSource?.close();
+        setTimeout(connectToLogs, 2000);
+    };
   }
 
   function isNearBottom(node: HTMLElement) {
@@ -123,6 +128,7 @@
   }
 
   function appendLog(entry: LogEntry) {
+    entry.id = logIdCounter++;
     const shouldScroll = !logContainer || isNearBottom(logContainer);
     logs = [...logs, entry].slice(-400);
     if (shouldScroll) {
@@ -236,7 +242,7 @@
     </div>
 
     <div class="log-output" bind:this={logContainer}>
-        {#each filteredLogs as log}
+        {#each filteredLogs as log (log.id)}
             {#if currentMode === 'Normal'}
                 <div class="line">
                     {#if log.isRaw}
@@ -410,4 +416,3 @@
         font-weight: 600;
     }
 </style>
-style>

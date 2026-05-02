@@ -11,6 +11,7 @@
   let running = false;
   let isDirty = false;
   let parseTimer: any = null;
+  let monitorLogIdCounter = 0;
 
   // Monitor Logs
   let monitorLogs: any[] = [];
@@ -33,6 +34,10 @@
             }
         } catch { }
     };
+    logSource.onerror = () => {
+        logSource?.close();
+        setTimeout(connectMonitor, 2000);
+    };
   }
 
   function isNearBottom(node: HTMLElement) {
@@ -40,6 +45,7 @@
   }
 
   function appendMonitorLog(entry: any) {
+      entry.id = monitorLogIdCounter++;
       const shouldScroll = !monitorContainer || isNearBottom(monitorContainer);
       monitorLogs = [...monitorLogs, entry].slice(-150);
       if (shouldScroll) {
@@ -103,16 +109,9 @@
   function onEditorInput() {
     isDirty = true;
     clearTimeout(parseTimer);
-    parseTimer = setTimeout(async () => {
-        try {
-            const res = await apiFetch(`/api/queue/${currentQueue}/parse`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ content: queueContent })
-            });
-            const data = await res.json();
-            setQueueStats({ ...counts, [currentQueue]: data.count });
-        } catch {}
+    parseTimer = setTimeout(() => {
+        const count = queueContent.split('\n').filter(l => l.trim().startsWith('http')).length;
+        setQueueStats({ ...counts, [currentQueue]: count });
     }, 400);
   }
 
@@ -234,7 +233,7 @@
   <div class="monitor-area">
     <div class="monitor-header">Ingestion Monitor</div>
     <div class="monitor-logs" bind:this={monitorContainer}>
-        {#each monitorLogs as log}
+        {#each monitorLogs as log (log.id)}
             <div class="log-line">
                 <span class="time">{log.timestamp?.split(' ')[1] || log.timestamp || ''}</span>
                 <span class="level {(log.level || 'INFO').toLowerCase()}">{log.level || 'INFO'}</span>

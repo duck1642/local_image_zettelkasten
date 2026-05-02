@@ -211,7 +211,7 @@
     {#if fullItem}
     <div class="group-container media-preview">
         {#if isImageMedia(item)}
-            <img src={assetUrl(item.url)} alt="Preview" />
+            <img src={assetUrl(item.thumbnail_url || item.url)} alt="Preview" />
         {:else if isVideoMedia(item)}
             <video
                 bind:this={videoElement}
