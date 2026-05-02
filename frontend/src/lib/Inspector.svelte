@@ -171,7 +171,16 @@
       if (e.repeat) return;
       const target = e.target as HTMLElement;
       if (['INPUT', 'TEXTAREA'].includes(target.tagName)) return;
+
       if (document.querySelector('.focus-overlay')) return;
+
+      if (e.key.toLowerCase() === 'a') {
+          e.preventDefault();
+          prevItem();
+      } else if (e.key.toLowerCase() === 'd') {
+          e.preventDefault();
+          nextItem();
+      }
 
       if (e.key.toLowerCase() === 'w') {
           e.preventDefault();

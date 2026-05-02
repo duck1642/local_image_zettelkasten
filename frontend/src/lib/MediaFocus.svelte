@@ -7,6 +7,7 @@
   import { isImageMedia, isVideoMedia } from './media';
 
   export let item: any;
+  export let group: any = null;
   export let mode: 'wide' | 'fullscreen' = 'wide';
   export let startTime: number = 0;
   
@@ -16,7 +17,21 @@
 
   $: assetUrl = resolveAssetUrl(item.url);
 
+  $: currentIndex = group ? group.items.findIndex((i: any) => i.hash === item?.hash) : 0;
+
   $: handleModeChange(mode);
+
+  function nextItem() {
+      if (!group) return;
+      const nextIdx = (currentIndex + 1) % group.items.length;
+      dispatch('changeItem', group.items[nextIdx]);
+  }
+
+  function prevItem() {
+      if (!group) return;
+      const prevIdx = (currentIndex - 1 + group.items.length) % group.items.length;
+      dispatch('changeItem', group.items[prevIdx]);
+  }
 
   async function handleModeChange(newMode: 'wide' | 'fullscreen') {
       uiLog('INFO', `MediaFocus mode changed to: ${newMode}`);
@@ -67,6 +82,12 @@
               uiLog('INFO', 'Dispatching switchMode fullscreen');
               dispatch('switchMode', 'fullscreen');
           }
+      } else if (e.key.toLowerCase() === 'a') {
+          e.preventDefault();
+          prevItem();
+      } else if (e.key.toLowerCase() === 'd') {
+          e.preventDefault();
+          nextItem();
       }
   }
 
@@ -86,6 +107,19 @@
 <svelte:window on:keydown={handleKeydown}/>
 
 <div class="focus-overlay" class:fullscreen={mode === 'fullscreen'} on:click={close}>
+    {#if group && group.items.length > 1}
+        <button class="nav-btn prev" on:click|stopPropagation={prevItem}>
+            <svg viewBox="0 0 24 24" width="40" height="40" stroke="currentColor" stroke-width="3" stroke-linejoin="round" fill="currentColor">
+                <path d="M16 4 L6 12 L16 20 Z" />
+            </svg>
+        </button>
+        <button class="nav-btn next" on:click|stopPropagation={nextItem}>
+            <svg viewBox="0 0 24 24" width="40" height="40" stroke="currentColor" stroke-width="3" stroke-linejoin="round" fill="currentColor">
+                <path d="M8 4 L18 12 L8 20 Z" />
+            </svg>
+        </button>
+    {/if}
+
     <div class="media-container" on:click|stopPropagation>
         {#if isImageMedia(item)}
             <img src={assetUrl} alt="Focused View" />
@@ -192,6 +226,36 @@
     .close-btn:hover {
         background: var(--accent-primary);
         border-color: var(--accent-primary);
+    }
+
+    .nav-btn {
+        position: absolute;
+        top: 50%;
+        transform: translateY(-50%);
+        background: transparent;
+        border: none;
+        color: white;
+        opacity: 0.15;
+        cursor: pointer;
+        padding: 20px;
+        transition: opacity 0.2s, transform 0.2s;
+        z-index: 1010;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .nav-btn:hover {
+        opacity: 0.8;
+        transform: translateY(-50%) scale(1.1);
+    }
+
+    .nav-btn.prev {
+        left: 20px;
+    }
+
+    .nav-btn.next {
+        right: 20px;
     }
 </style>
 

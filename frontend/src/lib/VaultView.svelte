@@ -1,4 +1,4 @@
-﻿<script lang="ts">
+<script lang="ts">
   import { createEventDispatcher, onMount, tick } from 'svelte';
   import type { SearchFilters, VaultGroup, VaultItem } from './types';
   import { apiFetch } from './api';
@@ -249,6 +249,7 @@
     selectedItem = item;
     selectedHashes = new Set([item.hash]);
     lastSelectedHash = item.hash;
+    focusStartTime = 0;
   }
 
   function clearSelection() {
@@ -484,10 +485,12 @@
 {#if focusMode !== 'normal' && selectedItem}
   <MediaFocus
     item={selectedItem}
+    group={selectedGroup}
     mode={focusMode}
     startTime={focusStartTime}
     on:close={() => focusMode = 'normal'}
     on:switchMode={(event) => { focusMode = event.detail; }}
+    on:changeItem={(event) => setSingleSelection(event.detail)}
   />
 {/if}
 
