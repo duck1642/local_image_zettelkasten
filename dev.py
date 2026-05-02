@@ -1,4 +1,4 @@
-﻿import subprocess
+import subprocess
 import sys
 import time
 import os
@@ -38,7 +38,7 @@ def run():
         tauri_proc.wait()
 
     except KeyboardInterrupt:
-        print("\nðŸ›‘ Shutting down...")
+        print("\n[STOP] Shutting down...")
     finally:
         # 5. Cleanup
         print("--- Cleaning up processes ---")
@@ -52,7 +52,7 @@ def run():
                 api_proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 api_proc.kill()
-        print("âœ… Done.")
+        print("[OK] Done.")
 
 if __name__ == "__main__":
     run()

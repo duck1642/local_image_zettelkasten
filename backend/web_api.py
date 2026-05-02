@@ -1,4 +1,4 @@
-﻿import os
+import os
 import sys
 import json
 import asyncio
@@ -58,6 +58,8 @@ def configure_terminal_logging():
     if not isinstance(sys.stderr, TerminalLogger):
         sys.stderr = TerminalLogger("terminal.log", sys.stderr)
     _terminal_logging_configured = True
+
+configure_terminal_logging()
 
 app = FastAPI(title="LMZ API")
 
