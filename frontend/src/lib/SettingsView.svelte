@@ -1,4 +1,4 @@
-﻿<script lang="ts">
+<script lang="ts">
   import { onMount } from 'svelte';
   import { TILE_MIN_WIDTH_CEILING, TILE_MIN_WIDTH_FLOOR } from './layout';
   import { config, configDirty, configLoading, configSaving, loadConfig, saveCurrentConfig, updateConfig } from './configStore';
@@ -136,6 +136,14 @@
         <div class="shortcut-row">
           <span class="key">F</span>
           <span class="desc">Toggle Fullscreen</span>
+        </div>
+        <div class="shortcut-row">
+          <span class="key">A</span>
+          <span class="desc">Previous Item in Group</span>
+        </div>
+        <div class="shortcut-row">
+          <span class="key">D</span>
+          <span class="desc">Next Item in Group</span>
         </div>
         <div class="divider"></div>
         <div class="shortcut-row">
