@@ -44,92 +44,100 @@ export function estimateMasonryGroupHeight(group: VaultGroup, columnWidth: numbe
   return { height: mediaHeight + ESTIMATED_CHROME_HEIGHT, estimated: true };
 }
 
-let lastCacheKey = '';
-let lastCache: MasonryLayout | null = null;
-let lastPositions: MasonryPosition[] = [];
-let lastActiveIndexes: Record<string, number> = {};
-let lastStore: MeasurementStore = {};
-
-export function computeMasonryLayout(
+export type MasonryLayoutEngine = (
   groups: VaultGroup[],
   width: number,
-  minWidth = DEFAULT_TILE_MIN_WIDTH,
-  activeIndexes: Record<string, number> = {},
-  store: MeasurementStore = {},
-  gap = MASONRY_GAP
-): MasonryLayout {
-  const normalizedMinWidth = normalizeTileMinWidth(minWidth);
-  const safeWidth = Math.max(1, width);
-  const columnCount = columnCountFor(safeWidth, normalizedMinWidth);
-  const columnWidth = Math.max(1, (safeWidth - gap * (columnCount - 1)) / columnCount);
-  
-  const cacheKey = `${safeWidth}-${normalizedMinWidth}-${gap}-${columnCount}-${groups.length}`;
-  let startIndex = 0;
-  let columnHeights = Array.from({ length: columnCount }, () => 0);
-  const positions: MasonryPosition[] = [];
+  minWidth?: number,
+  activeIndexes?: Record<string, number>,
+  store?: MeasurementStore,
+  gap?: number
+) => MasonryLayout;
 
-  if (lastCacheKey === cacheKey && lastCache && lastPositions.length > 0 && groups.length >= lastPositions.length && groups[0].id === lastPositions[0].group.id) {
-     for (let i = 0; i < lastPositions.length; i++) {
-        const group = groups[i];
-        const activeIdx = activeIndexes[group.id] || 0;
-        const prevActive = lastActiveIndexes[group.id] || 0;
-        
-        const { height, estimated } = estimateMasonryGroupHeight(group, columnWidth, activeIdx, store);
-        const prevPos = lastPositions[i];
-        
-        if (activeIdx !== prevActive || height !== prevPos.height || group.id !== prevPos.group.id) {
-           startIndex = i;
-           columnHeights = [...prevPos.columnHeightsBefore];
-           break;
-        }
-        positions.push(prevPos);
-        startIndex = i + 1;
-     }
-     if (startIndex === groups.length && groups.length === lastPositions.length) {
-         lastActiveIndexes = activeIndexes;
-         lastStore = store;
-         return lastCache;
-     }
-     if (startIndex === lastPositions.length) {
-        columnHeights = [...lastPositions[lastPositions.length - 1].columnHeightsBefore];
-        const lastPos = lastPositions[lastPositions.length - 1];
-        columnHeights[lastPos.columnIndex] = lastPos.bottom + gap;
-     }
-  }
+export function createMasonryLayoutEngine(): MasonryLayoutEngine {
+  let lastCacheKey = '';
+  let lastCache: MasonryLayout | null = null;
+  let lastPositions: MasonryPosition[] = [];
+  let lastActiveIndexes: Record<string, number> = {};
 
-  for (let i = startIndex; i < groups.length; i++) {
-    const group = groups[i];
-    let columnIndex = 0;
-    for (let index = 1; index < columnHeights.length; index += 1) {
-      if (columnHeights[index] < columnHeights[columnIndex]) columnIndex = index;
+  return function computeLayout(
+    groups: VaultGroup[],
+    width: number,
+    minWidth = DEFAULT_TILE_MIN_WIDTH,
+    activeIndexes: Record<string, number> = {},
+    store: MeasurementStore = {},
+    gap = MASONRY_GAP
+  ): MasonryLayout {
+    const normalizedMinWidth = normalizeTileMinWidth(minWidth);
+    const safeWidth = Math.max(1, width);
+    const columnCount = columnCountFor(safeWidth, normalizedMinWidth);
+    const columnWidth = Math.max(1, (safeWidth - gap * (columnCount - 1)) / columnCount);
+
+    const cacheKey = `${safeWidth}-${normalizedMinWidth}-${gap}-${columnCount}-${groups.length}`;
+    let startIndex = 0;
+    let columnHeights = Array.from({ length: columnCount }, () => 0);
+    const positions: MasonryPosition[] = [];
+
+    if (lastCacheKey === cacheKey && lastCache && lastPositions.length > 0 && groups.length >= lastPositions.length && groups[0].id === lastPositions[0].group.id) {
+       for (let i = 0; i < lastPositions.length; i++) {
+          const group = groups[i];
+          const activeIdx = activeIndexes[group.id] || 0;
+          const prevActive = lastActiveIndexes[group.id] || 0;
+
+          const { height } = estimateMasonryGroupHeight(group, columnWidth, activeIdx, store);
+          const prevPos = lastPositions[i];
+
+          if (activeIdx !== prevActive || height !== prevPos.height || group.id !== prevPos.group.id) {
+             startIndex = i;
+             columnHeights = [...prevPos.columnHeightsBefore];
+             break;
+          }
+          positions.push(prevPos);
+          startIndex = i + 1;
+       }
+       if (startIndex === groups.length && groups.length === lastPositions.length) {
+           lastActiveIndexes = activeIndexes;
+           return lastCache;
+       }
+       if (startIndex === lastPositions.length) {
+          columnHeights = [...lastPositions[lastPositions.length - 1].columnHeightsBefore];
+          const lastPos = lastPositions[lastPositions.length - 1];
+          columnHeights[lastPos.columnIndex] = lastPos.bottom + gap;
+       }
     }
-    const top = columnHeights[columnIndex];
-    const { height, estimated } = estimateMasonryGroupHeight(group, columnWidth, activeIndexes[group.id] || 0, store);
-    const left = columnIndex * (columnWidth + gap);
-    const bottom = top + height;
-    positions.push({ 
-        group, columnIndex, left, top, width: columnWidth, height, bottom, estimated, 
-        columnHeightsBefore: [...columnHeights] 
-    });
-    columnHeights[columnIndex] = bottom + gap;
-  }
 
-  const totalHeight = Math.max(0, ...columnHeights.map((value) => Math.max(0, value - gap)));
-  const layout = {
-    positions,
-    columnCount,
-    columnWidth,
-    totalHeight,
-    columnHeights: columnHeights.map((value) => Math.max(0, value - gap))
+    for (let i = startIndex; i < groups.length; i++) {
+      const group = groups[i];
+      let columnIndex = 0;
+      for (let index = 1; index < columnHeights.length; index += 1) {
+        if (columnHeights[index] < columnHeights[columnIndex]) columnIndex = index;
+      }
+      const top = columnHeights[columnIndex];
+      const { height, estimated } = estimateMasonryGroupHeight(group, columnWidth, activeIndexes[group.id] || 0, store);
+      const left = columnIndex * (columnWidth + gap);
+      const bottom = top + height;
+      positions.push({
+          group, columnIndex, left, top, width: columnWidth, height, bottom, estimated,
+          columnHeightsBefore: [...columnHeights]
+      });
+      columnHeights[columnIndex] = bottom + gap;
+    }
+
+    const totalHeight = Math.max(0, ...columnHeights.map((value) => Math.max(0, value - gap)));
+    const layout = {
+      positions,
+      columnCount,
+      columnWidth,
+      totalHeight,
+      columnHeights: columnHeights.map((value) => Math.max(0, value - gap))
+    };
+
+    lastCacheKey = cacheKey;
+    lastCache = layout;
+    lastPositions = positions;
+    lastActiveIndexes = activeIndexes;
+
+    return layout;
   };
-
-  lastCacheKey = cacheKey;
-  lastCache = layout;
-  lastPositions = positions;
-  lastActiveIndexes = activeIndexes;
-  lastStore = store;
-
-  return layout;
 }
 
 export function visibleMasonryPositions(

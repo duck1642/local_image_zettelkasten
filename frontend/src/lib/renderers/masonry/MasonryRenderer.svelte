@@ -7,12 +7,14 @@
   import {
     MASONRY_DRIFT_THRESHOLD,
     MASONRY_OVERSCAN,
-    computeMasonryLayout,
+    createMasonryLayoutEngine,
     visibleMasonryPositions,
     visualOrderFromMasonryPositions,
     type MasonryPosition
   } from './masonryLayout';
   import type { MeasurementStore } from './measurementStore';
+
+  const computeLayout = createMasonryLayoutEngine();
 
   export let groups: VaultGroup[] = [];
   export let viewportWidth = 0;
@@ -40,7 +42,7 @@
   const measuredNodes = new Map<HTMLElement, MasonryPosition>();
   const loggedDrifts = new Set<string>();
 
-  $: layout = computeMasonryLayout(groups, viewportWidth, tileMinWidth, activeIndexes, measurements);
+  $: layout = computeLayout(groups, viewportWidth, tileMinWidth, activeIndexes, measurements);
   $: visiblePositions = visibleMasonryPositions(layout.positions, scrollTop, viewportHeight, MASONRY_OVERSCAN);
   $: emitVisualOrder(layout.positions);
   $: if (import.meta.env.DEV) logSummary(groups, visiblePositions, layout, scrollTop, viewportHeight, recomputeCount, measurements);

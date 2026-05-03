@@ -56,6 +56,9 @@
     </aside>
 
     <main class="main-content">
+      <!-- VaultView stays mounted across tab switches to preserve scroll position, selection, and loaded items.
+           Its IntersectionObserver/ResizeObserver are idle when display:none, so the cost is negligible.
+           Other tabs use {#if} since they can re-fetch on demand. -->
       <div class:hidden={activeTab !== 'vault'} class="tab-panel">
         <VaultView on:status={handleVaultStatus} />
       </div>

@@ -8,6 +8,7 @@
 
   export let item: VaultItem | null = null;
   export let group: { id: string, items: VaultItem[] } | null = null;
+  export let focusMode: 'normal' | 'wide' | 'fullscreen' = 'normal';
   const dispatch = createEventDispatcher();
 
   let fullItem: any = null;
@@ -175,7 +176,7 @@
       const target = e.target as HTMLElement;
       if (['INPUT', 'TEXTAREA'].includes(target.tagName)) return;
 
-      if (document.querySelector('.focus-overlay')) return;
+      if (focusMode !== 'normal') return;
 
       const key = e.key.toLowerCase();
       if (key === 'a') {

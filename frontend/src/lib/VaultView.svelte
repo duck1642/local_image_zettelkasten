@@ -8,6 +8,7 @@
   import { DEFAULT_TILE_MIN_WIDTH, normalizeLayoutMode, normalizeTileMinWidth } from './layout';
   import { buildItemQueryParams, emptyFilters } from './search';
   import { updateSelection } from './selection';
+  import { watchIntersection, watchResize, type ObserverCleanup } from './observers';
   import GridRenderer from './renderers/grid/GridRenderer.svelte';
   import MasonryRenderer from './renderers/masonry/MasonryRenderer.svelte';
   import Inspector from './Inspector.svelte';
@@ -35,13 +36,12 @@
   let nextCursor: string | null = null;
   let hasMore = false;
   let sentinelEl: HTMLElement | null = null;
-  let observer: IntersectionObserver | null = null;
+  let layoutHostEl: HTMLElement | null = null;
+  let intersectionCleanup: ObserverCleanup | null = null;
   let observedSentinel: HTMLElement | null = null;
   let observedLayout = '';
-  let loadMoreCheckTimer: number | null = null;
-  let layoutHostEl: HTMLElement | null = null;
+  let resizeCleanup: ObserverCleanup | null = null;
   let observedLayoutHost: HTMLElement | null = null;
-  let resizeObserver: ResizeObserver | null = null;
   let vaultWidth = 0;
   let tileMinWidth = DEFAULT_TILE_MIN_WIDTH;
   let tileSizeSaveTimer: number | null = null;
@@ -64,11 +64,9 @@
     if (currentLayoutMode !== nextMode) {
       currentLayoutMode = nextMode;
       visualHashOrder = [];
-      scheduleLoadMoreCheck();
     }
     if (tileMinWidth !== nextWidth) {
       tileMinWidth = nextWidth;
-      scheduleLoadMoreCheck();
     }
   }
 
@@ -135,7 +133,6 @@
   async function saveLayoutMode(mode: VaultLayoutMode) {
     currentLayoutMode = mode;
     visualHashOrder = [];
-    scheduleLoadMoreCheck();
     try {
       await setVaultLayoutMode(mode);
     } catch (error) {
@@ -160,7 +157,6 @@
     if (next === tileMinWidth) return;
     tileMinWidth = next;
     setVaultTileMinWidthLocal(next);
-    scheduleLoadMoreCheck();
     saveTileSizeDebounced();
   }
 
@@ -199,7 +195,6 @@
     } finally {
       if (!append) isSearching = false;
       else isLoadingMore = false;
-      scheduleLoadMoreCheck();
     }
 
     if (!append) {
@@ -215,27 +210,6 @@
 
   function loadMore() {
     if (hasMore && nextCursor && !isSearching && !isLoadingMore) fetchItems(true);
-  }
-
-  function sentinelIsNearViewport() {
-    if (!sentinelEl) return false;
-    const rect = sentinelEl.getBoundingClientRect();
-    return rect.top <= window.innerHeight + 400 && rect.bottom >= -400;
-  }
-
-  function scheduleLoadMoreCheck() {
-    if (loadMoreCheckTimer !== null) window.clearTimeout(loadMoreCheckTimer);
-    loadMoreCheckTimer = window.setTimeout(() => {
-      loadMoreCheckTimer = null;
-      maybeLoadMore();
-    }, 50);
-  }
-
-  async function maybeLoadMore() {
-    await tick();
-    if (hasMore && nextCursor && !isSearching && !isLoadingMore && sentinelIsNearViewport()) {
-      loadMore();
-    }
   }
 
   function handleFiltersChanged(event: CustomEvent) {
@@ -389,41 +363,30 @@
   }
 
   function attachInfiniteScroll(node: HTMLElement | null, layout: string) {
-    if (!node) {
-      observer?.disconnect();
-      observer = null;
-      observedSentinel = null;
-      observedLayout = '';
-      return;
-    }
-    if (observer && observedSentinel === node && observedLayout === layout) return;
-    observer?.disconnect();
+    if (observedSentinel === node && observedLayout === layout) return;
+    intersectionCleanup?.();
+    intersectionCleanup = null;
     observedSentinel = node;
     observedLayout = layout;
-    observer = new IntersectionObserver(([entry]) => {
-      if (entry.isIntersecting && hasMore && !isSearching && !isLoadingMore) loadMore();
-    }, { rootMargin: '400px' });
-    observer.observe(node);
-    scheduleLoadMoreCheck();
+    if (!node) return;
+    intersectionCleanup = watchIntersection(node, {
+      rootMargin: '400px',
+      onEnter: loadMore
+    });
   }
 
   function observeLayoutHost(node: HTMLElement | null) {
+    if (observedLayoutHost === node) return;
+    resizeCleanup?.();
+    resizeCleanup = null;
+    observedLayoutHost = node;
     if (!node) {
-      resizeObserver?.disconnect();
-      resizeObserver = null;
-      observedLayoutHost = null;
       vaultWidth = 0;
       return;
     }
-    if (observedLayoutHost === node) return;
-    resizeObserver?.disconnect();
-    observedLayoutHost = node;
-    vaultWidth = Math.floor(node.clientWidth);
-    resizeObserver = new ResizeObserver(([entry]) => {
-      vaultWidth = Math.floor(entry.contentRect.width);
-      scheduleLoadMoreCheck();
+    resizeCleanup = watchResize(node, (width) => {
+      vaultWidth = width;
     });
-    resizeObserver.observe(node);
   }
 
   onMount(() => {
@@ -432,10 +395,9 @@
     fetchItems();
     return () => {
       window.removeEventListener('lmz:refresh', handleGlobalRefresh);
-      observer?.disconnect();
-      resizeObserver?.disconnect();
+      intersectionCleanup?.();
+      resizeCleanup?.();
       if (tileSizeSaveTimer !== null) window.clearTimeout(tileSizeSaveTimer);
-      if (loadMoreCheckTimer !== null) window.clearTimeout(loadMoreCheckTimer);
     };
   });
 </script>
@@ -508,6 +470,7 @@
   <Inspector
     item={selectedItem}
     group={selectedGroup}
+    {focusMode}
     on:close={clearSelection}
     on:updated={handleUpdate}
     on:focus={handleFocusMode}
