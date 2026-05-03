@@ -1,9 +1,9 @@
 <script lang="ts">
   import type { VaultItem } from './types';
-  import { createEventDispatcher } from 'svelte';
+  import { createEventDispatcher, onDestroy } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { log as uiLog } from './logger';
-  import { apiFetch, assetUrl } from './api';
+  import { apiFetch, apiUrl } from './api';
   import { isImageMedia, isVideoMedia } from './media';
 
   export let item: VaultItem | null = null;
@@ -19,13 +19,15 @@
   let loading = false;
   let tagging = false;
   let abortController: AbortController | null = null;
+  let lastLoadedHash: string | null = null;
 
-  let videoElement: HTMLVideoElement;
+  let videoElement: HTMLVideoElement | undefined;
 
   $: if (item) {
-      loadFullDetails(item.hash);
+      if (item.hash !== lastLoadedHash) loadFullDetails(item.hash);
   } else {
       fullItem = null;
+      lastLoadedHash = null;
   }
 
   $: currentIndex = group ? group.items.findIndex(i => i.hash === item?.hash) : 0;
@@ -46,6 +48,7 @@
         platform = fullItem.platform || '';
         topics = fullItem.topics || [];
         isDirty = false;
+        lastLoadedHash = hash;
     } catch (e: any) {
         if (e.name !== 'AbortError') {
             uiLog('ERROR', 'Failed to load item details', { hash, error: String(e) });
@@ -174,18 +177,17 @@
 
       if (document.querySelector('.focus-overlay')) return;
 
-      if (e.key.toLowerCase() === 'a') {
+      const key = e.key.toLowerCase();
+      if (key === 'a') {
           e.preventDefault();
           prevItem();
-      } else if (e.key.toLowerCase() === 'd') {
+      } else if (key === 'd') {
           e.preventDefault();
           nextItem();
-      }
-
-      if (e.key.toLowerCase() === 'w') {
+      } else if (key === 'w') {
           e.preventDefault();
           toggleFocus('wide');
-      } else if (e.key.toLowerCase() === 'f') {
+      } else if (key === 'f') {
           e.preventDefault();
           toggleFocus('fullscreen');
       }
@@ -202,6 +204,10 @@
       const prevIdx = (currentIndex - 1 + group.items.length) % group.items.length;
       dispatch('changeItem', group.items[prevIdx]);
   }
+
+  onDestroy(() => {
+      abortController?.abort();
+  });
 </script>
 
 <svelte:window on:keydown={handleKeydown} />
@@ -220,11 +226,11 @@
     {#if fullItem}
     <div class="group-container media-preview">
         {#if isImageMedia(item)}
-            <img src={assetUrl(item.thumbnail_url || item.url)} alt="Preview" />
+            <img src={apiUrl(item.thumbnail_url || item.url)} alt="Preview" />
         {:else if isVideoMedia(item)}
             <video
                 bind:this={videoElement}
-                src={assetUrl(item.url)}
+                src={apiUrl(item.url)}
                 controls
                 controlslist="nofullscreen"
                 muted

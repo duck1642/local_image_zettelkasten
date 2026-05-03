@@ -15,9 +15,9 @@ export const reviewCount = writable(0);
 
 export function setQueueStats(next: QueueStats) {
   queueStats.set({
-    normal: Number(next?.normal || 0),
-    force: Number(next?.force || 0),
-    failed: Number(next?.failed || 0)
+    normal: Number(next?.normal) || 0,
+    force: Number(next?.force) || 0,
+    failed: Number(next?.failed) || 0
   });
 }
 
@@ -37,7 +37,7 @@ export async function refreshReviewCount() {
   try {
     const response = await apiFetch('/api/review/count');
     const data = await response.json();
-    const count = Number(data?.count || 0);
+    const count = Number(data?.count) || 0;
     reviewCount.set(count);
     return count;
   } catch (error) {

@@ -1,6 +1,6 @@
 ﻿<script lang="ts">
   import { onMount } from 'svelte';
-  import { apiFetch, assetUrl } from './api';
+  import { apiFetch, apiUrl } from './api';
   import { log as uiLog } from './logger';
   import { refreshReviewCount } from './statsStore';
 
@@ -24,8 +24,13 @@
     loading = true;
     try {
       const res = await apiFetch('/api/review');
-      items = await res.json();
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      items = Array.isArray(data) ? data : [];
       await refreshReviewCount();
+    } catch (e) {
+      uiLog('ERROR', 'Failed to load review queue', { error: String(e) });
+      alert('Failed to load review queue. Check App Logs for details.');
     } finally { loading = false; }
   }
 
@@ -34,10 +39,14 @@
     acting = true;
     try {
       const filename = items[currentIndex].filename;
-      await apiFetch(`/api/review/${filename}/action?action=${action}`, { method: 'POST' });
+      const res = await apiFetch(`/api/review/${filename}/action?action=${action}`, { method: 'POST' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       items = items.filter((_, i) => i !== currentIndex);
       if (currentIndex >= items.length && items.length > 0) currentIndex = items.length - 1;
       await refreshReviewCount();
+    } catch (e) {
+      uiLog('ERROR', 'Review action failed', { action, error: String(e) });
+      alert(`Review action "${action}" failed. Check App Logs for details.`);
     } finally { acting = false; }
   }
 
@@ -70,11 +79,11 @@
 
     <div class="panes">
         <div class="pane">
-            <img src={assetUrl(current.url)} alt="New" />
+            <img src={apiUrl(current.url)} alt="New" />
         </div>
         <div class="pane">
             {#if current.best_match}
-                <img src={assetUrl(current.best_match.url)} alt="Match" />
+                <img src={apiUrl(current.best_match.url)} alt="Match" />
             {:else}
                 <div class="no-match">No duplicates found.</div>
             {/if}

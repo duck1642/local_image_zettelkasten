@@ -1,7 +1,6 @@
 <script lang="ts">
   import VirtualScroller from '../VirtualScroller.svelte';
   import VaultGroupTile from '../../VaultGroupTile.svelte';
-  import { onDestroy } from 'svelte';
   import type { VaultGroup, VaultItem } from '../../types';
   import { log as uiLog } from '../../logger';
   import {
@@ -39,41 +38,46 @@
     layout.columnCount,
     GRID_OVERSCAN
   );
-  $: emitVisualOrder();
-  $: logSummary();
+  $: emitVisualOrder(layout.positions);
+  $: if (import.meta.env.DEV) logSummary(groups, visiblePositions, layout, scrollTop, viewportHeight);
 
-  function emitVisualOrder() {
-    const hashes = visualOrderFromGridPositions(layout.positions);
-    const key = hashes.join('|');
+  function emitVisualOrder(positions: typeof layout.positions) {
+    const key = `${positions.length}:${positions[0]?.group.id ?? ''}:${positions[positions.length - 1]?.group.id ?? ''}:${layout.columnCount}`;
     if (key === lastVisualOrderKey) return;
     lastVisualOrderKey = key;
-    onVisualOrderChange(hashes);
+    onVisualOrderChange(visualOrderFromGridPositions(positions));
   }
 
-  function logSummary() {
+  function logSummary(
+    groupsArg: VaultGroup[],
+    visible: typeof visiblePositions,
+    layoutArg: typeof layout,
+    scroll: number,
+    height: number
+  ) {
     const now = Date.now();
     const key = [
-      groups.length,
-      visiblePositions.length,
-      layout.columnCount,
-      Math.round(layout.totalHeight),
-      Math.floor(scrollTop / 500),
-      Math.round(viewportHeight),
-      Math.round(layout.columnWidth)
+      groupsArg.length,
+      visible.length,
+      layoutArg.columnCount,
+      Math.round(layoutArg.totalHeight),
+      Math.floor(scroll / 500),
+      Math.round(height),
+      Math.round(layoutArg.columnWidth)
     ].join(':');
     if (key === lastSummaryKey || now - lastSummaryLog < 500) return;
     lastSummaryKey = key;
     lastSummaryLog = now;
-    uiLog('INFO', 'Grid renderer layout summary', {
-      total_groups: groups.length,
-      mounted_tiles: visiblePositions.length,
-      unmounted_tiles: Math.max(0, groups.length - visiblePositions.length),
-      columns: layout.columnCount,
-      scroll_top: Math.round(scrollTop),
-      viewport_height: Math.round(viewportHeight),
-      tile_width: Math.round(layout.columnWidth),
-      row_height: Math.round(layout.rowHeight),
-      total_height: Math.round(layout.totalHeight)
+    uiLog('DEBUG', 'Grid renderer layout summary', {
+      total_groups: groupsArg.length,
+      mounted_tiles: visible.length,
+      unmounted_tiles: Math.max(0, groupsArg.length - visible.length),
+      columns: layoutArg.columnCount,
+      scroll_top: Math.round(scroll),
+      viewport_height: Math.round(height),
+      tile_width: Math.round(layoutArg.columnWidth),
+      row_height: Math.round(layoutArg.rowHeight),
+      total_height: Math.round(layoutArg.totalHeight)
     });
   }
 

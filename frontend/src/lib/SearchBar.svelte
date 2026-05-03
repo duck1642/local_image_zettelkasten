@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { createEventDispatcher, tick } from 'svelte';
+  import { createEventDispatcher, onDestroy, tick } from 'svelte';
   import type { ActiveSegment, FacetSuggestion, SearchFilters } from './types';
   import { emptyFilters, getActiveSegment as findActiveSegment, hasActiveFilters, parseSearchQuery } from './search';
   import { apiFetch } from './api';
@@ -72,7 +72,7 @@
     if (active.kind === 'command') {
       const query = active.value.toLowerCase();
       suggestions = availableCommands
-        .filter((cmd) => cmd.toLowerCase().startsWith(`>${query}`) || cmd.toLowerCase().slice(1).startsWith(query))
+        .filter((cmd) => cmd.slice(1).toLowerCase().startsWith(query))
         .map((value) => ({ value }));
       showSuggestions = suggestions.length > 0;
       activeSuggestionIndex = 0;
@@ -209,6 +209,11 @@
       applySearch(true);
     }
   }
+
+  onDestroy(() => {
+    if (searchDebounceTimer !== null) clearTimeout(searchDebounceTimer);
+    if (refreshDebounceTimer !== null) clearTimeout(refreshDebounceTimer);
+  });
 </script>
 
 <div class="search-container">

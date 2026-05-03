@@ -19,8 +19,10 @@
   let loading = false;
   let error = '';
   let debounceTimer: number | null = null;
+  let requestSeq = 0;
 
   async function loadFacets() {
+    const seq = ++requestSeq;
     loading = true;
     error = '';
     try {
@@ -30,14 +32,17 @@
         limit: '200'
       });
       const response = await apiFetch(`/api/facets?${params.toString()}`);
+      if (seq !== requestSeq) return;
       if (!response.ok) throw new Error(`Facet request failed: ${response.status}`);
       const data = await response.json();
+      if (seq !== requestSeq) return;
       items = Array.isArray(data.items) ? data.items : [];
     } catch (err) {
+      if (seq !== requestSeq) return;
       error = 'Failed to load stats';
-      uiLog('ERROR', 'Failed to load facet stats', { error: err });
+      uiLog('ERROR', 'Failed to load facet stats', { error: String(err) });
     } finally {
-      loading = false;
+      if (seq === requestSeq) loading = false;
     }
   }
 

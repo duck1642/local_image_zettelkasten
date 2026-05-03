@@ -36,7 +36,7 @@ export function parseSearchQuery(query: string): SearchFilters {
       const value = segment.slice(1).trim();
       if (value) filters.command = value;
     } else {
-      filters.text_terms.push(...segment.split(/\s+/).map((term) => term.trim()).filter(Boolean));
+      filters.text_terms.push(...segment.split(/\s+/).filter(Boolean));
     }
   }
 

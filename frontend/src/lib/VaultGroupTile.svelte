@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { VaultItem } from './types';
   import { createEventDispatcher } from 'svelte';
-  import { assetUrl } from './api';
+  import { apiUrl } from './api';
   import { isImageMedia, isVideoMedia } from './media';
   
   export let group: { id: string, items: VaultItem[] };
@@ -15,8 +15,8 @@
 
   $: index = Math.min(Math.max(activeIndex || 0, 0), Math.max(0, group.items.length - 1));
   $: current = group.items[index];
-  $: thumbnailUrl = current ? assetUrl(current.thumbnail_url) : '';
-  $: fullUrl = current ? assetUrl(current.url) : '';
+  $: thumbnailUrl = current ? apiUrl(current.thumbnail_url) : '';
+  $: fullUrl = current ? apiUrl(current.url) : '';
   $: isSelected = current ? current.hash === selectedHash || selectedHashes.has(current.hash) : false;
   $: aspectStyle = (current?.width && current?.height)
     ? `aspect-ratio: ${current.width} / ${current.height}`

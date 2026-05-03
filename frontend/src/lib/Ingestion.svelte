@@ -1,7 +1,7 @@
 ﻿<script lang="ts">
   import { onMount } from 'svelte';
   import { log as uiLog } from './logger';
-  import { apiFetch, eventSourceUrl } from './api';
+  import { apiFetch, apiUrl } from './api';
   import { queueStats, refreshQueueStats, setQueueStats } from './statsStore';
 
   let currentQueue: 'normal' | 'force' | 'failed' = 'normal';
@@ -10,25 +10,31 @@
   let saving = false;
   let running = false;
   let isDirty = false;
-  let parseTimer: any = null;
+  let parseTimer: number | null = null;
   let monitorLogIdCounter = 0;
 
   // Monitor Logs
   let monitorLogs: any[] = [];
   let logSource: EventSource | null = null;
+  let logReconnectTimer: number | null = null;
   let monitorContainer: HTMLElement;
 
   $: counts = $queueStats;
 
   function connectMonitor() {
+    if (logReconnectTimer !== null) {
+        clearTimeout(logReconnectTimer);
+        logReconnectTimer = null;
+    }
     if (logSource) logSource.close();
-    logSource = new EventSource(eventSourceUrl('/api/logs?filename=ingestion.jsonl'));
+    logSource = new EventSource(apiUrl('/api/logs?filename=ingestion.jsonl'));
     logSource.onmessage = (e) => {
         try {
             const entry = JSON.parse(e.data);
             appendMonitorLog(entry);
             // Auto-reload queue when ingestion finishes
             if (entry.message && entry.message.includes('Ingestion cycle complete')) {
+                running = false;
                 fetchStats();
                 if (!isDirty) loadQueue(currentQueue);
             }
@@ -36,7 +42,10 @@
     };
     logSource.onerror = () => {
         logSource?.close();
-        setTimeout(connectMonitor, 2000);
+        logReconnectTimer = window.setTimeout(() => {
+            logReconnectTimer = null;
+            connectMonitor();
+        }, 2000);
     };
   }
 
@@ -100,16 +109,23 @@
     running = true;
     uiLog('INFO', `Starting ingestion for queue: ${currentQueue}`);
     try {
-      await apiFetch(`/api/ingest/${currentQueue}`, { method: 'POST' });
-    } finally { 
-        setTimeout(() => running = false, 5000); 
+      const res = await apiFetch(`/api/ingest/${currentQueue}`, { method: 'POST' });
+      if (!res.ok) {
+        running = false;
+        throw new Error(`HTTP ${res.status}`);
+      }
+    } catch (e) {
+      running = false;
+      uiLog('ERROR', 'Failed to start ingestion', { error: String(e) });
+      alert('Failed to start ingestion. Check App Logs for details.');
     }
   }
 
   function onEditorInput() {
     isDirty = true;
-    clearTimeout(parseTimer);
-    parseTimer = setTimeout(() => {
+    if (parseTimer !== null) clearTimeout(parseTimer);
+    parseTimer = window.setTimeout(() => {
+        parseTimer = null;
         const count = queueContent.split('\n').filter(l => l.trim().startsWith('http')).length;
         setQueueStats({ ...counts, [currentQueue]: count });
     }, 400);
@@ -192,7 +208,8 @@
     return () => {
         window.removeEventListener('lmz:refresh', handleGlobalRefresh);
         logSource?.close();
-        if (parseTimer) clearTimeout(parseTimer);
+        if (logReconnectTimer !== null) clearTimeout(logReconnectTimer);
+        if (parseTimer !== null) clearTimeout(parseTimer);
     };
   });
 </script>

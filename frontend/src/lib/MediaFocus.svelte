@@ -3,7 +3,7 @@
   import { onDestroy } from 'svelte';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { log as uiLog } from './logger';
-  import { assetUrl as resolveAssetUrl } from './api';
+  import { apiUrl } from './api';
   import { isImageMedia, isVideoMedia } from './media';
 
   export let item: any;
@@ -15,7 +15,7 @@
   let videoElement: HTMLVideoElement;
   const appWindow = getCurrentWindow();
 
-  $: assetUrl = resolveAssetUrl(item.url);
+  $: assetUrl = apiUrl(item.url);
 
   $: currentIndex = group ? group.items.findIndex((i: any) => i.hash === item?.hash) : 0;
 

@@ -8,14 +8,6 @@ export function apiUrl(path: string) {
   return `${API_BASE}${path}`;
 }
 
-export function assetUrl(path: string) {
-  return apiUrl(path);
-}
-
-export function eventSourceUrl(path: string) {
-  return apiUrl(path);
-}
-
 async function getApiKey() {
   if (!apiKeyPromise) {
     apiKeyPromise = fetch(apiUrl('/api/session-key'))
@@ -23,7 +15,11 @@ async function getApiKey() {
         if (!res.ok) throw new Error('Failed to load API session key');
         return res.json();
       })
-      .then((data) => data.key || '');
+      .then((data) => data.key || '')
+      .catch((error) => {
+        apiKeyPromise = null;
+        throw error;
+      });
   }
   return apiKeyPromise;
 }

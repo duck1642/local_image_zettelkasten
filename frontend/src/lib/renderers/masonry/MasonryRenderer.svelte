@@ -42,15 +42,14 @@
 
   $: layout = computeMasonryLayout(groups, viewportWidth, tileMinWidth, activeIndexes, measurements);
   $: visiblePositions = visibleMasonryPositions(layout.positions, scrollTop, viewportHeight, MASONRY_OVERSCAN);
-  $: emitVisualOrder();
-  $: logSummary();
+  $: emitVisualOrder(layout.positions);
+  $: if (import.meta.env.DEV) logSummary(groups, visiblePositions, layout, scrollTop, viewportHeight, recomputeCount, measurements);
 
-  function emitVisualOrder() {
-    const hashes = visualOrderFromMasonryPositions(layout.positions);
-    const key = hashes.join('|');
+  function emitVisualOrder(positions: typeof layout.positions) {
+    const key = `${positions.length}:${positions[0]?.group.id ?? ''}:${positions[positions.length - 1]?.group.id ?? ''}:${layout.columnCount}`;
     if (key === lastVisualOrderKey) return;
     lastVisualOrderKey = key;
-    onVisualOrderChange(hashes);
+    onVisualOrderChange(visualOrderFromMasonryPositions(positions));
   }
 
   function measureTile(node: HTMLElement, position: MasonryPosition) {
@@ -129,32 +128,40 @@
     }
   }
 
-  function logSummary() {
+  function logSummary(
+    groupsArg: VaultGroup[],
+    visible: typeof visiblePositions,
+    layoutArg: typeof layout,
+    scroll: number,
+    height: number,
+    recomputes: number,
+    store: MeasurementStore
+  ) {
     const now = Date.now();
     const key = [
-      groups.length,
-      visiblePositions.length,
-      layout.columnCount,
-      Math.round(layout.totalHeight),
-      Math.floor(scrollTop / 500),
-      Math.round(viewportHeight),
-      Math.round(layout.columnWidth),
-      recomputeCount
+      groupsArg.length,
+      visible.length,
+      layoutArg.columnCount,
+      Math.round(layoutArg.totalHeight),
+      Math.floor(scroll / 500),
+      Math.round(height),
+      Math.round(layoutArg.columnWidth),
+      recomputes
     ].join(':');
     if (key === lastSummaryKey || now - lastSummaryLog < 500) return;
     lastSummaryKey = key;
     lastSummaryLog = now;
-    uiLog('INFO', 'Masonry renderer layout summary', {
-      total_groups: groups.length,
-      mounted_tiles: visiblePositions.length,
-      unmounted_tiles: Math.max(0, groups.length - visiblePositions.length),
-      columns: layout.columnCount,
-      scroll_top: Math.round(scrollTop),
-      viewport_height: Math.round(viewportHeight),
-      tile_width: Math.round(layout.columnWidth),
-      total_height: Math.round(layout.totalHeight),
-      recompute_count: recomputeCount,
-      measured_count: Object.keys(measurements).length
+    uiLog('DEBUG', 'Masonry renderer layout summary', {
+      total_groups: groupsArg.length,
+      mounted_tiles: visible.length,
+      unmounted_tiles: Math.max(0, groupsArg.length - visible.length),
+      columns: layoutArg.columnCount,
+      scroll_top: Math.round(scroll),
+      viewport_height: Math.round(height),
+      tile_width: Math.round(layoutArg.columnWidth),
+      total_height: Math.round(layoutArg.totalHeight),
+      recompute_count: recomputes,
+      measured_count: Object.keys(store).length
     });
   }
 

@@ -1,7 +1,7 @@
 ﻿<script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { log as uiLog } from './logger';
-  import { apiFetch, eventSourceUrl } from './api';
+  import { apiFetch, apiUrl } from './api';
 
   interface LogEntry {
     id?: number;
@@ -20,6 +20,7 @@
   let currentFile = 'system.jsonl';
   let currentMode: 'Normal' | 'Full' = 'Normal';
   let eventSource: EventSource | null = null;
+  let reconnectTimer: number | null = null;
   let logContainer: HTMLElement;
   let searchText = '';
 
@@ -84,10 +85,14 @@
   }
 
   function connectToLogs() {
+    if (reconnectTimer !== null) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+    }
     if (eventSource) eventSource.close();
     logs = [];
-    
-    eventSource = new EventSource(eventSourceUrl(`/api/logs?filename=${currentFile}`));
+
+    eventSource = new EventSource(apiUrl(`/api/logs?filename=${currentFile}`));
     eventSource.onmessage = (e) => {
       try {
         const raw = e.data;
@@ -119,7 +124,10 @@
     };
     eventSource.onerror = () => {
         eventSource?.close();
-        setTimeout(connectToLogs, 2000);
+        reconnectTimer = window.setTimeout(() => {
+            reconnectTimer = null;
+            connectToLogs();
+        }, 2000);
     };
   }
 
@@ -201,6 +209,7 @@
   onDestroy(() => {
     window.removeEventListener('lmz:refresh', handleGlobalRefresh);
     eventSource?.close();
+    if (reconnectTimer !== null) clearTimeout(reconnectTimer);
   });
 </script>
 

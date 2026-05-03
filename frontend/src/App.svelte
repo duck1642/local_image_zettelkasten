@@ -75,7 +75,7 @@
 
   <footer class="bottom-status">
     {#if activeTab === 'vault'}
-      <span class="status-left">Total Items: {vaultStatus.totalItems} | View: {vaultStatus.layoutMode} | DB: WAL | LMZ Tauri</span>
+      <span class="status-left">Total Items: {vaultStatus.totalItems} | View: {vaultStatus.layoutMode} | LMZ Tauri</span>
       <span class="status-right">Showing {vaultStatus.groups} groups{vaultStatus.hasMore ? ' (more available)' : ''}</span>
     {:else if activeTab === 'ingest'}
       <span class="status-left">Ingestion | Normal: {$queueStats.normal} | Force: {$queueStats.force} | Failed: {$queueStats.failed}</span>

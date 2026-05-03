@@ -48,8 +48,14 @@
   let groupIndexes: Record<string, number> = {};
   let visualHashOrder: string[] = [];
 
+  let groupsById = new Map<string, VaultGroup>();
+  let groupOrder: string[] = [];
+  let hashIndex = new Map<string, { item: VaultItem; group: VaultGroup }>();
+  let lastStatus = { totalItems: -1, groups: -1, hasMore: false, layoutMode: '' as string };
+
   $: emitStatus(stats.total_items, groupedItems.length, hasMore, currentLayoutMode);
   $: jsVisualHashOrder = visualHashOrder.length ? visualHashOrder : groupedItems.flatMap((group) => group.items.map((item) => item.hash));
+  $: loadedHashOrder = jsVisualHashOrder.length ? jsVisualHashOrder : items.map((item) => item.hash);
   $: attachInfiniteScroll(sentinelEl, currentLayoutMode);
   $: observeLayoutHost(layoutHostEl);
   $: if ($config) {
@@ -66,27 +72,53 @@
     }
   }
 
-  function appendToGroups(newItems: VaultItem[], currentGroups: VaultGroup[]): VaultGroup[] {
-    const groupsMap: Record<string, VaultGroup> = {};
-    const result: VaultGroup[] = [];
-    currentGroups.forEach(g => {
-      groupsMap[g.id] = { id: g.id, items: [...g.items] };
-      result.push(groupsMap[g.id]);
-    });
+  function resetGroupsState() {
+    groupsById = new Map();
+    groupOrder = [];
+    hashIndex = new Map();
+  }
 
-    newItems.forEach((item) => {
-      const key = item.source_url && item.source_url.trim() !== '' ? item.source_url : `single-${item.hash}`;
-      if (!groupsMap[key]) {
-        const newGroup = { id: key, items: [] };
-        groupsMap[key] = newGroup;
-        result.push(newGroup);
+  function groupKeyForItem(item: VaultItem) {
+    return item.source_url && item.source_url.trim() !== '' ? item.source_url : `single-${item.hash}`;
+  }
+
+  function appendToGroups(newItems: VaultItem[], reset: boolean): VaultGroup[] {
+    if (reset) resetGroupsState();
+    if (!newItems.length) return groupOrder.map((id) => groupsById.get(id)!);
+
+    const additionsByKey = new Map<string, VaultItem[]>();
+    for (const item of newItems) {
+      const key = groupKeyForItem(item);
+      const list = additionsByKey.get(key);
+      if (list) list.push(item);
+      else additionsByKey.set(key, [item]);
+    }
+
+    for (const [key, addedItems] of additionsByKey) {
+      const existing = groupsById.get(key);
+      if (existing) {
+        const updated: VaultGroup = { id: key, items: [...existing.items, ...addedItems] };
+        groupsById.set(key, updated);
+        for (const it of updated.items) hashIndex.set(it.hash, { item: it, group: updated });
+      } else {
+        const created: VaultGroup = { id: key, items: [...addedItems] };
+        groupsById.set(key, created);
+        groupOrder.push(key);
+        for (const it of addedItems) hashIndex.set(it.hash, { item: it, group: created });
       }
-      groupsMap[key].items.push(item);
-    });
-    return result;
+    }
+
+    return groupOrder.map((id) => groupsById.get(id)!);
   }
 
   function emitStatus(totalItems: number, groups: number, moreAvailable: boolean, layoutMode: VaultLayoutMode) {
+    if (
+      lastStatus.totalItems === totalItems &&
+      lastStatus.groups === groups &&
+      lastStatus.hasMore === moreAvailable &&
+      lastStatus.layoutMode === layoutMode
+    ) return;
+    lastStatus = { totalItems, groups, hasMore: moreAvailable, layoutMode };
     dispatch('status', { totalItems, groups, hasMore: moreAvailable, layoutMode });
   }
 
@@ -150,26 +182,34 @@
     try {
       const params = buildItemQueryParams(activeFilters, currentSort, currentMediaType, '50', append ? nextCursor : null);
       const response = await apiFetch(`/api/items?${params.toString()}`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
       const newItems: VaultItem[] = Array.isArray(data.items) ? data.items : [];
       if (append) {
         items = [...items, ...newItems];
-        groupedItems = appendToGroups(newItems, groupedItems);
+        groupedItems = appendToGroups(newItems, false);
       } else {
         items = newItems;
-        groupedItems = appendToGroups(newItems, []);
+        groupedItems = appendToGroups(newItems, true);
       }
       nextCursor = data.next_cursor || null;
       hasMore = data.has_more || false;
-
-      const statsRes = await apiFetch('/api/stats');
-      stats = await statsRes.json();
     } catch (error) {
-      uiLog('ERROR', 'Failed to fetch items', { error });
+      uiLog('ERROR', 'Failed to fetch items', { error: String(error) });
     } finally {
       if (!append) isSearching = false;
       else isLoadingMore = false;
       scheduleLoadMoreCheck();
+    }
+
+    if (!append) {
+      try {
+        const statsRes = await apiFetch('/api/stats');
+        if (!statsRes.ok) throw new Error(`HTTP ${statsRes.status}`);
+        stats = await statsRes.json();
+      } catch (error) {
+        uiLog('ERROR', 'Failed to fetch vault stats', { error: String(error) });
+      }
     }
   }
 
@@ -215,25 +255,20 @@
     }
   }
 
-  function loadedHashOrder() {
-    return jsVisualHashOrder.length ? jsVisualHashOrder : items.map((item) => item.hash);
-  }
-
-  function findGroupForItem(target: VaultItem | null) {
-    if (!target) return null;
-    return groupedItems.find((group) => group.items.some((item) => item.hash === target.hash)) || null;
-  }
-
   function handleSelectItem(item: VaultItem, group: VaultGroup, event?: MouseEvent) {
-    const next = updateSelection(selectedHashes, loadedHashOrder(), item.hash, lastSelectedHash, event);
+    const next = updateSelection(selectedHashes, loadedHashOrder, item.hash, lastSelectedHash, event);
     selectedHashes = next.selectedHashes;
     lastSelectedHash = next.lastSelectedHash;
     if (selectedHashes.has(item.hash)) {
       selectedItem = item;
       selectedGroup = group;
+    } else if (selectedItem && selectedHashes.has(selectedItem.hash)) {
+      // current selectedItem still selected — keep it
     } else if (selectedHashes.size > 0) {
-      selectedItem = items.find((candidate) => selectedHashes.has(candidate.hash)) || null;
-      selectedGroup = findGroupForItem(selectedItem);
+      const firstHash = selectedHashes.values().next().value as string;
+      const entry = hashIndex.get(firstHash);
+      selectedItem = entry?.item ?? null;
+      selectedGroup = entry?.group ?? null;
     } else {
       selectedItem = null;
       selectedGroup = null;
@@ -280,13 +315,12 @@
         uiLog('INFO', 'Bulk delete completed', result);
       }
       clearSelection();
-      await fetchItems();
     } catch (error) {
       uiLog('ERROR', 'Bulk delete failed', { error: String(error) });
       alert('Delete failed. Check App Logs for details.');
-      await fetchItems();
     } finally {
       bulkDeleting = false;
+      await fetchItems();
     }
   }
 

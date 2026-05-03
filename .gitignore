@@ -185,6 +185,7 @@ logs/
 secrets/
 backups/
 .vscode/
+.claude/
 
 
 *.db
