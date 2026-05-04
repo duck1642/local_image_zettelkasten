@@ -191,7 +191,7 @@
         <VaultGroupTile
           group={position.group}
           layout="masonry"
-          eagerImages={true}
+          eagerImages={false}
           activeIndex={activeIndexes[position.group.id] || 0}
           {selectedHash}
           {selectedHashes}
@@ -211,6 +211,5 @@
 
   .measured-item :global(.tile-group) {
     margin-bottom: 0;
-    content-visibility: visible;
   }
 </style>

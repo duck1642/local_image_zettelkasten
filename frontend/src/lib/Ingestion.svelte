@@ -1,5 +1,5 @@
-﻿<script lang="ts">
-  import { onMount } from 'svelte';
+<script lang="ts">
+  import { onMount, tick } from 'svelte';
   import { log as uiLog } from './logger';
   import { apiFetch, apiUrl } from './api';
   import { queueStats, refreshQueueStats, setQueueStats } from './statsStore';
@@ -56,9 +56,11 @@
   function appendMonitorLog(entry: any) {
       entry.id = monitorLogIdCounter++;
       const shouldScroll = !monitorContainer || isNearBottom(monitorContainer);
-      monitorLogs = [...monitorLogs, entry].slice(-150);
+      monitorLogs.push(entry);
+      if (monitorLogs.length > 150) monitorLogs.splice(0, monitorLogs.length - 150);
+      monitorLogs = monitorLogs;
       if (shouldScroll) {
-          setTimeout(() => { if (monitorContainer) monitorContainer.scrollTop = monitorContainer.scrollHeight; }, 30);
+          tick().then(() => { if (monitorContainer) monitorContainer.scrollTop = monitorContainer.scrollHeight; });
       }
   }
 

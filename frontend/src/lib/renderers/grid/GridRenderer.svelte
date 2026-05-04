@@ -99,7 +99,7 @@
         <VaultGroupTile
           group={position.group}
           layout="grid"
-          eagerImages={true}
+          eagerImages={false}
           activeIndex={activeIndexes[position.group.id] || 0}
           {selectedHash}
           {selectedHashes}
@@ -120,6 +120,5 @@
   .grid-renderer-item :global(.tile-group) {
     margin-bottom: 0;
     height: 100%;
-    content-visibility: visible;
   }
 </style>

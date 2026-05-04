@@ -47,26 +47,27 @@
     </div>
 
     <div class="form-grid">
-      <label>Command Prefix</label>
-      <input type="text" value={$config.ui.prefixes.command} on:input={(event) => setConfig((draft) => draft.ui.prefixes.command = textValue(event))} />
+      <label for="settings-cmd-prefix">Command Prefix</label>
+      <input id="settings-cmd-prefix" type="text" value={$config.ui.prefixes.command} on:input={(event) => setConfig((draft) => draft.ui.prefixes.command = textValue(event))} />
 
-      <label>Artist Prefix</label>
-      <input type="text" value={$config.ui.prefixes.artist} on:input={(event) => setConfig((draft) => draft.ui.prefixes.artist = textValue(event))} />
+      <label for="settings-artist-prefix">Artist Prefix</label>
+      <input id="settings-artist-prefix" type="text" value={$config.ui.prefixes.artist} on:input={(event) => setConfig((draft) => draft.ui.prefixes.artist = textValue(event))} />
 
-      <label>Tag Prefix</label>
-      <input type="text" value={$config.ui.prefixes.tag} on:input={(event) => setConfig((draft) => draft.ui.prefixes.tag = textValue(event))} />
+      <label for="settings-tag-prefix">Tag Prefix</label>
+      <input id="settings-tag-prefix" type="text" value={$config.ui.prefixes.tag} on:input={(event) => setConfig((draft) => draft.ui.prefixes.tag = textValue(event))} />
 
-      <label>Platform Prefix</label>
-      <input type="text" value={$config.ui.prefixes.platform} on:input={(event) => setConfig((draft) => draft.ui.prefixes.platform = textValue(event))} />
+      <label for="settings-platform-prefix">Platform Prefix</label>
+      <input id="settings-platform-prefix" type="text" value={$config.ui.prefixes.platform} on:input={(event) => setConfig((draft) => draft.ui.prefixes.platform = textValue(event))} />
 
-      <label>Vault Layout Mode</label>
-      <select value={$config.ui.vault_layout_mode} on:change={(event) => setConfig((draft) => draft.ui.vault_layout_mode = textValue(event))}>
+      <label for="settings-layout-mode">Vault Layout Mode</label>
+      <select id="settings-layout-mode" value={$config.ui.vault_layout_mode} on:change={(event) => setConfig((draft) => draft.ui.vault_layout_mode = textValue(event))}>
         <option value="masonry">Masonry</option>
         <option value="grid">Grid</option>
       </select>
 
-      <label>Vault Min Tile Width</label>
+      <label for="settings-tile-min-width">Vault Min Tile Width</label>
       <input
+        id="settings-tile-min-width"
         type="number"
         min={TILE_MIN_WIDTH_FLOOR}
         max={TILE_MIN_WIDTH_CEILING}
@@ -87,21 +88,21 @@
         </label>
       </div>
 
-      <label>Tag Model Repo</label>
-      <input type="text" value={$config.tagging.model_repo} on:input={(event) => setConfig((draft) => draft.tagging.model_repo = textValue(event))} />
+      <label for="settings-model-repo">Tag Model Repo</label>
+      <input id="settings-model-repo" type="text" value={$config.tagging.model_repo} on:input={(event) => setConfig((draft) => draft.tagging.model_repo = textValue(event))} />
 
-      <label>Tag Device</label>
-      <select value={$config.tagging.device} on:change={(event) => setConfig((draft) => draft.tagging.device = textValue(event))}>
+      <label for="settings-tag-device">Tag Device</label>
+      <select id="settings-tag-device" value={$config.tagging.device} on:change={(event) => setConfig((draft) => draft.tagging.device = textValue(event))}>
         <option value="cpu">cpu</option>
         <option value="cuda">cuda</option>
         <option value="auto">auto</option>
       </select>
 
-      <label>Tag Threshold</label>
+      <label for="settings-tag-threshold">Tag Threshold</label>
       <div class="multi-input">
-        <input type="number" step="0.05" value={$config.tagging.threshold} on:input={(event) => setConfig((draft) => draft.tagging.threshold = numberValue(event))} />
-        <label class="inline-label">Max Tags</label>
-        <input type="number" value={$config.tagging.max_tags} on:input={(event) => setConfig((draft) => draft.tagging.max_tags = numberValue(event))} />
+        <input id="settings-tag-threshold" type="number" step="0.05" value={$config.tagging.threshold} on:input={(event) => setConfig((draft) => draft.tagging.threshold = numberValue(event))} />
+        <label class="inline-label" for="settings-max-tags">Max Tags</label>
+        <input id="settings-max-tags" type="number" value={$config.tagging.max_tags} on:input={(event) => setConfig((draft) => draft.tagging.max_tags = numberValue(event))} />
       </div>
 
       <div class="grid-spacer"></div>

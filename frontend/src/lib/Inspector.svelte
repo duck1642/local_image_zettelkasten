@@ -229,6 +229,7 @@
         {#if isImageMedia(item)}
             <img src={apiUrl(item.thumbnail_url || item.url)} alt="Preview" />
         {:else if isVideoMedia(item)}
+            <!-- svelte-ignore a11y-media-has-caption -->
             <video
                 bind:this={videoElement}
                 src={apiUrl(item.url)}
@@ -256,8 +257,8 @@
     {/if}
 
     <div class="group-container">
-      <label class="section-label">Artist</label>
-      <input type="text" bind:value={artist} on:input={handleInput} placeholder="Artist" />
+      <label class="section-label" for="inspector-artist">Artist</label>
+      <input id="inspector-artist" type="text" bind:value={artist} on:input={handleInput} placeholder="Artist" />
     </div>
 
     <div class="group-container horizontal action-row">
@@ -268,16 +269,18 @@
     </div>
 
     <div class="group-container">
-      <label class="section-label">Source URL</label>
-      <input type="text" bind:value={sourceUrl} on:input={handleInput} placeholder="Source URL" />
+      <label class="section-label" for="inspector-source-url">Source URL</label>
+      <input id="inspector-source-url" type="text" bind:value={sourceUrl} on:input={handleInput} placeholder="Source URL" />
     </div>
 
     <div class="group-container horizontal">
       <div class="sub-group platform-col">
+        <!-- svelte-ignore a11y-label-has-associated-control -->
         <label class="section-label">Platform</label>
         <div class="value-text">{platform || 'Unknown'}</div>
       </div>
       <div class="sub-group flex-grow">
+        <!-- svelte-ignore a11y-label-has-associated-control -->
         <label class="section-label">Hash</label>
         <div class="hash-row">
             <div class="value-text truncate">{item.hash}</div>
@@ -287,6 +290,7 @@
     </div>
 
     <div class="group-container">
+      <!-- svelte-ignore a11y-label-has-associated-control -->
       <label class="section-label">My Topics</label>
       <div class="tags-list">
           {#each (topics || []) as tag}
@@ -301,6 +305,7 @@
     </div>
 
     <div class="group-container">
+      <!-- svelte-ignore a11y-label-has-associated-control -->
       <label class="section-label">WD Suggestions</label>
       <div class="sub-section">
         <span class="muted-title">Rating</span>

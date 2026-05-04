@@ -50,8 +50,7 @@
     let reasonStr = typeof reason === 'string' ? reason : 'overlay_or_btn_click';
     uiLog('INFO', `MediaFocus closing because: ${reasonStr}`);
     try {
-        if ((window as any).__TAURI__) await appWindow.setFullscreen(false);
-        else if (document.fullscreenElement) await document.exitFullscreen();
+        await appWindow.setFullscreen(false);
     } catch (e) {
     } finally {
         dispatch('close');
@@ -106,24 +105,27 @@
 
 <svelte:window on:keydown={handleKeydown}/>
 
-<div class="focus-overlay" class:fullscreen={mode === 'fullscreen'} on:click={close}>
+<!-- svelte-ignore a11y-no-static-element-interactions -->
+<div class="focus-overlay" class:fullscreen={mode === 'fullscreen'} on:click={close} on:keydown={handleKeydown} role="button" tabindex="-1">
     {#if group && group.items.length > 1}
-        <button class="nav-btn prev" on:click|stopPropagation={prevItem}>
+        <button class="nav-btn prev" aria-label="Previous item" on:click|stopPropagation={prevItem}>
             <svg viewBox="0 0 24 24" width="40" height="40" stroke="currentColor" stroke-width="3" stroke-linejoin="round" fill="currentColor">
                 <path d="M16 4 L6 12 L16 20 Z" />
             </svg>
         </button>
-        <button class="nav-btn next" on:click|stopPropagation={nextItem}>
+        <button class="nav-btn next" aria-label="Next item" on:click|stopPropagation={nextItem}>
             <svg viewBox="0 0 24 24" width="40" height="40" stroke="currentColor" stroke-width="3" stroke-linejoin="round" fill="currentColor">
                 <path d="M8 4 L18 12 L8 20 Z" />
             </svg>
         </button>
     {/if}
 
-    <div class="media-container" on:click|stopPropagation>
+    <!-- svelte-ignore a11y-no-static-element-interactions -->
+    <div class="media-container" on:click|stopPropagation on:keydown|stopPropagation>
         {#if isImageMedia(item)}
             <img src={assetUrl} alt="Focused View" />
         {:else if isVideoMedia(item)}
+            <!-- svelte-ignore a11y-media-has-caption -->
             <video 
                 bind:this={videoElement}
                 src={assetUrl} 

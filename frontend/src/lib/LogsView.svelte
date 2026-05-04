@@ -1,5 +1,5 @@
-﻿<script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
+<script lang="ts">
+  import { onMount, onDestroy, tick } from 'svelte';
   import { log as uiLog } from './logger';
   import { apiFetch, apiUrl } from './api';
 
@@ -138,11 +138,13 @@
   function appendLog(entry: LogEntry) {
     entry.id = logIdCounter++;
     const shouldScroll = !logContainer || isNearBottom(logContainer);
-    logs = [...logs, entry].slice(-400);
+    logs.push(entry);
+    if (logs.length > 400) logs.splice(0, logs.length - 400);
+    logs = logs;
     if (shouldScroll) {
-      setTimeout(() => {
+      tick().then(() => {
         if (logContainer) logContainer.scrollTop = logContainer.scrollHeight;
-      }, 30);
+      });
     }
   }
 
