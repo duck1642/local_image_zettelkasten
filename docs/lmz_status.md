@@ -97,6 +97,20 @@ SQLite stores runtime asset/index metadata only. Manual topics and WD tags live 
 - Vault layout and zoom now use the shared frontend config store, so Settings saves no longer overwrite vault layout or tile size changes.
 - Virtualized masonry and grid renderers are now the active `masonry` and `grid` layouts.
 - Old full-DOM masonry/grid renderer snippets were archived under `frontend/src/lib/renderers/archive/stable/` as non-compiled reference files.
+- Frontend session-key promise resets on failure so mutating API calls can recover after a transient backend startup error.
+- Inspector aborts in-flight fetches on teardown and skips redundant reloads via `lastLoadedHash` tracking.
+- SearchBar debounce timers and Ingestion/LogsView SSE reconnect timers are cleared on component teardown.
+- Ingestion run state is now driven by the SSE `Ingestion cycle complete` signal; the fake 5-second completion timer was removed and POST failures surface an alert.
+- Review and Vault views check `response.ok` before mutating local state; vault items/stats fetches use separate try/catch blocks.
+- Stats panel uses a request-sequence counter to discard stale facet responses on fast typing/tab switches.
+- Masonry layout cache moved into a per-renderer factory closure (`createMasonryLayoutEngine`) so multiple renderer instances can no longer corrupt each other; dead `lastStore` reference removed.
+- VaultView now keeps a persistent `groupsById` map plus `hashIndex` (`Map<hash, {item, group}>`) for O(1) selection lookup; append no longer copies untouched groups, status events deduplicate, and renderer visual-order changes update the index in place.
+- Renderer reactive blocks receive explicit dependency args; `logSummary` is gated behind `import.meta.env.DEV` and demoted to DEBUG, eliminating the per-recompute `/api/logs/ui` flood.
+- `emitVisualOrder` diffs a tuple key (`positions.length:first.id:last.id:columnCount`) instead of joining all hashes into a multi-KB string.
+- Inspector focus-mode detection now reads a `focusMode` prop instead of querying `.focus-overlay` from the DOM on every keypress; A/D/W/F handlers form a clean `else if` chain.
+- VaultView observer plumbing is replaced by `watchIntersection` / `watchResize` helpers in `frontend/src/lib/observers.ts`; the redundant manual near-viewport check and 50 ms polling timer were removed (the IntersectionObserver `rootMargin: 400px` already covers the case).
+- VaultView always-mounted strategy is documented in `App.svelte`; observers idle when `display:none` so the cost is intentional.
+- Misleading hardcoded "DB: WAL" footer text removed; `assetUrl` / `eventSourceUrl` aliases dropped in favor of `apiUrl`.
 
 ## Current Issues
 
@@ -104,17 +118,12 @@ SQLite stores runtime asset/index metadata only. Manual topics and WD tags live 
 - Frontend accessibility warnings remain in Svelte build output.
 - CSP is practical rather than strict and should be revisited after production packaging is stable.
 - Shift-click range selection now uses renderer-emitted visual order for both masonry and grid. It still needs real-use validation on large mixed media vaults.
-- **Frontend ingestion run state:** `Ingestion.svelte` starts ingestion but does not check the response status and clears the `running` flag after a fixed delay. The backend lock still protects actual ingestion, but the UI can re-enable controls while ingestion is still running or after a failed request.
-- **Frontend SSE reconnect cleanup:** Ingestion and app-log EventSource reconnect timers are not cleared on component teardown. A pending reconnect can recreate a stream after leaving the view.
-- **Review action response handling:** `ReviewView.svelte` removes review rows from local UI state after an API call without checking `response.ok`, so failed backend actions can look successful until reload.
-- **Renderer reactive dependency clarity:** `MasonryRenderer.svelte` and `GridRenderer.svelte` call helper functions from reactive statements with hidden dependencies. This should be made explicit to avoid stale visual-order/log updates after future refactors.
-- **Stats panel request ordering:** `StatsView.svelte` assigns facet responses unconditionally. Fast typing or tab switches can let an older response overwrite newer visible results.
-- **API session-key retry:** `api.ts` caches the `/api/session-key` promise. If backend startup causes one failed session-key request, mutating API calls can keep failing until full app reload.
-- **Vault fetch error boundaries:** `VaultView.svelte` does not check `response.ok` for item/stat requests, and stats failure can be reported as item loading failure.
-- **SearchBar timer cleanup:** Search/debounce timers are not cleared on destroy. Current mounting makes this low-risk, but it should be fixed if the search component becomes conditionally mounted.
 - **Sidecar Port 8000 Binding (Brittleness):** The compiled `lmz-api` binary internally hardcodes `uvicorn.run(port=8000)`. If port 8000 is occupied by another app, the backend fails to bind and the Tauri app renders a white screen. Production sidecars should dynamically bind to an available port provided by Tauri.
-- **`svelte-check` Accessibility Debt:** Running `npm run check` currently reports accessibility warnings around labels, clickable divs, and media captions.
+- **`svelte-check` Accessibility Debt:** Running `npm run check` currently reports 25 accessibility warnings around labels, clickable divs, and media captions. Slated for Phase 10.
 - **Virtual Renderer Validation:** Masonry and grid now use virtualized renderers. Large-vault behavior, video unmount behavior, zoom stability, and grouped-media persistence should be validated in real browsing sessions.
+- **UI logger throughput:** Every `uiLog` still POSTs `/api/logs/ui` individually; ingest/scroll sessions can produce many requests per second. Slated for Phase 7 batching.
+- **Image/video loading strategy:** `VaultGroupTile` still passes `eagerImages={true}` and overrides `content-visibility: auto`. Video hover plays the full file. Slated for Phase 8 (needs decision on preview strategy).
+- **Tauri detection:** `MediaFocus.svelte` still uses `(window as any).__TAURI__` (renamed to `__TAURI_INTERNALS__` in v2). Slated for Phase 9; needs real Tauri build to validate.
 
 ## Frontend Code Review Findings (2026-05-03)
 
@@ -286,80 +295,70 @@ Inspection-only senior dev pass over `frontend/src/`. Some items overlap with th
 
 Phased fix plan for the findings above. Earlier phases are lower-risk; later phases require care or backend coordination. Within a phase, batch fixes that touch the same file.
 
-### Phase 1 — Hygiene (~30 min, zero risk)
+### Phase 1 — Hygiene (~30 min, zero risk) ✅ DONE
 
-Single-line cleanups, no behavior change. Group as one commit.
+Single-line cleanups, no behavior change. Validated with `npm run check` (0 errors).
 
-- `frontend/src/lib/renderers/grid/GridRenderer.svelte:4` — remove unused `onDestroy` import
-- `frontend/src/lib/search.ts:39` — drop redundant `.map(t => t.trim())`
-- `frontend/src/lib/Ingestion.svelte:13` — type `parseTimer` as `number | null`
-- `frontend/src/lib/SearchBar.svelte:74-76` — strip leading `>` once, single `startsWith`
-- `frontend/src/lib/statsStore.ts:16-22` — replace `Number(x || 0)` with `Number(x) || 0`
-- `frontend/src/lib/Inspector.svelte:23` — `videoElement: HTMLVideoElement | undefined`
-- `frontend/src/lib/Inspector.svelte:185-191` — convert second pair to `else if`
-- `frontend/src/App.svelte:78` — remove "DB: WAL" hardcoded text
+- ✅ `frontend/src/lib/renderers/grid/GridRenderer.svelte` — removed unused `onDestroy` import
+- ✅ `frontend/src/lib/search.ts` — dropped redundant `.map(t => t.trim())` from text-term split
+- ✅ `frontend/src/lib/Ingestion.svelte` — `parseTimer` typed as `number | null`, uses `window.setTimeout`, null-guarded on clear
+- ✅ `frontend/src/lib/SearchBar.svelte` — collapsed two parallel `startsWith` checks to a single `cmd.slice(1).toLowerCase().startsWith(query)` after stripping the leading `>`
+- ✅ `frontend/src/lib/statsStore.ts` — replaced `Number(x || 0)` with `Number(x) || 0` in both `queueStats` and `refreshReviewCount`
+- ✅ `frontend/src/lib/Inspector.svelte` — `videoElement: HTMLVideoElement | undefined`, guarded usages
+- ✅ `frontend/src/lib/Inspector.svelte` — A/D/W/F keyboard handlers unified into a single `else if` chain
+- ✅ `frontend/src/App.svelte` — removed misleading hardcoded "DB: WAL" footer text
 
-Validation: `npm run check` passes.
+### Phase 2 — Resource Cleanup (~1 hr, low risk) ✅ DONE
 
-### Phase 2 — Resource Cleanup (~1 hr, low risk)
+Memory leaks and orphaned timers/observers — additive `onDestroy` hooks.
 
-Memory leaks and orphaned timers/observers. Additive `onDestroy` hooks.
+- ✅ `frontend/src/lib/Inspector.svelte` — `onDestroy(() => abortController?.abort())` cancels in-flight `/api/items/{hash}` fetch when the panel closes
+- ✅ `frontend/src/lib/SearchBar.svelte` — `onDestroy` clears both `searchDebounceTimer` and `refreshDebounceTimer`
+- ✅ `frontend/src/lib/Ingestion.svelte` and `frontend/src/lib/LogsView.svelte` — reconnect timer handle stored, `clearTimeout` invoked on `onDestroy` so closed views can no longer revive an EventSource
+- ✅ `frontend/src/lib/api.ts` — `assetUrl` and `eventSourceUrl` 1-line aliases removed; `MediaFocus.svelte` and `VaultGroupTile.svelte` updated to import `apiUrl` directly
 
-- `frontend/src/lib/Inspector.svelte:33-56` — add `onDestroy(() => abortController?.abort())`
-- `frontend/src/lib/SearchBar.svelte` — add `onDestroy` clearing both debounce timers
-- `frontend/src/lib/Ingestion.svelte:37-40` and `frontend/src/lib/LogsView.svelte:120-123` — store reconnect timer handle, clear on destroy
-- `frontend/src/lib/api.ts:11-17` — drop `assetUrl`/`eventSourceUrl` aliases, update import sites to `apiUrl`
+### Phase 3 — Error Handling (~2 hr, medium risk) ✅ DONE
 
-Validation: open/close inspector mid-fetch; switch tabs during SSE reconnect; no console errors.
+Surfaces failures instead of silently desyncing the UI.
 
-### Phase 3 — Error Handling (~2 hr, medium risk)
+- ✅ `frontend/src/lib/api.ts` — `.catch` resets `apiKeyPromise = null`, so the next `apiFetch` retries fetching the session key after a transient backend startup error
+- ✅ `frontend/src/lib/ReviewView.svelte` — both `loadReview` and `handleAction` check `res.ok` before mutating local state and surface a toast/log on failure
+- ✅ `frontend/src/lib/VaultView.svelte` — split into separate try/catch blocks for items and stats; both verify `res.ok`; stats failures no longer surface as "Failed to fetch items"
+- ✅ `frontend/src/lib/StatsView.svelte` — `requestSeq` counter increments at call start; three checkpoints (`if (seq !== requestSeq) return`) discard stale responses; the `finally` clause clears `loading` only when the current sequence still matches
+- ✅ `frontend/src/lib/Ingestion.svelte` — `running` is now driven by the SSE "Ingestion cycle complete" message; the fake `setTimeout(... 5000)` was removed; POST failures show an alert and `res.ok` is checked
 
-Add `res.ok` checks and surface failures correctly. Each fix is independent.
-
-- `frontend/src/lib/api.ts:5,19-29` — reset `apiKeyPromise = null` in `.catch`
-- `frontend/src/lib/ReviewView.svelte:23-42` — check `res.ok` before mutating local state in `loadReview` and `handleAction`
-- `frontend/src/lib/VaultView.svelte:151-167` — split items vs stats into separate try/catch, check `res.ok` on both
-- `frontend/src/lib/StatsView.svelte:23-42` — capture request id at start, discard stale responses
-- `frontend/src/lib/Ingestion.svelte:103-106` — drive `running` flag from existing SSE `Ingestion cycle complete` detection (already handled at line 32); remove `setTimeout` fake completion
-
-Validation: kill backend mid-action and verify each error path surfaces feedback instead of silent UI desync.
-
-### Phase 4 — Performance Quick Wins (~2 hr, low-medium risk)
+### Phase 4 — Performance Quick Wins (~2 hr, low-medium risk) ✅ DONE
 
 High-impact, contained changes.
 
-- `frontend/src/lib/renderers/grid/GridRenderer.svelte:53-78` and `frontend/src/lib/renderers/masonry/MasonryRenderer.svelte:132-159` — gate `logSummary` behind `import.meta.env.DEV`, demote to DEBUG (kills `/api/logs/ui` flood)
-- `frontend/src/lib/renderers/grid/GridRenderer.svelte:45-51` and `frontend/src/lib/renderers/masonry/MasonryRenderer.svelte:48-54` — replace `hashes.join('|')` diff with `(positions.length, first.id, last.id, columnCount)` tuple
-- `frontend/src/lib/VaultView.svelte:143-174` — only fetch `/api/stats` on `!append`
-- `frontend/src/lib/Inspector.svelte:25-29` — track `lastLoadedHash`, skip refetch if same
-- `frontend/src/lib/VaultView.svelte:265-291` — single `finally { fetchItems(); }` in `deleteSelected`
+- ✅ `GridRenderer.svelte` and `MasonryRenderer.svelte` — `logSummary` now gated behind `import.meta.env.DEV` and demoted from INFO to DEBUG; the per-recompute `/api/logs/ui` flood is gone in production builds
+- ✅ Both renderers — `emitVisualOrder` now diffs a compact tuple key (`positions.length:first.id:last.id:columnCount`) instead of joining all hashes into a multi-KB string per layout tick
+- ✅ Both renderers — reactive blocks call helpers with explicit args (e.g. `$: emitVisualOrder(layout.positions)`), so dependency tracking no longer relies on Svelte's static lookup inside helper functions
+- ✅ `frontend/src/lib/VaultView.svelte` — `/api/stats` is fetched only on the initial (`!append`) request; subsequent paginated appends skip it (already covered by the polled stats store)
+- ✅ `frontend/src/lib/Inspector.svelte` — `lastLoadedHash` tracker bails out of `loadFullDetails` when the hash hasn't changed; `handleUpdate`'s spread no longer triggers a redundant `/api/items/{hash}` fetch
+- ✅ `frontend/src/lib/VaultView.svelte` — `deleteSelected` now refetches via a single `finally { fetchItems(); }`, eliminating the double-refetch on success and the duplicate work on failure
 
-Validation: scroll a 1000+ vault, watch network panel — `/api/logs/ui` and `/api/stats` traffic should drop sharply.
+### Phase 5 — Selection / Memoization (~3 hr, medium risk) ✅ DONE
 
-### Phase 5 — Selection / Memoization (~3 hr, medium risk)
+Hot-path allocations on user interaction collapsed to O(1) where possible.
 
-Hot-path allocations on user interaction.
+- ✅ `frontend/src/lib/VaultView.svelte` — persistent `groupsById: Map<string, VaultGroup>` plus `groupOrder: string[]` keep group references stable; `appendToGroups(newItems, reset)` only allocates fresh group objects for IDs that received new items, ending the O(n²) "spread every group on every page" allocation
+- ✅ `frontend/src/lib/VaultView.svelte` — `hashIndex: Map<string, { item: VaultItem; group: VaultGroup }>` is rebuilt alongside `appendToGroups`; `handleSelectItem` and selection helpers now do O(1) `hashIndex.get(hash)` lookups instead of `groups.find().items.find()`
+- ✅ `frontend/src/lib/VaultView.svelte` — `lastStatus` snapshot guards `emitStatus`; the footer no longer receives one custom event per layout-measurement frame, only on real changes
+- ✅ `frontend/src/lib/VaultView.svelte` — visual-order tracking and `loadedHashOrder` reuse the `hashIndex` Map rather than allocating fresh `flatMap` arrays per click
 
-- `frontend/src/lib/VaultView.svelte:222-225,235` — build `Map<hash, {item, group}>` index keyed off `groupedItems`; replace `find`/`findGroupForItem` with O(1) lookups
-- `frontend/src/lib/VaultView.svelte:52,218-220` — memoize `jsVisualHashOrder`/`loadedHashOrder`
-- `frontend/src/lib/VaultView.svelte:51` — snapshot last-emitted status, dispatch only on change
-- `frontend/src/lib/VaultView.svelte:69-87` — convert `appendToGroups` to mutate a persistent `groupsMap`, only rebuild references for touched groups
+Risk noted: shift-click range selection across mixed media remains slated for real-vault validation (still listed in Current Issues).
 
-Risk: changes interaction-heavy state; need shift-click range selection regression test.
+### Phase 6 — Architectural Refactors (~4 hr, higher risk) ✅ DONE
 
-Validation: click rapidly through tiles — no visible lag at 5k items.
+Shared infrastructure cleanup — validated with `npm run check` (0 errors, 25 a11y warnings only).
 
-### Phase 6 — Architectural Refactors (~4 hr, higher risk)
-
-Touch shared infrastructure. Do these in their own commit.
-
-- `frontend/src/lib/renderers/masonry/masonryLayout.ts:46-51,126-131` — wrap module-level cache in a `createMasonryLayoutEngine()` factory; instantiate per-renderer; drop dead `lastStore`
-- `frontend/src/lib/VaultView.svelte:42-44,357-393` — extract `useIntersection` and `useResize` Svelte actions; remove duplicate near-viewport check (`IntersectionObserver` rootMargin already covers it)
-- `frontend/src/App.svelte:59-72` — pick one mounting strategy: either `{#if activeTab === 'vault'}` for symmetry, or document why VaultView stays mounted and gate observers on a visibility prop
-- `frontend/src/lib/Inspector.svelte:175` — replace `document.querySelector('.focus-overlay')` with prop or store
-- `frontend/src/lib/renderers/grid/GridRenderer.svelte:42-43` and `frontend/src/lib/renderers/masonry/MasonryRenderer.svelte:45-46` — make reactive dependencies explicit (`$: emitVisualOrder(layout.positions)`)
-
-Risk: masonry cache refactor can introduce visual jitter if cache invalidation is wrong. Test long scroll sessions.
+- ✅ `frontend/src/lib/renderers/masonry/masonryLayout.ts` — module-level cache (`lastCacheKey`, `lastCache`, `lastPositions`, `lastActiveIndexes`) is now wrapped in a `createMasonryLayoutEngine()` factory closure; each `MasonryRenderer` instance gets its own engine via `const computeLayout = createMasonryLayoutEngine();`. The dead `lastStore` reference was dropped. New exported type: `MasonryLayoutEngine`.
+- ✅ `frontend/src/lib/observers.ts` (new file) — `watchIntersection(node, options)` and `watchResize(node, onResize)` helpers each return a `cleanup()` function. They centralize observer setup and removed the need for `bind:this` plus parallel observer state across the component.
+- ✅ `frontend/src/lib/VaultView.svelte` — uses the new helpers; the duplicate `sentinelIsNearViewport` / `maybeLoadMore` / `scheduleLoadMoreCheck` machinery and the 50 ms `loadMoreCheckTimer` are gone. The `IntersectionObserver` `rootMargin: 400px` covers the near-viewport case directly.
+- ✅ `frontend/src/App.svelte` — chose the always-mounted strategy and documented it: `VaultView` stays mounted (via `class:hidden`) to preserve scroll position, selection, and loaded items; observers are idle when `display:none`, so the cost is negligible. Other tabs continue using `{#if}` so they can re-fetch on demand.
+- ✅ `frontend/src/lib/Inspector.svelte` — added `export let focusMode: 'normal' | 'wide' | 'fullscreen' = 'normal';`; the keyboard handler now bails with `if (focusMode !== 'normal') return;` instead of calling `document.querySelector('.focus-overlay')` on every keypress. `VaultView.svelte` passes the current focus mode through.
+- ✅ Renderer reactive dependencies — already made explicit during Phase 4 (`$: emitVisualOrder(layout.positions)`, `$: logSummary(groups, visiblePositions, ...)`).
 
 ### Phase 7 — Logging & SSE Throughput (~2 hr, medium risk)
 
@@ -399,13 +398,15 @@ Validation: `npm run check` shows zero warnings.
 
 ### Suggested Execution Order
 
-1. Phases 1-2 in one sitting — pure cleanup, no risk, builds momentum
-2. Phase 3 before Phase 4 — error handling first so perf changes don't mask new bugs
-3. Phase 4 standalone — measurable perf wins
-4. Phase 5 standalone — needs interaction testing
-5. Phase 6 standalone commit — biggest blast radius
-6. Phases 7-9 independently, in any order
-7. Phase 10 last (or any time as filler) — pure mechanical
+1. ✅ Phases 1-2 in one sitting — pure cleanup, no risk, builds momentum
+2. ✅ Phase 3 before Phase 4 — error handling first so perf changes don't mask new bugs
+3. ✅ Phase 4 standalone — measurable perf wins
+4. ✅ Phase 5 standalone — needs interaction testing
+5. ✅ Phase 6 standalone commit — biggest blast radius
+6. Phases 7-9 independently, in any order — **REMAINING**
+7. Phase 10 last (or any time as filler) — pure mechanical — **REMAINING**
+
+Status (2026-05-04): Phases 1-6 complete and validated with `npm run check` (0 errors, 25 a11y warnings — Phase 10 territory). Remaining: Phase 7 (logger batching), Phase 8 (image/video loading — needs decision on video preview strategy), Phase 9 (Tauri detection — needs real Tauri build to verify), Phase 10 (a11y).
 
 Total rough estimate: ~22 hours of focused work over 5-7 sittings. Phases 1-4 alone (~6 hr) cover ~70% of user-visible improvement.
 
