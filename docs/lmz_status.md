@@ -96,6 +96,16 @@ SQLite stores runtime asset/index metadata only. Manual topics and WD tags live 
   - review count endpoint
   - sidecar build path
   - practical Tauri CSP
+- Review workflow wiring fixed. Done (will be checked):
+  - `keep` now defers in review (no DB ingest).
+  - `variant` now ingests with duplicate bypass and sidecar metadata handoff.
+  - Review action API now returns action-aware success payloads and propagates non-2xx failures.
+  - Review compare panes now support both image and video rendering.
+- Review wiring follow-up fixes from backend smoke run. Done (will be checked):
+  - Fixed `/api/review` tuple-unpack crash after review-item payload expansion.
+  - Fixed review action logging argument collision in `log_system`.
+  - Fixed false-failure variant behavior caused by post-commit source delete errors.
+  - Added best-effort retry cleanup for review source/sidecar removal after successful variant ingest.
 
 ## Needs Validation Or Refinement
 
@@ -130,6 +140,16 @@ SQLite stores runtime asset/index metadata only. Manual topics and WD tags live 
 - Sidecar port 8000:
   - backend currently assumes port 8000
   - dynamic port binding is deferred unless this becomes a real packaging blocker
+- Review workflow validation:
+  - verify `keep` leaves item and sidecar in `data/review` with no DB insert.
+  - verify `delete` removes item and sidecar and decrements review count.
+  - verify `variant` ingests once (no re-quarantine loop) and removes source from review.
+  - verify variant failure returns non-2xx and keeps the review item pending.
+  - verify image/video review pairs render correctly in both panes.
+- Review Windows file-lock edge case:
+  - during smoke tests, some review assets remained undeletable (`WinError 5`) after successful variant ingest.
+  - current behavior: DB ingest can succeed while review source cleanup fails due to external file lock.
+  - needs resolved-state fallback so successfully ingested-but-locked review files are hidden from review lists/count until cleanup is possible.
 
 ## Current Frontend Ideas Merged
 
@@ -188,6 +208,13 @@ Deferred:
 - Search chips.
 
 ## Deferred Work
+
+- Known review issues from smoke testing:
+  - Fixed: `/api/review` crashed due to tuple-unpack mismatch after review payload expansion.
+  - Fixed: review action logging passed duplicate `message` arguments into `log_system`.
+  - Fixed: `variant` could return failure after a successful DB commit when source delete failed post-commit.
+  - Open: Windows file locks (`WinError 5`) can keep review source files undeletable even after successful variant ingest.
+  - Open: when lock persists, review file cleanup can lag behind DB state unless a resolved-state fallback is added.
 
 - Video hover preview strategy:
   - current hover preview can download the original video

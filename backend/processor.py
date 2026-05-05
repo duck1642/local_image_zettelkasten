@@ -1,6 +1,7 @@
 
 import shutil
 import json
+import time
 from pathlib import Path
 from typing import Tuple, Optional
 from datetime import datetime
@@ -343,7 +344,18 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
             search_manager.update_indexes(**index_data)
 
         if delete_source:
-            filepath.unlink()
+            cleanup_error = None
+            for _ in range(5):
+                try:
+                    filepath.unlink()
+                    cleanup_error = None
+                    break
+                except OSError as exc:
+                    cleanup_error = exc
+                    time.sleep(0.2)
+            if cleanup_error is not None:
+                # Ingest has already committed at this point; treat source cleanup as non-fatal.
+                log_system("WARNING", "Ingest succeeded but source cleanup failed", file=str(filepath), error=str(cleanup_error))
 
         artist = metadata.get('artist', 'Local')
         platform = metadata.get('platform', 'Local')

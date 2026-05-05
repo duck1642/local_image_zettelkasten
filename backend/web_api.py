@@ -1,7 +1,9 @@
 import os
 import sys
 import json
+import mimetypes
 import asyncio
+import time
 import traceback
 import secrets
 import threading
@@ -129,6 +131,34 @@ def _review_path(filename: str) -> Path:
     if path.parent != review_root:
         raise HTTPException(status_code=400, detail="Invalid review filename")
     return path
+
+def _guess_review_mime_type(filename: str) -> str:
+    guessed, _ = mimetypes.guess_type(filename)
+    if guessed:
+        return guessed
+    ext = Path(filename).suffix.lower()
+    fallback_map = {
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".jfif": "image/jpeg",
+        ".png": "image/png",
+        ".webp": "image/webp",
+        ".gif": "image/gif",
+        ".mp4": "video/mp4",
+        ".webm": "video/webm",
+        ".ogv": "video/ogg",
+    }
+    return fallback_map.get(ext, "application/octet-stream")
+
+def _review_failure_status(message: str) -> int:
+    text = (message or "").strip().lower()
+    if text.startswith("duplicate ignored"):
+        return 409
+    if text.startswith("invalid"):
+        return 400
+    if text.startswith("system error"):
+        return 500
+    return 400
 
 def _tail_lines(path: Path, count: int = 150) -> list[str]:
     if not path.exists():
@@ -1007,9 +1037,9 @@ def _get_review_items_sync():
             if meta_path.exists():
                 with open(meta_path, "r", encoding="utf-8") as f: meta = json.load(f)
             best_match = meta.get("best_match")
-            pending.append((p, meta, best_match))
+            pending.append((p, meta, best_match, _guess_review_mime_type(p.name), p.suffix.lower()))
 
-    best_hashes = sorted({best for _, _, best in pending if best})
+    best_hashes = sorted({best for _, _, best, _, _ in pending if best})
     match_map = {}
     if best_hashes:
         conn = init_database()
@@ -1018,12 +1048,25 @@ def _get_review_items_sync():
             cursor = conn.cursor()
             cursor.execute(f"SELECT hash, file_extension, mime_type, source_artist FROM items WHERE hash IN ({placeholders})", best_hashes)
             for row in cursor.fetchall():
-                match_map[row[0]] = {"hash": row[0], "url": f"/vault/{row[0][:2]}/{row[0]}{row[1]}" if row[1] else f"/vault/{row[0][:2]}/{row[0]}", "artist": row[3]}
+                match_map[row[0]] = {
+                    "hash": row[0],
+                    "url": f"/vault/{row[0][:2]}/{row[0]}{row[1]}" if row[1] else f"/vault/{row[0][:2]}/{row[0]}",
+                    "artist": row[3],
+                    "mime_type": row[2] or "",
+                    "extension": row[1] or "",
+                }
         finally:
             conn.close()
 
-    for p, meta, best_match in pending:
-        items.append({"filename": p.name, "url": f"/review-assets/{p.name}", "metadata": meta, "best_match": match_map.get(best_match)})
+    for p, meta, best_match, review_mime, review_ext in pending:
+        items.append({
+            "filename": p.name,
+            "url": f"/review-assets/{p.name}",
+            "metadata": meta,
+            "best_match": match_map.get(best_match),
+            "mime_type": review_mime,
+            "extension": review_ext,
+        })
     return items
 
 @app.post("/api/review/{filename}/action")
@@ -1035,17 +1078,76 @@ def _review_action_sync(filename: str, action: str):
         raise HTTPException(status_code=400, detail="Invalid review action")
     file_path = _review_path(filename)
     if not file_path.exists(): raise HTTPException(status_code=404)
+
     if action == "delete":
         file_path.unlink()
         meta_path = file_path.with_suffix(file_path.suffix + ".json")
-        if meta_path.exists(): meta_path.unlink()
-    elif action == "keep" or action == "variant":
-        meta_path = file_path.with_suffix(file_path.suffix + ".json")
-        meta = {}
         if meta_path.exists():
-            with open(meta_path, "r", encoding="utf-8") as f: meta = json.load(f)
-        process_file(file_path, get_config(), metadata=meta, delete_source=True)
-    return {"status": "success"}
+            meta_path.unlink()
+        message = "Review item deleted."
+        log_system("INFO", "Review action succeeded", action=action, filename=filename, detail=message)
+        return {"status": "success", "action": action, "message": message}
+
+    if action == "keep":
+        message = "Review item kept in review queue."
+        log_system("INFO", "Review action succeeded", action=action, filename=filename, detail=message)
+        return {"status": "success", "action": action, "message": message}
+
+    meta_path = file_path.with_suffix(file_path.suffix + ".json")
+    sidecar = {}
+    if meta_path.exists():
+        with open(meta_path, "r", encoding="utf-8") as f:
+            sidecar = json.load(f)
+    metadata = sidecar.get("metadata", {}) if isinstance(sidecar, dict) else {}
+    if not isinstance(metadata, dict):
+        metadata = {}
+
+    try:
+        ok, process_message, _ = process_file(
+            file_path,
+            get_config(),
+            metadata=metadata,
+            delete_source=True,
+            skip_similarity=True,
+        )
+    except Exception as exc:
+        log_system("ERROR", "Review action failed", action=action, filename=filename, error=str(exc))
+        raise HTTPException(status_code=500, detail=f"Review action failed: {exc}") from exc
+
+    if not ok:
+        status_code = _review_failure_status(process_message)
+        log_system("ERROR", "Review action failed", action=action, filename=filename, error=process_message)
+        raise HTTPException(status_code=status_code, detail=process_message)
+
+    if file_path.exists():
+        cleanup_error = None
+        for _ in range(5):
+            try:
+                file_path.unlink()
+                cleanup_error = None
+                break
+            except OSError as exc:
+                cleanup_error = exc
+                time.sleep(0.2)
+        if cleanup_error is not None:
+            log_system("WARNING", "Variant ingest succeeded but review source cleanup failed", filename=filename, error=str(cleanup_error))
+
+    if meta_path.exists():
+        cleanup_error = None
+        for _ in range(5):
+            try:
+                meta_path.unlink()
+                cleanup_error = None
+                break
+            except OSError as exc:
+                cleanup_error = exc
+                time.sleep(0.2)
+        if cleanup_error is not None:
+            log_system("WARNING", "Variant ingest succeeded but sidecar cleanup failed", filename=filename, error=str(cleanup_error))
+
+    message = "Review item ingested as variant."
+    log_system("INFO", "Review action succeeded", action=action, filename=filename, detail=message)
+    return {"status": "success", "action": action, "message": message}
 
 @app.get("/api/config")
 async def get_app_config(): return await asyncio.to_thread(get_config)

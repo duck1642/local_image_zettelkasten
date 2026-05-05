@@ -7,18 +7,56 @@
   interface ReviewItem {
     filename: string;
     url: string;
+    mime_type?: string;
+    extension?: string;
     metadata: any;
     best_match: {
       hash: string;
       url: string;
       artist: string;
+      mime_type?: string;
+      extension?: string;
     } | null;
   }
+
+  type MediaInfo = {
+    url?: string;
+    mime_type?: string;
+    extension?: string;
+  } | null | undefined;
 
   let items: ReviewItem[] = [];
   let currentIndex = 0;
   let loading = true;
   let acting = false;
+
+  const VIDEO_EXTENSIONS = new Set(['.mp4', '.webm', '.ogv', '.mov', '.m4v', '.avi', '.mkv']);
+
+  function extFromUrl(url: string) {
+    const clean = (url || '').split('?')[0].split('#')[0];
+    const dot = clean.lastIndexOf('.');
+    if (dot < 0) return '';
+    return clean.slice(dot).toLowerCase();
+  }
+
+  function isVideoMedia(item: MediaInfo) {
+    if (!item) return false;
+    const mime = String(item.mime_type || '').toLowerCase();
+    if (mime.startsWith('video/')) return true;
+    const ext = String(item.extension || '').toLowerCase() || extFromUrl(item.url || '');
+    return VIDEO_EXTENSIONS.has(ext);
+  }
+
+  async function readErrorDetail(response: Response) {
+    try {
+      const data = await response.json();
+      if (typeof data?.detail === 'string' && data.detail.trim()) return data.detail;
+      if (typeof data?.message === 'string' && data.message.trim()) return data.message;
+    } catch {
+      // ignore parse errors and fall back to HTTP status text
+    }
+    return '';
+  }
 
   async function loadReview() {
     loading = true;
@@ -40,7 +78,12 @@
     try {
       const filename = items[currentIndex].filename;
       const res = await apiFetch(`/api/review/${filename}/action?action=${action}`, { method: 'POST' });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) {
+        const detail = await readErrorDetail(res);
+        throw new Error(detail ? `HTTP ${res.status}: ${detail}` : `HTTP ${res.status}`);
+      }
+      const payload = await res.json().catch(() => ({}));
+      uiLog('INFO', 'Review action succeeded', { action, filename, message: payload?.message || '' });
       items = items.filter((_, i) => i !== currentIndex);
       if (currentIndex >= items.length && items.length > 0) currentIndex = items.length - 1;
       await refreshReviewCount();
@@ -79,11 +122,21 @@
 
     <div class="panes">
         <div class="pane">
-            <img src={apiUrl(current.url)} alt="New" />
+            {#if isVideoMedia(current)}
+                <!-- svelte-ignore a11y_media_has_caption -->
+                <video src={apiUrl(current.url)} controls preload="metadata"></video>
+            {:else}
+                <img src={apiUrl(current.url)} alt="New" />
+            {/if}
         </div>
         <div class="pane">
             {#if current.best_match}
-                <img src={apiUrl(current.best_match.url)} alt="Match" />
+                {#if isVideoMedia(current.best_match)}
+                    <!-- svelte-ignore a11y_media_has_caption -->
+                    <video src={apiUrl(current.best_match.url)} controls preload="metadata"></video>
+                {:else}
+                    <img src={apiUrl(current.best_match.url)} alt="Match" />
+                {/if}
             {:else}
                 <div class="no-match">No duplicates found.</div>
             {/if}
@@ -139,7 +192,7 @@
     overflow: hidden;
   }
 
-  img { max-width: 100%; max-height: 100%; object-fit: contain; }
+  .pane img, .pane video { max-width: 100%; max-height: 100%; object-fit: contain; }
 
   .action-bar {
     display: flex;
