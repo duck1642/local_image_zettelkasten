@@ -248,7 +248,19 @@ def _get_search_suggestions_sync(kind: str, q: str = "", limit: int = 20):
     limit = max(1, min(int(limit or 20), 50))
 
     if kind == "command":
-        commands = [">masonry", ">grid", ">zoom-in", ">zoom-out", ">ram-track"]
+        commands = [
+            ">masonry",
+            ">grid",
+            ">zoom-in",
+            ">zoom-out",
+            ">ram-track",
+            ">sort-newest",
+            ">sort-oldest",
+            ">sort-artist",
+            ">media-all",
+            ">media-image",
+            ">media-video",
+        ]
         items = [
             {"value": cmd, "count": 0}
             for cmd in commands

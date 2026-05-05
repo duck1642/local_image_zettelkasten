@@ -233,7 +233,33 @@
       toggleInspector();
     } else if (command === 'ram-track') {
       toggleRamTracking().catch((error) => uiLog('ERROR', 'Failed to toggle RAM tracker', { error: String(error) }));
+    } else if (command === 'sort-newest') {
+      setSortMode('newest');
+    } else if (command === 'sort-oldest') {
+      setSortMode('oldest');
+    } else if (command === 'sort-artist') {
+      setSortMode('artist');
+    } else if (command === 'media-all') {
+      setMediaType('all');
+    } else if (command === 'media-image') {
+      setMediaType('image');
+    } else if (command === 'media-video') {
+      setMediaType('video');
     }
+  }
+
+  function setSortMode(sort: string) {
+    if (currentSort === sort) return;
+    currentSort = sort;
+    visualHashOrder = [];
+    fetchItems();
+  }
+
+  function setMediaType(mediaType: string) {
+    if (currentMediaType === mediaType) return;
+    currentMediaType = mediaType;
+    visualHashOrder = [];
+    fetchItems();
   }
 
   function handleSelectItem(item: VaultItem, group: VaultGroup, event?: MouseEvent) {
@@ -426,19 +452,6 @@
 
 <header class="top-header">
   <SearchBar on:filtersChanged={handleFiltersChanged} on:command={handleCommand} />
-  <div class="header-actions" class:with-inspector={inspectorVisible}>
-    <select class="filter-select" bind:value={currentSort} on:change={() => fetchItems()}>
-      <option value="newest">Newest First</option>
-      <option value="oldest">Oldest First</option>
-      <option value="artist">Artist (A-Z)</option>
-    </select>
-
-    <select class="filter-select" bind:value={currentMediaType} on:change={() => fetchItems()}>
-      <option value="all">All Media</option>
-      <option value="image">Images Only</option>
-      <option value="video">Videos Only</option>
-    </select>
-  </div>
 </header>
 
 <div class="view-and-inspector">
@@ -515,9 +528,6 @@
 
 <style>
   .top-header { height: var(--header-height); display: flex; align-items: center; padding: 0 15px; gap: 15px; border-bottom: 1px solid var(--border-dim); flex-shrink: 0; z-index: 100; }
-  .header-actions { display: flex; align-items: center; gap: 10px; }
-  .header-actions.with-inspector { width: calc(400px - 15px); min-width: calc(400px - 15px); justify-content: flex-start; padding-left: 15px; border-left: 1px solid var(--border-dim); align-self: stretch; }
-  .filter-select { background: var(--bg-input); border: 1px solid var(--border-dim); color: var(--text-main); padding: 5px 10px; border-radius: 6px; font-size: 12px; cursor: pointer; height: 32px; }
   .view-and-inspector { flex-grow: 1; display: flex; overflow: hidden; min-width: 0; }
   .viewport { flex-grow: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; position: relative; }
   .bulk-action-bar { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 60; display: flex; align-items: center; gap: 10px; padding: 9px 12px; border: 1px solid var(--border-dim); border-radius: 8px; background: rgba(13, 17, 23, 0.96); box-shadow: 0 10px 30px rgba(0,0,0,0.35); }
