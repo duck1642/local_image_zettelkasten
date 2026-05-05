@@ -18,6 +18,7 @@ dependencies = [
     "onnxruntime>=1.17.0",
     "pillow>=9.0.0",
     "playwright",
+    "psutil",
     "pyyaml",
     "sentence-transformers",
     "torch",

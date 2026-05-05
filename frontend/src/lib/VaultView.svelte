@@ -9,6 +9,7 @@
   import { buildItemQueryParams, emptyFilters } from './search';
   import { updateSelection } from './selection';
   import { watchIntersection, watchResize, type ObserverCleanup } from './observers';
+  import { toggleRamTracking } from './ramStore';
   import GridRenderer from './renderers/grid/GridRenderer.svelte';
   import MasonryRenderer from './renderers/masonry/MasonryRenderer.svelte';
   import Inspector from './Inspector.svelte';
@@ -230,6 +231,8 @@
       zoomOut();
     } else if (command === 'toggle-inspector') {
       toggleInspector();
+    } else if (command === 'ram-track') {
+      toggleRamTracking().catch((error) => uiLog('ERROR', 'Failed to toggle RAM tracker', { error: String(error) }));
     }
   }
 

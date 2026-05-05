@@ -142,11 +142,11 @@ Inspection-only senior dev pass over `frontend/src/`. Some items overlap with th
 * solutions: Track last loaded hash and bail if `item.hash === lastLoadedHash`.
 
 * where: `frontend/src/lib/Inspector.svelte:175`
-* problem: Keyboard handler suppresses A/D/W/F by `document.querySelector('.focus-overlay')` — DOM-snooping for state. Brittle (CSS class rename = silent break) and forces a layout query on every keypress.
+* problem: Keyboard handler suppresses A/D/W/F by `document.querySelector('.focus-overlay')` - DOM-snooping for state. Brittle (CSS class rename = silent break) and forces a layout query on every keypress.
 * solutions: Pass `focusMode` as a prop or use a writable store.
 
 * where: `frontend/src/lib/MediaFocus.svelte:53`
-* problem: `(window as any).__TAURI__` — Tauri v2 renamed this global to `__TAURI_INTERNALS__`. Detection path is likely already broken; the non-Tauri branch never runs in Tauri v2 anyway, so it's mostly dead.
+* problem: `(window as any).__TAURI__` - Tauri v2 renamed this global to `__TAURI_INTERNALS__`. Detection path is likely already broken; the non-Tauri branch never runs in Tauri v2 anyway, so it's mostly dead.
 * solutions: Detect via `import.meta.env.TAURI_PLATFORM` or always call `appWindow.setFullscreen(false)` (no-ops outside Tauri are caught).
 
 * where: `frontend/src/lib/Ingestion.svelte:94-107`
@@ -200,7 +200,7 @@ Inspection-only senior dev pass over `frontend/src/`. Some items overlap with th
 * solutions: Demote to DEBUG, gate behind `import.meta.env.DEV`, or remove entirely.
 
 * where: `frontend/src/lib/renderers/grid/GridRenderer.svelte:45-51`, `frontend/src/lib/renderers/masonry/MasonryRenderer.svelte:48-54`
-* problem: `emitVisualOrder` joins every hash (64-char strings × thousands of items) into one giant string just to detect change. Allocates hundreds of KB per layout reactivity tick.
+* problem: `emitVisualOrder` joins every hash (64-char strings x thousands of items) into one giant string just to detect change. Allocates hundreds of KB per layout reactivity tick.
 * solutions: Compare on `(positions.length, positions[0]?.group.id, positions[last]?.group.id, layout.columnCount)`, or hash the positions array length + a checksum.
 
 * where: `frontend/src/lib/VaultView.svelte:52,218-220`
@@ -208,7 +208,7 @@ Inspection-only senior dev pass over `frontend/src/`. Some items overlap with th
 * solutions: Memoize. Compute once when `visualHashOrder`/`groupedItems` actually changes; cache.
 
 * where: `frontend/src/lib/VaultView.svelte:222-225,235`
-* problem: `findGroupForItem` is O(groups × items) and `items.find(candidate => selectedHashes.has(...))` is O(items). Runs on every selection click. Painful at 10k+ items.
+* problem: `findGroupForItem` is O(groups x items) and `items.find(candidate => selectedHashes.has(...))` is O(items). Runs on every selection click. Painful at 10k+ items.
 * solutions: Maintain a `Map<hash, {item, group}>` index that updates with `groupedItems`.
 
 * where: `frontend/src/lib/VaultGroupTile.svelte:55,58`, `frontend/src/lib/renderers/grid/GridRenderer.svelte:98`, `frontend/src/lib/renderers/masonry/MasonryRenderer.svelte:185`
@@ -228,13 +228,13 @@ Inspection-only senior dev pass over `frontend/src/`. Some items overlap with th
 * solutions: Mutate-and-trim with a ring buffer, or batch incoming SSE messages per animation frame.
 
 * where: `frontend/src/lib/VaultView.svelte:69-87`
-* problem: `appendToGroups` copies every existing group's items array on every page append (`{ ...g, items: [...g.items] }`). At 1000+ groups, that's a lot of O(n²)-ish allocation per scroll page.
+* problem: `appendToGroups` copies every existing group's items array on every page append (`{ ...g, items: [...g.items] }`). At 1000+ groups, that's a lot of O(n^2)-ish allocation per scroll page.
 * solutions: Use a persistent `groupsMap` kept in component state and only mutate the touched groups, or rebuild references only for groups that received new items.
 
 ### Redundancy / Code Quality
 
 * where: `frontend/src/lib/search.ts:39`
-* problem: `segment.split(/\s+/).map(t => t.trim()).filter(Boolean)` — splitting on `\s+` already removes whitespace; the `.trim()` is redundant.
+* problem: `segment.split(/\s+/).map(t => t.trim()).filter(Boolean)` - splitting on `\s+` already removes whitespace; the `.trim()` is redundant.
 * solutions: Drop `.map(trim)`.
 
 * where: `frontend/src/lib/SearchBar.svelte:74-76`
@@ -246,7 +246,7 @@ Inspection-only senior dev pass over `frontend/src/`. Some items overlap with th
 * solutions: Compare against last-emitted snapshot before dispatching.
 
 * where: `frontend/src/lib/statsStore.ts:16-22`
-* problem: `Number(next?.normal || 0)` — the `|| 0` swallows legitimate `0` after a coercion that would already produce `0`. Reads as defensive noise.
+* problem: `Number(next?.normal || 0)` - the `|| 0` swallows legitimate `0` after a coercion that would already produce `0`. Reads as defensive noise.
 * solutions: `Number(next?.normal ?? 0) || 0` or just `Number(next?.normal) || 0`.
 
 * where: `frontend/src/lib/renderers/grid/GridRenderer.svelte:4`
@@ -266,7 +266,7 @@ Inspection-only senior dev pass over `frontend/src/`. Some items overlap with th
 * solutions: Drop them and import `apiUrl`, or give them real semantics (e.g. CDN host for assets).
 
 * where: `frontend/src/App.svelte:78`
-* problem: Footer hardcodes literal text `DB: WAL` regardless of the actual backend journal mode — UI lies if this ever changes.
+* problem: Footer hardcodes literal text `DB: WAL` regardless of the actual backend journal mode - UI lies if this ever changes.
 * solutions: Read from a status endpoint or remove.
 
 * where: `frontend/src/lib/SearchBar.svelte:21-22`
@@ -278,7 +278,7 @@ Inspection-only senior dev pass over `frontend/src/`. Some items overlap with th
 * solutions: Single `finally { fetchItems(); }` after the alert, and skip the success-path refetch if it's already covered.
 
 * where: `frontend/src/lib/Inspector.svelte:23`
-* problem: `let videoElement: HTMLVideoElement;` — bound only when item is a video, but typed as non-nullable. TypeScript-unsafe (passes only because Svelte's `bind:this` typings are loose).
+* problem: `let videoElement: HTMLVideoElement;` - bound only when item is a video, but typed as non-nullable. TypeScript-unsafe (passes only because Svelte's `bind:this` typings are loose).
 * solutions: `let videoElement: HTMLVideoElement | undefined;` and guard usages.
 
 * where: `frontend/src/lib/VaultView.svelte:42-44,376-393`
@@ -289,117 +289,121 @@ Inspection-only senior dev pass over `frontend/src/`. Some items overlap with th
 
 Phased fix plan for the findings above. Earlier phases are lower-risk; later phases require care or backend coordination. Within a phase, batch fixes that touch the same file.
 
-### Phase 1 — Hygiene (~30 min, zero risk) ✅ DONE
+### Phase 1 - Hygiene (~30 min, zero risk) [done] DONE
 
 Single-line cleanups, no behavior change. Validated with `npm run check` (0 errors).
 
-- ✅ `frontend/src/lib/renderers/grid/GridRenderer.svelte` — removed unused `onDestroy` import
-- ✅ `frontend/src/lib/search.ts` — dropped redundant `.map(t => t.trim())` from text-term split
-- ✅ `frontend/src/lib/Ingestion.svelte` — `parseTimer` typed as `number | null`, uses `window.setTimeout`, null-guarded on clear
-- ✅ `frontend/src/lib/SearchBar.svelte` — collapsed two parallel `startsWith` checks to a single `cmd.slice(1).toLowerCase().startsWith(query)` after stripping the leading `>`
-- ✅ `frontend/src/lib/statsStore.ts` — replaced `Number(x || 0)` with `Number(x) || 0` in both `queueStats` and `refreshReviewCount`
-- ✅ `frontend/src/lib/Inspector.svelte` — `videoElement: HTMLVideoElement | undefined`, guarded usages
-- ✅ `frontend/src/lib/Inspector.svelte` — A/D/W/F keyboard handlers unified into a single `else if` chain
-- ✅ `frontend/src/App.svelte` — removed misleading hardcoded "DB: WAL" footer text
+- [done] `frontend/src/lib/renderers/grid/GridRenderer.svelte` - removed unused `onDestroy` import
+- [done] `frontend/src/lib/search.ts` - dropped redundant `.map(t => t.trim())` from text-term split
+- [done] `frontend/src/lib/Ingestion.svelte` - `parseTimer` typed as `number | null`, uses `window.setTimeout`, null-guarded on clear
+- [done] `frontend/src/lib/SearchBar.svelte` - collapsed two parallel `startsWith` checks to a single `cmd.slice(1).toLowerCase().startsWith(query)` after stripping the leading `>`
+- [done] `frontend/src/lib/statsStore.ts` - replaced `Number(x || 0)` with `Number(x) || 0` in both `queueStats` and `refreshReviewCount`
+- [done] `frontend/src/lib/Inspector.svelte` - `videoElement: HTMLVideoElement | undefined`, guarded usages
+- [done] `frontend/src/lib/Inspector.svelte` - A/D/W/F keyboard handlers unified into a single `else if` chain
+- [done] `frontend/src/App.svelte` - removed misleading hardcoded "DB: WAL" footer text
 
-### Phase 2 — Resource Cleanup (~1 hr, low risk) ✅ DONE
+### Phase 2 - Resource Cleanup (~1 hr, low risk) [done] DONE
 
-Memory leaks and orphaned timers/observers — additive `onDestroy` hooks.
+Memory leaks and orphaned timers/observers - additive `onDestroy` hooks.
 
-- ✅ `frontend/src/lib/Inspector.svelte` — `onDestroy(() => abortController?.abort())` cancels in-flight `/api/items/{hash}` fetch when the panel closes
-- ✅ `frontend/src/lib/SearchBar.svelte` — `onDestroy` clears both `searchDebounceTimer` and `refreshDebounceTimer`
-- ✅ `frontend/src/lib/Ingestion.svelte` and `frontend/src/lib/LogsView.svelte` — reconnect timer handle stored, `clearTimeout` invoked on `onDestroy` so closed views can no longer revive an EventSource
-- ✅ `frontend/src/lib/api.ts` — `assetUrl` and `eventSourceUrl` 1-line aliases removed; `MediaFocus.svelte` and `VaultGroupTile.svelte` updated to import `apiUrl` directly
+- [done] `frontend/src/lib/Inspector.svelte` - `onDestroy(() => abortController?.abort())` cancels in-flight `/api/items/{hash}` fetch when the panel closes
+- [done] `frontend/src/lib/SearchBar.svelte` - `onDestroy` clears both `searchDebounceTimer` and `refreshDebounceTimer`
+- [done] `frontend/src/lib/Ingestion.svelte` and `frontend/src/lib/LogsView.svelte` - reconnect timer handle stored, `clearTimeout` invoked on `onDestroy` so closed views can no longer revive an EventSource
+- [done] `frontend/src/lib/api.ts` - `assetUrl` and `eventSourceUrl` 1-line aliases removed; `MediaFocus.svelte` and `VaultGroupTile.svelte` updated to import `apiUrl` directly
 
-### Phase 3 — Error Handling (~2 hr, medium risk) ✅ DONE
+### Phase 3 - Error Handling (~2 hr, medium risk) [done] DONE
 
 Surfaces failures instead of silently desyncing the UI.
 
-- ✅ `frontend/src/lib/api.ts` — `.catch` resets `apiKeyPromise = null`, so the next `apiFetch` retries fetching the session key after a transient backend startup error
-- ✅ `frontend/src/lib/ReviewView.svelte` — both `loadReview` and `handleAction` check `res.ok` before mutating local state and surface a toast/log on failure
-- ✅ `frontend/src/lib/VaultView.svelte` — split into separate try/catch blocks for items and stats; both verify `res.ok`; stats failures no longer surface as "Failed to fetch items"
-- ✅ `frontend/src/lib/StatsView.svelte` — `requestSeq` counter increments at call start; three checkpoints (`if (seq !== requestSeq) return`) discard stale responses; the `finally` clause clears `loading` only when the current sequence still matches
-- ✅ `frontend/src/lib/Ingestion.svelte` — `running` is now driven by the SSE "Ingestion cycle complete" message; the fake `setTimeout(... 5000)` was removed; POST failures show an alert and `res.ok` is checked
+- [done] `frontend/src/lib/api.ts` - `.catch` resets `apiKeyPromise = null`, so the next `apiFetch` retries fetching the session key after a transient backend startup error
+- [done] `frontend/src/lib/ReviewView.svelte` - both `loadReview` and `handleAction` check `res.ok` before mutating local state and surface a toast/log on failure
+- [done] `frontend/src/lib/VaultView.svelte` - split into separate try/catch blocks for items and stats; both verify `res.ok`; stats failures no longer surface as "Failed to fetch items"
+- [done] `frontend/src/lib/StatsView.svelte` - `requestSeq` counter increments at call start; three checkpoints (`if (seq !== requestSeq) return`) discard stale responses; the `finally` clause clears `loading` only when the current sequence still matches
+- [done] `frontend/src/lib/Ingestion.svelte` - `running` is now driven by the SSE "Ingestion cycle complete" message; the fake `setTimeout(... 5000)` was removed; POST failures show an alert and `res.ok` is checked
 
-### Phase 4 — Performance Quick Wins (~2 hr, low-medium risk) ✅ DONE
+### Phase 4 - Performance Quick Wins (~2 hr, low-medium risk) [done] DONE
 
 High-impact, contained changes.
 
-- ✅ `GridRenderer.svelte` and `MasonryRenderer.svelte` — `logSummary` now gated behind `import.meta.env.DEV` and demoted from INFO to DEBUG; the per-recompute `/api/logs/ui` flood is gone in production builds
-- ✅ Both renderers — `emitVisualOrder` now diffs a compact tuple key (`positions.length:first.id:last.id:columnCount`) instead of joining all hashes into a multi-KB string per layout tick
-- ✅ Both renderers — reactive blocks call helpers with explicit args (e.g. `$: emitVisualOrder(layout.positions)`), so dependency tracking no longer relies on Svelte's static lookup inside helper functions
-- ✅ `frontend/src/lib/VaultView.svelte` — `/api/stats` is fetched only on the initial (`!append`) request; subsequent paginated appends skip it (already covered by the polled stats store)
-- ✅ `frontend/src/lib/Inspector.svelte` — `lastLoadedHash` tracker bails out of `loadFullDetails` when the hash hasn't changed; `handleUpdate`'s spread no longer triggers a redundant `/api/items/{hash}` fetch
-- ✅ `frontend/src/lib/VaultView.svelte` — `deleteSelected` now refetches via a single `finally { fetchItems(); }`, eliminating the double-refetch on success and the duplicate work on failure
+- [done] `GridRenderer.svelte` and `MasonryRenderer.svelte` - `logSummary` now gated behind `import.meta.env.DEV` and demoted from INFO to DEBUG; the per-recompute `/api/logs/ui` flood is gone in production builds
+- [done] Both renderers - `emitVisualOrder` now diffs a compact tuple key (`positions.length:first.id:last.id:columnCount`) instead of joining all hashes into a multi-KB string per layout tick
+- [done] Both renderers - reactive blocks call helpers with explicit args (e.g. `$: emitVisualOrder(layout.positions)`), so dependency tracking no longer relies on Svelte's static lookup inside helper functions
+- [done] `frontend/src/lib/VaultView.svelte` - `/api/stats` is fetched only on the initial (`!append`) request; subsequent paginated appends skip it (already covered by the polled stats store)
+- [done] `frontend/src/lib/Inspector.svelte` - `lastLoadedHash` tracker bails out of `loadFullDetails` when the hash hasn't changed; `handleUpdate`'s spread no longer triggers a redundant `/api/items/{hash}` fetch
+- [done] `frontend/src/lib/VaultView.svelte` - `deleteSelected` now refetches via a single `finally { fetchItems(); }`, eliminating the double-refetch on success and the duplicate work on failure
 
-### Phase 5 — Selection / Memoization (~3 hr, medium risk) ✅ DONE
+### Phase 5 - Selection / Memoization (~3 hr, medium risk) [done] DONE
 
 Hot-path allocations on user interaction collapsed to O(1) where possible.
 
-- ✅ `frontend/src/lib/VaultView.svelte` — persistent `groupsById: Map<string, VaultGroup>` plus `groupOrder: string[]` keep group references stable; `appendToGroups(newItems, reset)` only allocates fresh group objects for IDs that received new items, ending the O(n²) "spread every group on every page" allocation
-- ✅ `frontend/src/lib/VaultView.svelte` — `hashIndex: Map<string, { item: VaultItem; group: VaultGroup }>` is rebuilt alongside `appendToGroups`; `handleSelectItem` and selection helpers now do O(1) `hashIndex.get(hash)` lookups instead of `groups.find().items.find()`
-- ✅ `frontend/src/lib/VaultView.svelte` — `lastStatus` snapshot guards `emitStatus`; the footer no longer receives one custom event per layout-measurement frame, only on real changes
-- ✅ `frontend/src/lib/VaultView.svelte` — visual-order tracking and `loadedHashOrder` reuse the `hashIndex` Map rather than allocating fresh `flatMap` arrays per click
+- [done] `frontend/src/lib/VaultView.svelte` - persistent `groupsById: Map<string, VaultGroup>` plus `groupOrder: string[]` keep group references stable; `appendToGroups(newItems, reset)` only allocates fresh group objects for IDs that received new items, ending the O(n^2) "spread every group on every page" allocation
+- [done] `frontend/src/lib/VaultView.svelte` - `hashIndex: Map<string, { item: VaultItem; group: VaultGroup }>` is rebuilt alongside `appendToGroups`; `handleSelectItem` and selection helpers now do O(1) `hashIndex.get(hash)` lookups instead of `groups.find().items.find()`
+- [done] `frontend/src/lib/VaultView.svelte` - `lastStatus` snapshot guards `emitStatus`; the footer no longer receives one custom event per layout-measurement frame, only on real changes
+- [done] `frontend/src/lib/VaultView.svelte` - visual-order tracking and `loadedHashOrder` reuse the `hashIndex` Map rather than allocating fresh `flatMap` arrays per click
 
 Risk noted: shift-click range selection across mixed media remains slated for real-vault validation (still listed in Current Issues).
 
-### Phase 6 — Architectural Refactors (~4 hr, higher risk) ✅ DONE
+### Phase 6 - Architectural Refactors (~4 hr, higher risk) [done] DONE
 
-Shared infrastructure cleanup — validated with `npm run check` (0 errors, 25 a11y warnings only).
+Shared infrastructure cleanup - validated with `npm run check` (0 errors, 25 a11y warnings only).
 
-- ✅ `frontend/src/lib/renderers/masonry/masonryLayout.ts` — module-level cache (`lastCacheKey`, `lastCache`, `lastPositions`, `lastActiveIndexes`) is now wrapped in a `createMasonryLayoutEngine()` factory closure; each `MasonryRenderer` instance gets its own engine via `const computeLayout = createMasonryLayoutEngine();`. The dead `lastStore` reference was dropped. New exported type: `MasonryLayoutEngine`.
-- ✅ `frontend/src/lib/observers.ts` (new file) — `watchIntersection(node, options)` and `watchResize(node, onResize)` helpers each return a `cleanup()` function. They centralize observer setup and removed the need for `bind:this` plus parallel observer state across the component.
-- ✅ `frontend/src/lib/VaultView.svelte` — uses the new helpers; the duplicate `sentinelIsNearViewport` / `maybeLoadMore` / `scheduleLoadMoreCheck` machinery and the 50 ms `loadMoreCheckTimer` are gone. The `IntersectionObserver` `rootMargin: 400px` covers the near-viewport case directly.
-- ✅ `frontend/src/App.svelte` — chose the always-mounted strategy and documented it: `VaultView` stays mounted (via `class:hidden`) to preserve scroll position, selection, and loaded items; observers are idle when `display:none`, so the cost is negligible. Other tabs continue using `{#if}` so they can re-fetch on demand.
-- ✅ `frontend/src/lib/Inspector.svelte` — added `export let focusMode: 'normal' | 'wide' | 'fullscreen' = 'normal';`; the keyboard handler now bails with `if (focusMode !== 'normal') return;` instead of calling `document.querySelector('.focus-overlay')` on every keypress. `VaultView.svelte` passes the current focus mode through.
-- ✅ Renderer reactive dependencies — already made explicit during Phase 4 (`$: emitVisualOrder(layout.positions)`, `$: logSummary(groups, visiblePositions, ...)`).
+- [done] `frontend/src/lib/renderers/masonry/masonryLayout.ts` - module-level cache (`lastCacheKey`, `lastCache`, `lastPositions`, `lastActiveIndexes`) is now wrapped in a `createMasonryLayoutEngine()` factory closure; each `MasonryRenderer` instance gets its own engine via `const computeLayout = createMasonryLayoutEngine();`. The dead `lastStore` reference was dropped. New exported type: `MasonryLayoutEngine`.
+- [done] `frontend/src/lib/observers.ts` (new file) - `watchIntersection(node, options)` and `watchResize(node, onResize)` helpers each return a `cleanup()` function. They centralize observer setup and removed the need for `bind:this` plus parallel observer state across the component.
+- [done] `frontend/src/lib/VaultView.svelte` - uses the new helpers; the duplicate `sentinelIsNearViewport` / `maybeLoadMore` / `scheduleLoadMoreCheck` machinery and the 50 ms `loadMoreCheckTimer` are gone. The `IntersectionObserver` `rootMargin: 400px` covers the near-viewport case directly.
+- [done] `frontend/src/App.svelte` - chose the always-mounted strategy and documented it: `VaultView` stays mounted (via `class:hidden`) to preserve scroll position, selection, and loaded items; observers are idle when `display:none`, so the cost is negligible. Other tabs continue using `{#if}` so they can re-fetch on demand.
+- [done] `frontend/src/lib/Inspector.svelte` - added `export let focusMode: 'normal' | 'wide' | 'fullscreen' = 'normal';`; the keyboard handler now bails with `if (focusMode !== 'normal') return;` instead of calling `document.querySelector('.focus-overlay')` on every keypress. `VaultView.svelte` passes the current focus mode through.
+- [done] Renderer reactive dependencies - already made explicit during Phase 4 (`$: emitVisualOrder(layout.positions)`, `$: logSummary(groups, visiblePositions, ...)`).
 
-### Phase 7 — Logging & SSE Throughput (~2 hr, medium risk) ✅ DONE
+### Phase 7 - Logging & SSE Throughput (~2 hr, medium risk) [done] DONE
 
-- ✅ `frontend/src/lib/logger.ts` — rewrote with 300ms batch queue; ERROR bypasses queue (flushes immediately); DEBUG dropped in production; exports `flushLogs()` for teardown
-- ✅ `frontend/src/lib/Ingestion.svelte` — replaced `[...logs, entry].slice(-150)` with push+splice+reassign (mutate-and-trim); replaced `setTimeout(_, 30)` with `tick()`
-- ✅ `frontend/src/lib/LogsView.svelte` — same mutate-and-trim + `tick()` pattern applied
+- [done] `frontend/src/lib/logger.ts` - rewrote with 300ms batch queue; ERROR bypasses queue (flushes immediately); DEBUG dropped in production; exports `flushLogs()` for teardown
+- [done] `frontend/src/lib/Ingestion.svelte` - replaced `[...logs, entry].slice(-150)` with push+splice+reassign (mutate-and-trim); replaced `setTimeout(_, 30)` with `tick()`
+- [done] `frontend/src/lib/LogsView.svelte` - same mutate-and-trim + `tick()` pattern applied
 
-### Phase 8 — Image/Video Loading Strategy (~3 hr, needs measurement) ✅ DONE (image loading); Video preview DEFERRED
+### Phase 8 - Image/Video Loading Strategy (~3 hr, needs measurement) [done] DONE (image loading); Video preview DEFERRED
 
-- ✅ Both renderers — flipped `eagerImages` to `false`; removed `content-visibility: visible` override so tile's own `content-visibility: auto` takes effect. Images in the overscan band now use browser-managed `loading="lazy"`.
-- ⏳ Video hover preview — DEFERRED. Three options documented for later decision:
+- [done] Both renderers - flipped `eagerImages` to `false`; removed `content-visibility: visible` override so tile's own `content-visibility: auto` takes effect. Images in the overscan band now use browser-managed `loading="lazy"`.
+- [deferred] Video hover preview - DEFERRED. Three options documented for later decision:
   1. Frontend-only file size cap (skip hover-play for large videos, no backend changes)
   2. Backend preview clip endpoint (`GET /api/items/{hash}/preview`, 3-5 sec ffmpeg clip)
   3. Animated WebP thumbnail (cheapest: reuse existing `extract_sampled_video_frames()` which already extracts 5 frames for CLIP embeddings; stitch into animated WebP via Pillow; ~0 extra ffmpeg calls)
 
-### Phase 9 — Tauri / Environment (~1 hr, low risk) ✅ DONE
+### Phase 9 - Tauri / Environment (~1 hr, low risk) [done] DONE
 
-- ✅ `frontend/src/lib/MediaFocus.svelte` — removed broken `(window as any).__TAURI__` check in `close()`; now always calls `appWindow.setFullscreen(false)` with try/catch, consistent with `handleModeChange` and `onDestroy` which already use this pattern
+- [done] `frontend/src/lib/MediaFocus.svelte` - removed broken `(window as any).__TAURI__` check in `close()`; now always calls `appWindow.setFullscreen(false)` with try/catch, consistent with `handleModeChange` and `onDestroy` which already use this pattern
 
 Validation: needs real `tauri dev` and packaged build testing.
 
-### Phase 10 — A11y Debt (~3 hr, low risk) ✅ DONE
+### Phase 10 - A11y Debt (~3 hr, low risk) [done] DONE
 
 All 25 accessibility warnings resolved. `npm run check` now reports **0 errors, 0 warnings**.
 
-- ✅ `frontend/src/lib/MediaFocus.svelte` — added `role="button"` + `tabindex="-1"` + `on:keydown` to overlay div; `aria-label` on prev/next nav buttons; `on:keydown|stopPropagation` on media container; `svelte-ignore` for video caption
-- ✅ `frontend/src/lib/VaultGroupTile.svelte` — added `role="button"` + `tabindex="0"` + Enter keydown handler to `.tile-group`; `svelte-ignore` for video caption
-- ✅ `frontend/src/lib/Inspector.svelte` — linked Artist + Source URL labels with `for`/`id` pairs; `svelte-ignore a11y-label-has-associated-control` on 4 display-only labels (Platform, Hash, Topics, WD Suggestions); `svelte-ignore` for video caption
-- ✅ `frontend/src/lib/SettingsView.svelte` — linked all 10 label/input pairs with `for`/`id` attributes
+- [done] `frontend/src/lib/MediaFocus.svelte` - added `role="button"` + `tabindex="-1"` + `on:keydown` to overlay div; `aria-label` on prev/next nav buttons; `on:keydown|stopPropagation` on media container; `svelte-ignore` for video caption
+- [done] `frontend/src/lib/VaultGroupTile.svelte` - added `role="button"` + `tabindex="0"` + Enter keydown handler to `.tile-group`; `svelte-ignore` for video caption
+- [done] `frontend/src/lib/Inspector.svelte` - linked Artist + Source URL labels with `for`/`id` pairs; `svelte-ignore a11y-label-has-associated-control` on 4 display-only labels (Platform, Hash, Topics, WD Suggestions); `svelte-ignore` for video caption
+- [done] `frontend/src/lib/SettingsView.svelte` - linked all 10 label/input pairs with `for`/`id` attributes
 
 ### Suggested Execution Order
 
-1. ✅ Phases 1-2 in one sitting — pure cleanup, no risk, builds momentum
-2. ✅ Phase 3 before Phase 4 — error handling first so perf changes don't mask new bugs
-3. ✅ Phase 4 standalone — measurable perf wins
-4. ✅ Phase 5 standalone — needs interaction testing
-5. ✅ Phase 6 standalone commit — biggest blast radius
-6. ✅ Phase 7 — logger batching and SSE throughput
-7. ✅ Phase 8 — image lazy loading (video preview deferred)
-8. ✅ Phase 9 — Tauri detection fix
-9. ✅ Phase 10 — accessibility debt cleared to 0 warnings
+1. [done] Phases 1-2 in one sitting - pure cleanup, no risk, builds momentum
+2. [done] Phase 3 before Phase 4 - error handling first so perf changes don't mask new bugs
+3. [done] Phase 4 standalone - measurable perf wins
+4. [done] Phase 5 standalone - needs interaction testing
+5. [done] Phase 6 standalone commit - biggest blast radius
+6. [done] Phase 7 - logger batching and SSE throughput
+7. [done] Phase 8 - image lazy loading (video preview deferred)
+8. [done] Phase 9 - Tauri detection fix
+9. [done] Phase 10 - accessibility debt cleared to 0 warnings
 
 Status (2026-05-04): **All phases complete.** `npm run check` reports 0 errors, 0 warnings. Only remaining item is the deferred video preview strategy (Phase 8, options documented above).
 
+Also the fixes will be crosschecked with code by GPT 5.5
+
+Also will check how DEBUG button functions. 
+
 ### Cross-Cutting Considerations
 
-- Tests: project has no frontend test suite visible in the tree. Consider adding a minimal Vitest harness for `search.ts`, `selection.ts`, `layout.ts`, `gridLayout.ts`, `masonryLayout.ts` before Phase 5/6 — these are pure functions and easy wins for safety.
+- Tests: project has no frontend test suite visible in the tree. Consider adding a minimal Vitest harness for `search.ts`, `selection.ts`, `layout.ts`, `gridLayout.ts`, `masonryLayout.ts` before Phase 5/6 - these are pure functions and easy wins for safety.
 - Validation environment: several issues (Tauri detection, eager image perf, masonry cache) only manifest in packaged builds or with large vaults. Need a 5k+ item test vault.
 - Backend coordination needed for: video preview endpoint (Phase 8), DB journal mode status endpoint (Phase 1, optional), ingestion run-status endpoint as alternative to SSE-driven flag (Phase 3, optional).
 

@@ -181,6 +181,59 @@ def _get_stats_sync():
     finally:
         conn.close()
 
+@app.get("/api/system/memory")
+async def get_system_memory():
+    return await asyncio.to_thread(_get_system_memory_sync)
+
+def _get_system_memory_sync():
+    try:
+        try:
+            import psutil
+            backend_mb = psutil.Process().memory_info().rss / 1024 / 1024
+        except ModuleNotFoundError:
+            backend_mb = _get_process_memory_mb_fallback()
+        return {"backend_mb": round(backend_mb, 2)}
+    except Exception as exc:
+        log_system("ERROR", "Failed to read backend memory", error=str(exc))
+        raise HTTPException(status_code=500, detail="Failed to read backend memory") from exc
+
+def _get_process_memory_mb_fallback():
+    if sys.platform == "win32":
+        import ctypes
+        from ctypes import wintypes
+
+        class ProcessMemoryCounters(ctypes.Structure):
+            _fields_ = [
+                ("cb", wintypes.DWORD),
+                ("PageFaultCount", wintypes.DWORD),
+                ("PeakWorkingSetSize", ctypes.c_size_t),
+                ("WorkingSetSize", ctypes.c_size_t),
+                ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                ("PagefileUsage", ctypes.c_size_t),
+                ("PeakPagefileUsage", ctypes.c_size_t),
+            ]
+
+        counters = ProcessMemoryCounters()
+        counters.cb = ctypes.sizeof(counters)
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        psapi = ctypes.WinDLL("psapi", use_last_error=True)
+        kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+        psapi.GetProcessMemoryInfo.argtypes = [wintypes.HANDLE, ctypes.POINTER(ProcessMemoryCounters), wintypes.DWORD]
+        psapi.GetProcessMemoryInfo.restype = wintypes.BOOL
+        handle = kernel32.GetCurrentProcess()
+        ok = psapi.GetProcessMemoryInfo(handle, ctypes.byref(counters), counters.cb)
+        if not ok:
+            raise ctypes.WinError(ctypes.get_last_error())
+        return counters.WorkingSetSize / 1024 / 1024
+
+    import resource
+    value = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    divisor = 1024 * 1024 if sys.platform == "darwin" else 1024
+    return value / divisor
+
 @app.get("/api/search/suggestions")
 async def get_search_suggestions(kind: str, q: str = "", limit: int = 20):
     return await asyncio.to_thread(_get_search_suggestions_sync, kind, q, limit)
@@ -195,7 +248,7 @@ def _get_search_suggestions_sync(kind: str, q: str = "", limit: int = 20):
     limit = max(1, min(int(limit or 20), 50))
 
     if kind == "command":
-        commands = [">masonry", ">grid", ">zoom-in", ">zoom-out"]
+        commands = [">masonry", ">grid", ">zoom-in", ">zoom-out", ">ram-track"]
         items = [
             {"value": cmd, "count": 0}
             for cmd in commands

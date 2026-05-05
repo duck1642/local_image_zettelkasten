@@ -19,6 +19,7 @@ function normalizeConfig(value: any) {
   if (!next.ui) next.ui = {};
   next.ui.vault_layout_mode = normalizeLayoutMode(next);
   next.ui.vault_tile_min_width = normalizeTileMinWidth(next.ui.vault_tile_min_width);
+  next.ui.ram_track_enabled = Boolean(next.ui.ram_track_enabled);
   return next;
 }
 
@@ -83,6 +84,13 @@ export async function setVaultLayoutMode(mode: VaultLayoutMode) {
   return updateConfig((draft) => {
     if (!draft.ui) draft.ui = {};
     draft.ui.vault_layout_mode = mode;
+  }, true);
+}
+
+export async function setRamTrackEnabled(enabled: boolean) {
+  return updateConfig((draft) => {
+    if (!draft.ui) draft.ui = {};
+    draft.ui.ram_track_enabled = enabled;
   }, true);
 }
 

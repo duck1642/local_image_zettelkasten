@@ -7,6 +7,7 @@
   import StatsView from './lib/StatsView.svelte';
   import VaultView from './lib/VaultView.svelte';
   import { log as uiLog } from './lib/logger';
+  import { ramStats, startRamTracker } from './lib/ramStore';
   import { queueStats, reviewCount, startSharedStatsPolling } from './lib/statsStore';
 
   type AppTab = 'vault' | 'logs' | 'ingest' | 'review' | 'stats' | 'settings';
@@ -30,9 +31,23 @@
     window.dispatchEvent(new CustomEvent('lmz:refresh', { detail: { tab: activeTab } }));
   }
 
+  function ramStatusText(stats: any) {
+    if (stats.error) return 'RAM: unavailable';
+    if (stats.backendMb === null) return 'RAM: loading';
+    if (stats.frontendMb !== null && stats.totalMb !== null) {
+      return `RAM: backend ${stats.backendMb} MB | frontend ${stats.frontendMb} MB | total ${stats.totalMb} MB`;
+    }
+    return `RAM: backend ${stats.backendMb} MB`;
+  }
+
   onMount(() => {
     uiLog('INFO', 'Svelte UI initialized and mounted');
-    return startSharedStatsPolling();
+    const stopStats = startSharedStatsPolling();
+    const stopRam = startRamTracker();
+    return () => {
+      stopStats();
+      stopRam();
+    };
   });
 </script>
 
@@ -79,16 +94,19 @@
   <footer class="bottom-status">
     {#if activeTab === 'vault'}
       <span class="status-left">Total Items: {vaultStatus.totalItems} | View: {vaultStatus.layoutMode} | LMZ Tauri</span>
-      <span class="status-right">Showing {vaultStatus.groups} groups{vaultStatus.hasMore ? ' (more available)' : ''}</span>
+      <span class="status-right">
+        {#if $ramStats.enabled}<span class="ram-status">{ramStatusText($ramStats)}</span>{/if}
+        <span>Showing {vaultStatus.groups} groups{vaultStatus.hasMore ? ' (more available)' : ''}</span>
+      </span>
     {:else if activeTab === 'ingest'}
       <span class="status-left">Ingestion | Normal: {$queueStats.normal} | Force: {$queueStats.force} | Failed: {$queueStats.failed}</span>
-      <span class="status-right">LMZ Tauri</span>
+      <span class="status-right">{#if $ramStats.enabled}<span class="ram-status">{ramStatusText($ramStats)}</span>{/if}<span>LMZ Tauri</span></span>
     {:else if activeTab === 'review'}
       <span class="status-left">Review | Pending: {$reviewCount}</span>
-      <span class="status-right">LMZ Tauri</span>
+      <span class="status-right">{#if $ramStats.enabled}<span class="ram-status">{ramStatusText($ramStats)}</span>{/if}<span>LMZ Tauri</span></span>
     {:else}
       <span class="status-left">{activeTab === 'logs' ? 'App Logs' : activeTab === 'stats' ? 'Stats' : 'Settings'}</span>
-      <span class="status-right">LMZ Tauri</span>
+      <span class="status-right">{#if $ramStats.enabled}<span class="ram-status">{ramStatusText($ramStats)}</span>{/if}<span>LMZ Tauri</span></span>
     {/if}
   </footer>
 </div>
@@ -107,7 +125,8 @@
   .view-shell { flex-grow: 1; display: flex; flex-direction: column; overflow: hidden; }
   .bottom-status { height: 25px; background: #010409; border-top: 1px solid var(--border-dim); padding: 0; display: flex; align-items: center; justify-content: space-between; font-size: 11px; color: var(--text-muted); flex-shrink: 0; z-index: 200; width: 100%; box-sizing: border-box; }
   .status-left { padding-left: 15px; }
-  .status-right { padding-right: 15px; }
+  .status-right { padding-right: 15px; display: flex; align-items: center; gap: 14px; }
+  .ram-status { color: var(--text-muted); white-space: nowrap; }
   .badge { background: var(--accent-primary); color: white; font-size: 10px; padding: 1px 5px; border-radius: 10px; margin-left: 3px; }
   .badge.warn { background: var(--accent-warning); }
 </style>
