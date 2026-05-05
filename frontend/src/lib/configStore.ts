@@ -3,6 +3,10 @@ import { apiFetch } from './api';
 import { normalizeLayoutMode, normalizeTileMinWidth, type VaultLayoutMode } from './layout';
 import { log as uiLog } from './logger';
 
+export const DEFAULT_INSPECTOR_WIDTH = 400;
+export const MIN_INSPECTOR_WIDTH = 320;
+export const MAX_INSPECTOR_WIDTH = 760;
+
 export const config = writable<any>(null);
 export const configLoading = writable(false);
 export const configSaving = writable(false);
@@ -20,7 +24,14 @@ function normalizeConfig(value: any) {
   next.ui.vault_layout_mode = normalizeLayoutMode(next);
   next.ui.vault_tile_min_width = normalizeTileMinWidth(next.ui.vault_tile_min_width);
   next.ui.ram_track_enabled = Boolean(next.ui.ram_track_enabled);
+  next.ui.inspector_width = normalizeInspectorWidth(next.ui.inspector_width);
   return next;
+}
+
+export function normalizeInspectorWidth(value: unknown) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return DEFAULT_INSPECTOR_WIDTH;
+  return Math.max(MIN_INSPECTOR_WIDTH, Math.min(MAX_INSPECTOR_WIDTH, Math.round(numeric)));
 }
 
 export const configDirty = derived(
@@ -91,6 +102,13 @@ export async function setRamTrackEnabled(enabled: boolean) {
   return updateConfig((draft) => {
     if (!draft.ui) draft.ui = {};
     draft.ui.ram_track_enabled = enabled;
+  }, true);
+}
+
+export async function setInspectorWidth(width: number) {
+  return updateConfig((draft) => {
+    if (!draft.ui) draft.ui = {};
+    draft.ui.inspector_width = normalizeInspectorWidth(width);
   }, true);
 }
 

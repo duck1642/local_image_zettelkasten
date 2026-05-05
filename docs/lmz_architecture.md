@@ -2,13 +2,13 @@
 
 ## Summary
 
-LMZ is a local media archive and zettelkasten system for images, GIFs, and videos.
+Local Media Zettelkasten (LMZ) is a local media archive and zettelkasten system for images, GIFs, and videos.
 
-It ingests local files and external URLs, validates media, stores files by SHA256 hash, indexes runtime metadata in SQLite, generates Obsidian-compatible markdown notes, keeps local WD tag suggestions in JSON cache files, and exposes a Tauri/Svelte desktop UI through a local FastAPI backend.
+It ingests local files and external URLs, validates media, stores original assets by SHA256 hash, indexes runtime metadata in SQLite, generates Obsidian-compatible markdown notes, keeps local WD tag reports in sharded JSON cache files, and exposes a Tauri/Svelte desktop UI through a local FastAPI backend.
 
 Runtime state stays outside source code under root-level `data/`, `logs/`, and `secrets/`.
 
-## Current Project Shape
+## Project Shape
 
 ```text
 local_media_zettelkasten/
@@ -18,10 +18,6 @@ local_media_zettelkasten/
   README.md
   config/
     config.yaml
-  frontend/
-    src/
-      lib/
-    src-tauri/
   backend/
     core.py
     web_api.py
@@ -30,6 +26,7 @@ local_media_zettelkasten/
     md_generator.py
     processor.py
     queue_service.py
+    thumbnails.py
     utils.py
     validators.py
     db/
@@ -37,6 +34,25 @@ local_media_zettelkasten/
     logs/
     scripts/
     tagging/
+  frontend/
+    src/
+      App.svelte
+      lib/
+        VaultView.svelte
+        VaultGroupTile.svelte
+        Inspector.svelte
+        MediaFocus.svelte
+        SearchBar.svelte
+        Ingestion.svelte
+        ReviewView.svelte
+        StatsView.svelte
+        LogsView.svelte
+        SettingsView.svelte
+        renderers/
+          masonry/
+          grid/
+          archive/
+    src-tauri/
   tools/
     maintenance/
   data/
@@ -61,33 +77,34 @@ local_media_zettelkasten/
 
 ## Entry Points
 
-- `python dev.py` launches the modern Tauri/Svelte + FastAPI development stack.
+- `python dev.py` launches the development stack.
 - `python main.py` runs CLI ingestion.
-- `lmz` runs `core:main` when installed.
-- `cd frontend; npm run build:sidecar` builds the production Tauri sidecar binary.
+- `lmz` runs the installed CLI entry point.
+- `cd frontend; npm run build:sidecar` builds the production Tauri sidecar.
+- `cd frontend; npm run tauri build` builds the desktop app after the sidecar exists.
 
-The old `gui.py`, old Python UI package, and PySide entry point are removed.
+The old Flet and PySide/PyQt UI paths are no longer active.
 
-## Core Data Flow
+## Runtime Data Flow
 
 ```text
-Local files / Markdown URL queues
+local files / markdown URL queues / Tauri UI actions
         |
         v
-core.py / queue_service.py / web_api.py
+backend/core.py / backend/queue_service.py / backend/web_api.py
         |
-        +--> external_ingestion.py
-        |        +--> gallery-dl wrapper
-        |        +--> yt-dlp wrapper
+        +--> backend/external_ingestion.py
+        |       +--> gallery-dl wrapper
+        |       +--> yt-dlp wrapper
         |
         v
-processor.py
+backend/processor.py
         |
         +--> MIME/extension validation
         +--> SHA256 hash
         +--> duplicate checks
         +--> pHash / video signatures
-        +--> copy to sharded vault assets
+        +--> copy original to sharded vault assets
         +--> insert SQLite runtime metadata
         +--> generate sharded markdown note
         +--> optional local WD tagging
@@ -120,7 +137,7 @@ Metadata ownership:
 
 SQLite intentionally does not store manual topics or WD tag metadata.
 
-## SQLite Schema
+## SQLite Model
 
 ### `items`
 
@@ -144,7 +161,7 @@ SQLite intentionally does not store manual topics or WD tag metadata.
 
 ### `item_tiles`
 
-Used for fragment/tile-level pHash support:
+Used for fragment/tile-level pHash support.
 
 | Column | Meaning |
 | --- | --- |
@@ -152,36 +169,162 @@ Used for fragment/tile-level pHash support:
 | `tile_index` | Tile order |
 | `tile_phash` | Tile perceptual hash |
 
-## API Architecture
+## Backend API
 
-`backend/web_api.py` exposes local HTTP endpoints for the Tauri/Svelte frontend.
+`backend/web_api.py` is the local FastAPI service used by the frontend.
 
-Important API properties:
+Core API areas:
+
+- Session key: `/api/session-key`.
+- Vault stats and memory: `/api/stats`, `/api/system/memory`.
+- Facets/search suggestions: `/api/facets`, `/api/search/suggestions`.
+- Thumbnails and item data: `/api/thumbnails/{hash}`, `/api/items`, `/api/items/{hash}`.
+- Item actions: update, delete, bulk delete, tag, open folder, open note.
+- Logs: SSE streaming, log open, log clear, frontend UI log ingest.
+- Queue ingestion: queue read/write/parse/open/retry/clear/start.
+- Review workflow: review count, review item list, review actions.
+- Config: `/api/config`.
+
+Security and runtime constraints:
 
 - Mutating endpoints require `X-LMZ-API-KEY`.
-- Session key is created under `secrets/.api_key`.
-- CORS is limited to localhost/Tauri origins.
+- The session key is stored under `secrets/.api_key`.
+- CORS is limited to local/Tauri origins.
 - Queue/log/review path inputs are allowlisted or root-checked.
-- Heavy synchronous work is routed through thread helpers in the main API paths.
-- Logs stream through Server-Sent Events.
+- Blocking filesystem/SQLite work is routed through thread helpers on main API paths.
 - Static vault/review assets are served from local runtime folders.
-- Frontend API, asset, and SSE URLs are centralized in `frontend/src/lib/api.ts`.
+- Frontend API calls go through `frontend/src/lib/api.ts`.
 
-Frontend API calls use `frontend/src/lib/api.ts` so mutating requests automatically include the session key.
+## Frontend Architecture
 
-## Tauri Packaging
+The active UI is Tauri + Svelte.
 
-Development uses `python dev.py`, which starts the Python backend directly and then launches Tauri.
+Top-level structure:
 
-Production Tauri builds expect an external sidecar named `lmz-api`. Build it before packaging:
+- `App.svelte`: application shell, sidebar navigation, footer, shared tab layout.
+- `VaultView.svelte`: vault page state, search integration, renderer selection, selection state, inspector/focus wiring.
+- `SearchBar.svelte` and `search.ts`: structured search parsing, commands, suggestions, Tab autocomplete.
+- `VaultGroupTile.svelte`: shared visual tile for grouped and single media.
+- `Inspector.svelte`: metadata, topics, WD tags, grouped navigation, tag/open/copy/save actions.
+- `MediaFocus.svelte`: wide/fullscreen media view, grouped navigation, filmstrip, fullscreen zoom/pan.
+- `Ingestion.svelte`: markdown queue editor and queue runner.
+- `ReviewView.svelte`: duplicate/review workflow.
+- `StatsView.svelte`: facet-count browsing.
+- `LogsView.svelte`: structured/raw log viewer.
+- `SettingsView.svelte`: config editing.
 
-```powershell
-cd frontend
-npm run build:sidecar
-npm run tauri build
+Shared frontend infrastructure:
+
+- `api.ts`: central API URL and authenticated fetch helper.
+- `configStore.ts`: shared config state and targeted config updates.
+- `statsStore.ts`: shared queue/review stats polling.
+- `ramStore.ts`: optional RAM tracker polling.
+- `media.ts`: safe media type helpers.
+- `selection.ts`: pure selection helpers.
+- `observers.ts`: reusable intersection/resize observer helpers.
+- `logger.ts`: batched frontend UI logging.
+
+## Vault Renderers
+
+The active vault renderers are virtualized and live under:
+
+```text
+frontend/src/lib/renderers/masonry/
+frontend/src/lib/renderers/grid/
 ```
 
-The sidecar builder uses PyInstaller against `backend/web_api.py` and writes Tauri's target-specific binary into `frontend/src-tauri/bin/`.
+Old full-DOM renderer snippets are archived under:
+
+```text
+frontend/src/lib/renderers/archive/
+```
+
+They are reference files only and are not compiled into the app.
+
+Active layout modes:
+
+- `masonry`: measured virtual masonry renderer.
+- `grid`: virtual fixed-row grid renderer.
+
+Renderer responsibilities:
+
+- Render only visible/overscan tiles.
+- Unmount offscreen media, including videos.
+- Emit visual order for Shift-click range selection.
+- Preserve grouped-media active indexes through parent state.
+- Respect `ui.vault_tile_min_width`.
+
+Vault commands:
+
+- `>masonry`
+- `>grid`
+- `>zoom-in`
+- `>zoom-out`
+- `>sort-newest`
+- `>sort-oldest`
+- `>sort-artist`
+- `>media-all`
+- `>media-image`
+- `>media-video`
+- `>toggle-inspector`
+- `>ram-track`
+
+## Vault Grouping
+
+The UI groups rows by non-empty `source_url`.
+
+Rules:
+
+- One SQLite row represents one media file.
+- One UI tile may represent multiple rows from the same source URL.
+- Blank `source_url` rows are never grouped.
+- Source URL grouping is UI-level; the database remains file-based.
+- Grouped media index state is owned by `VaultView` so virtualization can unmount/remount tiles safely.
+
+## Search And Facets
+
+Search is one input with structured prefixes:
+
+- `a:` artist.
+- `@` platform.
+- `#` note-frontmatter topic.
+- `*` WD tag.
+- `>` command.
+- `;` separates filter segments.
+
+Filter semantics:
+
+- Different prefix types: AND.
+- Repeated artists: OR.
+- Repeated platforms: OR.
+- Repeated topics: AND.
+- Repeated WD tags: AND.
+- Plain text terms: AND.
+
+Facet counts:
+
+- Artist/platform counts come from SQLite.
+- Topic counts come from markdown frontmatter.
+- WD tag counts come from markdown/cache-backed WD fields.
+- `/api/facets` powers the Stats view and search dropdown counts.
+
+## Media Focus
+
+`MediaFocus.svelte` owns wide/fullscreen viewing.
+
+Implemented behavior:
+
+- Wide and fullscreen modes for images and videos.
+- Grouped media navigation.
+- Filmstrip for grouped media in wide/fullscreen modes.
+- Fullscreen-only zoom/pan core logic.
+- `W`/`F` mode switching and Escape close behavior.
+
+Refinement still expected:
+
+- Fullscreen zoom/pan edge cases.
+- Filmstrip sizing and animation polish.
+- GIF animation policy in vault/inspector previews.
 
 ## Ingestion Integrity
 
@@ -195,7 +338,7 @@ Protected batch platforms:
 - Pinterest
 - YouTube community posts
 
-For protected platforms, downloaded media from one URL is treated as one batch. If one file fails processing, newly inserted DB rows/assets/notes from that attempt are rolled back and the URL remains retryable.
+For protected platforms, downloaded media from one URL is treated as one batch. If one file fails processing, newly inserted DB rows/assets/notes/tag outputs from that attempt are rolled back and the URL remains retryable.
 
 Platform specifics:
 
@@ -205,42 +348,7 @@ Platform specifics:
 - X/Twitter: no metadata prefetch; original URL is preserved while gallery-dl receives its supported URL form.
 - YouTube community: extracts community image attachments and records per-image download failures.
 
-## UI Architecture
-
-The active UI is Tauri + Svelte.
-
-Main frontend responsibilities:
-
-- Vault browsing with masonry/grid layouts.
-- Inspector metadata editing and tag display.
-- Grouped source URL navigation.
-- Media focus views for wide/fullscreen image/video inspection.
-- Markdown queue editor for ingestion.
-- Review workflow.
-- Settings editing.
-- Structured log viewing.
-
-Main backend responsibilities:
-
-- SQLite queries and mutations.
-- Thumbnail serving/generation.
-- Local file and URL ingestion commands.
-- WD tag triggering.
-- Markdown note regeneration.
-- Log streaming and log file opening.
-
-## Vault Grouping
-
-The vault UI groups rows by non-empty `source_url`.
-
-Behavior:
-
-- One DB row represents one media file.
-- One UI tile may represent multiple rows from the same source URL.
-- Blank `source_url` rows are never grouped.
-- Source URL grouping is UI-level; the database remains file-based.
-
-## Tagging Architecture
+## Tagging
 
 Local WD tagging lives under `backend/tagging/`.
 
@@ -250,7 +358,20 @@ Behavior:
 - Model files live under `data/models/`.
 - Detailed cache lives under `data/wd-tags/{hash[:2]}/{hash}.json`.
 - Markdown notes receive distilled WD fields.
+- Images are tagged directly.
 - Videos are tagged by sampling frames and merging results.
+- GIFs are currently treated as images; first-frame behavior is expected for thumbnails/tagging/dedupe.
+
+## Thumbnails And Media Serving
+
+Thumbnail generation lives in `backend/thumbnails.py`.
+
+Current behavior:
+
+- Image thumbnails are static JPEGs.
+- Video thumbnails are generated via ffmpeg.
+- GIF thumbnails are static first-frame previews.
+- Full original assets remain in the sharded vault and are served to the frontend through backend asset routes.
 
 ## Logging
 
@@ -259,9 +380,30 @@ Logs live under root-level `logs/`.
 Current layout:
 
 - `logs/raw/`: terminal output and raw tracebacks.
-- `logs/structured/`: JSONL streams for system, Svelte, ingestion, and activity events.
+- `logs/structured/`: JSONL streams for system, frontend UI, ingestion, and activity events.
+
+Frontend logging is batched through `frontend/src/lib/logger.ts`.
 
 The UI can show readable normal logs or raw JSONL records.
+
+## Tauri Packaging
+
+Development uses `python dev.py`, which starts the Python backend directly and launches Tauri.
+
+Production Tauri builds expect an external sidecar named `lmz-api`.
+
+```powershell
+cd frontend
+npm run build:sidecar
+npm run tauri build
+```
+
+The sidecar builder uses PyInstaller against `backend/web_api.py` and writes Tauri's target-specific binary into `frontend/src-tauri/bin/`.
+
+Known packaging caveat:
+
+- The production sidecar still needs clean-machine release validation.
+- Port 8000 binding is still static and may need dynamic binding later.
 
 ## Design Constraints
 

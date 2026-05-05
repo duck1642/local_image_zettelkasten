@@ -148,14 +148,18 @@ Check how paths handled. Everything must be relative to project folder
 ### Task
 Build a practical desktop interface for vault management, add local AI tagging, and harden the local API/runtime boundary.
 
-### Completed
+### Completed So Far
 - Replaced the broken Flet/PySide direction with a Tauri + Svelte desktop UI backed by FastAPI.
 - Removed old PySide UI code, `gui.py`, PySide dependencies.
-- Added a Svelte vault with masonry/grid layouts, grouped source URL tiles, infinite loading, and media filters.
+- Added a Svelte vault with virtualized masonry/grid layouts, grouped source URL tiles, infinite loading, and command-driven media/sort filters.
 - Added a Svelte inspector for metadata editing, source URL group navigation, copy/delete/open actions, and clickable WD suggestions.
+- Added toggleable and resizable inspector behavior.
 - Added image/video wide and fullscreen focus behavior through the modern frontend.
+- Added fullscreen zoom/pan core logic.
+- Added wide/fullscreen grouped-media filmstrip core logic.
 - Added markdown queue ingestion workbench with Normal/Force/Failed queues, save/open/retry/clear actions, live URL counts, and ingestion locking.
 - Added Svelte Review, Settings, and Logs views.
+- Added a read-only Stats view for WD tag, artist, platform, and topic counts.
 - Split logs into raw terminal output and structured JSONL streams.
 - Added readable and raw log display modes in the UI.
 - Added a reusable local WD tagging service with local model storage under `data/models/`.
@@ -176,32 +180,47 @@ Build a practical desktop interface for vault management, add local AI tagging, 
 - Centralized frontend API, asset, and SSE URL construction.
 - Fixed command-triggered layout saves to use authenticated API requests.
 - Added shared infinite-scroll loading for masonry and grid vault layouts.
+- Promoted virtualized renderers to the active `masonry` and `grid` layouts.
+- Archived old full-DOM renderer snippets as non-compiled references.
+- Added frontend facet-count suggestions and command search improvements.
+- Added local RAM tracker endpoint, frontend polling, footer display, and `>ram-track` toggle.
 - Added a PyInstaller sidecar build path for production Tauri packaging.
 - Replaced sidecar startup panics with logged errors.
 - Added a practical Tauri CSP for local backend/media access.
 
-### Remaining Caveats
+### Still In Progress / Needs Refinement
+- Virtual masonry/grid renderers need continued real-vault validation for long-scroll stability, video unmounting, grouped-media state, and zoom behavior.
+- Inspector resize works, but separator/handle alignment still needs polish.
+- Fullscreen zoom/pan works at core level, but interaction details still need refinement.
+- Wide/fullscreen filmstrip works at core level, but sizing, animation, and thumbnail ergonomics still need refinement.
+- RAM tracker works, but footer formatting and polling behavior still need refinement.
+- GIFs ingest and preserve originals, but vault/inspector previews are still static first-frame thumbnails and tagging/dedupe inspect only the first frame.
 - Search/index hydration still bulk-loads runtime signatures into RAM.
 - `get_config()` still reparses YAML often; caching needs explicit invalidation.
 - Video embedding still extracts five frames through separate ffmpeg calls.
 - YouTube community posts still fail/retry if one expected image fails.
 - Existing `source_url_norm` values are backfilled lazily on DB init, not through a standalone migration tool.
-- Frontend still has Svelte accessibility warnings.
 - Production sidecar packaging exists but still needs release-build validation.
 
 ---
 
-## Phase 9 — Search Scaling, Config Cache, and Runtime Cleanup
+## Phase 9 — UI Refinement, Search Scaling, Config Cache, and Runtime Cleanup
 
 ### Task
-Make the current Tauri/Svelte + FastAPI system scale better and remove the remaining deferred technical debt.
+Finish the active Tauri/Svelte vault experience, validate the virtual renderer path, scale search/facet handling, and remove the remaining deferred runtime debt.
 
 ### Planned
+- Polish inspector resize UI, especially the separator/resize-handle alignment.
+- Refine fullscreen zoom/pan and grouped-media filmstrip behavior.
+- Decide whether GIFs should remain static in vault tiles or get animation-aware preview/tagging behavior.
+- Validate virtual masonry/grid against large real vault sessions.
+- Add a faster topic/WD facet cache for Stats and dropdown suggestions.
+- Add context-aware search suggestions after reviewing similar programs.
 - Add deliberate config caching with safe invalidation when Settings writes `config.yaml`.
 - Add a proper source URL normalization maintenance tool for existing databases.
 - Reduce search hydration memory pressure with batching or a persistent index strategy.
 - Optimize video embedding frame extraction.
-- Resolve Svelte accessibility warnings.
+- Decide and implement a video hover preview strategy: file-size cap, backend preview clip endpoint, or animated thumbnail.
 - Consolidate remaining duplicate helper logic.
 - Validate production Tauri sidecar packaging on a clean machine.
 

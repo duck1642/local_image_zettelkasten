@@ -2,7 +2,17 @@
   import { createEventDispatcher, onMount, tick } from 'svelte';
   import type { SearchFilters, VaultGroup, VaultItem } from './types';
   import { apiFetch } from './api';
-  import { config, loadConfig, saveCurrentConfig, updateConfig, setVaultLayoutMode, setVaultTileMinWidthLocal } from './configStore';
+  import {
+    config,
+    loadConfig,
+    saveCurrentConfig,
+    updateConfig,
+    setVaultLayoutMode,
+    setVaultTileMinWidthLocal,
+    setInspectorWidth,
+    normalizeInspectorWidth,
+    DEFAULT_INSPECTOR_WIDTH
+  } from './configStore';
   import { log as uiLog } from './logger';
   import type { VaultLayoutMode } from './layout';
   import { DEFAULT_TILE_MIN_WIDTH, normalizeLayoutMode, normalizeTileMinWidth } from './layout';
@@ -49,6 +59,10 @@
   let groupIndexes: Record<string, number> = {};
   let visualHashOrder: string[] = [];
   let inspectorVisible = true;
+  let inspectorWidth = DEFAULT_INSPECTOR_WIDTH;
+  let isResizingInspector = false;
+  let resizeStartX = 0;
+  let resizeStartWidth = DEFAULT_INSPECTOR_WIDTH;
 
   let groupsById = new Map<string, VaultGroup>();
   let groupOrder: string[] = [];
@@ -69,6 +83,10 @@
     }
     if (tileMinWidth !== nextWidth) {
       tileMinWidth = nextWidth;
+    }
+    const nextInspectorWidth = normalizeInspectorWidth($config?.ui?.inspector_width);
+    if (!isResizingInspector && inspectorWidth !== nextInspectorWidth) {
+      inspectorWidth = nextInspectorWidth;
     }
   }
 
@@ -128,6 +146,7 @@
       currentLayoutMode = normalizeLayoutMode(loaded);
       tileMinWidth = normalizeTileMinWidth(loaded?.ui?.vault_tile_min_width);
       inspectorVisible = loaded?.ui?.inspector_visible !== false;
+      inspectorWidth = normalizeInspectorWidth(loaded?.ui?.inspector_width);
     } catch (error) {
       uiLog('ERROR', 'Failed to fetch config', { error });
     }
@@ -381,6 +400,40 @@
     }, true);
   }
 
+  function startInspectorResize(event: PointerEvent) {
+    event.preventDefault();
+    isResizingInspector = true;
+    resizeStartX = event.clientX;
+    resizeStartWidth = inspectorWidth;
+    document.body.classList.add('inspector-resizing');
+    window.addEventListener('pointermove', handleInspectorResize);
+    window.addEventListener('pointerup', stopInspectorResize);
+    window.addEventListener('pointercancel', stopInspectorResize);
+  }
+
+  function handleInspectorResize(event: PointerEvent) {
+    if (!isResizingInspector) return;
+    inspectorWidth = normalizeInspectorWidth(resizeStartWidth - (event.clientX - resizeStartX));
+  }
+
+  function stopInspectorResize() {
+    if (!isResizingInspector) return;
+    isResizingInspector = false;
+    document.body.classList.remove('inspector-resizing');
+    window.removeEventListener('pointermove', handleInspectorResize);
+    window.removeEventListener('pointerup', stopInspectorResize);
+    window.removeEventListener('pointercancel', stopInspectorResize);
+    setInspectorWidth(inspectorWidth).catch((error) => uiLog('ERROR', 'Failed to save inspector width', { error: String(error) }));
+  }
+
+  function handleResizeHandleKeydown(event: KeyboardEvent) {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+    event.preventDefault();
+    const delta = event.key === 'ArrowLeft' ? 20 : -20;
+    inspectorWidth = normalizeInspectorWidth(inspectorWidth + delta);
+    setInspectorWidth(inspectorWidth).catch((error) => uiLog('ERROR', 'Failed to save inspector width', { error: String(error) }));
+  }
+
   async function refreshFromTop() {
     uiLog('INFO', 'Vault refresh from top requested', { layout: currentLayoutMode });
     if (layoutHostEl) layoutHostEl.scrollTop = 0;
@@ -443,6 +496,7 @@
       window.removeEventListener('lmz:refresh', handleGlobalRefresh);
       intersectionCleanup?.();
       resizeCleanup?.();
+      stopInspectorResize();
       if (tileSizeSaveTimer !== null) window.clearTimeout(tileSizeSaveTimer);
     };
   });
@@ -450,61 +504,73 @@
 
 <svelte:window on:keydown={handleGlobalKeydown} />
 
-<header class="top-header">
-  <SearchBar on:filtersChanged={handleFiltersChanged} on:command={handleCommand} />
-</header>
+<div class="vault-shell">
+  <div class="vault-main">
+    <header class="top-header">
+      <SearchBar on:filtersChanged={handleFiltersChanged} on:command={handleCommand} />
+    </header>
 
-<div class="view-and-inspector">
-  <div class="viewport" on:wheel={handleVaultWheel}>
-    {#if selectedHashes.size > 1}
-      <div class="bulk-action-bar">
-        <span class="selection-count">{selectedHashes.size} selected</span>
-        <button on:click={clearSelection}>Clear Selection</button>
-        <button class="danger" on:click={deleteSelected} disabled={bulkDeleting}>
-          {bulkDeleting ? 'Deleting...' : 'Delete Selected'}
-        </button>
-      </div>
-    {/if}
-    {#if isSearching && items.length === 0}
-      <div class="initial-loading"></div>
-    {:else if currentLayoutMode === 'masonry'}
-      <MasonryRenderer
-        groups={groupedItems}
-        viewportWidth={vaultWidth}
-        {tileMinWidth}
-        selectedHash={selectedItem?.hash}
-        {selectedHashes}
-        activeIndexes={groupIndexes}
-        bind:sentinelEl
-        bind:hostEl={layoutHostEl}
-        {isLoadingMore}
-        onSelectItem={handleSelectItem}
-        onIndexChange={handleGroupIndexChange}
-        onVisualOrderChange={(hashes: string[]) => visualHashOrder = hashes}
-      />
-    {:else}
-      <GridRenderer
-        groups={groupedItems}
-        viewportWidth={vaultWidth}
-        {tileMinWidth}
-        selectedHash={selectedItem?.hash}
-        {selectedHashes}
-        activeIndexes={groupIndexes}
-        bind:sentinelEl
-        bind:hostEl={layoutHostEl}
-        {isLoadingMore}
-        onSelectItem={handleSelectItem}
-        onIndexChange={handleGroupIndexChange}
-        onVisualOrderChange={(hashes: string[]) => visualHashOrder = hashes}
-      />
-    {/if}
+    <div class="viewport" on:wheel={handleVaultWheel}>
+      {#if selectedHashes.size > 1}
+        <div class="bulk-action-bar">
+          <span class="selection-count">{selectedHashes.size} selected</span>
+          <button on:click={clearSelection}>Clear Selection</button>
+          <button class="danger" on:click={deleteSelected} disabled={bulkDeleting}>
+            {bulkDeleting ? 'Deleting...' : 'Delete Selected'}
+          </button>
+        </div>
+      {/if}
+      {#if isSearching && items.length === 0}
+        <div class="initial-loading"></div>
+      {:else if currentLayoutMode === 'masonry'}
+        <MasonryRenderer
+          groups={groupedItems}
+          viewportWidth={vaultWidth}
+          {tileMinWidth}
+          selectedHash={selectedItem?.hash}
+          {selectedHashes}
+          activeIndexes={groupIndexes}
+          bind:sentinelEl
+          bind:hostEl={layoutHostEl}
+          {isLoadingMore}
+          onSelectItem={handleSelectItem}
+          onIndexChange={handleGroupIndexChange}
+          onVisualOrderChange={(hashes: string[]) => visualHashOrder = hashes}
+        />
+      {:else}
+        <GridRenderer
+          groups={groupedItems}
+          viewportWidth={vaultWidth}
+          {tileMinWidth}
+          selectedHash={selectedItem?.hash}
+          {selectedHashes}
+          activeIndexes={groupIndexes}
+          bind:sentinelEl
+          bind:hostEl={layoutHostEl}
+          {isLoadingMore}
+          onSelectItem={handleSelectItem}
+          onIndexChange={handleGroupIndexChange}
+          onVisualOrderChange={(hashes: string[]) => visualHashOrder = hashes}
+        />
+      {/if}
+    </div>
   </div>
 
   {#if inspectorVisible}
+    <button
+      type="button"
+      class="inspector-resize-handle"
+      class:active={isResizingInspector}
+      aria-label="Resize inspector"
+      on:pointerdown={startInspectorResize}
+      on:keydown={handleResizeHandleKeydown}
+      title="Resize inspector"
+    ></button>
     <Inspector
       item={selectedItem}
       group={selectedGroup}
       {focusMode}
+      width={inspectorWidth}
       on:close={clearSelection}
       on:updated={handleUpdate}
       on:focus={handleFocusMode}
@@ -527,9 +593,15 @@
 {/if}
 
 <style>
+  :global(body.inspector-resizing) { cursor: col-resize; user-select: none; }
+  :global(body.inspector-resizing *) { cursor: col-resize !important; user-select: none; }
+  .vault-shell { flex-grow: 1; display: flex; overflow: hidden; min-width: 0; }
+  .vault-main { flex-grow: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
   .top-header { height: var(--header-height); display: flex; align-items: center; padding: 0 15px; gap: 15px; border-bottom: 1px solid var(--border-dim); flex-shrink: 0; z-index: 100; }
-  .view-and-inspector { flex-grow: 1; display: flex; overflow: hidden; min-width: 0; }
   .viewport { flex-grow: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; position: relative; }
+  .inspector-resize-handle { width: 7px; flex: 0 0 7px; cursor: col-resize; border: 0; border-left: 1px solid var(--border-dim); border-right: 1px solid transparent; border-radius: 0; background: var(--bg-main); position: relative; z-index: 20; padding: 0; }
+  .inspector-resize-handle:hover, .inspector-resize-handle.active { border-left-color: var(--accent-primary); }
+  .inspector-resize-handle:hover { background: rgba(255,255,255,0.03); }
   .bulk-action-bar { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 60; display: flex; align-items: center; gap: 10px; padding: 9px 12px; border: 1px solid var(--border-dim); border-radius: 8px; background: rgba(13, 17, 23, 0.96); box-shadow: 0 10px 30px rgba(0,0,0,0.35); }
   .selection-count { color: var(--text-bright); font-weight: 600; white-space: nowrap; }
   .initial-loading { flex-grow: 1; }

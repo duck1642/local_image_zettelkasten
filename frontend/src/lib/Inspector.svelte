@@ -9,6 +9,7 @@
   export let item: VaultItem | null = null;
   export let group: { id: string, items: VaultItem[] } | null = null;
   export let focusMode: 'normal' | 'wide' | 'fullscreen' = 'normal';
+  export let width = 400;
   const dispatch = createEventDispatcher();
 
   let fullItem: any = null;
@@ -213,7 +214,7 @@
 
 <svelte:window on:keydown={handleKeydown} />
 
-<aside class="inspector">
+<aside class="inspector" style={`width: ${width}px; min-width: ${width}px;`}>
   {#if !item}
     <div class="empty-panel">
         <p>No item selected</p>
@@ -361,10 +362,7 @@
 
 <style>
   .inspector {
-    width: 400px;
-    min-width: 400px;
     background: var(--bg-main);
-    border-left: 1px solid var(--border-dim);
     display: flex;
     flex-direction: column;
     padding: 15px;
