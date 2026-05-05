@@ -2,7 +2,7 @@
   import { createEventDispatcher, onMount, tick } from 'svelte';
   import type { SearchFilters, VaultGroup, VaultItem } from './types';
   import { apiFetch } from './api';
-  import { config, loadConfig, saveCurrentConfig, setVaultLayoutMode, setVaultTileMinWidthLocal } from './configStore';
+  import { config, loadConfig, saveCurrentConfig, updateConfig, setVaultLayoutMode, setVaultTileMinWidthLocal } from './configStore';
   import { log as uiLog } from './logger';
   import type { VaultLayoutMode } from './layout';
   import { DEFAULT_TILE_MIN_WIDTH, normalizeLayoutMode, normalizeTileMinWidth } from './layout';
@@ -47,6 +47,7 @@
   let tileSizeSaveTimer: number | null = null;
   let groupIndexes: Record<string, number> = {};
   let visualHashOrder: string[] = [];
+  let inspectorVisible = true;
 
   let groupsById = new Map<string, VaultGroup>();
   let groupOrder: string[] = [];
@@ -125,6 +126,7 @@
       const loaded = await loadConfig();
       currentLayoutMode = normalizeLayoutMode(loaded);
       tileMinWidth = normalizeTileMinWidth(loaded?.ui?.vault_tile_min_width);
+      inspectorVisible = loaded?.ui?.inspector_visible !== false;
     } catch (error) {
       uiLog('ERROR', 'Failed to fetch config', { error });
     }
@@ -226,6 +228,8 @@
       zoomIn();
     } else if (command === 'zoom-out') {
       zoomOut();
+    } else if (command === 'toggle-inspector') {
+      toggleInspector();
     }
   }
 
@@ -333,6 +337,19 @@
       zoomOut();
       return;
     }
+    if (!editing && event.key === 'i' && !event.ctrlKey && !event.altKey && !event.metaKey && focusMode === 'normal') {
+      event.preventDefault();
+      toggleInspector();
+      return;
+    }
+  }
+
+  function toggleInspector() {
+    inspectorVisible = !inspectorVisible;
+    updateConfig((draft) => {
+      if (!draft.ui) draft.ui = {};
+      draft.ui.inspector_visible = inspectorVisible;
+    }, true);
   }
 
   async function refreshFromTop() {
@@ -406,7 +423,7 @@
 
 <header class="top-header">
   <SearchBar on:filtersChanged={handleFiltersChanged} on:command={handleCommand} />
-  <div class="header-actions with-inspector">
+  <div class="header-actions" class:with-inspector={inspectorVisible}>
     <select class="filter-select" bind:value={currentSort} on:change={() => fetchItems()}>
       <option value="newest">Newest First</option>
       <option value="oldest">Oldest First</option>
@@ -467,16 +484,18 @@
     {/if}
   </div>
 
-  <Inspector
-    item={selectedItem}
-    group={selectedGroup}
-    {focusMode}
-    on:close={clearSelection}
-    on:updated={handleUpdate}
-    on:focus={handleFocusMode}
-    on:changeItem={(event) => setSingleSelection(event.detail)}
-    on:deleted={() => { clearSelection(); fetchItems(); }}
-  />
+  {#if inspectorVisible}
+    <Inspector
+      item={selectedItem}
+      group={selectedGroup}
+      {focusMode}
+      on:close={clearSelection}
+      on:updated={handleUpdate}
+      on:focus={handleFocusMode}
+      on:changeItem={(event) => setSingleSelection(event.detail)}
+      on:deleted={() => { clearSelection(); fetchItems(); }}
+    />
+  {/if}
 </div>
 
 {#if focusMode !== 'normal' && selectedItem}

@@ -146,6 +146,10 @@
           <span class="key">D</span>
           <span class="desc">Next Item in Group</span>
         </div>
+        <div class="shortcut-row">
+          <span class="key">I</span>
+          <span class="desc">Toggle Inspector Panel</span>
+        </div>
         <div class="divider"></div>
         <div class="shortcut-row">
           <span class="key">&gt;grid</span>
@@ -162,6 +166,10 @@
         <div class="shortcut-row">
           <span class="key">&gt;zoom-out</span>
           <span class="desc">Decrease Vault Tile Size</span>
+        </div>
+        <div class="shortcut-row">
+          <span class="key">&gt;toggle-inspector</span>
+          <span class="desc">Toggle Inspector Panel</span>
         </div>
       </div>
     </div>
