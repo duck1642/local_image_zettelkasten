@@ -117,6 +117,16 @@ SQLite stores runtime asset/index metadata only. Manual topics and WD tags live 
   - Fixed review action logging argument collision in `log_system`.
   - Fixed false-failure variant behavior caused by post-commit source delete errors.
   - Added best-effort retry cleanup for review source/sidecar removal after successful variant ingest.
+- Ingestion safe-exit + stop-after-current wiring completed. Done (will be checked):
+  - Added close-request guard in Tauri/Svelte flow: if ingestion is running, app asks to stop after current item and exit.
+  - Added backend ingest runtime endpoint for online/local running state.
+  - Added backend stop-after-current endpoint for online/local ingestion workers.
+  - Online worker now stops scheduling new URLs after stop is requested and lets in-flight items finish.
+  - Local worker now stops before next item when stop is requested and lets current item finish.
+- Review `variant` cleanup semantics hardened. Done (will be checked):
+  - `variant`/`replace` no longer report full success when review file deletion fails.
+  - On delete-failure after ingest, item is marked `cleanup_failed` and kept pending in review with warning response.
+  - Prevents “review empty” false-positive while review file still exists.
 
 ## Needs Validation Or Refinement
 
@@ -161,6 +171,13 @@ SQLite stores runtime asset/index metadata only. Manual topics and WD tags live 
   - during smoke tests, some review assets remained undeletable (`WinError 5`) after successful variant ingest.
   - current behavior: DB ingest can succeed while review source cleanup fails due to external file lock.
   - needs resolved-state fallback so successfully ingested-but-locked review files are hidden from review lists/count until cleanup is possible.
+- Ingestion close-flow validation:
+  - verify close while local ingest is running prompts stop-after-current and exits only after current item completes.
+  - verify close while online ingest is running prompts stop-after-current and exits only after in-flight workers settle.
+  - verify deferred online URLs remain in retry path after stop-after-current.
+- Review `variant` strict cleanup validation:
+  - verify successful ingest + failed review-file delete returns warning and keeps item pending (`cleanup_failed`).
+  - verify successful ingest + successful review-file delete returns success and removes item from pending list.
 
 ## Current Frontend Ideas Merged
 
