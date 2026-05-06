@@ -1539,11 +1539,17 @@ def _review_action_sync(filename: str, action: str):
     if meta_path.exists():
         sidecar_deleted, sidecar_err = _review_cleanup_path(meta_path)
     if not file_deleted:
-        sidecar = _set_review_state(sidecar, resolved_state, cleanup_error=file_err)
+        sidecar = _set_review_state(sidecar, "cleanup_failed", cleanup_error=file_err)
         _write_review_sidecar(file_path, sidecar)
         log_system("WARNING", "Review cleanup pending after successful ingest", filename=filename, error=file_err)
+        return {
+            "status": "warning",
+            "action": action,
+            "message": "Ingested to DB, but failed to delete review file. Item kept pending for cleanup.",
+        }
     elif not sidecar_deleted:
         log_system("WARNING", "Review sidecar cleanup pending after successful ingest", filename=filename, error=sidecar_err)
+        # Media is gone, but sidecar may still linger locked; keep it resolved so pending queue stays clean.
 
     message = "Review item replaced and ingested." if action == "replace" else "Review item ingested as variant."
     log_system("INFO", "Review action succeeded", action=action, filename=filename, detail=message)
