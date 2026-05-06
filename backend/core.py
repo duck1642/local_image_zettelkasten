@@ -18,7 +18,7 @@ def main():
     finally:
         conn.close()
 
-    log_ingestion('INFO', f"\nY LMZ Unified System - Starting")
+    log_ingestion('INFO', f"\nLMZ Unified System - Starting")
     log_ingestion('INFO', f"Input: {INPUT_DIR}")
     log_ingestion('INFO', f"Vault: {VAULT_DIR}")
     log_ingestion('INFO', f"DB: {DB_PATH}\n")
@@ -44,7 +44,7 @@ def main():
         else:
             log_ingestion('INFO', f"  No {filename} found. Skipping.")
 
-    log_ingestion('INFO', f"\nY Scanning local input folder for remaining files...")
+    log_ingestion('INFO', f"\nScanning local input folder for remaining files...")
 
     if not INPUT_DIR.exists():
         INPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -82,4 +82,4 @@ def main():
         for item in local_index_queue:
             search_manager.update_indexes(**item)
 
-    log_ingestion('INFO', f"\nYS FINAL SUMMARY: {stats['processed']} Added | {stats['skipped']} Skipped/Duplicates | {stats['errors']} Errors")
+    log_ingestion('INFO', f"\nFINAL SUMMARY: {stats['processed']} Added | {stats['skipped']} Skipped/Duplicates | {stats['errors']} Errors")

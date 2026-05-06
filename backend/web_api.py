@@ -7,6 +7,7 @@ import time
 import traceback
 import secrets
 import threading
+from datetime import datetime
 from collections import Counter
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, Query, Request
@@ -16,13 +17,14 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from db.sqlite_operator import init_database, normalize_source_url
-from utils import get_config, ASSETS_DIR, REVIEW_DIR, note_path_for, asset_path_for
+from utils import get_config, ASSETS_DIR, REVIEW_DIR, LOCAL_INGEST_DIR, note_path_for, asset_path_for, calculate_file_hash
 from processor import process_file
 from logs.logger import log_auth, log_svelte, log_system, RAW_LOGS_DIR, STRUCTURED_LOGS_DIR
 from md_generator import load_note_topics, load_note_wd_tags, generate_markdown
 from tagging import load_tag_cache, tag_media
 from thumbnails import get_or_generate_thumbnail
 from utils import SECRETS_DIR, WD_TAGS_DIR, atomic_write_text, get_cookie_auth_status
+from ingest_control import ONLINE_STOP_AFTER_CURRENT, LOCAL_STOP_AFTER_CURRENT
 
 class TerminalLogger:
     def __init__(self, filename, original_stream):
@@ -81,6 +83,25 @@ LOG_FILES = {
     "auth.jsonl": STRUCTURED_LOGS_DIR / "auth.jsonl",
     "activity.jsonl": STRUCTURED_LOGS_DIR / "activity.jsonl",
     "terminal.log": RAW_LOGS_DIR / "terminal.log",
+}
+
+REVIEW_RESOLVED_STATES = {
+    "resolved_variant",
+    "resolved_delete",
+    "resolved_replace",
+}
+REVIEW_PENDING_STATES = {"pending", "deferred", "cleanup_failed"}
+LOCAL_INGEST_LOCK = threading.Lock()
+LOCAL_INGEST_STATE = {
+    "running": False,
+    "queued": 0,
+    "processed": 0,
+    "summary": {"ingested": 0, "review": 0, "failed": 0, "duplicate": 0},
+    "results": [],
+    "failed_paths": [],
+    "started_at": None,
+    "finished_at": None,
+    "stop_requested": False,
 }
 
 app.add_middleware(
@@ -173,6 +194,48 @@ def _review_path(filename: str) -> Path:
         raise HTTPException(status_code=400, detail="Invalid review filename")
     return path
 
+def _review_sidecar_path(path: Path) -> Path:
+    return path.with_suffix(path.suffix + ".json")
+
+def _read_review_sidecar(path: Path) -> dict:
+    sidecar_path = _review_sidecar_path(path)
+    if not sidecar_path.exists():
+        return {}
+    try:
+        data = json.loads(sidecar_path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+def _write_review_sidecar(path: Path, sidecar: dict):
+    sidecar_path = _review_sidecar_path(path)
+    atomic_write_text(sidecar_path, json.dumps(sidecar, indent=2, ensure_ascii=False))
+
+def _stat_signature(path: Path) -> tuple[int, int]:
+    stat = path.stat()
+    return int(stat.st_size), int(stat.st_mtime_ns)
+
+def _ensure_review_hash(path: Path, sidecar: dict) -> dict:
+    size, mtime_ns = _stat_signature(path)
+    cached_hash = str(sidecar.get("file_hash") or "").strip()
+    cached_size = int(sidecar.get("file_size") or -1)
+    cached_mtime = int(sidecar.get("file_mtime") or -1)
+    if not cached_hash or cached_size != size or cached_mtime != mtime_ns:
+        sidecar["file_hash"] = calculate_file_hash(path)
+        sidecar["file_size"] = size
+        sidecar["file_mtime"] = mtime_ns
+    return sidecar
+
+def _set_review_state(sidecar: dict, state: str, cleanup_error: str | None = None) -> dict:
+    sidecar["state"] = state
+    if state in REVIEW_RESOLVED_STATES:
+        sidecar["resolved_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    if cleanup_error:
+        sidecar["last_cleanup_error"] = cleanup_error
+    elif "last_cleanup_error" in sidecar:
+        sidecar.pop("last_cleanup_error", None)
+    return sidecar
+
 def _guess_review_mime_type(filename: str) -> str:
     guessed, _ = mimetypes.guess_type(filename)
     if guessed:
@@ -200,6 +263,32 @@ def _review_failure_status(message: str) -> int:
     if text.startswith("system error"):
         return 500
     return 400
+
+def _review_cleanup_path(path: Path, retries: int = 5, delay_seconds: float = 0.2) -> tuple[bool, str]:
+    if not path.exists():
+        return True, ""
+    last_error = ""
+    for _ in range(retries):
+        try:
+            path.unlink()
+            return True, ""
+        except OSError as exc:
+            last_error = str(exc)
+            time.sleep(delay_seconds)
+    return False, last_error
+
+def _review_db_has_hashes(hashes: list[str]) -> set[str]:
+    clean = sorted({str(h or "").strip() for h in hashes if str(h or "").strip()})
+    if not clean:
+        return set()
+    conn = init_database()
+    try:
+        placeholders = ",".join("?" for _ in clean)
+        cursor = conn.cursor()
+        cursor.execute(f"SELECT hash FROM items WHERE hash IN ({placeholders})", clean)
+        return {row[0] for row in cursor.fetchall() if row and row[0]}
+    finally:
+        conn.close()
 
 def _tail_lines(path: Path, count: int = 150) -> list[str]:
     if not path.exists():
@@ -1042,6 +1131,7 @@ async def start_ingestion(queue_name: str):
     queue_name = _queue_name(queue_name, allow_failed=False)
     if not INGESTION_LOCK.acquire(blocking=False):
         raise HTTPException(status_code=409, detail="Already running")
+    ONLINE_STOP_AFTER_CURRENT.clear()
     def run_in_background():
         try:
             run_queue(queue_name)
@@ -1052,40 +1142,282 @@ async def start_ingestion(queue_name: str):
     asyncio.get_running_loop().run_in_executor(None, run_in_background)
     return {"status": "success"}
 
+@app.get("/api/ingest/runtime-status")
+async def ingest_runtime_status():
+    with LOCAL_INGEST_LOCK:
+        local_running = bool(LOCAL_INGEST_STATE.get("running"))
+        local_stop_requested = bool(LOCAL_INGEST_STATE.get("stop_requested"))
+    online_running = bool(INGESTION_LOCK.locked())
+    return {
+        "online_running": online_running,
+        "online_stop_requested": bool(ONLINE_STOP_AFTER_CURRENT.is_set()),
+        "local_running": local_running,
+        "local_stop_requested": local_stop_requested,
+        "any_running": bool(online_running or local_running),
+    }
+
+@app.post("/api/ingest/stop-after-current")
+async def ingest_stop_after_current():
+    online_running = bool(INGESTION_LOCK.locked())
+    with LOCAL_INGEST_LOCK:
+        local_running = bool(LOCAL_INGEST_STATE.get("running"))
+        if local_running:
+            LOCAL_INGEST_STATE["stop_requested"] = True
+    if online_running:
+        ONLINE_STOP_AFTER_CURRENT.set()
+    if local_running:
+        LOCAL_STOP_AFTER_CURRENT.set()
+    if not online_running and not local_running:
+        return {"status": "idle", "message": "No ingestion is running."}
+    return {
+        "status": "success",
+        "online_stop_requested": online_running,
+        "local_stop_requested": local_running,
+    }
+
 @app.get("/api/queue-stats")
 async def get_queue_stats(): return await asyncio.to_thread(queue_counts)
 
-@app.get("/api/review/count")
-async def get_review_count():
-    return await asyncio.to_thread(_get_review_count_sync)
+class LocalIngestDefaults(BaseModel):
+    artist: str | None = None
+    platform: str | None = None
+    source_url: str | None = None
 
-def _get_review_count_sync():
+class LocalIngestStartRequest(BaseModel):
+    paths: list[str]
+    defaults: LocalIngestDefaults | None = None
+    skip_similarity: bool = False
+
+def _expand_local_ingest_paths(paths: list[str]) -> list[Path]:
+    allowed_exts = {ext.lstrip(".").lower() for ext in get_config().get("firewall", {}).get("allowed_extensions", [])}
+    collected: list[Path] = []
+    seen = set()
+    for raw in paths or []:
+        text = str(raw or "").strip()
+        if not text:
+            continue
+        path = Path(text).expanduser()
+        if not path.is_absolute():
+            path = (LOCAL_INGEST_DIR / path).resolve()
+        else:
+            path = path.resolve()
+        if path.is_file():
+            key = str(path)
+            if key not in seen:
+                seen.add(key)
+                collected.append(path)
+            continue
+        if path.is_dir():
+            for child in sorted(path.rglob("*")):
+                if not child.is_file():
+                    continue
+                ext = child.suffix.lstrip(".").lower()
+                if allowed_exts and ext not in allowed_exts:
+                    continue
+                key = str(child.resolve())
+                if key not in seen:
+                    seen.add(key)
+                    collected.append(child.resolve())
+    return collected
+
+def _snapshot_local_ingest_state() -> dict:
+    with LOCAL_INGEST_LOCK:
+        return {
+            "running": bool(LOCAL_INGEST_STATE["running"]),
+            "queued": int(LOCAL_INGEST_STATE["queued"]),
+            "processed": int(LOCAL_INGEST_STATE["processed"]),
+            "summary": dict(LOCAL_INGEST_STATE["summary"]),
+            "results": list(LOCAL_INGEST_STATE["results"]),
+            "failed_paths": list(LOCAL_INGEST_STATE["failed_paths"]),
+            "started_at": LOCAL_INGEST_STATE["started_at"],
+            "finished_at": LOCAL_INGEST_STATE["finished_at"],
+            "stop_requested": bool(LOCAL_INGEST_STATE.get("stop_requested")),
+        }
+
+def _set_local_ingest_state(**kwargs):
+    with LOCAL_INGEST_LOCK:
+        for key, value in kwargs.items():
+            LOCAL_INGEST_STATE[key] = value
+
+def _run_local_ingest_worker(paths: list[Path], defaults: dict, skip_similarity: bool):
+    cfg = get_config()
+    LOCAL_STOP_AFTER_CURRENT.clear()
+    with LOCAL_INGEST_LOCK:
+        LOCAL_INGEST_STATE["running"] = True
+        LOCAL_INGEST_STATE["queued"] = len(paths)
+        LOCAL_INGEST_STATE["processed"] = 0
+        LOCAL_INGEST_STATE["summary"] = {"ingested": 0, "review": 0, "failed": 0, "duplicate": 0}
+        LOCAL_INGEST_STATE["results"] = []
+        LOCAL_INGEST_STATE["failed_paths"] = []
+        LOCAL_INGEST_STATE["started_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        LOCAL_INGEST_STATE["finished_at"] = None
+        LOCAL_INGEST_STATE["stop_requested"] = False
+
+    for path in paths:
+        if LOCAL_STOP_AFTER_CURRENT.is_set():
+            break
+        metadata = {
+            "artist": defaults.get("artist") or "Local",
+            "platform": defaults.get("platform") or "Local",
+            "source_url": defaults.get("source_url") or "",
+        }
+        try:
+            ok, message, _ = process_file(path, cfg, metadata=metadata, delete_source=False, skip_similarity=skip_similarity)
+            if ok:
+                status = "ingested"
+            elif "moved to review" in message.lower():
+                status = "review"
+            elif message.lower().startswith("duplicate ignored"):
+                status = "duplicate"
+            else:
+                status = "failed"
+        except Exception as exc:
+            status = "failed"
+            message = f"Local ingest crash: {exc}"
+
+        with LOCAL_INGEST_LOCK:
+            LOCAL_INGEST_STATE["processed"] += 1
+            LOCAL_INGEST_STATE["summary"][status] = int(LOCAL_INGEST_STATE["summary"].get(status, 0)) + 1
+            LOCAL_INGEST_STATE["results"].append(
+                {
+                    "path": str(path),
+                    "name": path.name,
+                    "status": status,
+                    "message": message,
+                }
+            )
+            if status == "failed":
+                LOCAL_INGEST_STATE["failed_paths"].append(str(path))
+
+    with LOCAL_INGEST_LOCK:
+        LOCAL_INGEST_STATE["running"] = False
+        LOCAL_INGEST_STATE["finished_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    LOCAL_STOP_AFTER_CURRENT.clear()
+
+@app.post("/api/local-ingest/start")
+async def local_ingest_start(body: LocalIngestStartRequest):
+    with LOCAL_INGEST_LOCK:
+        if LOCAL_INGEST_STATE["running"]:
+            raise HTTPException(status_code=409, detail="Local ingestion already running")
+    paths = _expand_local_ingest_paths(body.paths)
+    if not paths:
+        raise HTTPException(status_code=400, detail="No valid local files found")
+    defaults = body.defaults.model_dump() if body.defaults else {}
+    asyncio.get_running_loop().run_in_executor(None, _run_local_ingest_worker, paths, defaults, bool(body.skip_similarity))
+    return {"status": "success", "queued": len(paths)}
+
+@app.get("/api/local-ingest/status")
+async def local_ingest_status():
+    return await asyncio.to_thread(_snapshot_local_ingest_state)
+
+@app.post("/api/local-ingest/retry-failed")
+async def local_ingest_retry_failed():
+    with LOCAL_INGEST_LOCK:
+        if LOCAL_INGEST_STATE["running"]:
+            raise HTTPException(status_code=409, detail="Local ingestion already running")
+        failed_paths = list(LOCAL_INGEST_STATE.get("failed_paths") or [])
+    if not failed_paths:
+        return {"status": "success", "queued": 0}
+    paths = _expand_local_ingest_paths(failed_paths)
+    if not paths:
+        return {"status": "success", "queued": 0}
+    asyncio.get_running_loop().run_in_executor(None, _run_local_ingest_worker, paths, {}, False)
+    return {"status": "success", "queued": len(paths)}
+
+@app.get("/api/review/count")
+async def get_review_count(include_resolved: bool = False):
+    return await asyncio.to_thread(_get_review_count_sync, include_resolved)
+
+def _iter_review_media_files() -> list[Path]:
     if not REVIEW_DIR.exists():
-        return {"count": 0}
-    count = sum(
-        1 for path in REVIEW_DIR.iterdir()
-        if path.is_file() and path.suffix.lower() not in [".json", ".md"]
+        return []
+    allowed = {
+        f".{ext.lstrip('.').lower()}"
+        for ext in get_config().get("firewall", {}).get("allowed_extensions", [])
+    }
+    return sorted(
+        [
+            p
+            for p in REVIEW_DIR.iterdir()
+            if p.is_file()
+            and p.suffix.lower() not in [".json", ".md"]
+            and (not allowed or p.suffix.lower() in allowed)
+        ]
     )
-    return {"count": count}
+
+def _resolve_review_entries() -> list[dict]:
+    files = _iter_review_media_files()
+    entries: list[dict] = []
+    for media_path in files:
+        sidecar = _read_review_sidecar(media_path)
+        changed = False
+        before_hash = str(sidecar.get("file_hash") or "")
+        sidecar = _ensure_review_hash(media_path, sidecar)
+        if str(sidecar.get("file_hash") or "") != before_hash:
+            changed = True
+        state = str(sidecar.get("state") or "pending")
+        if not state:
+            state = "pending"
+            sidecar["state"] = state
+            changed = True
+        entries.append(
+            {
+                "path": media_path,
+                "sidecar": sidecar,
+                "state": state,
+                "changed": changed,
+                "mime_type": _guess_review_mime_type(media_path.name),
+                "extension": media_path.suffix.lower(),
+            }
+        )
+
+    present_hashes = _review_db_has_hashes(
+        [str(entry["sidecar"].get("file_hash") or "") for entry in entries]
+    )
+
+    for entry in entries:
+        sidecar = entry["sidecar"]
+        file_hash = str(sidecar.get("file_hash") or "")
+        if file_hash and file_hash in present_hashes and entry["state"] not in REVIEW_RESOLVED_STATES:
+            _set_review_state(sidecar, "resolved_variant")
+            entry["state"] = "resolved_variant"
+            entry["changed"] = True
+        if entry["changed"]:
+            try:
+                _write_review_sidecar(entry["path"], sidecar)
+            except Exception as exc:
+                log_system("WARNING", "Failed to persist review sidecar reconciliation", filename=entry["path"].name, error=str(exc))
+    return entries
+
+def _is_pending_review_state(state: str) -> bool:
+    if not state:
+        return True
+    return state in REVIEW_PENDING_STATES
+
+def _get_review_count_sync(include_resolved: bool = False):
+    entries = _resolve_review_entries()
+    if include_resolved:
+        return {"count": len(entries)}
+    pending = sum(1 for entry in entries if _is_pending_review_state(entry["state"]))
+    return {"count": pending}
 
 @app.get("/api/review")
-async def get_review_items():
-    return await asyncio.to_thread(_get_review_items_sync)
+async def get_review_items(include_resolved: bool = False):
+    return await asyncio.to_thread(_get_review_items_sync, include_resolved)
 
-def _get_review_items_sync():
-    if not REVIEW_DIR.exists(): return []
+def _get_review_items_sync(include_resolved: bool = False):
+    entries = _resolve_review_entries()
+    if not include_resolved:
+        entries = [entry for entry in entries if _is_pending_review_state(entry["state"])]
+
     items = []
-    pending = []
-    for p in sorted(REVIEW_DIR.iterdir()):
-        if p.is_file() and p.suffix.lower() not in [".json", ".md"]:
-            meta_path = p.with_suffix(p.suffix + ".json")
-            meta = {}
-            if meta_path.exists():
-                with open(meta_path, "r", encoding="utf-8") as f: meta = json.load(f)
-            best_match = meta.get("best_match")
-            pending.append((p, meta, best_match, _guess_review_mime_type(p.name), p.suffix.lower()))
-
-    best_hashes = sorted({best for _, _, best, _, _ in pending if best})
+    best_hashes = sorted(
+        {
+            str(entry["sidecar"].get("best_match") or "").strip()
+            for entry in entries
+            if str(entry["sidecar"].get("best_match") or "").strip()
+        }
+    )
     match_map = {}
     if best_hashes:
         conn = init_database()
@@ -1104,14 +1436,18 @@ def _get_review_items_sync():
         finally:
             conn.close()
 
-    for p, meta, best_match, review_mime, review_ext in pending:
+    for entry in entries:
+        p = entry["path"]
+        sidecar = entry["sidecar"]
+        best_match = str(sidecar.get("best_match") or "").strip()
         items.append({
             "filename": p.name,
             "url": f"/review-assets/{p.name}",
-            "metadata": meta,
-            "best_match": match_map.get(best_match),
-            "mime_type": review_mime,
-            "extension": review_ext,
+            "metadata": sidecar,
+            "best_match": match_map.get(best_match) if best_match else None,
+            "mime_type": entry["mime_type"],
+            "extension": entry["extension"],
+            "state": entry["state"],
         })
     return items
 
@@ -1120,33 +1456,63 @@ async def review_action(filename: str, action: str):
     return await asyncio.to_thread(_review_action_sync, filename, action)
 
 def _review_action_sync(filename: str, action: str):
-    if action not in {"delete", "keep", "variant"}:
+    if action not in {"delete", "keep", "variant", "replace"}:
         raise HTTPException(status_code=400, detail="Invalid review action")
     file_path = _review_path(filename)
     if not file_path.exists(): raise HTTPException(status_code=404)
+    sidecar = _read_review_sidecar(file_path)
+    meta_path = _review_sidecar_path(file_path)
+    metadata = sidecar.get("metadata", {}) if isinstance(sidecar, dict) else {}
+    if not isinstance(metadata, dict):
+        metadata = {}
+    sidecar = _ensure_review_hash(file_path, sidecar)
+    _write_review_sidecar(file_path, sidecar)
 
     if action == "delete":
-        file_path.unlink()
-        meta_path = file_path.with_suffix(file_path.suffix + ".json")
+        file_deleted, file_err = _review_cleanup_path(file_path)
+        sidecar_deleted = True
+        sidecar_err = ""
         if meta_path.exists():
-            meta_path.unlink()
-        message = "Review item deleted."
-        log_system("INFO", "Review action succeeded", action=action, filename=filename, detail=message)
+            sidecar_deleted, sidecar_err = _review_cleanup_path(meta_path)
+        if file_deleted and sidecar_deleted:
+            message = "Review item deleted."
+            log_system("INFO", "Review action succeeded", action=action, filename=filename, detail=message)
+            return {"status": "success", "action": action, "message": message}
+
+        sidecar = _set_review_state(
+            _read_review_sidecar(file_path) if file_path.exists() else sidecar,
+            "resolved_delete",
+            cleanup_error=file_err or sidecar_err,
+        )
+        if file_path.exists():
+            _write_review_sidecar(file_path, sidecar)
+        message = "Review item marked deleted; cleanup is pending."
+        log_system("WARNING", "Review delete cleanup pending", action=action, filename=filename, error=file_err or sidecar_err)
         return {"status": "success", "action": action, "message": message}
 
     if action == "keep":
+        sidecar = _set_review_state(sidecar, "deferred")
+        _write_review_sidecar(file_path, sidecar)
         message = "Review item kept in review queue."
         log_system("INFO", "Review action succeeded", action=action, filename=filename, detail=message)
         return {"status": "success", "action": action, "message": message}
 
-    meta_path = file_path.with_suffix(file_path.suffix + ".json")
-    sidecar = {}
-    if meta_path.exists():
-        with open(meta_path, "r", encoding="utf-8") as f:
-            sidecar = json.load(f)
-    metadata = sidecar.get("metadata", {}) if isinstance(sidecar, dict) else {}
-    if not isinstance(metadata, dict):
-        metadata = {}
+    if action == "replace":
+        target_hash = str(sidecar.get("best_match") or "").strip()
+        if not target_hash:
+            message = "Replace target is missing. Item kept pending."
+            log_system("WARNING", "Review replace warning", action=action, filename=filename, detail=message)
+            return {"status": "warning", "action": action, "message": message}
+        conn = init_database()
+        try:
+            cursor = conn.cursor()
+            replace_result = _delete_item_row(cursor, conn, target_hash)
+        finally:
+            conn.close()
+        if replace_result["status"] == "missing":
+            message = "Replace target no longer exists in DB. Item kept pending."
+            log_system("WARNING", "Review replace warning", action=action, filename=filename, target_hash=target_hash, detail=message)
+            return {"status": "warning", "action": action, "message": message}
 
     try:
         ok, process_message, _ = process_file(
@@ -1165,35 +1531,49 @@ def _review_action_sync(filename: str, action: str):
         log_system("ERROR", "Review action failed", action=action, filename=filename, error=process_message)
         raise HTTPException(status_code=status_code, detail=process_message)
 
-    if file_path.exists():
-        cleanup_error = None
-        for _ in range(5):
-            try:
-                file_path.unlink()
-                cleanup_error = None
-                break
-            except OSError as exc:
-                cleanup_error = exc
-                time.sleep(0.2)
-        if cleanup_error is not None:
-            log_system("WARNING", "Variant ingest succeeded but review source cleanup failed", filename=filename, error=str(cleanup_error))
-
+    resolved_state = "resolved_replace" if action == "replace" else "resolved_variant"
+    sidecar = _set_review_state(sidecar, resolved_state)
+    file_deleted, file_err = _review_cleanup_path(file_path)
+    sidecar_deleted = True
+    sidecar_err = ""
     if meta_path.exists():
-        cleanup_error = None
-        for _ in range(5):
-            try:
-                meta_path.unlink()
-                cleanup_error = None
-                break
-            except OSError as exc:
-                cleanup_error = exc
-                time.sleep(0.2)
-        if cleanup_error is not None:
-            log_system("WARNING", "Variant ingest succeeded but sidecar cleanup failed", filename=filename, error=str(cleanup_error))
+        sidecar_deleted, sidecar_err = _review_cleanup_path(meta_path)
+    if not file_deleted:
+        sidecar = _set_review_state(sidecar, resolved_state, cleanup_error=file_err)
+        _write_review_sidecar(file_path, sidecar)
+        log_system("WARNING", "Review cleanup pending after successful ingest", filename=filename, error=file_err)
+    elif not sidecar_deleted:
+        log_system("WARNING", "Review sidecar cleanup pending after successful ingest", filename=filename, error=sidecar_err)
 
-    message = "Review item ingested as variant."
+    message = "Review item replaced and ingested." if action == "replace" else "Review item ingested as variant."
     log_system("INFO", "Review action succeeded", action=action, filename=filename, detail=message)
     return {"status": "success", "action": action, "message": message}
+
+@app.post("/api/review/cleanup")
+async def cleanup_review_resolved():
+    return await asyncio.to_thread(_cleanup_review_resolved_sync)
+
+def _cleanup_review_resolved_sync():
+    entries = _resolve_review_entries()
+    cleaned = 0
+    failed = 0
+    for entry in entries:
+        state = entry["state"]
+        if state not in REVIEW_RESOLVED_STATES:
+            continue
+        file_path = entry["path"]
+        sidecar_path = _review_sidecar_path(file_path)
+        ok_file, err_file = _review_cleanup_path(file_path)
+        ok_sidecar, err_sidecar = _review_cleanup_path(sidecar_path)
+        if ok_file and ok_sidecar:
+            cleaned += 1
+            continue
+        failed += 1
+        if file_path.exists():
+            sidecar = _read_review_sidecar(file_path)
+            sidecar = _set_review_state(sidecar, "cleanup_failed", cleanup_error=err_file or err_sidecar)
+            _write_review_sidecar(file_path, sidecar)
+    return {"status": "success", "cleaned": cleaned, "failed": failed}
 
 @app.get("/api/config")
 async def get_app_config(): return await asyncio.to_thread(get_config)

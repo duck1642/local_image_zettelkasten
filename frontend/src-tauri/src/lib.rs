@@ -17,6 +17,7 @@ fn copy_file_to_clipboard(path: String) -> Result<(), String> {
 pub fn run() {
   tauri::Builder::default()
     .invoke_handler(tauri::generate_handler![copy_file_to_clipboard])
+    .plugin(tauri_plugin_dialog::init())
     .plugin(tauri_plugin_shell::init())
     .plugin(tauri_plugin_log::Builder::default()
         .targets([

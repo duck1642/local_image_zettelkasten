@@ -256,6 +256,9 @@ Deferred:
   - local Python timestamps and SQLite UTC defaults still coexist
 - Thumbnail helper cleanup:
   - small asset-path helper duplication remains
+- Tauri package alignment:
+  - frontend `@tauri-apps/api` is pinned to `2.10.1` to match Rust `tauri 2.10.x`.
+  - full Tauri stack upgrade to `2.11.x` is deferred as a separate stabilization pass.
 
 ## Useful Checks
 

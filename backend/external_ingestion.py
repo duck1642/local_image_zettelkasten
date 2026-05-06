@@ -1,7 +1,7 @@
 ﻿
 from pathlib import Path
 from typing import List, Optional, Dict, Tuple
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 import threading
 import time
 import shutil
@@ -16,6 +16,7 @@ from logs.logger import log_ingestion
 from downloaders.gallery_dl_wrapper import download_gallery, inspect_gallery
 from downloaders.yt_dlp_wrapper import download_video, inspect_youtube_community
 import random
+from ingest_control import ONLINE_STOP_AFTER_CURRENT
 
 
 GLOBAL_WORKER_LIMIT: Optional[threading.Semaphore] = None
@@ -107,21 +108,47 @@ class ExternalIngestor:
         log_ingestion("INFO", f"Starting queue with {num_workers} workers.", platform=platform)
 
         with ThreadPoolExecutor(max_workers=num_workers) as executor:
-            futures = [executor.submit(self._worker_item, platform, url, jitter) for url in urls]
+            pending_urls = iter(urls)
+            in_flight = set()
 
-            for future in as_completed(futures):
-                success, url_out, stats_out, index_list = future.result()
+            for _ in range(num_workers):
+                if ONLINE_STOP_AFTER_CURRENT.is_set():
+                    break
+                try:
+                    next_url = next(pending_urls)
+                except StopIteration:
+                    break
+                in_flight.add(executor.submit(self._worker_item, platform, next_url, jitter))
 
+            while in_flight:
+                done, in_flight = wait(in_flight, return_when=FIRST_COMPLETED)
+                for future in done:
+                    success, url_out, stats_out, index_list = future.result()
 
-                plat_stats["processed"] += stats_out["processed"]
-                plat_stats["skipped"] += stats_out["skipped"]
-                plat_stats["errors"] += stats_out["errors"]
+                    plat_stats["processed"] += stats_out["processed"]
+                    plat_stats["skipped"] += stats_out["skipped"]
+                    plat_stats["errors"] += stats_out["errors"]
 
-                if index_list:
-                    plat_index_data.extend(index_list)
+                    if index_list:
+                        plat_index_data.extend(index_list)
 
-                if not success:
-                    plat_remaining.append(url_out)
+                    if not success:
+                        plat_remaining.append(url_out)
+
+                if ONLINE_STOP_AFTER_CURRENT.is_set():
+                    continue
+
+                for _ in range(len(done)):
+                    try:
+                        next_url = next(pending_urls)
+                    except StopIteration:
+                        break
+                    in_flight.add(executor.submit(self._worker_item, platform, next_url, jitter))
+
+            if ONLINE_STOP_AFTER_CURRENT.is_set():
+                for url_left in pending_urls:
+                    plat_remaining.append(url_left)
+                log_ingestion("INFO", "Stop-after-current acknowledged; remaining URLs deferred", platform=platform, deferred=len(plat_remaining))
 
         return plat_stats, plat_remaining, plat_index_data
 

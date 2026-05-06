@@ -9,11 +9,14 @@
   import { log as uiLog } from './lib/logger';
   import { ramStats, startRamTracker } from './lib/ramStore';
   import { queueStats, reviewCount, startSharedStatsPolling } from './lib/statsStore';
+  import { apiFetch } from './lib/api';
 
   type AppTab = 'vault' | 'logs' | 'ingest' | 'review' | 'stats' | 'settings';
 
   let activeTab: AppTab = 'vault';
   let vaultStatus = { totalItems: 0, groups: 0, hasMore: false, layoutMode: 'masonry' };
+  let forceClosing = false;
+  let closeFlowRunning = false;
 
   function handleVaultStatus(event: CustomEvent) {
     vaultStatus = event.detail;
@@ -44,9 +47,56 @@
     uiLog('INFO', 'Svelte UI initialized and mounted');
     const stopStats = startSharedStatsPolling();
     const stopRam = startRamTracker();
+    let unlistenClose: (() => void) | null = null;
+
+    (async () => {
+      try {
+        const { getCurrentWindow } = await import('@tauri-apps/api/window');
+        const appWindow = getCurrentWindow();
+        unlistenClose = await appWindow.onCloseRequested(async (event) => {
+          if (forceClosing || closeFlowRunning) return;
+          try {
+            const statusRes = await apiFetch('/api/ingest/runtime-status');
+            if (!statusRes.ok) return;
+            const status = await statusRes.json();
+            if (!status?.any_running) return;
+
+            event.preventDefault();
+            const shouldStop = confirm('Ingestion is running.\n\nStop after current item and exit?');
+            if (!shouldStop) return;
+
+            closeFlowRunning = true;
+            await apiFetch('/api/ingest/stop-after-current', { method: 'POST' });
+
+            const startedAt = Date.now();
+            while (Date.now() - startedAt < 10 * 60 * 1000) {
+              await new Promise((resolve) => setTimeout(resolve, 900));
+              const pollRes = await apiFetch('/api/ingest/runtime-status');
+              if (!pollRes.ok) continue;
+              const poll = await pollRes.json();
+              if (!poll?.any_running) {
+                forceClosing = true;
+                await appWindow.close();
+                return;
+              }
+            }
+            closeFlowRunning = false;
+            alert('Timed out waiting for ingestion to stop. Try again in a few moments.');
+          } catch (error) {
+            closeFlowRunning = false;
+            uiLog('ERROR', 'Close guard failed', { error: String(error) });
+            alert('Failed to run safe-exit flow. Check logs.');
+          }
+        });
+      } catch {
+        // non-tauri context
+      }
+    })();
+
     return () => {
       stopStats();
       stopRam();
+      if (unlistenClose) unlistenClose();
     };
   });
 </script>
