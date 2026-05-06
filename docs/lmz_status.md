@@ -78,6 +78,7 @@ SQLite stores runtime asset/index metadata only. Manual topics and WD tags live 
 - Auth config cleanup:
   - `cookies_path` now uses relative `secrets/cookies.txt`
   - Pixiv token is loaded from `secrets/.secrets.yaml`, not `config/config.yaml`
+  - `/api/config` strips secret keys so Settings saves cannot write Pixiv token back to `config.yaml`
   - relative cookie paths resolve from the project root
 - RAM tracker implemented:
   - backend endpoint `/api/system/memory`

@@ -360,6 +360,7 @@ Credential storage:
 - `config/config.yaml`: non-secret defaults, including relative `external_tools.cookies_path`.
 - `secrets/.secrets.yaml`: sensitive overrides such as `pixiv_token` and `cookies_path`.
 - `secrets/cookies.txt`: Netscape cookie jar used by gallery-dl and yt-dlp.
+- `/api/config` returns and saves public config only; secret keys are stripped before UI round-trips can write `config.yaml`.
 
 Path handling:
 

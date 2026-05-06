@@ -7,6 +7,7 @@ import time
 import traceback
 import secrets
 import threading
+import copy
 from datetime import datetime
 from collections import Counter
 from pathlib import Path
@@ -1584,8 +1585,31 @@ def _cleanup_review_resolved_sync():
             _write_review_sidecar(file_path, sidecar)
     return {"status": "success", "cleaned": cleaned, "failed": failed}
 
+CONFIG_SECRET_KEYS = {"pixiv_token"}
+
+
+def _strip_config_secrets(config: dict) -> dict:
+    safe_config = copy.deepcopy(config or {})
+    external_tools = safe_config.get("external_tools")
+    if isinstance(external_tools, dict):
+        for key in CONFIG_SECRET_KEYS:
+            external_tools.pop(key, None)
+    return safe_config
+
+
+def _load_public_config_sync() -> dict:
+    from utils import CONFIG_PATH
+    import yaml
+    if not CONFIG_PATH.exists():
+        return _strip_config_secrets(get_config())
+    with open(CONFIG_PATH, "r", encoding="utf-8") as handle:
+        config = yaml.safe_load(handle) or {}
+    return _strip_config_secrets(config)
+
+
 @app.get("/api/config")
-async def get_app_config(): return await asyncio.to_thread(get_config)
+async def get_app_config():
+    return await asyncio.to_thread(_load_public_config_sync)
 
 @app.post("/api/config")
 async def update_app_config(new_config: dict):
@@ -1594,7 +1618,8 @@ async def update_app_config(new_config: dict):
 def _update_app_config_sync(new_config: dict):
     from utils import CONFIG_PATH
     import yaml
-    atomic_write_text(CONFIG_PATH, yaml.dump(new_config, default_flow_style=False, allow_unicode=True))
+    safe_config = _strip_config_secrets(new_config)
+    atomic_write_text(CONFIG_PATH, yaml.dump(safe_config, default_flow_style=False, allow_unicode=True))
     return {"status": "success"}
 
 @app.get("/")
