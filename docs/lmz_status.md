@@ -50,6 +50,80 @@ SQLite stores runtime asset/index metadata only. Manual topics and WD tags live 
 - Dedicated auth-status log stream for cookie/token visibility.
 - Local API hardening for destructive actions.
 
+## Current Issues
+
+### Critical
+
+- Online ingestion can crash before work starts.
+  - Cause: `as_completed(futures)` is used but `as_completed` is not imported from `concurrent.futures`.
+  - Code: `backend/external_ingestion.py:4`, `backend/external_ingestion.py:65`.
+- Review `replace` can destroy the existing vault item before replacement succeeds.
+  - Cause: target item is deleted first, then `process_file()` runs. If ingest fails, the old item is already removed from DB/assets/notes.
+  - Code: `backend/web_api.py:1513`, `backend/web_api.py:1521`.
+
+### High
+
+- `cleanup_failed` review items can be hidden automatically.
+  - Cause: `_resolve_review_entries()` converts any review file whose hash exists in DB into `resolved_variant`, unless already in resolved states. `cleanup_failed` is not resolved, so it gets overwritten.
+  - Code: `backend/web_api.py:94`, `backend/web_api.py:1385`.
+- `>cleanup-review` does not clean `cleanup_failed` items.
+  - Cause: cleanup loop only processes `REVIEW_RESOLVED_STATES`; `cleanup_failed` is in pending states.
+  - Code: `backend/web_api.py:89`, `backend/web_api.py:1571`.
+- Local ingest can move original user files into review.
+  - Cause: local worker calls `process_file(... delete_source=False)`, but duplicate quarantine uses `shutil.move(filepath, dest_path)` regardless of `delete_source`.
+  - Code: `backend/web_api.py:1269`, `backend/processor.py:207`.
+- Local ingest can start two workers.
+  - Cause: endpoint checks `LOCAL_INGEST_STATE["running"]`, then expands paths and schedules worker. `running=True` is only set inside the worker later.
+  - Code: `backend/web_api.py:1303`, `backend/web_api.py:1250`.
+
+### Medium
+
+- Stop-after-current can drop deferred online URLs.
+  - Cause: deferred URLs are collected in `all_remaining`, but final queue write always clears the source queue with `_write_back([])`.
+  - Code: `backend/external_ingestion.py:73`, `backend/external_ingestion.py:88`.
+- Review `keep` behavior is inconsistent in the frontend.
+  - Cause: backend sets state `deferred`, which remains pending. Frontend treats the successful action as resolved and removes the item from the local list.
+  - Code: `backend/web_api.py:1497`, `frontend/src/lib/ReviewView.svelte:106`.
+- Review action URL can break for special filenames.
+  - Cause: filename is interpolated directly into the URL path without `encodeURIComponent`.
+  - Code: `frontend/src/lib/ReviewView.svelte:92`.
+- Review filename collision is possible.
+  - Cause: duplicate quarantine writes to `REVIEW_DIR / filepath.name`; no hash/session suffix is added.
+  - Code: `backend/processor.py:206`, `backend/processor.py:250`.
+- Orphan review sidecars are not cleanup candidates.
+  - Cause: cleanup starts from media files only; `.json` sidecars without media are excluded before cleanup logic runs.
+  - Code: `backend/web_api.py:1335`, `backend/web_api.py:1347`.
+- Local retry loses metadata defaults.
+  - Cause: retry endpoint reuses only `failed_paths`; it starts the worker with `{}` defaults and `skip_similarity=False`.
+  - Code: `backend/web_api.py:1322`, `backend/web_api.py:1328`.
+- `/review-assets` may not mount on clean startup.
+  - Cause: static mount only happens if `REVIEW_DIR.exists()` at API import time. Later directory creation does not mount the route.
+  - Code: `backend/web_api.py:328`.
+
+### Low
+
+- Documented Python AST check fails on BOM files.
+  - Cause: command uses `encoding='utf-8'`; several backend files start with UTF-8 BOM.
+  - Code/doc: `docs/lmz_status.md:285`, `backend/core.py:1`.
+- Pixiv token is still in normal config.
+  - Cause: docs say secrets-backed, but `config/config.yaml` has `external_tools.pixiv_token`.
+  - Code/config: `config/config.yaml:3`.
+- Docs contain old search syntax.
+  - Cause: current code uses `p:`, `t:`, `#`; status doc still says repeated `@` and `*` in one section.
+  - Code/doc: `frontend/src/lib/search.ts:26`, `docs/lmz_status.md:234`.
+- Local folder expansion can block API.
+  - Cause: recursive `path.rglob("*")` and sorting run synchronously before the background worker starts.
+  - Code: `backend/web_api.py:1215`.
+- Local ingest results can grow in memory.
+  - Cause: backend appends every result into process-global `LOCAL_INGEST_STATE["results"]`; frontend only displays the last 120.
+  - Code: `backend/web_api.py:1285`, `frontend/src/lib/Ingestion.svelte:485`.
+- Topic/WD filters are expensive.
+  - Cause: query loads up to 100,000 DB rows, then parses markdown/tag data in Python.
+  - Code: `backend/web_api.py:656`, `backend/web_api.py:668`.
+- Video VP-tree rebuilds on every add.
+  - Cause: `VPTreeSearcher.add()` rebuilds the tree immediately. Batch updates repeatedly rebuild.
+  - Code: `backend/db/searchers.py:25`, `backend/db/searchers.py:29`.
+
 ## Recently Completed
 
 - Project renamed to Local Media Zettelkasten / LMZ.
