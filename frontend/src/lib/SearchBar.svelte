@@ -14,6 +14,7 @@
     '>toggle-inspector',
     '>ram-track',
     '>scan-auth',
+    '>cleanup-review',
     '>sort-newest',
     '>sort-oldest',
     '>sort-artist',
@@ -234,7 +235,7 @@
   <div class="search-wrapper">
     <input
       type="text"
-      placeholder="a: artist; # topic; * wd-tag; @ platform; > cmd"
+      placeholder="> cmd; a: artist; p: platform; t: topic; # wd-tag"
       bind:this={searchInputEl}
       bind:value={searchQuery}
       on:input={handleSearchInput}

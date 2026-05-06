@@ -171,6 +171,63 @@
           <span class="key">&gt;toggle-inspector</span>
           <span class="desc">Toggle Inspector Panel</span>
         </div>
+        <div class="shortcut-row">
+          <span class="key">&gt;ram-track</span>
+          <span class="desc">Toggle RAM Tracker Footer</span>
+        </div>
+        <div class="shortcut-row">
+          <span class="key">&gt;scan-auth</span>
+          <span class="desc">Run Auth Status Scan</span>
+        </div>
+        <div class="shortcut-row">
+          <span class="key">&gt;cleanup-review</span>
+          <span class="desc">Retry Review Cleanup</span>
+        </div>
+        <div class="shortcut-row">
+          <span class="key">&gt;sort-newest</span>
+          <span class="desc">Sort Vault by Newest</span>
+        </div>
+        <div class="shortcut-row">
+          <span class="key">&gt;sort-oldest</span>
+          <span class="desc">Sort Vault by Oldest</span>
+        </div>
+        <div class="shortcut-row">
+          <span class="key">&gt;sort-artist</span>
+          <span class="desc">Sort Vault by Artist</span>
+        </div>
+        <div class="shortcut-row">
+          <span class="key">&gt;media-all</span>
+          <span class="desc">Show All Media Types</span>
+        </div>
+        <div class="shortcut-row">
+          <span class="key">&gt;media-image</span>
+          <span class="desc">Filter Images Only</span>
+        </div>
+        <div class="shortcut-row">
+          <span class="key">&gt;media-video</span>
+          <span class="desc">Filter Videos Only</span>
+        </div>
+        <div class="divider"></div>
+        <div class="shortcut-row">
+          <span class="key">&gt;</span>
+          <span class="desc">Command Prefix</span>
+        </div>
+        <div class="shortcut-row">
+          <span class="key">a:</span>
+          <span class="desc">Artist Prefix</span>
+        </div>
+        <div class="shortcut-row">
+          <span class="key">p:</span>
+          <span class="desc">Platform Prefix</span>
+        </div>
+        <div class="shortcut-row">
+          <span class="key">t:</span>
+          <span class="desc">Topic Prefix</span>
+        </div>
+        <div class="shortcut-row">
+          <span class="key">#</span>
+          <span class="desc">WD Tag Prefix</span>
+        </div>
       </div>
     </div>
   {/if}

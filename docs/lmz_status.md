@@ -127,6 +127,13 @@ SQLite stores runtime asset/index metadata only. Manual topics and WD tags live 
   - `variant`/`replace` no longer report full success when review file deletion fails.
   - On delete-failure after ingest, item is marked `cleanup_failed` and kept pending in review with warning response.
   - Prevents “review empty” false-positive while review file still exists.
+- Review cleanup command added. Done (will be checked):
+  - New vault command `>cleanup-review` triggers `POST /api/review/cleanup`.
+  - Command logs cleanup `cleaned` and `failed` counts into App Logs.
+- Search prefix remap + UI guide order updated. Done (will be checked):
+  - Prefix mapping changed to: `> cmd`, `a: artist`, `p: platform`, `t: topic`, `# wd-tag`.
+  - Search parser and active-segment detection updated for `p:` and `t:`.
+  - Settings and search placeholder text updated to the same order.
 
 ## Needs Validation Or Refinement
 
@@ -204,9 +211,9 @@ Deferred:
 Current search syntax:
 
 - `a:` artist
-- `@` platform
-- `#` note-frontmatter topic
-- `*` WD tag
+- `p:` platform
+- `t:` note-frontmatter topic
+- `#` WD tag
 - `>` command
 - `;` separates structured filters
 
@@ -217,6 +224,7 @@ Current operational commands include:
 - `>toggle-inspector`
 - `>ram-track`
 - `>scan-auth`
+- `>cleanup-review`
 - `>sort-newest`, `>sort-oldest`, `>sort-artist`
 - `>media-all`, `>media-image`, `>media-video`
 

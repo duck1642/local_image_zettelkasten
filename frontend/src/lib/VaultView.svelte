@@ -254,6 +254,8 @@
       toggleRamTracking().catch((error) => uiLog('ERROR', 'Failed to toggle RAM tracker', { error: String(error) }));
     } else if (command === 'scan-auth') {
       scanAuthStatus();
+    } else if (command === 'cleanup-review') {
+      cleanupReview();
     } else if (command === 'sort-newest') {
       setSortMode('newest');
     } else if (command === 'sort-oldest') {
@@ -276,6 +278,20 @@
       uiLog('INFO', 'Auth scan requested from command');
     } catch (error) {
       uiLog('ERROR', 'Auth scan command failed', { error: String(error) });
+    }
+  }
+
+  async function cleanupReview() {
+    try {
+      const response = await apiFetch('/api/review/cleanup', { method: 'POST' });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload?.detail || `HTTP ${response.status}`);
+      uiLog('INFO', 'Review cleanup requested from command', {
+        cleaned: payload?.cleaned ?? 0,
+        failed: payload?.failed ?? 0
+      });
+    } catch (error) {
+      uiLog('ERROR', 'Review cleanup command failed', { error: String(error) });
     }
   }
 
