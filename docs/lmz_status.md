@@ -1,6 +1,6 @@
 # LMZ Current Status
 
-Last updated: 2026-05-05
+Last updated: 2026-05-06
 
 ## Current State
 
@@ -47,6 +47,7 @@ SQLite stores runtime asset/index metadata only. Manual topics and WD tags live 
 - Markdown queue ingestion workbench.
 - Review, Stats, Settings, and App Logs views.
 - Structured log viewer with normal/raw modes.
+- Dedicated auth-status log stream for cookie/token visibility.
 - Local API hardening for destructive actions.
 
 ## Recently Completed
@@ -68,6 +69,16 @@ SQLite stores runtime asset/index metadata only. Manual topics and WD tags live 
   - `>grid`
   - `>zoom-in`
   - `>zoom-out`
+- Auth status scan implemented:
+  - startup auth scan writes to `logs/structured/auth.jsonl`
+  - manual endpoint `/api/auth/scan`
+  - vault command `>scan-auth`
+  - App Logs dropdown includes `auth.jsonl (Auth)`
+  - reports X, Instagram, Pinterest, YouTube, and Pixiv availability without logging secret values
+- Auth config cleanup:
+  - `cookies_path` now uses relative `secrets/cookies.txt`
+  - Pixiv token is loaded from `secrets/.secrets.yaml`, not `config/config.yaml`
+  - relative cookie paths resolve from the project root
 - RAM tracker implemented:
   - backend endpoint `/api/system/memory`
   - frontend footer display
@@ -181,6 +192,16 @@ Current search syntax:
 - `*` WD tag
 - `>` command
 - `;` separates structured filters
+
+Current operational commands include:
+
+- `>masonry`, `>grid`
+- `>zoom-in`, `>zoom-out`
+- `>toggle-inspector`
+- `>ram-track`
+- `>scan-auth`
+- `>sort-newest`, `>sort-oldest`, `>sort-artist`
+- `>media-all`, `>media-image`, `>media-video`
 
 Current semantics:
 

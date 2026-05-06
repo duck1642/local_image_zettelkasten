@@ -2,11 +2,13 @@ import hashlib
 import json
 import shutil
 import subprocess
-from pathlib import Path
 from urllib.parse import urlparse
 
 from downloaders.media_filter import valid_media_files
-from utils import INPUT_DIR, get_config, get_cookie_path
+from utils import INPUT_DIR, get_config, get_cookie_auth_status, get_cookie_path
+
+
+_AUTH_STATUS_LOGGED = set()
 
 
 def _extract_artist(data: dict, platform: str) -> str:
@@ -65,7 +67,15 @@ def _base_args(url: str) -> list:
     config = get_config()
     ext_tools = config.get('external_tools', {})
     cookie_path = get_cookie_path()
+    cookie_status = get_cookie_auth_status()
     args = []
+    platform = _platform_for_url(url)
+
+    _log_auth_status(
+        platform,
+        cookie_status,
+        bool(ext_tools.get('pixiv_token')),
+    )
 
     if cookie_path:
         args.extend(["--cookies", str(cookie_path)])
@@ -77,6 +87,45 @@ def _base_args(url: str) -> list:
         args.extend(["--user-agent", ext_tools['user_agent']])
 
     return args
+
+
+def _log_auth_status(
+    platform: str,
+    cookie_status: dict,
+    has_pixiv_token: bool,
+):
+    platform_cookie_key = {
+        "X": "x",
+        "Instagram": "instagram",
+        "Pinterest": "pinterest",
+    }.get(platform)
+    platform_cookie_status = cookie_status.get(platform_cookie_key, "not_required")
+
+    pixiv_token_status = "not_required"
+    if platform == "Pixiv":
+        pixiv_token_status = "available" if has_pixiv_token else "missing"
+
+    key = (
+        platform,
+        cookie_status.get("cookies"),
+        platform_cookie_status,
+        pixiv_token_status,
+    )
+    if key in _AUTH_STATUS_LOGGED:
+        return
+    _AUTH_STATUS_LOGGED.add(key)
+
+    from logs.logger import log_auth
+    log_auth(
+        "INFO",
+        "Downloader auth status",
+        downloader="gallery-dl",
+        platform=platform,
+        cookies=cookie_status.get("cookies"),
+        platform_cookies=platform_cookie_status,
+        cookies_path=cookie_status.get("path", ""),
+        pixiv_token=pixiv_token_status,
+    )
 
 
 def _load_metadata_lines(stdout: str) -> list:

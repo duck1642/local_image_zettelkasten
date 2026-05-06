@@ -252,6 +252,8 @@
       toggleInspector();
     } else if (command === 'ram-track') {
       toggleRamTracking().catch((error) => uiLog('ERROR', 'Failed to toggle RAM tracker', { error: String(error) }));
+    } else if (command === 'scan-auth') {
+      scanAuthStatus();
     } else if (command === 'sort-newest') {
       setSortMode('newest');
     } else if (command === 'sort-oldest') {
@@ -264,6 +266,16 @@
       setMediaType('image');
     } else if (command === 'media-video') {
       setMediaType('video');
+    }
+  }
+
+  async function scanAuthStatus() {
+    try {
+      const response = await apiFetch('/api/auth/scan', { method: 'POST' });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      uiLog('INFO', 'Auth scan requested from command');
+    } catch (error) {
+      uiLog('ERROR', 'Auth scan command failed', { error: String(error) });
     }
   }
 

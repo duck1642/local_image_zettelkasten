@@ -37,6 +37,7 @@
     { label: 'terminal.log (Python Stdout)', value: 'terminal.log' },
     { label: 'svelte.jsonl (Frontend)', value: 'svelte.jsonl' },
     { label: 'ingestion.jsonl (Worker)', value: 'ingestion.jsonl' },
+    { label: 'auth.jsonl (Auth)', value: 'auth.jsonl' },
     { label: 'activity.jsonl (Audit)', value: 'activity.jsonl' },
   ];
 

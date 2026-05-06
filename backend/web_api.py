@@ -18,11 +18,11 @@ from pydantic import BaseModel
 from db.sqlite_operator import init_database, normalize_source_url
 from utils import get_config, ASSETS_DIR, REVIEW_DIR, note_path_for, asset_path_for
 from processor import process_file
-from logs.logger import log_svelte, log_system, RAW_LOGS_DIR, STRUCTURED_LOGS_DIR
+from logs.logger import log_auth, log_svelte, log_system, RAW_LOGS_DIR, STRUCTURED_LOGS_DIR
 from md_generator import load_note_topics, load_note_wd_tags, generate_markdown
 from tagging import load_tag_cache, tag_media
 from thumbnails import get_or_generate_thumbnail
-from utils import SECRETS_DIR, WD_TAGS_DIR, atomic_write_text
+from utils import SECRETS_DIR, WD_TAGS_DIR, atomic_write_text, get_cookie_auth_status
 
 class TerminalLogger:
     def __init__(self, filename, original_stream):
@@ -78,6 +78,7 @@ LOG_FILES = {
     "system.jsonl": STRUCTURED_LOGS_DIR / "system.jsonl",
     "svelte.jsonl": STRUCTURED_LOGS_DIR / "svelte.jsonl",
     "ingestion.jsonl": STRUCTURED_LOGS_DIR / "ingestion.jsonl",
+    "auth.jsonl": STRUCTURED_LOGS_DIR / "auth.jsonl",
     "activity.jsonl": STRUCTURED_LOGS_DIR / "activity.jsonl",
     "terminal.log": RAW_LOGS_DIR / "terminal.log",
 }
@@ -88,6 +89,46 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+def _scan_auth_status_sync(reason: str = "manual") -> dict:
+    config = get_config()
+    ext_tools = config.get("external_tools", {})
+    cookie_status = get_cookie_auth_status()
+    pixiv_token = "available" if ext_tools.get("pixiv_token") else "missing"
+    statuses = {
+        "cookies": cookie_status.get("cookies"),
+        "cookies_path": cookie_status.get("path", ""),
+        "platforms": {
+            "X": {"cookies": cookie_status.get("x", "missing"), "token": "not_required"},
+            "Instagram": {"cookies": cookie_status.get("instagram", "missing"), "token": "not_required"},
+            "Pinterest": {"cookies": cookie_status.get("pinterest", "missing"), "token": "not_required"},
+            "YouTube": {"cookies": cookie_status.get("youtube", "missing"), "token": "not_required"},
+            "Pixiv": {"cookies": "not_required", "token": pixiv_token},
+        },
+    }
+
+    log_auth(
+        "INFO",
+        "Auth scan summary",
+        reason=reason,
+        cookies=statuses["cookies"],
+        cookies_path=statuses["cookies_path"],
+    )
+    for platform, status in statuses["platforms"].items():
+        log_auth(
+            "INFO",
+            "Auth platform status",
+            reason=reason,
+            platform=platform,
+            cookies=status["cookies"],
+            token=status["token"],
+        )
+    return statuses
+
+
+@app.on_event("startup")
+async def startup_auth_scan():
+    await asyncio.to_thread(_scan_auth_status_sync, "startup")
 
 def _api_key_path() -> Path:
     return SECRETS_DIR / ".api_key"
@@ -880,6 +921,11 @@ async def stream_logs(filename: str = Query("system.jsonl")):
         except Exception:
             pass
     return StreamingResponse(log_generator(), media_type="text/event-stream")
+
+@app.post("/api/auth/scan")
+async def scan_auth_status():
+    statuses = await asyncio.to_thread(_scan_auth_status_sync, "manual")
+    return {"status": "ok", "auth": statuses}
 
 class UILogEntry(BaseModel):
     level: str

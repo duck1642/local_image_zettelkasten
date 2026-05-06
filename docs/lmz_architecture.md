@@ -181,6 +181,7 @@ Core API areas:
 - Thumbnails and item data: `/api/thumbnails/{hash}`, `/api/items`, `/api/items/{hash}`.
 - Item actions: update, delete, bulk delete, tag, open folder, open note.
 - Logs: SSE streaming, log open, log clear, frontend UI log ingest.
+- Auth status: `/api/auth/scan` writes credential availability checks to `auth.jsonl`.
 - Queue ingestion: queue read/write/parse/open/retry/clear/start.
 - Review workflow: review count, review item list, review actions.
 - Config: `/api/config`.
@@ -194,6 +195,7 @@ Security and runtime constraints:
 - Blocking filesystem/SQLite work is routed through thread helpers on main API paths.
 - Static vault/review assets are served from local runtime folders.
 - Frontend API calls go through `frontend/src/lib/api.ts`.
+- `config/config.yaml` stores non-secret runtime settings. `secrets/.secrets.yaml` stores external-service credentials such as Pixiv refresh token and cookie path overrides.
 
 ## Frontend Architecture
 
@@ -268,6 +270,7 @@ Vault commands:
 - `>media-video`
 - `>toggle-inspector`
 - `>ram-track`
+- `>scan-auth`
 
 ## Vault Grouping
 
@@ -348,6 +351,38 @@ Platform specifics:
 - X/Twitter: no metadata prefetch; original URL is preserved while gallery-dl receives its supported URL form.
 - YouTube community: extracts community image attachments and records per-image download failures.
 
+## External Authentication
+
+External downloader authentication is config-driven but secrets-backed.
+
+Credential storage:
+
+- `config/config.yaml`: non-secret defaults, including relative `external_tools.cookies_path`.
+- `secrets/.secrets.yaml`: sensitive overrides such as `pixiv_token` and `cookies_path`.
+- `secrets/cookies.txt`: Netscape cookie jar used by gallery-dl and yt-dlp.
+
+Path handling:
+
+- Relative cookie paths resolve from the project root.
+- Current default: `secrets/cookies.txt`.
+- Secret values are merged into `external_tools` at runtime by `get_config()`.
+
+Platform expectations:
+
+- X/Twitter: cookies.
+- Instagram: cookies.
+- Pinterest: cookies are detected and reported if present, but usually not required.
+- YouTube: cookies are optional; useful for restricted content.
+- Pixiv: refresh token.
+
+Auth visibility:
+
+- Startup runs an auth scan.
+- `POST /api/auth/scan` runs a manual scan.
+- Vault command `>scan-auth` triggers the manual scan.
+- Results are written to `logs/structured/auth.jsonl`.
+- Logs report only availability states, never cookie or token values.
+
 ## Tagging
 
 Local WD tagging lives under `backend/tagging/`.
@@ -380,11 +415,11 @@ Logs live under root-level `logs/`.
 Current layout:
 
 - `logs/raw/`: terminal output and raw tracebacks.
-- `logs/structured/`: JSONL streams for system, frontend UI, ingestion, and activity events.
+- `logs/structured/`: JSONL streams for system, frontend UI, ingestion, auth status, and activity events.
 
 Frontend logging is batched through `frontend/src/lib/logger.ts`.
 
-The UI can show readable normal logs or raw JSONL records.
+The UI can show readable normal logs or raw JSONL records, including `auth.jsonl`.
 
 ## Tauri Packaging
 

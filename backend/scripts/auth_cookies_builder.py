@@ -23,7 +23,7 @@ def _update_config_cookies_path(cookie_file_path: Path):
     secrets_path = SECRETS_DIR / ".secrets.yaml"
 
 
-    path_str = str(cookie_file_path.resolve().as_posix())
+    path_str = "secrets/cookies.txt"
 
     if secrets_path.exists():
         with open(secrets_path, 'r', encoding='utf-8') as f:
@@ -116,7 +116,7 @@ def run_builder():
         print("\nY IMPORTANT: Do not share your cookies.txt file! It contains your active login sessions.")
     except Exception as e:
         print(f"as i  Generated cookies.txt, but failed to update .secrets.yaml: {e}")
-        print(f"   Please manually add the path to your config.yaml: cookies_path: '{cookie_file_path.absolute()}'")
+        print("   Please manually add this to your config.yaml: cookies_path: 'secrets/cookies.txt'")
 
 if __name__ == "__main__":
     run_builder()

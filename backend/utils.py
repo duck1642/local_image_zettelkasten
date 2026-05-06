@@ -305,15 +305,84 @@ def calculate_phash(filepath: Path) -> Optional[str]:
 
 def get_cookie_path() -> Optional[Path]:
 
+    path = get_configured_cookie_path()
+    return path if path and path.exists() else None
+
+def resolve_project_path(path_str: str) -> Path:
+
+    path = Path(path_str)
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    return path.resolve()
+
+def get_configured_cookie_path() -> Optional[Path]:
+
     config = get_config()
     cookie_str = config.get('external_tools', {}).get('cookies_path')
 
     if not cookie_str:
         return None
 
-    path = Path(cookie_str)
-    if not path.is_absolute():
-        path = PROJECT_ROOT / path
+    return resolve_project_path(cookie_str)
 
-    resolved_path = path.resolve()
-    return resolved_path if resolved_path.exists() else None
+def get_cookie_auth_status() -> dict:
+
+    configured_path = get_configured_cookie_path()
+    if not configured_path:
+        return {
+            "cookies": "not_configured",
+            "path": "",
+            "x": "missing",
+            "instagram": "missing",
+            "pinterest": "missing",
+            "youtube": "missing",
+        }
+    if not configured_path.exists():
+        return {
+            "cookies": "missing",
+            "path": str(configured_path),
+            "x": "missing",
+            "instagram": "missing",
+            "pinterest": "missing",
+            "youtube": "missing",
+        }
+
+    platforms = {"x": False, "instagram": False, "pinterest": False, "youtube": False}
+    try:
+        for line in configured_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split("\t")
+            if len(parts) < 7:
+                continue
+            domain = parts[0].lower()
+            name = parts[5].lower()
+            if (
+                ("twitter.com" in domain or "x.com" in domain)
+                and name in {"auth_token", "ct0"}
+            ):
+                platforms["x"] = True
+            if "instagram.com" in domain and name == "sessionid":
+                platforms["instagram"] = True
+            if "pinterest.com" in domain:
+                platforms["pinterest"] = True
+            if "youtube.com" in domain or "google.com" in domain:
+                platforms["youtube"] = True
+    except OSError:
+        return {
+            "cookies": "unreadable",
+            "path": str(configured_path),
+            "x": "unknown",
+            "instagram": "unknown",
+            "pinterest": "unknown",
+            "youtube": "unknown",
+        }
+
+    return {
+        "cookies": "available",
+        "path": str(configured_path),
+        **{
+            platform: "available" if found else "missing"
+            for platform, found in platforms.items()
+        },
+    }

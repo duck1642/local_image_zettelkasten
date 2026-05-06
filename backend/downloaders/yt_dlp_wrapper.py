@@ -10,7 +10,10 @@ from urllib.parse import parse_qs, urljoin, urlparse
 from urllib.request import HTTPCookieProcessor, ProxyHandler, Request, build_opener
 
 from downloaders.media_filter import valid_media_files
-from utils import INPUT_DIR, get_config, get_cookie_path
+from utils import INPUT_DIR, get_config, get_cookie_auth_status, get_cookie_path
+
+
+_AUTH_STATUS_LOGGED = set()
 
 
 def _is_community_url(url: str) -> bool:
@@ -33,6 +36,7 @@ def _post_id(url: str) -> str:
 def _opener(config: dict):
     handlers = []
     cookie_path = get_cookie_path()
+    _log_auth_status("YouTube", get_cookie_auth_status())
     if cookie_path:
         jar = MozillaCookieJar()
         try:
@@ -45,6 +49,29 @@ def _opener(config: dict):
     if proxy:
         handlers.append(ProxyHandler({'http': proxy, 'https': proxy}))
     return build_opener(*handlers)
+
+
+def _log_auth_status(
+    platform: str,
+    cookie_status: dict,
+):
+    platform_cookie_status = cookie_status.get("youtube", "missing")
+
+    key = (platform, cookie_status.get("cookies"), platform_cookie_status)
+    if key in _AUTH_STATUS_LOGGED:
+        return
+    _AUTH_STATUS_LOGGED.add(key)
+
+    from logs.logger import log_auth
+    log_auth(
+        "INFO",
+        "Downloader auth status",
+        downloader="yt-dlp",
+        platform=platform,
+        cookies=cookie_status.get("cookies"),
+        platform_cookies=platform_cookie_status,
+        cookies_path=cookie_status.get("path", ""),
+    )
 
 
 def _fetch_text(url: str, config: dict) -> tuple[bool, str]:
@@ -306,6 +333,7 @@ def download_video(url: str, metadata_info: dict = None) -> tuple[bool, dict]:
     config = get_config()
     ext_tools = config.get('external_tools', {})
     cookie_path = get_cookie_path()
+    _log_auth_status("YouTube", get_cookie_auth_status())
 
     url_hash = hashlib.sha256(url.encode()).hexdigest()[:10]
     session_dir = INPUT_DIR / "external" / url_hash

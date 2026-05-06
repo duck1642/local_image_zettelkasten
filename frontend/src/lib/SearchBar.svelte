@@ -13,6 +13,7 @@
     '>zoom-out',
     '>toggle-inspector',
     '>ram-track',
+    '>scan-auth',
     '>sort-newest',
     '>sort-oldest',
     '>sort-artist',
