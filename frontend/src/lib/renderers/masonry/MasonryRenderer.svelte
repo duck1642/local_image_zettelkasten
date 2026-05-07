@@ -9,7 +9,6 @@
     MASONRY_OVERSCAN,
     createMasonryLayoutEngine,
     visibleMasonryPositions,
-    visualOrderFromMasonryPositions,
     type MasonryPosition
   } from './masonryLayout';
   import type { MeasurementStore } from './measurementStore';
@@ -27,7 +26,6 @@
   export let isLoadingMore = false;
   export let onSelectItem: (item: VaultItem, group: VaultGroup, event?: MouseEvent) => void = () => {};
   export let onIndexChange: (groupId: string, index: number) => void = () => {};
-  export let onVisualOrderChange: (hashes: string[]) => void = () => {};
 
   let scrollTop = 0;
   let viewportHeight = 0;
@@ -37,22 +35,13 @@
   let recomputeCount = 0;
   let lastSummaryLog = 0;
   let lastSummaryKey = '';
-  let lastVisualOrderKey = '';
   let measureObserver: ResizeObserver | null = null;
   const measuredNodes = new Map<HTMLElement, MasonryPosition>();
   const loggedDrifts = new Set<string>();
 
   $: layout = computeLayout(groups, viewportWidth, tileMinWidth, activeIndexes, measurements);
-  $: visiblePositions = visibleMasonryPositions(layout.positions, scrollTop, viewportHeight, MASONRY_OVERSCAN);
-  $: emitVisualOrder(layout.positions);
+  $: visiblePositions = visibleMasonryPositions(layout.positions, scrollTop, viewportHeight, MASONRY_OVERSCAN, layout.maxPositionHeight);
   $: if (import.meta.env.DEV) logSummary(groups, visiblePositions, layout, scrollTop, viewportHeight, recomputeCount, measurements);
-
-  function emitVisualOrder(positions: typeof layout.positions) {
-    const key = `${positions.length}:${positions[0]?.group.id ?? ''}:${positions[positions.length - 1]?.group.id ?? ''}:${layout.columnCount}`;
-    if (key === lastVisualOrderKey) return;
-    lastVisualOrderKey = key;
-    onVisualOrderChange(visualOrderFromMasonryPositions(positions));
-  }
 
   function measureTile(node: HTMLElement, position: MasonryPosition) {
     if (!measureObserver) {

@@ -54,7 +54,11 @@ class ExternalIngestor:
 
 
             buckets = self._bucket_links(links)
-            log_ingestion('INFO', f"Bucketed {len(links)} links into {len(buckets)} platform queues.")
+            log_ingestion(
+                'INFO',
+                f"Bucketed {len(links)} links into {len(buckets)} platform queues.",
+                platforms=", ".join(sorted(buckets.keys())),
+            )
 
 
             remaining_urls = []
@@ -518,7 +522,7 @@ class ExternalIngestor:
         if 'instagram.com' in u: return 'instagram'
         if 'twitter.com' in u or 'x.com' in u: return 'x'
         if 'youtube.com' in u or 'youtu.be' in u: return 'youtube'
-        return 'generic'
+        return 'other'
 
     def _parse_links(self) -> List[str]:
 

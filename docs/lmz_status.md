@@ -117,16 +117,65 @@ SQLite stores runtime asset/index metadata plus a disposable derived topic/WD qu
 - Local ingest results can grow in memory. Done (will be checked).
   - Cause: backend appends every result into process-global `LOCAL_INGEST_STATE["results"]`; frontend only displays the last 120.
   - Code: `backend/web_api.py:1285`, `frontend/src/lib/Ingestion.svelte:485`.
-- Topic/WD filters are expensive.
+- Topic/WD filters are expensive. Done (will be checked).
   - Cause: query loads up to 100,000 DB rows, then parses markdown/tag data in Python.
-  - Code: `backend/web_api.py:656`, `backend/web_api.py:668`.
-- Video VP-tree rebuilds on every add.
+  - Code: `backend/web_api.py:650`, `backend/metadata_index.py`.
+- Video VP-tree rebuilds on every add. Done (will be checked).
   - Cause: `VPTreeSearcher.add()` rebuilds the tree immediately. Batch updates repeatedly rebuild.
-  - Code: `backend/db/searchers.py:25`, `backend/db/searchers.py:29`.
+  - Code: `backend/db/searchers.py`, `backend/db/search_manager.py`.
 
 ## Recently Completed
 
 - Project renamed to Local Media Zettelkasten / LMZ.
+- Set 5A RAM index build performance completed. Done (will be checked):
+  - Video/audio VP-tree signatures now append to pending items instead of rebuilding on every add.
+  - Queries search both the built VP tree and pending signatures, so duplicate detection remains immediate.
+  - Batch index updates rebuild VP trees once after the batch.
+  - Validation used:
+    - backend AST parse with `utf-8-sig`
+    - backend import smoke
+    - focused VP-tree/search-manager smoke
+    - 10k fake-signature performance smoke
+- Set 5B large-vault frontend validation completed. Done (will be checked):
+  - Playwright large-vault harness lives under `tests/frontend/`.
+  - Mock API covers `/api/items`, `/api/stats`, `/api/config`, `/api/session-key`, and no-op UI logs.
+  - Scenarios cover 10k and 100k items, masonry/grid layouts, mixed media, and grouped media.
+  - Validation used:
+    - `npm run check`
+    - `npm run test:large-vault`
+    - Playwright assertions for bounded mounted tiles, finite scroll surface, no visible overlap, repeated scroll stability, and layout switching
+- Set 5C durable metadata index completed. Done (will be checked):
+  - Added disposable SQLite metadata index for topics and WD tags.
+  - YAML/frontmatter remains source of truth.
+  - WD JSON cache is fallback only when YAML WD fields are missing.
+  - Startup repair, watchdog reindex, stale signature checks, status endpoint, and rebuild endpoint are implemented.
+  - Topic/WD filters, facets, suggestions, and item detail metadata read through the index after initial backfill.
+  - Legacy YAML/cache scan remains fallback before initial backfill completes.
+  - Validation used:
+    - focused metadata-index smoke for schema, parser, WD JSON fallback, legacy note path, malformed YAML error recording, cascade delete, stale repair, SQL filters/facets, cursor pagination, and detail refresh
+    - backend AST parse with `utf-8-sig`
+    - backend import smoke
+    - `git diff --check`
+- Set 5D vault query/render hot-path performance completed. Done (will be checked):
+  - Added SQLite indexes for date/hash, oldest date/hash, artist/date/hash, platform, source artist, MIME/date, and source URL paths.
+  - Artist-sort cursor pagination now matches artist/date/hash ordering.
+  - Renderer hot paths no longer build full visual hash arrays.
+  - Masonry visible-item lookup uses bounded binary-search scanning instead of full-position scans during scroll.
+  - Validation used:
+    - backend AST parse with `utf-8-sig`
+    - backend import smoke
+    - focused artist-cursor smoke
+    - `npm run check`
+    - `npm run test:large-vault`
+    - `git diff --check`
+- Close guard + unknown URL log labeling fixed. Done (will be checked):
+  - Window close now fails open when no ingestion is running or runtime-status cannot be reached.
+  - Close guard still prompts stop-after-current when ingestion is actually running.
+  - Unknown online URL buckets are labeled `other` internally and shown as `[OTHER URL]` in Logs instead of `[GENERIC]`.
+  - Validation used:
+    - backend AST parse with `utf-8-sig`
+    - backend import smoke
+    - `npm run check`
 - Python source root renamed from `src/` to `backend/`.
 - Old full-DOM masonry/grid renderers archived as non-compiled references.
 - Virtualized masonry and grid renderers promoted to the active `masonry` and `grid` layouts.
@@ -255,9 +304,9 @@ SQLite stores runtime asset/index metadata plus a disposable derived topic/WD qu
 ## Needs Validation Or Refinement
 
 - Virtual renderer validation:
-  - long-scroll masonry overlap checks
-  - offscreen video unmount checks
-  - grouped media active index after scroll out/in
+  - automated large-vault Playwright checks pass for 10k/100k masonry/grid and grouped mixed media
+  - still needs manual real-vault smoke for offscreen video unmount behavior
+  - still needs manual real-vault smoke for grouped media active index after scroll out/in
   - zoom stability in narrow and wide windows
   - real vault testing with large item counts
 - Resizable inspector polish:
@@ -392,6 +441,18 @@ Deferred:
 - Search chips.
 
 ## Deferred Work
+
+- Set 6 security hardening is deferred and will be done later:
+  - local API auth/origin/path review
+  - mutating endpoint protection pass
+  - secrets/runtime exposure review
+  - packaging-time security checks
+- Set 7 Tauri/runtime stabilization is deferred and will be done later:
+  - sidecar startup/shutdown lifecycle
+  - dynamic port/runtime coordination
+  - production path/config validation
+  - clean-machine package validation
+  - full Tauri stack alignment pass
 
 - Known review issues from smoke testing:
   - Fixed: `/api/review` crashed due to tuple-unpack mismatch after review payload expansion.

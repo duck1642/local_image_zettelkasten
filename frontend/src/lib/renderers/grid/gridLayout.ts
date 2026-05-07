@@ -65,9 +65,3 @@ export function visibleGridPositions(
   const endIndex = Math.min(positions.length, (endRow + 1) * columnCount);
   return positions.slice(startIndex, endIndex);
 }
-
-export function visualOrderFromGridPositions(positions: GridPosition[]) {
-  return [...positions]
-    .sort((left, right) => left.rowIndex - right.rowIndex || left.columnIndex - right.columnIndex)
-    .flatMap((position) => position.group.items.map((item) => item.hash));
-}

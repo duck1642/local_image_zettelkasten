@@ -54,14 +54,34 @@
         const { getCurrentWindow } = await import('@tauri-apps/api/window');
         const appWindow = getCurrentWindow();
         unlistenClose = await appWindow.onCloseRequested(async (event) => {
-          if (forceClosing || closeFlowRunning) return;
-          try {
-            const statusRes = await apiFetch('/api/ingest/runtime-status');
-            if (!statusRes.ok) return;
-            const status = await statusRes.json();
-            if (!status?.any_running) return;
+          if (forceClosing) return;
+          event.preventDefault();
+          if (closeFlowRunning) return;
 
-            event.preventDefault();
+          async function closeNow() {
+            forceClosing = true;
+            await appWindow.close();
+          }
+
+          async function fetchRuntimeStatus() {
+            const controller = new AbortController();
+            const timeout = window.setTimeout(() => controller.abort(), 2500);
+            try {
+              const statusRes = await apiFetch('/api/ingest/runtime-status', { signal: controller.signal });
+              if (!statusRes.ok) return null;
+              return await statusRes.json();
+            } finally {
+              window.clearTimeout(timeout);
+            }
+          }
+
+          try {
+            const status = await fetchRuntimeStatus();
+            if (!status?.any_running) {
+              await closeNow();
+              return;
+            }
+
             const shouldStop = confirm('Ingestion is running.\n\nStop after current item and exit?');
             if (!shouldStop) return;
 
@@ -84,8 +104,8 @@
             alert('Timed out waiting for ingestion to stop. Try again in a few moments.');
           } catch (error) {
             closeFlowRunning = false;
-            uiLog('ERROR', 'Close guard failed', { error: String(error) });
-            alert('Failed to run safe-exit flow. Check logs.');
+            uiLog('WARNING', 'Close guard failed open', { error: String(error) });
+            await closeNow();
           }
         });
       } catch {

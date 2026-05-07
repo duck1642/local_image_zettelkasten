@@ -1,6 +1,7 @@
 import os
 import sys
 import json
+import base64
 import mimetypes
 import asyncio
 import time
@@ -661,15 +662,57 @@ async def get_items(
         field, value, sort, media_type, artist, platform, filename, topic, wd_tag, text, cursor, limit
     )
 
-def _item_after_cursor(item: dict, cursor: str, sort: str) -> bool:
+def _encode_cursor(payload: dict) -> str:
+    raw = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    return "v2:" + base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+def _decode_cursor(cursor: str | None) -> dict:
     if not cursor:
-        return True
+        return {}
+    if cursor.startswith("v2:"):
+        try:
+            raw = cursor[3:]
+            raw += "=" * (-len(raw) % 4)
+            payload = json.loads(base64.urlsafe_b64decode(raw.encode("ascii")).decode("utf-8"))
+            return payload if isinstance(payload, dict) else {}
+        except Exception:
+            return {}
     try:
         cursor_date, cursor_hash = cursor.rsplit("_", 1)
     except ValueError:
         cursor_date, cursor_hash = cursor, ""
+    return {"date": cursor_date, "hash": cursor_hash}
+
+def _cursor_for_item(item: dict, sort: str) -> str:
+    payload = {
+        "sort": sort,
+        "date": str(item.get("date_added") or ""),
+        "hash": str(item.get("hash") or ""),
+    }
+    if sort == "artist":
+        payload["artist"] = str(item.get("artist") or "")
+    return _encode_cursor(payload)
+
+def _item_after_cursor(item: dict, cursor: str, sort: str) -> bool:
+    if not cursor:
+        return True
+    payload = _decode_cursor(cursor)
+    cursor_date = str(payload.get("date") or "")
+    cursor_hash = str(payload.get("hash") or "")
     item_key = (str(item.get("date_added") or ""), str(item.get("hash") or ""))
     cursor_key = (cursor_date, cursor_hash)
+    if sort == "artist":
+        item_key = (
+            str(item.get("artist") or "").casefold(),
+            str(item.get("date_added") or ""),
+            str(item.get("hash") or ""),
+        )
+        cursor_key = (
+            str(payload.get("artist") or "").casefold(),
+            cursor_date,
+            cursor_hash,
+        )
+        return item_key > cursor_key
     if sort == "oldest":
         return item_key > cursor_key
     return item_key < cursor_key
@@ -766,11 +809,20 @@ def _get_items_sync(field, value, sort, media_type, artist, platform, filename, 
             log_system("WARNING", "Metadata index not ready; using legacy item filter scan")
 
         if cursor and not has_python_frontmatter_filter:
-            try:
-                cursor_date, cursor_hash = cursor.rsplit("_", 1)
-            except ValueError:
-                cursor_date, cursor_hash = cursor, ""
-            if sort == 'oldest':
+            cursor_payload = _decode_cursor(cursor)
+            cursor_date = str(cursor_payload.get("date") or "")
+            cursor_hash = str(cursor_payload.get("hash") or "")
+            if sort == 'artist':
+                cursor_artist = str(cursor_payload.get("artist") or "")
+                conditions.append(
+                    "("
+                    "COALESCE(source_artist, '') COLLATE NOCASE > ? COLLATE NOCASE "
+                    "OR (COALESCE(source_artist, '') COLLATE NOCASE = ? COLLATE NOCASE "
+                    "AND (date_added < ? OR (date_added = ? AND hash < ?)))"
+                    ")"
+                )
+                params.extend([cursor_artist, cursor_artist, cursor_date, cursor_date, cursor_hash])
+            elif sort == 'oldest':
                 conditions.append("(date_added > ? OR (date_added = ? AND hash > ?))")
                 params.extend([cursor_date, cursor_date, cursor_hash])
             else:
@@ -783,7 +835,7 @@ def _get_items_sync(field, value, sort, media_type, artist, platform, filename, 
 
         order_clause = " ORDER BY date_added DESC, hash DESC"
         if sort == 'oldest': order_clause = " ORDER BY date_added ASC, hash ASC"
-        elif sort == 'artist': order_clause = " ORDER BY source_artist COLLATE NOCASE ASC, date_added DESC"
+        elif sort == 'artist': order_clause = " ORDER BY COALESCE(source_artist, '') COLLATE NOCASE ASC, date_added DESC, hash DESC"
 
         sql_limit = 100000 if has_python_frontmatter_filter else limit + 1
 
@@ -827,7 +879,7 @@ def _get_items_sync(field, value, sort, media_type, artist, platform, filename, 
         next_cursor = None
         if has_more and items:
             last = items[-1]
-            next_cursor = f"{last['date_added']}_{last['hash']}"
+            next_cursor = _cursor_for_item(last, sort)
 
         return {"items": items, "next_cursor": next_cursor, "has_more": has_more}
     finally:

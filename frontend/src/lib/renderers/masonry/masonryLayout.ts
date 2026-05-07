@@ -27,6 +27,7 @@ export type MasonryLayout = {
   columnWidth: number;
   totalHeight: number;
   columnHeights: number[];
+  maxPositionHeight: number;
 };
 
 function activeItem(group: VaultGroup, activeIndex: number): VaultItem | undefined {
@@ -76,6 +77,7 @@ export function createMasonryLayoutEngine(): MasonryLayoutEngine {
     let startIndex = 0;
     let columnHeights = Array.from({ length: columnCount }, () => 0);
     const positions: MasonryPosition[] = [];
+    let maxPositionHeight = 0;
 
     if (lastCacheKey === cacheKey && lastCache && lastPositions.length > 0 && groups.length >= lastPositions.length && groups[0].id === lastPositions[0].group.id) {
        for (let i = 0; i < lastPositions.length; i++) {
@@ -92,6 +94,7 @@ export function createMasonryLayoutEngine(): MasonryLayoutEngine {
              break;
           }
           positions.push(prevPos);
+          if (prevPos.height > maxPositionHeight) maxPositionHeight = prevPos.height;
           startIndex = i + 1;
        }
        if (startIndex === groups.length && groups.length === lastPositions.length) {
@@ -115,6 +118,7 @@ export function createMasonryLayoutEngine(): MasonryLayoutEngine {
       const { height, estimated } = estimateMasonryGroupHeight(group, columnWidth, activeIndexes[group.id] || 0, store);
       const left = columnIndex * (columnWidth + gap);
       const bottom = top + height;
+      if (height > maxPositionHeight) maxPositionHeight = height;
       positions.push({
           group, columnIndex, left, top, width: columnWidth, height, bottom, estimated,
           columnHeightsBefore: [...columnHeights]
@@ -128,7 +132,8 @@ export function createMasonryLayoutEngine(): MasonryLayoutEngine {
       columnCount,
       columnWidth,
       totalHeight,
-      columnHeights: columnHeights.map((value) => Math.max(0, value - gap))
+      columnHeights: columnHeights.map((value) => Math.max(0, value - gap)),
+      maxPositionHeight
     };
 
     lastCacheKey = cacheKey;
@@ -144,19 +149,24 @@ export function visibleMasonryPositions(
   positions: MasonryPosition[],
   scrollTop: number,
   viewportHeight: number,
-  overscan = MASONRY_OVERSCAN
+  overscan = MASONRY_OVERSCAN,
+  maxPositionHeight = 0
 ) {
   const min = scrollTop - overscan;
   const max = scrollTop + viewportHeight + overscan;
+  const startTop = min - Math.max(0, maxPositionHeight);
+  let low = 0;
+  let high = positions.length;
+  while (low < high) {
+    const mid = Math.floor((low + high) / 2);
+    if (positions[mid].top < startTop) low = mid + 1;
+    else high = mid;
+  }
   const visible: MasonryPosition[] = [];
-  for (const position of positions) {
+  for (let index = low; index < positions.length; index += 1) {
+    const position = positions[index];
+    if (position.top > max) break;
     if (position.bottom >= min && position.top <= max) visible.push(position);
   }
   return visible;
-}
-
-export function visualOrderFromMasonryPositions(positions: MasonryPosition[]) {
-  return [...positions]
-    .sort((left, right) => left.top - right.top || left.left - right.left)
-    .flatMap((position) => position.group.items.map((item) => item.hash));
 }

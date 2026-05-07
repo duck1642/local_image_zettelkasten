@@ -57,7 +57,6 @@
   let tileMinWidth = DEFAULT_TILE_MIN_WIDTH;
   let tileSizeSaveTimer: number | null = null;
   let groupIndexes: Record<string, number> = {};
-  let visualHashOrder: string[] = [];
   let inspectorVisible = true;
   let inspectorWidth = DEFAULT_INSPECTOR_WIDTH;
   let isResizingInspector = false;
@@ -70,8 +69,7 @@
   let lastStatus = { totalItems: -1, groups: -1, hasMore: false, layoutMode: '' as string };
 
   $: emitStatus(stats.total_items, groupedItems.length, hasMore, currentLayoutMode);
-  $: jsVisualHashOrder = visualHashOrder.length ? visualHashOrder : groupedItems.flatMap((group) => group.items.map((item) => item.hash));
-  $: loadedHashOrder = jsVisualHashOrder.length ? jsVisualHashOrder : items.map((item) => item.hash);
+  $: loadedHashOrder = items.map((item) => item.hash);
   $: attachInfiniteScroll(sentinelEl, currentLayoutMode);
   $: observeLayoutHost(layoutHostEl);
   $: if ($config) {
@@ -79,7 +77,6 @@
     const nextWidth = normalizeTileMinWidth($config?.ui?.vault_tile_min_width);
     if (currentLayoutMode !== nextMode) {
       currentLayoutMode = nextMode;
-      visualHashOrder = [];
     }
     if (tileMinWidth !== nextWidth) {
       tileMinWidth = nextWidth;
@@ -154,7 +151,6 @@
 
   async function saveLayoutMode(mode: VaultLayoutMode) {
     currentLayoutMode = mode;
-    visualHashOrder = [];
     try {
       await setVaultLayoutMode(mode);
     } catch (error) {
@@ -244,7 +240,6 @@
 
   function handleFiltersChanged(event: CustomEvent) {
     activeFilters = event.detail.filters;
-    visualHashOrder = [];
     fetchItems();
   }
 
@@ -306,14 +301,12 @@
   function setSortMode(sort: string) {
     if (currentSort === sort) return;
     currentSort = sort;
-    visualHashOrder = [];
     fetchItems();
   }
 
   function setMediaType(mediaType: string) {
     if (currentMediaType === mediaType) return;
     currentMediaType = mediaType;
-    visualHashOrder = [];
     fetchItems();
   }
 
@@ -478,7 +471,6 @@
     nextCursor = null;
     hasMore = false;
     items = [];
-    visualHashOrder = [];
     await fetchItems(false);
     await tick();
     if (layoutHostEl) layoutHostEl.scrollTop = 0;
@@ -571,7 +563,6 @@
           {isLoadingMore}
           onSelectItem={handleSelectItem}
           onIndexChange={handleGroupIndexChange}
-          onVisualOrderChange={(hashes: string[]) => visualHashOrder = hashes}
         />
       {:else}
         <GridRenderer
@@ -586,7 +577,6 @@
           {isLoadingMore}
           onSelectItem={handleSelectItem}
           onIndexChange={handleGroupIndexChange}
-          onVisualOrderChange={(hashes: string[]) => visualHashOrder = hashes}
         />
       {/if}
     </div>

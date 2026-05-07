@@ -66,6 +66,13 @@
     return true;
   }
 
+  function platformLabel(platform: string) {
+    const value = (platform || '').trim();
+    if (!value) return '';
+    if (value === 'generic' || value === 'other') return 'OTHER URL';
+    return value.toUpperCase();
+  }
+
   function ansiToHtml(text: string) {
     const ansiColors: Record<string, string> = {
         '30': '#8b949e', '31': '#ff7b72', '32': '#3fb950', '33': '#d29922', '34': '#58a6ff', '35': '#d2a8ff', '36': '#56d4dd', '37': '#f0f6fc',
@@ -263,7 +270,7 @@
                     {:else}
                         <span class="timestamp">{log.timestamp}</span>
                         <span class="level {log.level.toLowerCase()}">{log.level}</span>
-                        <span class="platform-tag {log.platform ? log.platform.toLowerCase() : ''}">{log.platform ? `[${log.platform.toUpperCase()}]` : ''}</span>
+                        <span class="platform-tag {log.platform ? log.platform.toLowerCase() : ''}">{log.platform ? `[${platformLabel(log.platform)}]` : ''}</span>
                         {#if shouldShowModule(log.module)}
                             <span class="module">[{log.module}]</span>
                         {/if}

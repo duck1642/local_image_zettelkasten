@@ -63,6 +63,12 @@ def init_database():
 
 
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_source_url ON items(source_url)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_items_date_hash ON items(date_added DESC, hash DESC)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_items_date_hash_oldest ON items(date_added ASC, hash ASC)')
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_items_artist_date ON items(COALESCE(source_artist, '') COLLATE NOCASE ASC, date_added DESC, hash DESC)")
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_items_platform ON items(platform)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_items_source_artist ON items(source_artist)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_items_mime_date ON items(mime_type, date_added DESC, hash DESC)')
 
 
     cursor.execute("PRAGMA table_info(items)")

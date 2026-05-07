@@ -6,7 +6,6 @@
   import {
     computeGridLayout,
     visibleGridPositions,
-    visualOrderFromGridPositions,
     GRID_OVERSCAN
   } from './gridLayout';
 
@@ -21,13 +20,11 @@
   export let isLoadingMore = false;
   export let onSelectItem: (item: VaultItem, group: VaultGroup, event?: MouseEvent) => void = () => {};
   export let onIndexChange: (groupId: string, index: number) => void = () => {};
-  export let onVisualOrderChange: (hashes: string[]) => void = () => {};
 
   let scrollTop = 0;
   let viewportHeight = 0;
   let lastSummaryLog = 0;
   let lastSummaryKey = '';
-  let lastVisualOrderKey = '';
 
   $: layout = computeGridLayout(groups, viewportWidth, tileMinWidth);
   $: visiblePositions = visibleGridPositions(
@@ -38,15 +35,7 @@
     layout.columnCount,
     GRID_OVERSCAN
   );
-  $: emitVisualOrder(layout.positions);
   $: if (import.meta.env.DEV) logSummary(groups, visiblePositions, layout, scrollTop, viewportHeight);
-
-  function emitVisualOrder(positions: typeof layout.positions) {
-    const key = `${positions.length}:${positions[0]?.group.id ?? ''}:${positions[positions.length - 1]?.group.id ?? ''}:${layout.columnCount}`;
-    if (key === lastVisualOrderKey) return;
-    lastVisualOrderKey = key;
-    onVisualOrderChange(visualOrderFromGridPositions(positions));
-  }
 
   function logSummary(
     groupsArg: VaultGroup[],
