@@ -9,7 +9,7 @@ import numpy as np
 from PIL import Image
 
 from fingerprint import extract_sampled_video_frames
-from logs.logger import log_system
+from logger import log_system
 from utils import MODELS_DIR, atomic_write_text, calculate_file_hash, get_config, wd_tag_cache_path_for
 from validators import get_mime_type
 

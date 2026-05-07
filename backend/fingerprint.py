@@ -79,7 +79,7 @@ def get_video_duration(video_path: Path) -> float:
             timeout=30
         )
         if probe.returncode != 0:
-            from logs.logger import log_system
+            from logger import log_system
             log_system("WARNING", "ffprobe failed - possibly corrupt or unsupported video",
                        file=str(video_path.name), stderr=probe.stderr.strip()[:200])
             return 0.0
@@ -110,7 +110,7 @@ def extract_video_frame(video_path: Path, timestamp: float) -> Image.Image:
         frame_proc = subprocess.run(frame_cmd, capture_output=True, check=True, timeout=60)
         return Image.open(BytesIO(frame_proc.stdout)).convert('RGB')
     except Exception as exc:
-        from logs.logger import log_system
+        from logger import log_system
         log_system("WARNING", "Video frame extraction failed", file=str(video_path), timestamp=timestamp, error=str(exc))
         return None
 

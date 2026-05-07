@@ -20,7 +20,7 @@ from pydantic import BaseModel
 from db.sqlite_operator import init_database, normalize_source_url
 from utils import get_config, ASSETS_DIR, REVIEW_DIR, LOCAL_INGEST_DIR, note_path_for, asset_path_for, calculate_file_hash
 from processor import process_file
-from logs.logger import log_auth, log_svelte, log_system, RAW_LOGS_DIR, STRUCTURED_LOGS_DIR
+from logger import log_auth, log_review, log_svelte, log_system, RAW_LOGS_DIR, STRUCTURED_LOGS_DIR
 from md_generator import load_note_topics, load_note_wd_tags, generate_markdown
 from tagging import load_tag_cache, tag_media
 from thumbnails import get_or_generate_thumbnail
@@ -81,6 +81,7 @@ LOG_FILES = {
     "system.jsonl": STRUCTURED_LOGS_DIR / "system.jsonl",
     "svelte.jsonl": STRUCTURED_LOGS_DIR / "svelte.jsonl",
     "ingestion.jsonl": STRUCTURED_LOGS_DIR / "ingestion.jsonl",
+    "review.jsonl": STRUCTURED_LOGS_DIR / "review.jsonl",
     "auth.jsonl": STRUCTURED_LOGS_DIR / "auth.jsonl",
     "activity.jsonl": STRUCTURED_LOGS_DIR / "activity.jsonl",
     "terminal.log": RAW_LOGS_DIR / "terminal.log",
@@ -91,7 +92,9 @@ REVIEW_RESOLVED_STATES = {
     "resolved_delete",
     "resolved_replace",
 }
-REVIEW_PENDING_STATES = {"pending", "deferred", "cleanup_failed"}
+REVIEW_PENDING_STATES = {"pending", "deferred"}
+REVIEW_CLEANUP_STATES = {"pending_cleanup", "cleanup_failed"}
+REVIEW_VISIBLE_STATES = REVIEW_PENDING_STATES | REVIEW_CLEANUP_STATES
 LOCAL_INGEST_LOCK = threading.Lock()
 LOCAL_INGEST_STATE = {
     "running": False,
@@ -227,10 +230,35 @@ def _ensure_review_hash(path: Path, sidecar: dict) -> dict:
         sidecar["file_mtime"] = mtime_ns
     return sidecar
 
-def _set_review_state(sidecar: dict, state: str, cleanup_error: str | None = None) -> dict:
+def _normalize_review_state(state: str | None) -> str:
+    clean = str(state or "").strip()
+    if clean == "cleanup_failed":
+        return "pending_cleanup"
+    if clean in REVIEW_RESOLVED_STATES or clean in REVIEW_PENDING_STATES or clean == "pending_cleanup":
+        return clean
+    return "pending"
+
+def _review_section_for_state(state: str | None) -> str:
+    return "cleanup" if _normalize_review_state(state) == "pending_cleanup" else "pending"
+
+def _is_cleanup_review_state(state: str | None) -> bool:
+    return _normalize_review_state(state) == "pending_cleanup"
+
+def _set_review_state(
+    sidecar: dict,
+    state: str,
+    cleanup_error: str | None = None,
+    action: str | None = None,
+    target_hash: str | None = None,
+) -> dict:
+    state = _normalize_review_state(state)
     sidecar["state"] = state
     if state in REVIEW_RESOLVED_STATES:
         sidecar["resolved_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    if action:
+        sidecar["last_action"] = action
+    if target_hash:
+        sidecar["target_hash"] = target_hash
     if cleanup_error:
         sidecar["last_cleanup_error"] = cleanup_error
     elif "last_cleanup_error" in sidecar:
@@ -906,6 +934,65 @@ def _delete_item_row(cursor, conn, item_hash: str):
     log_system("INFO", f"Deleted item {item_hash}")
     return {"hash": item_hash, "status": "deleted", "cleanup_errors": cleanup_errors}
 
+def _delete_item_after_replacement(item_hash: str):
+    conn = init_database()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT file_extension, mime_type FROM items WHERE hash = ?", (item_hash,))
+        row = cursor.fetchone()
+        if not row:
+            return {"hash": item_hash, "status": "missing", "cleanup_errors": []}
+
+        cleanup_paths = [
+            asset_path_for(item_hash, row[0] or "", row[1] or ""),
+            note_path_for(item_hash),
+            WD_TAGS_DIR / item_hash[:2] / f"{item_hash}.json",
+        ]
+        existing_paths = [path for path in cleanup_paths if path.exists()]
+        trash_dir = REVIEW_DIR / ".replace-trash"
+        trash_dir.mkdir(parents=True, exist_ok=True)
+        moved_paths = []
+
+        def restore_moved():
+            restore_errors = []
+            for temp_path, original_path in reversed(moved_paths):
+                try:
+                    if temp_path.exists() and not original_path.exists():
+                        original_path.parent.mkdir(parents=True, exist_ok=True)
+                        temp_path.replace(original_path)
+                except OSError as exc:
+                    restore_errors.append({"hash": item_hash, "path": str(original_path), "error": str(exc)})
+            return restore_errors
+
+        for index, path in enumerate(existing_paths):
+            try:
+                temp_path = trash_dir / f"{item_hash}_{index}_{path.name}"
+                path.replace(temp_path)
+                moved_paths.append((temp_path, path))
+            except OSError as exc:
+                cleanup_errors = [{"hash": item_hash, "path": str(path), "error": str(exc)}]
+                cleanup_errors.extend(restore_moved())
+                return {"hash": item_hash, "status": "cleanup_failed", "cleanup_errors": cleanup_errors}
+
+        try:
+            cursor.execute("DELETE FROM items WHERE hash = ?", (item_hash,))
+            conn.commit()
+        except Exception as exc:
+            conn.rollback()
+            cleanup_errors = [{"hash": item_hash, "path": "database", "error": str(exc)}]
+            cleanup_errors.extend(restore_moved())
+            return {"hash": item_hash, "status": "cleanup_failed", "cleanup_errors": cleanup_errors}
+
+        for temp_path, _ in moved_paths:
+            try:
+                if temp_path.exists():
+                    temp_path.unlink()
+            except OSError as exc:
+                log_review("WARNING", "Review replace staged file cleanup failed", target_hash=item_hash, path=str(temp_path), error=str(exc))
+        return {"hash": item_hash, "status": "deleted", "cleanup_errors": []}
+    finally:
+        conn.close()
+
 def _delete_item_sync(item_hash: str):
     conn = init_database()
     cursor = conn.cursor()
@@ -1359,9 +1446,9 @@ def _resolve_review_entries() -> list[dict]:
         sidecar = _ensure_review_hash(media_path, sidecar)
         if str(sidecar.get("file_hash") or "") != before_hash:
             changed = True
-        state = str(sidecar.get("state") or "pending")
-        if not state:
-            state = "pending"
+        raw_state = str(sidecar.get("state") or "pending")
+        state = _normalize_review_state(raw_state)
+        if raw_state != state or not raw_state:
             sidecar["state"] = state
             changed = True
         entries.append(
@@ -1382,8 +1469,8 @@ def _resolve_review_entries() -> list[dict]:
     for entry in entries:
         sidecar = entry["sidecar"]
         file_hash = str(sidecar.get("file_hash") or "")
-        if file_hash and file_hash in present_hashes and entry["state"] not in REVIEW_RESOLVED_STATES:
-            _set_review_state(sidecar, "resolved_variant")
+        if file_hash and file_hash in present_hashes and entry["state"] in REVIEW_PENDING_STATES:
+            _set_review_state(sidecar, "resolved_variant", action=sidecar.get("last_action") or "reconciled")
             entry["state"] = "resolved_variant"
             entry["changed"] = True
         if entry["changed"]:
@@ -1396,14 +1483,15 @@ def _resolve_review_entries() -> list[dict]:
 def _is_pending_review_state(state: str) -> bool:
     if not state:
         return True
-    return state in REVIEW_PENDING_STATES
+    return _normalize_review_state(state) in REVIEW_PENDING_STATES
 
 def _get_review_count_sync(include_resolved: bool = False):
     entries = _resolve_review_entries()
-    if include_resolved:
-        return {"count": len(entries)}
     pending = sum(1 for entry in entries if _is_pending_review_state(entry["state"]))
-    return {"count": pending}
+    cleanup = sum(1 for entry in entries if _is_cleanup_review_state(entry["state"]))
+    if include_resolved:
+        return {"count": pending, "pending": pending, "cleanup": cleanup, "total": len(entries)}
+    return {"count": pending, "pending": pending, "cleanup": cleanup}
 
 @app.get("/api/review")
 async def get_review_items(include_resolved: bool = False):
@@ -1412,7 +1500,7 @@ async def get_review_items(include_resolved: bool = False):
 def _get_review_items_sync(include_resolved: bool = False):
     entries = _resolve_review_entries()
     if not include_resolved:
-        entries = [entry for entry in entries if _is_pending_review_state(entry["state"])]
+        entries = [entry for entry in entries if _normalize_review_state(entry["state"]) in REVIEW_VISIBLE_STATES]
 
     items = []
     best_hashes = sorted(
@@ -1452,6 +1540,9 @@ def _get_review_items_sync(include_resolved: bool = False):
             "mime_type": entry["mime_type"],
             "extension": entry["extension"],
             "state": entry["state"],
+            "section": _review_section_for_state(entry["state"]),
+            "last_action": sidecar.get("last_action") or "",
+            "last_cleanup_error": sidecar.get("last_cleanup_error") or "",
         })
     return items
 
@@ -1466,6 +1557,11 @@ def _review_action_sync(filename: str, action: str):
     if not file_path.exists(): raise HTTPException(status_code=404)
     sidecar = _read_review_sidecar(file_path)
     meta_path = _review_sidecar_path(file_path)
+    current_state = _normalize_review_state(sidecar.get("state"))
+    if current_state == "pending_cleanup":
+        message = "Review item is pending cleanup; retry cleanup instead of applying review actions."
+        log_review("WARNING", "Review action rejected for cleanup item", action=action, filename=filename, state=current_state)
+        raise HTTPException(status_code=409, detail=message)
     metadata = sidecar.get("metadata", {}) if isinstance(sidecar, dict) else {}
     if not isinstance(metadata, dict):
         metadata = {}
@@ -1480,42 +1576,43 @@ def _review_action_sync(filename: str, action: str):
             sidecar_deleted, sidecar_err = _review_cleanup_path(meta_path)
         if file_deleted and sidecar_deleted:
             message = "Review item deleted."
-            log_system("INFO", "Review action succeeded", action=action, filename=filename, detail=message)
+            log_review("INFO", "Review action succeeded", action=action, filename=filename, state="resolved_delete", detail=message)
             return {"status": "success", "action": action, "message": message}
 
         sidecar = _set_review_state(
             _read_review_sidecar(file_path) if file_path.exists() else sidecar,
-            "resolved_delete",
+            "pending_cleanup",
             cleanup_error=file_err or sidecar_err,
+            action=action,
         )
         if file_path.exists():
             _write_review_sidecar(file_path, sidecar)
-        message = "Review item marked deleted; cleanup is pending."
-        log_system("WARNING", "Review delete cleanup pending", action=action, filename=filename, error=file_err or sidecar_err)
-        return {"status": "success", "action": action, "message": message}
+        message = "Review delete requested, but cleanup is pending."
+        log_review("WARNING", "Review delete cleanup pending", action=action, filename=filename, state="pending_cleanup", error=file_err or sidecar_err)
+        return {"status": "warning", "action": action, "message": message}
 
     if action == "keep":
-        sidecar = _set_review_state(sidecar, "deferred")
+        sidecar = _set_review_state(sidecar, "deferred", action=action)
         _write_review_sidecar(file_path, sidecar)
         message = "Review item kept in review queue."
-        log_system("INFO", "Review action succeeded", action=action, filename=filename, detail=message)
+        log_review("INFO", "Review action succeeded", action=action, filename=filename, state="deferred", detail=message)
         return {"status": "success", "action": action, "message": message}
 
+    target_hash = ""
     if action == "replace":
         target_hash = str(sidecar.get("best_match") or "").strip()
         if not target_hash:
             message = "Replace target is missing. Item kept pending."
-            log_system("WARNING", "Review replace warning", action=action, filename=filename, detail=message)
+            log_review("WARNING", "Review replace warning", action=action, filename=filename, detail=message)
             return {"status": "warning", "action": action, "message": message}
         conn = init_database()
         try:
-            cursor = conn.cursor()
-            replace_result = _delete_item_row(cursor, conn, target_hash)
+            target_exists = bool(conn.execute("SELECT 1 FROM items WHERE hash = ?", (target_hash,)).fetchone())
         finally:
             conn.close()
-        if replace_result["status"] == "missing":
+        if not target_exists:
             message = "Replace target no longer exists in DB. Item kept pending."
-            log_system("WARNING", "Review replace warning", action=action, filename=filename, target_hash=target_hash, detail=message)
+            log_review("WARNING", "Review replace warning", action=action, filename=filename, target_hash=target_hash, detail=message)
             return {"status": "warning", "action": action, "message": message}
 
     try:
@@ -1527,36 +1624,51 @@ def _review_action_sync(filename: str, action: str):
             skip_similarity=True,
         )
     except Exception as exc:
-        log_system("ERROR", "Review action failed", action=action, filename=filename, error=str(exc))
+        log_review("ERROR", "Review action failed", action=action, filename=filename, target_hash=target_hash, error=str(exc))
         raise HTTPException(status_code=500, detail=f"Review action failed: {exc}") from exc
 
     if not ok:
         status_code = _review_failure_status(process_message)
-        log_system("ERROR", "Review action failed", action=action, filename=filename, error=process_message)
+        log_review("ERROR", "Review action failed", action=action, filename=filename, target_hash=target_hash, error=process_message)
         raise HTTPException(status_code=status_code, detail=process_message)
 
     resolved_state = "resolved_replace" if action == "replace" else "resolved_variant"
-    sidecar = _set_review_state(sidecar, resolved_state)
+    sidecar = _set_review_state(sidecar, resolved_state, action=action, target_hash=target_hash)
     file_deleted, file_err = _review_cleanup_path(file_path)
     sidecar_deleted = True
     sidecar_err = ""
     if meta_path.exists():
         sidecar_deleted, sidecar_err = _review_cleanup_path(meta_path)
     if not file_deleted:
-        sidecar = _set_review_state(sidecar, "cleanup_failed", cleanup_error=file_err)
+        sidecar = _set_review_state(sidecar, "pending_cleanup", cleanup_error=file_err, action=action, target_hash=target_hash)
         _write_review_sidecar(file_path, sidecar)
-        log_system("WARNING", "Review cleanup pending after successful ingest", filename=filename, error=file_err)
+        log_review("WARNING", "Review cleanup pending after successful ingest", action=action, filename=filename, state="pending_cleanup", target_hash=target_hash, error=file_err)
         return {
             "status": "warning",
             "action": action,
             "message": "Ingested to DB, but failed to delete review file. Item kept pending for cleanup.",
         }
     elif not sidecar_deleted:
-        log_system("WARNING", "Review sidecar cleanup pending after successful ingest", filename=filename, error=sidecar_err)
-        # Media is gone, but sidecar may still linger locked; keep it resolved so pending queue stays clean.
+        log_review("WARNING", "Review sidecar cleanup pending after successful ingest", action=action, filename=filename, state=resolved_state, target_hash=target_hash, error=sidecar_err)
+
+    if action == "replace":
+        replace_result = _delete_item_after_replacement(target_hash)
+        if replace_result["status"] != "deleted":
+            error_text = "; ".join(str(item.get("error", "")) for item in replace_result.get("cleanup_errors", []) if item.get("error"))
+            message = "Replacement ingested, but old target cleanup failed. Both vault items are kept."
+            log_review(
+                "WARNING",
+                "Review replace target cleanup failed",
+                action=action,
+                filename=filename,
+                state=resolved_state,
+                target_hash=target_hash,
+                error=error_text or replace_result["status"],
+            )
+            return {"status": "warning", "action": action, "message": message}
 
     message = "Review item replaced and ingested." if action == "replace" else "Review item ingested as variant."
-    log_system("INFO", "Review action succeeded", action=action, filename=filename, detail=message)
+    log_review("INFO", "Review action succeeded", action=action, filename=filename, state=resolved_state, target_hash=target_hash, detail=message)
     return {"status": "success", "action": action, "message": message}
 
 @app.post("/api/review/cleanup")
@@ -1567,23 +1679,51 @@ def _cleanup_review_resolved_sync():
     entries = _resolve_review_entries()
     cleaned = 0
     failed = 0
+    cleaned_orphans = 0
+    failed_orphans = 0
+    seen_sidecars = set()
     for entry in entries:
         state = entry["state"]
-        if state not in REVIEW_RESOLVED_STATES:
+        if state not in REVIEW_RESOLVED_STATES and not _is_cleanup_review_state(state):
             continue
         file_path = entry["path"]
         sidecar_path = _review_sidecar_path(file_path)
+        seen_sidecars.add(sidecar_path.resolve())
         ok_file, err_file = _review_cleanup_path(file_path)
         ok_sidecar, err_sidecar = _review_cleanup_path(sidecar_path)
         if ok_file and ok_sidecar:
             cleaned += 1
+            log_review("INFO", "Review cleanup succeeded", filename=file_path.name, state=state)
             continue
         failed += 1
         if file_path.exists():
             sidecar = _read_review_sidecar(file_path)
-            sidecar = _set_review_state(sidecar, "cleanup_failed", cleanup_error=err_file or err_sidecar)
+            sidecar = _set_review_state(sidecar, "pending_cleanup", cleanup_error=err_file or err_sidecar, action=sidecar.get("last_action") or "cleanup")
             _write_review_sidecar(file_path, sidecar)
-    return {"status": "success", "cleaned": cleaned, "failed": failed}
+        log_review("WARNING", "Review cleanup failed", filename=file_path.name, state="pending_cleanup", error=err_file or err_sidecar)
+
+    if REVIEW_DIR.exists():
+        for sidecar_path in REVIEW_DIR.glob("*.json"):
+            resolved_sidecar = sidecar_path.resolve()
+            if resolved_sidecar in seen_sidecars:
+                continue
+            media_path = sidecar_path.with_suffix("")
+            if media_path.exists():
+                continue
+            ok_sidecar, err_sidecar = _review_cleanup_path(sidecar_path)
+            if ok_sidecar:
+                cleaned_orphans += 1
+                log_review("INFO", "Review orphan sidecar cleaned", sidecar=str(sidecar_path.name))
+            else:
+                failed_orphans += 1
+                log_review("WARNING", "Review orphan sidecar cleanup failed", sidecar=str(sidecar_path.name), error=err_sidecar)
+    return {
+        "status": "success",
+        "cleaned": cleaned,
+        "failed": failed,
+        "cleaned_orphans": cleaned_orphans,
+        "failed_orphans": failed_orphans,
+    }
 
 CONFIG_SECRET_KEYS = {"pixiv_token"}
 

@@ -11,7 +11,7 @@ from utils import get_config, QUEUES_DIR, ASSETS_DIR, existing_note_path_for
 from db.sqlite_operator import init_database, normalize_source_url
 from db.search_manager import search_manager
 from processor import process_file
-from logs.logger import log_ingestion
+from logger import log_ingestion
 
 from downloaders.gallery_dl_wrapper import download_gallery, inspect_gallery
 from downloaders.yt_dlp_wrapper import download_video, inspect_youtube_community

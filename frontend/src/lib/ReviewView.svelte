@@ -11,6 +11,9 @@
     extension?: string;
     metadata: any;
     state?: string;
+    section?: 'pending' | 'cleanup';
+    last_action?: string;
+    last_cleanup_error?: string;
     best_match: {
       hash: string;
       url: string;
@@ -22,16 +25,23 @@
 
   type MediaInfo = {
     url?: string;
+    filename?: string;
     mime_type?: string;
     extension?: string;
   } | null | undefined;
 
   let items: ReviewItem[] = [];
-  let currentIndex = 0;
+  let selectedFilename = '';
   let loading = true;
   let acting = false;
 
   const VIDEO_EXTENSIONS = new Set(['.mp4', '.webm', '.ogv', '.mov', '.m4v', '.avi', '.mkv']);
+
+  $: pendingItems = items.filter((item) => (item.section || 'pending') === 'pending');
+  $: cleanupItems = items.filter((item) => item.section === 'cleanup');
+  $: current = items.find((item) => item.filename === selectedFilename) || pendingItems[0] || cleanupItems[0];
+  $: currentSectionItems = current?.section === 'cleanup' ? cleanupItems : pendingItems;
+  $: currentSectionIndex = current ? currentSectionItems.findIndex((item) => item.filename === current.filename) : -1;
 
   function extFromUrl(url: string) {
     const clean = (url || '').split('?')[0].split('#')[0];
@@ -48,6 +58,12 @@
     return VIDEO_EXTENSIONS.has(ext);
   }
 
+  function mediaUrl(item: MediaInfo) {
+    if (!item) return '';
+    if (item.filename) return apiUrl(`/review-assets/${encodeURIComponent(item.filename)}`);
+    return apiUrl(item.url || '');
+  }
+
   async function readErrorDetail(response: Response) {
     try {
       const data = await response.json();
@@ -59,6 +75,13 @@
     return '';
   }
 
+  function ensureSelection(nextItems: ReviewItem[]) {
+    if (selectedFilename && nextItems.some((item) => item.filename === selectedFilename)) return;
+    selectedFilename = nextItems.find((item) => (item.section || 'pending') === 'pending')?.filename
+      || nextItems.find((item) => item.section === 'cleanup')?.filename
+      || '';
+  }
+
   async function loadReview() {
     loading = true;
     try {
@@ -66,7 +89,7 @@
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       items = Array.isArray(data) ? data : [];
-      if (currentIndex >= items.length) currentIndex = Math.max(0, items.length - 1);
+      ensureSelection(items);
       await refreshReviewCount();
     } catch (e) {
       uiLog('ERROR', 'Failed to load review queue', { error: String(e) });
@@ -77,8 +100,7 @@
   }
 
   async function handleAction(action: 'keep' | 'delete' | 'variant' | 'replace') {
-    const current = items[currentIndex];
-    if (!current || acting) return;
+    if (!current || acting || current.section === 'cleanup') return;
     if (action === 'replace') {
       const target = String(current.metadata?.best_match || current.best_match?.hash || '').trim();
       const message = target
@@ -89,7 +111,8 @@
 
     acting = true;
     try {
-      const res = await apiFetch(`/api/review/${current.filename}/action?action=${action}`, { method: 'POST' });
+      const filename = encodeURIComponent(current.filename);
+      const res = await apiFetch(`/api/review/${filename}/action?action=${action}`, { method: 'POST' });
       if (!res.ok) {
         const detail = await readErrorDetail(res);
         throw new Error(detail ? `HTTP ${res.status}: ${detail}` : `HTTP ${res.status}`);
@@ -98,20 +121,48 @@
       if (payload?.status === 'warning') {
         uiLog('WARNING', 'Review action warning', { action, filename: current.filename, message: payload?.message || '' });
         alert(payload?.message || 'Action returned warning.');
-        await refreshReviewCount();
-        return;
+      } else {
+        uiLog('INFO', 'Review action succeeded', { action, filename: current.filename, message: payload?.message || '' });
       }
-
-      uiLog('INFO', 'Review action succeeded', { action, filename: current.filename, message: payload?.message || '' });
-      items = items.filter((_, i) => i !== currentIndex);
-      if (currentIndex >= items.length && items.length > 0) currentIndex = items.length - 1;
-      await refreshReviewCount();
+      await loadReview();
     } catch (e) {
       uiLog('ERROR', 'Review action failed', { action, error: String(e) });
       alert(`Review action "${action}" failed. Check App Logs for details.`);
     } finally {
       acting = false;
     }
+  }
+
+  async function retryCleanup() {
+    if (acting) return;
+    acting = true;
+    try {
+      const res = await apiFetch('/api/review/cleanup', { method: 'POST' });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(payload?.detail || `HTTP ${res.status}`);
+      uiLog('INFO', 'Review cleanup retried', {
+        cleaned: payload?.cleaned ?? 0,
+        failed: payload?.failed ?? 0,
+        cleaned_orphans: payload?.cleaned_orphans ?? 0,
+        failed_orphans: payload?.failed_orphans ?? 0
+      });
+      await loadReview();
+    } catch (e) {
+      uiLog('ERROR', 'Review cleanup retry failed', { error: String(e) });
+      alert('Review cleanup retry failed. Check App Logs for details.');
+    } finally {
+      acting = false;
+    }
+  }
+
+  function selectItem(item: ReviewItem) {
+    selectedFilename = item.filename;
+  }
+
+  function selectRelative(delta: number) {
+    if (!currentSectionItems.length || currentSectionIndex < 0) return;
+    const nextIndex = Math.max(0, Math.min(currentSectionItems.length - 1, currentSectionIndex + delta));
+    selectedFilename = currentSectionItems[nextIndex].filename;
   }
 
   function handleGlobalRefresh(event: Event) {
@@ -126,8 +177,6 @@
     loadReview();
     return () => window.removeEventListener('lmz:refresh', handleGlobalRefresh);
   });
-
-  $: current = items[currentIndex];
 </script>
 
 <div class="review-root">
@@ -137,64 +186,120 @@
     <div class="centered">Review folder is empty.</div>
   {:else}
     <aside class="queue-list">
-      <div class="queue-title">Pending Review ({items.length})</div>
+      <div class="queue-title">Review Queue</div>
       <div class="queue-scroll">
-        {#each items as item, index}
-          <button class="queue-item {index === currentIndex ? 'active' : ''}" on:click={() => currentIndex = index}>
-            <span class="queue-name">{item.filename}</span>
-            <span class="queue-state">{item.state || 'pending'}</span>
-          </button>
-        {/each}
+        <div class="queue-section-title">Pending ({pendingItems.length})</div>
+        {#if pendingItems.length === 0}
+          <div class="queue-empty">No pending decisions.</div>
+        {:else}
+          {#each pendingItems as item}
+            <button class="queue-item {item.filename === current?.filename ? 'active' : ''}" on:click={() => selectItem(item)}>
+              <span class="queue-name">{item.filename}</span>
+              <span class="queue-state">{item.state || 'pending'}</span>
+            </button>
+          {/each}
+        {/if}
+
+        <div class="queue-section-title cleanup-title">Cleanup ({cleanupItems.length})</div>
+        {#if cleanupItems.length === 0}
+          <div class="queue-empty">No cleanup problems.</div>
+        {:else}
+          {#each cleanupItems as item}
+            <button class="queue-item cleanup {item.filename === current?.filename ? 'active' : ''}" on:click={() => selectItem(item)}>
+              <span class="queue-name">{item.filename}</span>
+              <span class="queue-state">{item.last_cleanup_error || item.state || 'pending_cleanup'}</span>
+            </button>
+          {/each}
+        {/if}
       </div>
     </aside>
 
-    <section class="review-main">
-      <div class="comparison-header">
-        <div class="column-title">NEW ITEM</div>
-        <div class="column-title">BEST MATCH IN VAULT</div>
-      </div>
+    {#if current}
+      <section class="review-main">
+        {#if current.section === 'cleanup'}
+          <div class="comparison-header">
+            <div class="column-title">REVIEW FILE</div>
+            <div class="column-title">CLEANUP PROBLEM</div>
+          </div>
 
-      <div class="panes">
-        <div class="pane">
-          {#if isVideoMedia(current)}
-            <!-- svelte-ignore a11y_media_has_caption -->
-            <video src={apiUrl(current.url)} controls preload="metadata"></video>
-          {:else}
-            <img src={apiUrl(current.url)} alt="New" />
-          {/if}
+          <div class="panes">
+            <div class="pane">
+              {#if isVideoMedia(current)}
+                <!-- svelte-ignore a11y_media_has_caption -->
+                <video src={mediaUrl(current)} controls preload="metadata"></video>
+              {:else}
+                <img src={mediaUrl(current)} alt="Review cleanup item" />
+              {/if}
+            </div>
+            <div class="pane detail-pane">
+              <div class="cleanup-detail">
+                <div class="detail-label">State</div>
+                <div>{current.state || 'pending_cleanup'}</div>
+                <div class="detail-label">Last action</div>
+                <div>{current.last_action || current.metadata?.last_action || 'unknown'}</div>
+                <div class="detail-label">Last error</div>
+                <div class="error-text">{current.last_cleanup_error || current.metadata?.last_cleanup_error || 'Cleanup failed.'}</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="meta-bar">
+            <span>File: {current.filename}</span>
+            <span>Target: {current.metadata?.target_hash || current.metadata?.best_match || 'missing'}</span>
+          </div>
+
+          <div class="action-bar">
+            <button class="action-big retry-btn" on:click={retryCleanup} disabled={acting}>Retry Cleanup</button>
+          </div>
+        {:else}
+          <div class="comparison-header">
+            <div class="column-title">NEW ITEM</div>
+            <div class="column-title">BEST MATCH IN VAULT</div>
+          </div>
+
+          <div class="panes">
+            <div class="pane">
+              {#if isVideoMedia(current)}
+                <!-- svelte-ignore a11y_media_has_caption -->
+                <video src={mediaUrl(current)} controls preload="metadata"></video>
+              {:else}
+                <img src={mediaUrl(current)} alt="New" />
+              {/if}
+            </div>
+            <div class="pane">
+              {#if current.best_match}
+                {#if isVideoMedia(current.best_match)}
+                  <!-- svelte-ignore a11y_media_has_caption -->
+                  <video src={mediaUrl(current.best_match)} controls preload="metadata"></video>
+                {:else}
+                  <img src={mediaUrl(current.best_match)} alt="Match" />
+                {/if}
+              {:else}
+                <div class="no-match">No best-match preview available.</div>
+              {/if}
+            </div>
+          </div>
+
+          <div class="meta-bar">
+            <span>File: {current.filename}</span>
+            <span>Target: {current.best_match?.hash || current.metadata?.best_match || 'missing'}</span>
+          </div>
+
+          <div class="action-bar">
+            <button class="action-big keep-btn" on:click={() => handleAction('keep')} disabled={acting}>Keep Visible</button>
+            <button class="action-big variant-btn" on:click={() => handleAction('variant')} disabled={acting}>Save Variant</button>
+            <button class="action-big replace-btn" on:click={() => handleAction('replace')} disabled={acting}>Replace</button>
+            <button class="action-big delete-btn" on:click={() => handleAction('delete')} disabled={acting}>Delete</button>
+          </div>
+        {/if}
+
+        <div class="nav-bar">
+          <button on:click={() => selectRelative(-1)} disabled={currentSectionIndex <= 0}>Previous</button>
+          <div class="counter">Item {currentSectionIndex + 1} of {currentSectionItems.length}</div>
+          <button on:click={() => selectRelative(1)} disabled={currentSectionIndex >= currentSectionItems.length - 1}>Next</button>
         </div>
-        <div class="pane">
-          {#if current.best_match}
-            {#if isVideoMedia(current.best_match)}
-              <!-- svelte-ignore a11y_media_has_caption -->
-              <video src={apiUrl(current.best_match.url)} controls preload="metadata"></video>
-            {:else}
-              <img src={apiUrl(current.best_match.url)} alt="Match" />
-            {/if}
-          {:else}
-            <div class="no-match">No best-match preview available.</div>
-          {/if}
-        </div>
-      </div>
-
-      <div class="meta-bar">
-        <span>File: {current.filename}</span>
-        <span>Target: {current.best_match?.hash || current.metadata?.best_match || 'missing'}</span>
-      </div>
-
-      <div class="action-bar">
-        <button class="action-big keep-btn" on:click={() => handleAction('keep')} disabled={acting}>Keep for Later</button>
-        <button class="action-big variant-btn" on:click={() => handleAction('variant')} disabled={acting}>Save Variant</button>
-        <button class="action-big replace-btn" on:click={() => handleAction('replace')} disabled={acting}>Replace</button>
-        <button class="action-big delete-btn" on:click={() => handleAction('delete')} disabled={acting}>Delete</button>
-      </div>
-
-      <div class="nav-bar">
-        <button on:click={() => currentIndex--} disabled={currentIndex === 0}>Previous</button>
-        <div class="counter">Item {currentIndex + 1} of {items.length}</div>
-        <button on:click={() => currentIndex++} disabled={currentIndex === items.length - 1}>Next</button>
-      </div>
-    </section>
+      </section>
+    {/if}
   {/if}
 </div>
 
@@ -237,6 +342,26 @@
     gap: 6px;
   }
 
+  .queue-section-title {
+    margin-top: 4px;
+    padding: 4px 2px;
+    font-size: 11px;
+    color: var(--text-muted);
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+
+  .cleanup-title {
+    margin-top: 12px;
+    color: var(--accent-warning);
+  }
+
+  .queue-empty {
+    padding: 7px 8px;
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
   .queue-item {
     width: 100%;
     text-align: left;
@@ -247,6 +372,10 @@
     display: flex;
     flex-direction: column;
     gap: 4px;
+  }
+
+  .queue-item.cleanup {
+    border-color: rgba(210, 153, 34, 0.45);
   }
 
   .queue-item.active {
@@ -263,6 +392,7 @@
   .queue-state {
     font-size: 11px;
     color: var(--text-muted);
+    word-break: break-word;
   }
 
   .review-main {
@@ -302,6 +432,33 @@
     align-items: center;
     justify-content: center;
     overflow: hidden;
+    min-width: 0;
+  }
+
+  .detail-pane {
+    align-items: stretch;
+    justify-content: flex-start;
+    padding: 14px;
+  }
+
+  .cleanup-detail {
+    display: grid;
+    grid-template-columns: 110px minmax(0, 1fr);
+    gap: 10px;
+    width: 100%;
+    color: var(--text-main);
+    font-size: 12px;
+    align-content: start;
+  }
+
+  .detail-label {
+    color: var(--text-muted);
+    font-weight: 700;
+  }
+
+  .error-text {
+    color: var(--accent-warning);
+    word-break: break-word;
   }
 
   .pane img, .pane video {
@@ -351,7 +508,7 @@
     border: none;
   }
 
-  .replace-btn {
+  .replace-btn, .retry-btn {
     background: var(--accent-warning);
     color: #111111;
     border: none;
@@ -381,7 +538,7 @@
     font-size: 12px;
   }
 
-  .centered {
+  .centered, .no-match {
     flex-grow: 1;
     display: flex;
     align-items: center;

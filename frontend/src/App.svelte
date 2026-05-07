@@ -8,7 +8,7 @@
   import VaultView from './lib/VaultView.svelte';
   import { log as uiLog } from './lib/logger';
   import { ramStats, startRamTracker } from './lib/ramStore';
-  import { queueStats, reviewCount, startSharedStatsPolling } from './lib/statsStore';
+  import { queueStats, reviewCount, reviewStats, startSharedStatsPolling } from './lib/statsStore';
   import { apiFetch } from './lib/api';
 
   type AppTab = 'vault' | 'logs' | 'ingest' | 'review' | 'stats' | 'settings';
@@ -152,7 +152,7 @@
       <span class="status-left">Ingestion | Normal: {$queueStats.normal} | Force: {$queueStats.force} | Failed: {$queueStats.failed}</span>
       <span class="status-right">{#if $ramStats.enabled}<span class="ram-status">{ramStatusText($ramStats)}</span>{/if}<span>LMZ Tauri</span></span>
     {:else if activeTab === 'review'}
-      <span class="status-left">Review | Pending: {$reviewCount}</span>
+      <span class="status-left">Review | Pending: {$reviewStats.pending} | Cleanup: {$reviewStats.cleanup}</span>
       <span class="status-right">{#if $ramStats.enabled}<span class="ram-status">{ramStatusText($ramStats)}</span>{/if}<span>LMZ Tauri</span></span>
     {:else}
       <span class="status-left">{activeTab === 'logs' ? 'App Logs' : activeTab === 'stats' ? 'Stats' : 'Settings'}</span>

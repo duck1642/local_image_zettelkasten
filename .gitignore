@@ -181,7 +181,7 @@ cython_debug/
 # LMZ runtime/private state
 # docs/
 data/
-logs/
+/logs/
 secrets/
 backups/
 .vscode/

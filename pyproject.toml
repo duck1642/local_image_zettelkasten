@@ -58,7 +58,7 @@ py-modules = [
 
 [tool.setuptools.packages.find]
 where = ["backend"]
-include = ["db", "downloaders", "logs", "scripts", "tagging"]
+include = ["db", "downloaders", "logger", "scripts", "tagging"]
 exclude = ["backups", "program", "tools", "tests", "data", "secrets"]
 
 [tool.ruff]

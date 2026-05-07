@@ -2,7 +2,7 @@ import subprocess
 from pathlib import Path
 
 from PIL import Image
-from logs.logger import log_system
+from logger import log_system
 from utils import ASSETS_DIR, PROJECT_ROOT, EXT_MAP
 
 THUMBNAIL_DIR = PROJECT_ROOT / "data" / "ui_cache" / "thumbnails"

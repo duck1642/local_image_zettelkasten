@@ -43,7 +43,7 @@ def _opener(config: dict):
             jar.load(str(cookie_path), ignore_discard=True, ignore_expires=True)
             handlers.append(HTTPCookieProcessor(jar))
         except Exception as exc:
-            from logs.logger import log_ingestion
+            from logger import log_ingestion
             log_ingestion("WARNING", "Cookie jar load failed", path=str(cookie_path), error=str(exc))
     proxy = config.get('external_tools', {}).get('proxy')
     if proxy:
@@ -62,7 +62,7 @@ def _log_auth_status(
         return
     _AUTH_STATUS_LOGGED.add(key)
 
-    from logs.logger import log_auth
+    from logger import log_auth
     log_auth(
         "INFO",
         "Downloader auth status",

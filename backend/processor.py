@@ -20,7 +20,7 @@ from db.sqlite_operator import (
 )
 from db.search_manager import search_manager
 from md_generator import generate_markdown
-from logs.logger import log_activity, log_system
+from logger import log_activity, log_system
 from tagging import tag_media
 
 def calculate_tiles(filepath: Path, ratio_threshold: float = 3.0) -> list:
@@ -43,7 +43,7 @@ def calculate_tiles(filepath: Path, ratio_threshold: float = 3.0) -> list:
             w, h = img.size
 
             if w == 0 or h == 0:
-                from logs.logger import log_system
+                from logger import log_system
                 log_system("WARNING", "Degenerate image with 0-pixel dimension", file=str(filepath), width=w, height=h)
                 return []
             ratio = max(w, h) / min(w, h)

@@ -1,6 +1,6 @@
 # LMZ Current Status
 
-Last updated: 2026-05-06
+Last updated: 2026-05-07
 
 ## Current State
 
@@ -57,16 +57,16 @@ SQLite stores runtime asset/index metadata only. Manual topics and WD tags live 
 - Online ingestion can crash before work starts.
   - Cause: `as_completed(futures)` is used but `as_completed` is not imported from `concurrent.futures`.
   - Code: `backend/external_ingestion.py:4`, `backend/external_ingestion.py:65`.
-- Review `replace` can destroy the existing vault item before replacement succeeds.
+- Review `replace` can destroy the existing vault item before replacement succeeds. Done (will be checked).
   - Cause: target item is deleted first, then `process_file()` runs. If ingest fails, the old item is already removed from DB/assets/notes.
   - Code: `backend/web_api.py:1513`, `backend/web_api.py:1521`.
 
 ### High
 
-- `cleanup_failed` review items can be hidden automatically.
+- `cleanup_failed` review items can be hidden automatically. Done (will be checked).
   - Cause: `_resolve_review_entries()` converts any review file whose hash exists in DB into `resolved_variant`, unless already in resolved states. `cleanup_failed` is not resolved, so it gets overwritten.
   - Code: `backend/web_api.py:94`, `backend/web_api.py:1385`.
-- `>cleanup-review` does not clean `cleanup_failed` items.
+- `>cleanup-review` does not clean `cleanup_failed` items. Done (will be checked).
   - Cause: cleanup loop only processes `REVIEW_RESOLVED_STATES`; `cleanup_failed` is in pending states.
   - Code: `backend/web_api.py:89`, `backend/web_api.py:1571`.
 - Local ingest can move original user files into review.
@@ -81,16 +81,16 @@ SQLite stores runtime asset/index metadata only. Manual topics and WD tags live 
 - Stop-after-current can drop deferred online URLs.
   - Cause: deferred URLs are collected in `all_remaining`, but final queue write always clears the source queue with `_write_back([])`.
   - Code: `backend/external_ingestion.py:73`, `backend/external_ingestion.py:88`.
-- Review `keep` behavior is inconsistent in the frontend.
+- Review `keep` behavior is inconsistent in the frontend. Done (will be checked).
   - Cause: backend sets state `deferred`, which remains pending. Frontend treats the successful action as resolved and removes the item from the local list.
   - Code: `backend/web_api.py:1497`, `frontend/src/lib/ReviewView.svelte:106`.
-- Review action URL can break for special filenames.
+- Review action URL can break for special filenames. Done (will be checked).
   - Cause: filename is interpolated directly into the URL path without `encodeURIComponent`.
   - Code: `frontend/src/lib/ReviewView.svelte:92`.
 - Review filename collision is possible.
   - Cause: duplicate quarantine writes to `REVIEW_DIR / filepath.name`; no hash/session suffix is added.
   - Code: `backend/processor.py:206`, `backend/processor.py:250`.
-- Orphan review sidecars are not cleanup candidates.
+- Orphan review sidecars are not cleanup candidates. Done (will be checked).
   - Cause: cleanup starts from media files only; `.json` sidecars without media are excluded before cleanup logic runs.
   - Code: `backend/web_api.py:1335`, `backend/web_api.py:1347`.
 - Local retry loses metadata defaults.
@@ -102,7 +102,7 @@ SQLite stores runtime asset/index metadata only. Manual topics and WD tags live 
 
 ### Low
 
-- Documented Python AST check fails on BOM files.
+- Documented Python AST check fails on BOM files. Done (will be checked).
   - Cause: command uses `encoding='utf-8'`; several backend files start with UTF-8 BOM.
   - Code/doc: `docs/lmz_status.md:285`, `backend/core.py:1`.
 - Pixiv token is still in normal config.
@@ -205,6 +205,23 @@ SQLite stores runtime asset/index metadata only. Manual topics and WD tags live 
 - Review cleanup command added. Done (will be checked):
   - New vault command `>cleanup-review` triggers `POST /api/review/cleanup`.
   - Command logs cleanup `cleaned` and `failed` counts into App Logs.
+- Set 1 review workflow hardening completed. Done (will be checked):
+  - Review sidebar is split into Pending and Cleanup sections.
+  - `keep` stays visible as `deferred`.
+  - `variant` uses duplicate bypass and moves cleanup failures to `pending_cleanup`.
+  - `replace` ingests first, then deletes the old target; old-delete failure keeps both vault items.
+  - `delete` cleanup failure moves the item to Cleanup.
+  - `/api/review/cleanup` retries pending cleanup and removes orphan sidecars.
+  - Review counts now separate pending and cleanup.
+  - Review action and review asset URLs encode filenames with `encodeURIComponent`.
+  - `cleanup_failed` sidecars are treated as `pending_cleanup`.
+  - App Logs includes `review.jsonl`.
+- Logger package tracking fix completed. Done (will be checked):
+  - Source package moved from ignored `backend/logs/` to tracked `backend/logger/`.
+  - Backend imports now use `from logger import ...`.
+  - Review structured logging moved from `web_api.py` into `backend/logger/logger.py`.
+  - `.gitignore` now ignores only root runtime `/logs/`.
+  - `pyproject.toml` package include now uses `"logger"`.
 - Search prefix remap + UI guide order updated. Done (will be checked):
   - Prefix mapping changed to: `> cmd`, `a: artist`, `p: platform`, `t: topic`, `# wd-tag`.
   - Search parser and active-segment detection updated for `p:` and `t:`.
@@ -252,13 +269,13 @@ SQLite stores runtime asset/index metadata only. Manual topics and WD tags live 
 - Review Windows file-lock edge case:
   - during smoke tests, some review assets remained undeletable (`WinError 5`) after successful variant ingest.
   - current behavior: DB ingest can succeed while review source cleanup fails due to external file lock.
-  - needs resolved-state fallback so successfully ingested-but-locked review files are hidden from review lists/count until cleanup is possible.
+  - Set 1 changed this to `pending_cleanup` + Cleanup section. Done (will be checked).
 - Ingestion close-flow validation:
   - verify close while local ingest is running prompts stop-after-current and exits only after current item completes.
   - verify close while online ingest is running prompts stop-after-current and exits only after in-flight workers settle.
   - verify deferred online URLs remain in retry path after stop-after-current.
 - Review `variant` strict cleanup validation:
-  - verify successful ingest + failed review-file delete returns warning and keeps item pending (`cleanup_failed`).
+  - verify successful ingest + failed review-file delete returns warning and keeps item in Cleanup (`pending_cleanup`).
   - verify successful ingest + successful review-file delete returns success and removes item from pending list.
 
 ## Current Frontend Ideas Merged
@@ -334,8 +351,8 @@ Deferred:
   - Fixed: `/api/review` crashed due to tuple-unpack mismatch after review payload expansion.
   - Fixed: review action logging passed duplicate `message` arguments into `log_system`.
   - Fixed: `variant` could return failure after a successful DB commit when source delete failed post-commit.
-  - Open: Windows file locks (`WinError 5`) can keep review source files undeletable even after successful variant ingest.
-  - Open: when lock persists, review file cleanup can lag behind DB state unless a resolved-state fallback is added.
+  - Done (will be checked): Windows file locks now route review files into `pending_cleanup` instead of reporting clean success.
+  - Done (will be checked): cleanup-lag handling is exposed through the Review Cleanup section.
 
 - Video hover preview strategy:
   - current hover preview can download the original video
@@ -365,7 +382,7 @@ Deferred:
 ```powershell
 $env:PYTHONPATH='backend'
 python -B -c "import core, web_api, db.sqlite_operator, db.search_manager, queue_service, tagging.service; print('IMPORT OK')"
-python -B -c "import ast, pathlib; [ast.parse(path.read_text(encoding='utf-8'), filename=str(path)) for path in pathlib.Path('backend').rglob('*.py')]; print('AST OK')"
+python -B -c "import ast, pathlib; [ast.parse(path.read_text(encoding='utf-8-sig'), filename=str(path)) for path in pathlib.Path('backend').rglob('*.py')]; print('AST OK')"
 cd frontend
 npm run check
 npm run build

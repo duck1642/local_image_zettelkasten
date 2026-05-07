@@ -8,10 +8,18 @@ export type QueueStats = {
   failed: number;
 };
 
+export type ReviewStats = {
+  count: number;
+  pending: number;
+  cleanup: number;
+};
+
 const initialQueueStats: QueueStats = { normal: 0, force: 0, failed: 0 };
+const initialReviewStats: ReviewStats = { count: 0, pending: 0, cleanup: 0 };
 
 export const queueStats = writable<QueueStats>(initialQueueStats);
 export const reviewCount = writable(0);
+export const reviewStats = writable<ReviewStats>(initialReviewStats);
 
 export function setQueueStats(next: QueueStats) {
   queueStats.set({
@@ -38,8 +46,14 @@ export async function refreshReviewCount() {
     const response = await apiFetch('/api/review/count');
     const data = await response.json();
     const count = Number(data?.count) || 0;
+    const stats = {
+      count,
+      pending: Number(data?.pending) || count,
+      cleanup: Number(data?.cleanup) || 0
+    };
     reviewCount.set(count);
-    return count;
+    reviewStats.set(stats);
+    return stats;
   } catch (error) {
     uiLog('ERROR', 'Failed to refresh review count', { error: String(error) });
     throw error;

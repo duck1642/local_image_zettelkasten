@@ -5,7 +5,7 @@ from typing import List, Tuple, Optional
 
 from db.searchers import BKTreeSearcher, URLRegistry, VPTreeSearcher
 from db.sqlite_operator import get_all_phashes, get_all_tiles, get_all_urls, get_all_video_signatures
-from logs.logger import log_ingestion
+from logger import log_ingestion
 
 def _cosine_dist(v1_bytes: bytes, v2_bytes: bytes) -> float:
 

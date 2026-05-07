@@ -115,7 +115,7 @@ def _log_auth_status(
         return
     _AUTH_STATUS_LOGGED.add(key)
 
-    from logs.logger import log_auth
+    from logger import log_auth
     log_auth(
         "INFO",
         "Downloader auth status",
