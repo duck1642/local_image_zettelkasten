@@ -69,10 +69,10 @@ SQLite stores runtime asset/index metadata only. Manual topics and WD tags live 
 - `>cleanup-review` does not clean `cleanup_failed` items. Done (will be checked).
   - Cause: cleanup loop only processes `REVIEW_RESOLVED_STATES`; `cleanup_failed` is in pending states.
   - Code: `backend/web_api.py:89`, `backend/web_api.py:1571`.
-- Local ingest can move original user files into review.
+- Local ingest can move original user files into review. Done (will be checked).
   - Cause: local worker calls `process_file(... delete_source=False)`, but duplicate quarantine uses `shutil.move(filepath, dest_path)` regardless of `delete_source`.
   - Code: `backend/web_api.py:1269`, `backend/processor.py:207`.
-- Local ingest can start two workers.
+- Local ingest can start two workers. Done (will be checked).
   - Cause: endpoint checks `LOCAL_INGEST_STATE["running"]`, then expands paths and schedules worker. `running=True` is only set inside the worker later.
   - Code: `backend/web_api.py:1303`, `backend/web_api.py:1250`.
 
@@ -93,7 +93,7 @@ SQLite stores runtime asset/index metadata only. Manual topics and WD tags live 
 - Orphan review sidecars are not cleanup candidates. Done (will be checked).
   - Cause: cleanup starts from media files only; `.json` sidecars without media are excluded before cleanup logic runs.
   - Code: `backend/web_api.py:1335`, `backend/web_api.py:1347`.
-- Local retry loses metadata defaults.
+- Local retry loses metadata defaults. Done (will be checked).
   - Cause: retry endpoint reuses only `failed_paths`; it starts the worker with `{}` defaults and `skip_similarity=False`.
   - Code: `backend/web_api.py:1322`, `backend/web_api.py:1328`.
 - `/review-assets` may not mount on clean startup.
@@ -111,10 +111,10 @@ SQLite stores runtime asset/index metadata only. Manual topics and WD tags live 
 - Docs contain old search syntax.
   - Cause: current code uses `p:`, `t:`, `#`; status doc still says repeated `@` and `*` in one section.
   - Code/doc: `frontend/src/lib/search.ts:26`, `docs/lmz_status.md:234`.
-- Local folder expansion can block API.
+- Local folder expansion can block API. Done (will be checked).
   - Cause: recursive `path.rglob("*")` and sorting run synchronously before the background worker starts.
   - Code: `backend/web_api.py:1215`.
-- Local ingest results can grow in memory.
+- Local ingest results can grow in memory. Done (will be checked).
   - Cause: backend appends every result into process-global `LOCAL_INGEST_STATE["results"]`; frontend only displays the last 120.
   - Code: `backend/web_api.py:1285`, `frontend/src/lib/Ingestion.svelte:485`.
 - Topic/WD filters are expensive.
@@ -222,6 +222,16 @@ SQLite stores runtime asset/index metadata only. Manual topics and WD tags live 
   - Review structured logging moved from `web_api.py` into `backend/logger/logger.py`.
   - `.gitignore` now ignores only root runtime `/logs/`.
   - `pyproject.toml` package include now uses `"logger"`.
+- Set 2 local ingestion safety completed. Done (will be checked):
+  - Online temp downloads now use `data/input/online/{url_hash}/`.
+  - Local ingest now stages copies under `data/input/local/{run_id}/`.
+  - Local worker passes staged files to `process_file(... delete_source=True)`.
+  - User originals are no longer passed directly to `process_file()`.
+  - Local start marks `running=True` before worker scheduling.
+  - Local retry preserves last defaults and `skip_similarity`.
+  - Local status now exposes `phase`, `run_id`, `scanned`, and `staged`.
+  - Backend local results are capped to the last 500.
+  - Local panel displays phase/scanned/staged counters.
 - Search prefix remap + UI guide order updated. Done (will be checked):
   - Prefix mapping changed to: `> cmd`, `a: artist`, `p: platform`, `t: topic`, `# wd-tag`.
   - Search parser and active-segment detection updated for `p:` and `t:`.
@@ -274,6 +284,13 @@ SQLite stores runtime asset/index metadata only. Manual topics and WD tags live 
   - verify close while local ingest is running prompts stop-after-current and exits only after current item completes.
   - verify close while online ingest is running prompts stop-after-current and exits only after in-flight workers settle.
   - verify deferred online URLs remain in retry path after stop-after-current.
+- Set 2 local ingestion validation:
+  - verify successful local ingest leaves original files untouched.
+  - verify similar local duplicate moves only the staged copy to review.
+  - verify two rapid local starts return one success and one `409`.
+  - verify local retry reuses defaults and `skip_similarity`.
+  - verify large folder start returns quickly while status enters `scanning`.
+  - verify online download temp folders are created under `data/input/online/`.
 - Review `variant` strict cleanup validation:
   - verify successful ingest + failed review-file delete returns warning and keeps item in Cleanup (`pending_cleanup`).
   - verify successful ingest + successful review-file delete returns success and removes item from pending list.

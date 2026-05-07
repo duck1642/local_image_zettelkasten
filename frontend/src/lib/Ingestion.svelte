@@ -26,19 +26,30 @@
 
   type LocalStatus = {
     running: boolean;
+    phase: string;
+    run_id: string | null;
+    scanned: number;
+    staged: number;
     queued: number;
     processed: number;
     summary: { ingested: number; review: number; failed: number; duplicate: number };
-    results: Array<{ path: string; name: string; status: string; message: string }>;
+    results: Array<{ path: string; source_path?: string; staged_path?: string; name: string; status: string; message: string }>;
     failed_paths: string[];
+    last_defaults?: { artist?: string; platform?: string; source_url?: string };
+    last_skip_similarity?: boolean;
     started_at: string | null;
     finished_at: string | null;
+    stop_requested?: boolean;
   };
 
   let localPaths: string[] = [];
   let localDefaults = { artist: '', platform: 'Local', source_url: '' };
   let localStatus: LocalStatus = {
     running: false,
+    phase: 'idle',
+    run_id: null,
+    scanned: 0,
+    staged: 0,
     queued: 0,
     processed: 0,
     summary: { ingested: 0, review: 0, failed: 0, duplicate: 0 },
@@ -320,7 +331,7 @@
       if (!res.ok) {
         throw new Error(payload?.detail || `HTTP ${res.status}`);
       }
-      uiLog('INFO', 'Started local ingestion', { queued: payload?.queued || 0 });
+      uiLog('INFO', 'Started local ingestion', { run_id: payload?.run_id || '', phase: payload?.phase || 'scanning' });
       await refreshLocalStatus();
       startLocalStatusPolling();
     } catch (e) {
@@ -337,6 +348,7 @@
       if ((payload?.queued || 0) > 0) {
         startLocalStatusPolling();
       }
+      uiLog('INFO', 'Retried local failed items', { queued: payload?.queued || 0, run_id: payload?.run_id || '', phase: payload?.phase || 'scanning' });
       await refreshLocalStatus();
     } catch (e) {
       uiLog('ERROR', 'Failed to retry local failed items', { error: String(e) });
@@ -470,6 +482,9 @@
     <div class="local-status">
       <div class="monitor-header">Local Run Status</div>
       <div class="status-grid">
+        <span>Phase: {localStatus.phase}</span>
+        <span>Scanned: {localStatus.scanned}</span>
+        <span>Staged: {localStatus.staged}</span>
         <span>Queued: {localStatus.queued}</span>
         <span>Processed: {localStatus.processed}</span>
         <span>Ingested: {localStatus.summary.ingested}</span>

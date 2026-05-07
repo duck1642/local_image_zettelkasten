@@ -5,7 +5,7 @@ import subprocess
 from urllib.parse import urlparse
 
 from downloaders.media_filter import valid_media_files
-from utils import INPUT_DIR, get_config, get_cookie_auth_status, get_cookie_path
+from utils import ONLINE_INGEST_DIR, get_config, get_cookie_auth_status, get_cookie_path
 
 
 _AUTH_STATUS_LOGGED = set()
@@ -261,7 +261,7 @@ def _minimal_download_info(url: str) -> dict:
 def download_gallery(url: str, metadata_info: dict = None) -> tuple[bool, dict]:
     config = get_config()
     url_hash = hashlib.sha256(url.encode()).hexdigest()[:16]
-    session_dir = INPUT_DIR / "external" / url_hash
+    session_dir = ONLINE_INGEST_DIR / url_hash
     session_dir.mkdir(parents=True, exist_ok=True)
 
     try:

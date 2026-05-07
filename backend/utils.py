@@ -36,8 +36,8 @@ VAULT_DIR = _resolve_path('vault', "data/vault")
 
 INPUT_DIR = _resolve_path('input', "data/input")
 REVIEW_DIR = _resolve_path('review', "data/review")
-LOCAL_INGEST_DIR = _resolve_path('local_ingest', "data/local_ingest")
-ONLINE_INGEST_DIR = _resolve_path('online_ingest', "data/online_ingest")
+LOCAL_INGEST_DIR = INPUT_DIR / "local"
+ONLINE_INGEST_DIR = INPUT_DIR / "online"
 QUEUES_DIR = _resolve_path('queues', "data/queues")
 BATCHES_DIR = _resolve_path('batches', "data/batches")
 SECRETS_DIR = _resolve_path('secrets', "secrets")
