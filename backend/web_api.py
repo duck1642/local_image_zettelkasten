@@ -23,6 +23,15 @@ from utils import get_config, ASSETS_DIR, REVIEW_DIR, LOCAL_INGEST_DIR, note_pat
 from processor import process_file
 from logger import log_auth, log_review, log_svelte, log_system, RAW_LOGS_DIR, STRUCTURED_LOGS_DIR
 from md_generator import load_note_topics, load_note_wd_tags, generate_markdown
+from metadata_index import (
+    indexed_item_metadata,
+    metadata_facets,
+    metadata_index_ready,
+    metadata_index_status,
+    safe_reindex_item_metadata,
+    start_metadata_repair_worker,
+    start_metadata_watchdog,
+)
 from tagging import load_tag_cache, tag_media
 from thumbnails import get_or_generate_thumbnail
 from utils import SECRETS_DIR, WD_TAGS_DIR, atomic_write_text, get_cookie_auth_status
@@ -162,6 +171,19 @@ def _scan_auth_status_sync(reason: str = "manual") -> dict:
 @app.on_event("startup")
 async def startup_auth_scan():
     await asyncio.to_thread(_scan_auth_status_sync, "startup")
+
+@app.on_event("startup")
+async def startup_metadata_index():
+    def start_services():
+        try:
+            start_metadata_watchdog()
+        except Exception as exc:
+            log_system("WARNING", "Metadata watchdog startup failed", error=str(exc))
+        try:
+            start_metadata_repair_worker(full=False)
+        except Exception as exc:
+            log_system("WARNING", "Metadata index repair startup failed", error=str(exc))
+    await asyncio.to_thread(start_services)
 
 def _api_key_path() -> Path:
     return SECRETS_DIR / ".api_key"
@@ -411,6 +433,21 @@ app.mount("/review-assets", StaticFiles(directory=str(REVIEW_DIR)), name="review
 async def get_stats():
     return await asyncio.to_thread(_get_stats_sync)
 
+@app.get("/api/metadata-index/status")
+async def get_metadata_index_status():
+    return await asyncio.to_thread(_get_metadata_index_status_sync)
+
+def _get_metadata_index_status_sync():
+    conn = init_database()
+    try:
+        return metadata_index_status(conn)
+    finally:
+        conn.close()
+
+@app.post("/api/metadata-index/rebuild")
+async def rebuild_metadata_index():
+    return await asyncio.to_thread(start_metadata_repair_worker, True)
+
 def _get_stats_sync():
     conn = init_database()
     cursor = conn.cursor()
@@ -576,6 +613,10 @@ def _get_facets_sync(kind: str, q: str = "", limit: int = 100):
             items = [{"value": row[0], "count": row[1]} for row in cursor.fetchall() if row[0]]
             return {"kind": kind, "items": _sort_facets(items, needle, limit)}
 
+        if metadata_index_ready(conn):
+            return {"kind": kind, "items": metadata_facets(conn, kind, needle.casefold(), limit)}
+
+        log_system("WARNING", "Metadata index not ready; using legacy facet scan", kind=kind)
         cursor.execute("SELECT hash FROM items ORDER BY date_added DESC")
         rows = cursor.fetchall()
         if kind == "topic":
@@ -693,6 +734,7 @@ def _get_items_sync(field, value, sort, media_type, artist, platform, filename, 
         base_query = "SELECT hash, file_extension, mime_type, original_filename, source_url, date_added, platform, source_artist, width, height FROM items"
         conditions = []
         params = []
+        use_metadata_index = bool(topic_filters or wd_tag_filters) and metadata_index_ready(conn)
 
         if field and value:
             allowed = {"source_artist", "platform", "original_filename"}
@@ -710,9 +752,20 @@ def _get_items_sync(field, value, sort, media_type, artist, platform, filename, 
         elif media_type == 'video':
             conditions.append("mime_type LIKE 'video/%'")
 
-        has_frontmatter_filter = bool(topic_filters or wd_tag_filters)
+        if use_metadata_index:
+            for topic_value in topic_filters:
+                conditions.append("EXISTS (SELECT 1 FROM item_topics mt WHERE mt.item_hash = items.hash AND mt.topic_norm LIKE ?)")
+                params.append(f"%{topic_value.casefold()}%")
+            for wd_value in wd_tag_filters:
+                conditions.append("EXISTS (SELECT 1 FROM item_wd_tags mw WHERE mw.item_hash = items.hash AND mw.tag_norm LIKE ?)")
+                params.append(f"%{wd_value.casefold()}%")
 
-        if cursor and not has_frontmatter_filter:
+        has_frontmatter_filter = bool(topic_filters or wd_tag_filters)
+        has_python_frontmatter_filter = has_frontmatter_filter and not use_metadata_index
+        if has_python_frontmatter_filter:
+            log_system("WARNING", "Metadata index not ready; using legacy item filter scan")
+
+        if cursor and not has_python_frontmatter_filter:
             try:
                 cursor_date, cursor_hash = cursor.rsplit("_", 1)
             except ValueError:
@@ -732,7 +785,7 @@ def _get_items_sync(field, value, sort, media_type, artist, platform, filename, 
         if sort == 'oldest': order_clause = " ORDER BY date_added ASC, hash ASC"
         elif sort == 'artist': order_clause = " ORDER BY source_artist COLLATE NOCASE ASC, date_added DESC"
 
-        sql_limit = 100000 if has_frontmatter_filter else limit + 1
+        sql_limit = 100000 if has_python_frontmatter_filter else limit + 1
 
         cursor_obj.execute(f"{base_query}{where_clause}{order_clause} LIMIT {sql_limit}", tuple(params))
         rows = cursor_obj.fetchall()
@@ -744,13 +797,13 @@ def _get_items_sync(field, value, sort, media_type, artist, platform, filename, 
         for row in rows:
             h, ext = row[0], (row[1] or "")
 
-            if topic_lowers:
+            if topic_lowers and not use_metadata_index:
                 note_topics = load_note_topics(h)
                 topic_strings = [t.lower() for t in note_topics]
                 if not all(any(topic_value in topic_string for topic_string in topic_strings) for topic_value in topic_lowers):
                     continue
 
-            if wd_tag_lowers:
+            if wd_tag_lowers and not use_metadata_index:
                 wd_strings = [name.lower() for name in _wd_names_for_hash(h)]
                 if not all(any(wd_value in wd_string for wd_string in wd_strings) for wd_value in wd_tag_lowers):
                     continue
@@ -764,7 +817,7 @@ def _get_items_sync(field, value, sort, media_type, artist, platform, filename, 
                 "width": row[8], "height": row[9]
             })
 
-        if has_frontmatter_filter and cursor:
+        if has_python_frontmatter_filter and cursor:
             items = [item for item in items if _item_after_cursor(item, cursor, sort)]
 
         has_more = len(items) > limit
@@ -780,20 +833,29 @@ def _get_items_sync(field, value, sort, media_type, artist, platform, filename, 
     finally:
         conn.close()
 
-def _get_item_details(h, row):
+def _get_item_details(h, row, conn=None):
     ext = row[1] or ""
-    topics = load_note_topics(h)
-    wd_data = load_note_wd_tags(h)
-    if wd_data.get("status") != "ok":
-        cache_data = load_tag_cache(h)
-        if cache_data.get("status") == "ok":
-            wd_data = {
-                "status": "ok",
-                "source": "cache",
-                "rating": cache_data.get("rating") or {},
-                "character_tags": cache_data.get("character_tags") or [],
-                "tags": cache_data.get("tags") or []
-            }
+    try:
+        if conn is not None:
+            metadata = indexed_item_metadata(conn, h)
+            topics = metadata.get("topics", [])
+            wd_data = metadata.get("wd_data", {"status": "missing"})
+        else:
+            raise RuntimeError("metadata index connection unavailable")
+    except Exception as exc:
+        log_system("WARNING", "Metadata index detail fallback", hash=h, error=str(exc))
+        topics = load_note_topics(h)
+        wd_data = load_note_wd_tags(h)
+        if wd_data.get("status") != "ok":
+            cache_data = load_tag_cache(h)
+            if cache_data.get("status") == "ok":
+                wd_data = {
+                    "status": "ok",
+                    "source": "cache",
+                    "rating": cache_data.get("rating") or {},
+                    "character_tags": cache_data.get("character_tags") or [],
+                    "tags": cache_data.get("tags") or []
+                }
     
     def get_names(tag_list):
         names = []
@@ -830,7 +892,7 @@ def _get_item_sync(item_hash: str):
         cursor.execute("SELECT hash, file_extension, mime_type, original_filename, source_url, date_added, platform, source_artist, width, height FROM items WHERE hash = ?", (item_hash,))
         row = cursor.fetchone()
         if not row: raise HTTPException(status_code=404)
-        return _get_item_details(item_hash, row)
+        return _get_item_details(item_hash, row, conn)
     finally:
         conn.close()
 
@@ -944,6 +1006,8 @@ def _update_item_sync(item_hash: str, update: ItemUpdate):
             note_path = note_path_for(item_hash)
             note_path.parent.mkdir(parents=True, exist_ok=True)
             atomic_write_text(note_path, md_content)
+            safe_reindex_item_metadata(conn, item_hash, "item_patch")
+            conn.commit()
             
         return {"status": "success"}
     finally:
@@ -1113,10 +1177,12 @@ async def trigger_tagging(item_hash: str):
                 note_path = note_path_for(item_hash)
                 note_path.parent.mkdir(parents=True, exist_ok=True)
                 atomic_write_text(note_path, md_content)
+                safe_reindex_item_metadata(conn, item_hash, "manual_tag")
+                conn.commit()
             
             cursor.execute("SELECT hash, file_extension, mime_type, original_filename, source_url, date_added, platform, source_artist, width, height FROM items WHERE hash = ?", (item_hash,))
             updated_row = cursor.fetchone()
-            return _get_item_details(item_hash, updated_row)
+            return _get_item_details(item_hash, updated_row, conn)
         finally:
             conn.close()
 

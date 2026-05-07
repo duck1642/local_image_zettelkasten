@@ -28,7 +28,7 @@ The old Flet and PySide/PyQt UI paths are no longer active. The Python source ro
 - Logs: `logs/raw/` and `logs/structured/`.
 - Secrets: `secrets/`.
 
-SQLite stores runtime asset/index metadata only. Manual topics and WD tags live outside SQLite.
+SQLite stores runtime asset/index metadata plus a disposable derived topic/WD query index. Markdown/YAML remains the source of truth.
 
 ## Working Areas
 
@@ -380,6 +380,7 @@ Implemented:
 - Repeated query params to the backend.
 - Dropdown suggestions for commands, artists, platforms, topics, and WD tags.
 - Dropdown counts from `/api/facets`.
+- Topic/WD filters and counts use the SQLite metadata index after initial backfill, with legacy YAML/cache fallback before it is ready.
 - Scrollable dropdown with mouse, ArrowUp/ArrowDown, Enter, Escape, and Tab autocomplete.
 - Stats tab for global WD tag, artist, platform, and topic counts.
 

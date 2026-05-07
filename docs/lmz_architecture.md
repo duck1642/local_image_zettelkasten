@@ -131,11 +131,11 @@ Markdown asset links are relative to sharded notes:
 
 Metadata ownership:
 
-- SQLite: runtime asset/index metadata.
-- Markdown frontmatter: manual `topics`, distilled `wd_rating`, `wd_character_tags`, and `wd_tags`.
-- WD JSON cache: detailed local WD tag report, including scores and frame-level video tag data.
+- SQLite: runtime asset/index metadata plus disposable derived topic/WD query indexes.
+- Markdown frontmatter: source of truth for manual `topics`, distilled `wd_rating`, `wd_character_tags`, and `wd_tags`.
+- WD JSON cache: detailed local WD tag report, including scores and frame-level video tag data. Used as fallback only when YAML has no WD fields.
 
-SQLite intentionally does not store manual topics or WD tag metadata.
+Derived SQLite metadata rows are rebuildable and are not the source of truth.
 
 ## SQLite Model
 
@@ -168,6 +168,16 @@ Used for fragment/tile-level pHash support.
 | `parent_hash` | Parent item hash |
 | `tile_index` | Tile order |
 | `tile_phash` | Tile perceptual hash |
+
+### Metadata index tables
+
+Used for SQL-backed topic/WD filters, facets, and suggestions.
+
+| Table | Meaning |
+| --- | --- |
+| `item_metadata_files` | Note/WD file signatures and index status per item |
+| `item_topics` | Derived topic rows |
+| `item_wd_tags` | Derived WD rating/character/general tag rows |
 
 ## Backend API
 
@@ -307,8 +317,9 @@ Filter semantics:
 Facet counts:
 
 - Artist/platform counts come from SQLite.
-- Topic counts come from markdown frontmatter.
-- WD tag counts come from markdown/cache-backed WD fields.
+- Topic counts come from the SQLite metadata index after initial backfill.
+- WD tag counts come from the SQLite metadata index after initial backfill.
+- Before initial backfill completes, topic/WD counts fall back to the legacy YAML/cache scan.
 - `/api/facets` powers the Stats view and search dropdown counts.
 
 ## Media Focus
@@ -447,7 +458,8 @@ Known packaging caveat:
 - Keep credentials under `secrets/`.
 - Keep `backups/` and `docs/` local/ignored.
 - Keep source URL provenance stable.
-- Keep manual topics and WD tags out of SQLite.
+- Keep markdown/YAML as the source of truth for manual topics and WD tags.
+- Keep SQLite topic/WD rows disposable and rebuildable.
 - Prefer batch-safe ingestion for multi-media posts.
 - Do not reintroduce Flet or PySide UI code.
 - Build the production sidecar before production Tauri packaging.

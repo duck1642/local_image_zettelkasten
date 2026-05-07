@@ -87,6 +87,9 @@ def init_database():
     )
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_source_url_norm ON items(source_url_norm)')
 
+    from metadata_index import ensure_metadata_schema
+    ensure_metadata_schema(conn)
+
     conn.commit()
     return conn
 
@@ -141,6 +144,10 @@ def reset_database():
         cursor = conn.cursor()
         cursor.execute('PRAGMA foreign_keys = ON;')
         cursor.execute('BEGIN IMMEDIATE')
+        cursor.execute('DROP TABLE IF EXISTS item_wd_tags')
+        cursor.execute('DROP TABLE IF EXISTS item_topics')
+        cursor.execute('DROP TABLE IF EXISTS item_metadata_files')
+        cursor.execute('DROP TABLE IF EXISTS metadata_index_state')
         cursor.execute('DROP TABLE IF EXISTS item_tiles')
         cursor.execute('DROP TABLE IF EXISTS items')
         conn.commit()

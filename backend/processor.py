@@ -21,6 +21,7 @@ from db.sqlite_operator import (
 )
 from db.search_manager import search_manager
 from md_generator import generate_markdown
+from metadata_index import safe_reindex_item_metadata
 from logger import log_activity, log_system
 from tagging import tag_media
 
@@ -380,6 +381,8 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
             log_system("WARNING", "Tagging enrichment crashed", hash=file_hash, error=str(tag_exc))
             if config.get('tagging', {}).get('fail_ingestion_on_error', False):
                 raise
+
+        safe_reindex_item_metadata(conn, file_hash, "ingest")
 
         conn.commit()
 

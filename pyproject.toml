@@ -51,6 +51,7 @@ py-modules = [
     "external_ingestion",
     "fingerprint",
     "md_generator",
+    "metadata_index",
     "processor",
     "utils",
     "validators",

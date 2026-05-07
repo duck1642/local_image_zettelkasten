@@ -167,7 +167,7 @@ Build a practical desktop interface for vault management, add local AI tagging, 
 - Added distilled WD fields to markdown frontmatter.
 - Added image and video WD tagging; videos use sampled frame tagging and merged suggestions.
 - Kept manual topics separate from WD tags.
-- Kept SQLite free of manual topics and WD tag metadata.
+- Added a disposable SQLite metadata index for topic/WD queries while keeping markdown/YAML as source of truth.
 - Hardened local API mutating endpoints with a local session key and allowlisted origins.
 - Validated log, queue, and review paths to prevent traversal.
 - Fixed false-success API behavior for missing items.
