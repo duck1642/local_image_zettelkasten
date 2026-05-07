@@ -1,6 +1,7 @@
 
 import sqlite3
 import threading
+import time
 from typing import List, Tuple, Optional
 
 from db.searchers import BKTreeSearcher, URLRegistry, VPTreeSearcher
@@ -32,6 +33,7 @@ class SearchManager:
 
     _instance = None
     _lock = threading.Lock()
+    VP_PENDING_REBUILD_THRESHOLD = 512
 
     def __new__(cls):
         with cls._lock:
@@ -88,8 +90,7 @@ class SearchManager:
                     self.video_tree.add(f_hash, v_emb)
 
 
-            self.video_tree.build_index()
-            self.audio_tree.build_index()
+            self._rebuild_deferred_indexes_locked("hydrate")
 
             self.is_hydrated = True
             log_ingestion('INFO', f"Hydration complete: {len(urls)} URLs | {len(phashes)} Images | {len(v_sigs)} Videos indexed in RAM.")
@@ -147,19 +148,71 @@ class SearchManager:
     def update_indexes(self, file_hash: str, phash: Optional[str], url: Optional[str], tiles: List[Tuple[int, str]] = None, audio_hash: bytes = None, visual_embedding: bytes = None):
 
         with self._sync_lock:
-            if url:
-                self.url_registry.add(url)
-            if phash:
-                self.global_tree.add(file_hash, phash)
-            if tiles:
-                for _, tile_phash in tiles:
-                    self.tile_tree.add(file_hash, tile_phash)
+            self._update_indexes_unlocked(file_hash, phash, url, tiles, audio_hash, visual_embedding)
+            if self._vp_pending_count_locked() >= self.VP_PENDING_REBUILD_THRESHOLD:
+                self._rebuild_deferred_indexes_locked("pending_threshold")
 
+    def update_indexes_batch(self, items: list[dict]):
 
-            if audio_hash:
-                self.audio_tree.add(file_hash, audio_hash)
-            if visual_embedding:
-                self.video_tree.add(file_hash, visual_embedding)
+        if not items:
+            return
+        with self._sync_lock:
+            for item in items:
+                self._update_indexes_unlocked(
+                    item.get("file_hash"),
+                    item.get("phash"),
+                    item.get("url"),
+                    item.get("tiles"),
+                    item.get("audio_hash"),
+                    item.get("visual_embedding"),
+                )
+            log_ingestion("INFO", "RAM index batch update queued", count=len(items))
+            self._rebuild_deferred_indexes_locked("batch_update")
+
+    def rebuild_deferred_indexes(self):
+
+        with self._sync_lock:
+            self._rebuild_deferred_indexes_locked("explicit")
+
+    def _update_indexes_unlocked(self, file_hash: str, phash: Optional[str], url: Optional[str], tiles: List[Tuple[int, str]] = None, audio_hash: bytes = None, visual_embedding: bytes = None):
+
+        if url:
+            self.url_registry.add(url)
+        if phash:
+            self.global_tree.add(file_hash, phash)
+        if tiles:
+            for _, tile_phash in tiles:
+                self.tile_tree.add(file_hash, tile_phash)
+
+        if audio_hash:
+            self.audio_tree.add(file_hash, audio_hash)
+        if visual_embedding:
+            self.video_tree.add(file_hash, visual_embedding)
+
+    def _vp_pending_count_locked(self) -> int:
+
+        return self.audio_tree.pending_count() + self.video_tree.pending_count()
+
+    def _rebuild_deferred_indexes_locked(self, reason: str):
+
+        for name, tree in (("video", self.video_tree), ("audio", self.audio_tree)):
+            pending = tree.pending_count()
+            if pending <= 0 and not tree.dirty:
+                continue
+            started = time.perf_counter()
+            stats = tree.build_index()
+            duration_ms = round((time.perf_counter() - started) * 1000, 2)
+            log_ingestion(
+                "INFO",
+                "VP-tree index rebuilt" if stats.get("rebuilt") else "VP-tree index rebuild skipped",
+                tree=name,
+                reason=reason,
+                indexed=stats.get("indexed", tree.indexed_count()),
+                merged=stats.get("merged", pending),
+                pending=tree.pending_count(),
+                duration_ms=duration_ms,
+                rebuild_count=tree.rebuild_count,
+            )
 
 
 search_manager = SearchManager()

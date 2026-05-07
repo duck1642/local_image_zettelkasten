@@ -190,6 +190,14 @@
     zoomTileSize(-20);
   }
 
+  function itemPageLimit() {
+    if (!import.meta.env.DEV) return '50';
+    const value = new URLSearchParams(window.location.search).get('lmz_test_page_size');
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric < 1) return '50';
+    return String(Math.min(100000, Math.round(numeric)));
+  }
+
   async function fetchItems(append = false) {
     if (!append) {
       nextCursor = null;
@@ -198,7 +206,7 @@
       isLoadingMore = true;
     }
     try {
-      const params = buildItemQueryParams(activeFilters, currentSort, currentMediaType, '50', append ? nextCursor : null);
+      const params = buildItemQueryParams(activeFilters, currentSort, currentMediaType, itemPageLimit(), append ? nextCursor : null);
       const response = await apiFetch(`/api/items?${params.toString()}`);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();

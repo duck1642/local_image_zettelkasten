@@ -33,8 +33,8 @@
   });
 </script>
 
-<div class="virtual-scroller" bind:this={hostEl} on:scroll={handleScroll}>
-  <div class="virtual-surface" style={`height: ${totalHeight}px;`}>
+<div class="virtual-scroller" data-testid="virtual-scroller" bind:this={hostEl} on:scroll={handleScroll}>
+  <div class="virtual-surface" data-testid="virtual-surface" style={`height: ${totalHeight}px;`}>
     <slot {scrollTop} {viewportHeight}></slot>
   </div>
   <div bind:this={sentinelEl} class="scroll-sentinel"></div>

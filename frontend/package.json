@@ -8,10 +8,12 @@
     "build": "vite build",
     "preview": "vite preview",
     "check": "svelte-check --tsconfig ./tsconfig.app.json && tsc -p tsconfig.node.json",
+    "test:large-vault": "set NODE_PATH=./node_modules&& playwright test --config playwright.config.ts",
     "tauri": "tauri",
     "build:sidecar": "python ../tools/maintenance/build_tauri_sidecar.py --clean"
   },
   "devDependencies": {
+    "@playwright/test": "^1.59.1",
     "@sveltejs/vite-plugin-svelte": "^7.0.0",
     "@tauri-apps/cli": "^2.10.1",
     "@tsconfig/svelte": "^5.0.8",

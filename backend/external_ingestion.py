@@ -82,8 +82,7 @@ class ExternalIngestor:
             if batch_index_queue:
                 log_ingestion('INFO', f"Syncing RAM indexes for {len(batch_index_queue)} new items...")
                 try:
-                    for item in batch_index_queue:
-                        search_manager.update_indexes(**item)
+                    search_manager.update_indexes_batch(batch_index_queue)
                 except Exception as sync_e:
                     log_ingestion("ERROR", "RAM Sync failed during batch finalization", error=str(sync_e))
 

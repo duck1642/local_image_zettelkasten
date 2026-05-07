@@ -185,6 +185,7 @@
     {#each visiblePositions as position (position.group.id)}
       <div
         class="measured-item"
+        data-testid="masonry-renderer-item"
         style={`width: ${position.width}px; transform: translate3d(${position.left}px, ${position.top}px, 0);`}
         use:measureTile={position}
       >

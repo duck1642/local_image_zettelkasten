@@ -20,19 +20,43 @@ class VPTreeSearcher(BaseSearcher):
     def __init__(self, distance_func):
         self.distance_func = distance_func
         self.tree = None
-        self.items = []
+        self.indexed_items = []
+        self.pending_items = []
+        self.dirty = False
+        self.rebuild_count = 0
 
     def add(self, item_hash: str, signature: Any):
 
         if signature is not None:
-            self.items.append((item_hash, signature))
-            self.tree = self._make_tree(self.items)
+            self.pending_items.append((item_hash, signature))
+            self.dirty = True
 
     def build_index(self):
 
-        if not self.items:
-            return
-        self.tree = self._make_tree(self.items)
+        pending_count = len(self.pending_items)
+        if pending_count:
+            self.indexed_items.extend(self.pending_items)
+            self.pending_items = []
+        if not self.indexed_items:
+            self.tree = None
+            self.dirty = False
+            return {"indexed": 0, "merged": pending_count, "rebuilt": False}
+        if not self.dirty and self.tree is not None:
+            return {"indexed": len(self.indexed_items), "merged": 0, "rebuilt": False}
+        self.tree = self._make_tree(self.indexed_items)
+        self.dirty = False
+        self.rebuild_count += 1
+        return {"indexed": len(self.indexed_items), "merged": pending_count, "rebuilt": True}
+
+    @property
+    def items(self):
+        return self.indexed_items + self.pending_items
+
+    def pending_count(self) -> int:
+        return len(self.pending_items)
+
+    def indexed_count(self) -> int:
+        return len(self.indexed_items)
 
 
     def _make_tree(self, items):
@@ -61,11 +85,13 @@ class VPTreeSearcher(BaseSearcher):
         return (vp_item, median_dist, self._make_tree(left_items), self._make_tree(right_items))
 
     def query(self, query_sig: Any, threshold: float) -> List[Tuple[str, float]]:
-        if self.tree is None:
-            return []
-
         results = []
-        self._search(self.tree, query_sig, threshold, results)
+        if self.tree is not None:
+            self._search(self.tree, query_sig, threshold, results)
+        for item_hash, signature in self.pending_items:
+            dist = self.distance_func(query_sig, signature)
+            if dist <= threshold:
+                results.append((item_hash, dist))
         return sorted(results, key=lambda x: x[1])
 
     def _search(self, node, query_sig, threshold, results):

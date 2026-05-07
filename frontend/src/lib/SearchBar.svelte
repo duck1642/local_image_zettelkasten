@@ -235,6 +235,7 @@
   <div class="search-wrapper">
     <input
       type="text"
+      data-testid="vault-search-input"
       placeholder="> cmd; a: artist; p: platform; t: topic; # wd-tag"
       bind:this={searchInputEl}
       bind:value={searchQuery}

@@ -50,7 +50,7 @@
 </script>
 
 <!-- svelte-ignore a11y-no-static-element-interactions -->
-<div class="tile-group {layout}" class:selected={isSelected} on:click={select} on:keydown={(e) => { if (e.key === 'Enter' && current) dispatch('select', { item: current }); }} role="button" tabindex="0">
+<div class="tile-group {layout}" data-testid="vault-tile" class:selected={isSelected} on:click={select} on:keydown={(e) => { if (e.key === 'Enter' && current) dispatch('select', { item: current }); }} role="button" tabindex="0">
     <div class="media-stack" style={layout !== 'grid' ? aspectStyle : ''}>
         {#if current && isImageMedia(current)}
             <img src={thumbnailUrl} alt="Vault Item" loading={eagerImages ? 'eager' : 'lazy'}

@@ -94,6 +94,7 @@
     {#each visiblePositions as position (position.group.id)}
       <div
         class="grid-renderer-item"
+        data-testid="grid-renderer-item"
         style={`width: ${position.width}px; height: ${position.height}px; transform: translate3d(${position.left}px, ${position.top}px, 0);`}
       >
         <VaultGroupTile
