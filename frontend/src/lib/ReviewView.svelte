@@ -6,6 +6,7 @@
 
   interface ReviewItem {
     filename: string;
+    display_name?: string;
     url: string;
     mime_type?: string;
     extension?: string;
@@ -64,6 +65,10 @@
     return apiUrl(item.url || '');
   }
 
+  function displayName(item: ReviewItem | null | undefined) {
+    return item?.display_name || item?.metadata?.original_name || item?.filename || '';
+  }
+
   async function readErrorDetail(response: Response) {
     try {
       const data = await response.json();
@@ -104,8 +109,8 @@
     if (action === 'replace') {
       const target = String(current.metadata?.best_match || current.best_match?.hash || '').trim();
       const message = target
-        ? `Replace target ${target.slice(0, 10)}... with ${current.filename}?`
-        : `Replace target is missing for ${current.filename}. Continue anyway?`;
+        ? `Replace target ${target.slice(0, 10)}... with ${displayName(current)}?`
+        : `Replace target is missing for ${displayName(current)}. Continue anyway?`;
       if (!confirm(message)) return;
     }
 
@@ -119,10 +124,10 @@
       }
       const payload = await res.json().catch(() => ({}));
       if (payload?.status === 'warning') {
-        uiLog('WARNING', 'Review action warning', { action, filename: current.filename, message: payload?.message || '' });
+        uiLog('WARNING', 'Review action warning', { action, filename: current.filename, display_name: displayName(current), message: payload?.message || '' });
         alert(payload?.message || 'Action returned warning.');
       } else {
-        uiLog('INFO', 'Review action succeeded', { action, filename: current.filename, message: payload?.message || '' });
+        uiLog('INFO', 'Review action succeeded', { action, filename: current.filename, display_name: displayName(current), message: payload?.message || '' });
       }
       await loadReview();
     } catch (e) {
@@ -194,7 +199,7 @@
         {:else}
           {#each pendingItems as item}
             <button class="queue-item {item.filename === current?.filename ? 'active' : ''}" on:click={() => selectItem(item)}>
-              <span class="queue-name">{item.filename}</span>
+              <span class="queue-name">{displayName(item)}</span>
               <span class="queue-state">{item.state || 'pending'}</span>
             </button>
           {/each}
@@ -206,7 +211,7 @@
         {:else}
           {#each cleanupItems as item}
             <button class="queue-item cleanup {item.filename === current?.filename ? 'active' : ''}" on:click={() => selectItem(item)}>
-              <span class="queue-name">{item.filename}</span>
+              <span class="queue-name">{displayName(item)}</span>
               <span class="queue-state">{item.last_cleanup_error || item.state || 'pending_cleanup'}</span>
             </button>
           {/each}
@@ -244,7 +249,7 @@
           </div>
 
           <div class="meta-bar">
-            <span>File: {current.filename}</span>
+            <span>File: {displayName(current)}</span>
             <span>Target: {current.metadata?.target_hash || current.metadata?.best_match || 'missing'}</span>
           </div>
 
@@ -281,7 +286,7 @@
           </div>
 
           <div class="meta-bar">
-            <span>File: {current.filename}</span>
+            <span>File: {displayName(current)}</span>
             <span>Target: {current.best_match?.hash || current.metadata?.best_match || 'missing'}</span>
           </div>
 

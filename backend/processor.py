@@ -2,6 +2,7 @@
 import shutil
 import json
 import time
+import secrets
 from pathlib import Path
 from typing import Tuple, Optional
 from datetime import datetime
@@ -22,6 +23,59 @@ from db.search_manager import search_manager
 from md_generator import generate_markdown
 from logger import log_activity, log_system
 from tagging import tag_media
+
+def _safe_review_name(name: str) -> str:
+    invalid = '<>:"/\\|?*'
+    safe = "".join("_" if char in invalid or ord(char) < 32 else char for char in str(name or "")).strip(" .")
+    if not safe:
+        safe = "review_item"
+    if len(safe) > 180:
+        original = Path(safe)
+        safe = f"{original.stem[:140]}{original.suffix[:20]}"
+    return safe
+
+def _review_original_name(filepath: Path, metadata: dict) -> str:
+    explicit = str(metadata.get("original_name") or "").strip()
+    if explicit:
+        return Path(explicit).name
+    source_path = str(metadata.get("original_path") or metadata.get("source_path") or "").strip()
+    if source_path:
+        source_name = Path(source_path).name
+        if source_name:
+            return source_name
+    return filepath.name
+
+def _move_to_review(filepath: Path, file_hash: str, metadata: dict, sidecar_fields: dict) -> Path:
+    REVIEW_DIR.mkdir(parents=True, exist_ok=True)
+    original_name = _review_original_name(filepath, metadata)
+    safe_original_name = _safe_review_name(original_name)
+    for _ in range(20):
+        review_id = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{secrets.token_hex(4)}"
+        storage_name = f"{review_id}_{file_hash[:8]}_{safe_original_name}"
+        dest_path = REVIEW_DIR / storage_name
+        sidecar_path = dest_path.with_suffix(dest_path.suffix + ".json")
+        if not dest_path.exists() and not sidecar_path.exists():
+            break
+    else:
+        raise RuntimeError("Could not allocate unique review filename")
+
+    shutil.move(filepath, dest_path)
+    source_path = str(metadata.get("original_path") or metadata.get("source_path") or filepath)
+    staged_from = str(metadata.get("staged_from") or ("online" if metadata.get("source_url") else "unknown"))
+    sidecar = {
+        "review_id": review_id,
+        "storage_name": storage_name,
+        "original_name": original_name,
+        "source_path": source_path,
+        "staged_from": staged_from,
+        "state": "pending",
+        "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        "metadata": metadata,
+        **sidecar_fields,
+    }
+    with open(sidecar_path, 'w', encoding='utf-8') as f:
+        json.dump(sidecar, f, indent=4, ensure_ascii=False)
+    return dest_path
 
 def calculate_tiles(filepath: Path, ratio_threshold: float = 3.0) -> list:
 
@@ -202,24 +256,19 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
 
                 conn.close()
 
-                REVIEW_DIR.mkdir(parents=True, exist_ok=True)
-                dest_path = REVIEW_DIR / filepath.name
-                shutil.move(filepath, dest_path)
-
-
-                sidecar = {
-                    "original_name": filepath.name,
+                _move_to_review(
+                    filepath,
+                    file_hash,
+                    metadata,
+                    {
                     "phash": phash,
                     "match_type": match_type,
                     "best_match": conflict_hash,
                     "distance": distance,
                     "total_conflicts": total_conflicts,
                     "is_tiled": bool(tiles),
-                    "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                    "metadata": metadata
-                }
-                with open(dest_path.with_suffix(dest_path.suffix + '.json'), 'w', encoding='utf-8') as f:
-                    json.dump(sidecar, f, indent=4)
+                    },
+                )
 
                 log_system("WARNING", f"Quarantined: Visual match detected ({match_type})", file=filepath.name, match_type=match_type, conflicts=total_conflicts)
                 return False, f"asi   Visual Match ({match_type}, Total: {total_conflicts}) -> Moved to review/", None
@@ -246,24 +295,19 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
 
                 conn.close()
 
-                REVIEW_DIR.mkdir(parents=True, exist_ok=True)
-                dest_path = REVIEW_DIR / filepath.name
-                shutil.move(filepath, dest_path)
-
-
-                sidecar = {
-                    "original_name": filepath.name,
+                _move_to_review(
+                    filepath,
+                    file_hash,
+                    metadata,
+                    {
                     "match_type": match_type,
                     "best_match": conflict_hash,
                     "similarity": round(float(similarity), 4) if similarity else 0.0,
                     "total_conflicts": total_conflicts,
                     "audio_present": bool(audio_hash),
                     "visual_embedding_present": bool(visual_embedding),
-                    "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                    "metadata": metadata
-                }
-                with open(dest_path.with_suffix(dest_path.suffix + '.json'), 'w', encoding='utf-8') as f:
-                    json.dump(sidecar, f, indent=4)
+                    },
+                )
 
                 log_system("WARNING", f"Quarantined: Video duplicate detected ({match_type})", file=filepath.name, match_type=match_type, conflicts=total_conflicts)
                 return False, f"asi   Video Duplicate ({match_type}, Total: {total_conflicts}) -> Moved to review/", None

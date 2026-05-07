@@ -87,7 +87,7 @@ SQLite stores runtime asset/index metadata only. Manual topics and WD tags live 
 - Review action URL can break for special filenames. Done (will be checked).
   - Cause: filename is interpolated directly into the URL path without `encodeURIComponent`.
   - Code: `frontend/src/lib/ReviewView.svelte:92`.
-- Review filename collision is possible.
+- Review filename collision is possible. Done (will be checked).
   - Cause: duplicate quarantine writes to `REVIEW_DIR / filepath.name`; no hash/session suffix is added.
   - Code: `backend/processor.py:206`, `backend/processor.py:250`.
 - Orphan review sidecars are not cleanup candidates. Done (will be checked).
@@ -96,7 +96,7 @@ SQLite stores runtime asset/index metadata only. Manual topics and WD tags live 
 - Local retry loses metadata defaults. Done (will be checked).
   - Cause: retry endpoint reuses only `failed_paths`; it starts the worker with `{}` defaults and `skip_similarity=False`.
   - Code: `backend/web_api.py:1322`, `backend/web_api.py:1328`.
-- `/review-assets` may not mount on clean startup.
+- `/review-assets` may not mount on clean startup. Done (will be checked).
   - Cause: static mount only happens if `REVIEW_DIR.exists()` at API import time. Later directory creation does not mount the route.
   - Code: `backend/web_api.py:328`.
 
@@ -232,6 +232,13 @@ SQLite stores runtime asset/index metadata only. Manual topics and WD tags live 
   - Local status now exposes `phase`, `run_id`, `scanned`, and `staged`.
   - Backend local results are capped to the last 500.
   - Local panel displays phase/scanned/staged counters.
+- Set 3 review storage safety completed. Done (will be checked):
+  - Review quarantine now uses unique storage names with `review_id`, short hash, and safe original name.
+  - Review sidecars now store `review_id`, `storage_name`, `original_name`, `source_path`, `staged_from`, and `state`.
+  - `/api/review` returns both storage `filename` and human `display_name`.
+  - Review UI displays `display_name` while using `filename` for asset/action URLs.
+  - `/review-assets` is always mounted after creating `data/review`.
+  - Legacy review files remain readable with best-effort sidecar defaults.
 - Search prefix remap + UI guide order updated. Done (will be checked):
   - Prefix mapping changed to: `> cmd`, `a: artist`, `p: platform`, `t: topic`, `# wd-tag`.
   - Search parser and active-segment detection updated for `p:` and `t:`.
@@ -291,6 +298,13 @@ SQLite stores runtime asset/index metadata only. Manual topics and WD tags live 
   - verify local retry reuses defaults and `skip_similarity`.
   - verify large folder start returns quickly while status enters `scanning`.
   - verify online download temp folders are created under `data/input/online/`.
+- Set 3 review storage validation:
+  - verify two same-name files quarantine to different review storage filenames.
+  - verify sidecars retain the same human `original_name`.
+  - verify local staged names display as original names in Review UI.
+  - verify review actions still work with encoded storage `filename`.
+  - verify `/review-assets/{filename}` works on clean startup.
+  - verify cleanup/orphan sidecar handling still works with `media.ext.json`.
 - Review `variant` strict cleanup validation:
   - verify successful ingest + failed review-file delete returns warning and keeps item in Cleanup (`pending_cleanup`).
   - verify successful ingest + successful review-file delete returns success and removes item from pending list.
