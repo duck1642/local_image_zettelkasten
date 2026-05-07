@@ -54,7 +54,7 @@ SQLite stores runtime asset/index metadata only. Manual topics and WD tags live 
 
 ### Critical
 
-- Online ingestion can crash before work starts.
+- Online ingestion can crash before work starts. Done (will be checked).
   - Cause: `as_completed(futures)` is used but `as_completed` is not imported from `concurrent.futures`.
   - Code: `backend/external_ingestion.py:4`, `backend/external_ingestion.py:65`.
 - Review `replace` can destroy the existing vault item before replacement succeeds. Done (will be checked).
@@ -78,7 +78,7 @@ SQLite stores runtime asset/index metadata only. Manual topics and WD tags live 
 
 ### Medium
 
-- Stop-after-current can drop deferred online URLs.
+- Stop-after-current can drop deferred online URLs. Done (will be checked).
   - Cause: deferred URLs are collected in `all_remaining`, but final queue write always clears the source queue with `_write_back([])`.
   - Code: `backend/external_ingestion.py:73`, `backend/external_ingestion.py:88`.
 - Review `keep` behavior is inconsistent in the frontend. Done (will be checked).
@@ -239,6 +239,14 @@ SQLite stores runtime asset/index metadata only. Manual topics and WD tags live 
   - Review UI displays `display_name` while using `filename` for asset/action URLs.
   - `/review-assets` is always mounted after creating `data/review`.
   - Legacy review files remain readable with best-effort sidecar defaults.
+- Set 4 online queue safety completed. Done (will be checked):
+  - Added missing `as_completed` import for platform-level online ingestion.
+  - Online source queues now keep deferred and crash-preserved URLs instead of clearing all links.
+  - Successful, skipped, and real failed URLs are removed from the source queue.
+  - Worker crashes are logged to failed links and counted as errors.
+  - Platform manager crashes preserve that platform bucket in the same source queue.
+  - Stop-after-current preserves not-yet-started URLs in the current queue.
+  - Queue rewrite logging now reports original, removed, and remaining counts.
 - Search prefix remap + UI guide order updated. Done (will be checked):
   - Prefix mapping changed to: `> cmd`, `a: artist`, `p: platform`, `t: topic`, `# wd-tag`.
   - Search parser and active-segment detection updated for `p:` and `t:`.
@@ -305,6 +313,12 @@ SQLite stores runtime asset/index metadata only. Manual topics and WD tags live 
   - verify review actions still work with encoded storage `filename`.
   - verify `/review-assets/{filename}` works on clean startup.
   - verify cleanup/orphan sidecar handling still works with `media.ext.json`.
+- Set 4 online queue safety validation:
+  - verify normal and force queues preserve only their own deferred URLs.
+  - verify failed queue receives only real failed URLs.
+  - verify stop-after-current leaves not-yet-started URLs in the source queue.
+  - verify platform manager crash preserves that platform bucket.
+  - verify startup import works with `as_completed`.
 - Review `variant` strict cleanup validation:
   - verify successful ingest + failed review-file delete returns warning and keeps item in Cleanup (`pending_cleanup`).
   - verify successful ingest + successful review-file delete returns success and removes item from pending list.

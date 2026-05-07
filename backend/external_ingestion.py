@@ -1,7 +1,7 @@
 ﻿
 from pathlib import Path
 from typing import List, Optional, Dict, Tuple
-from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
+from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED, as_completed
 import threading
 import time
 import shutil
@@ -57,7 +57,8 @@ class ExternalIngestor:
             log_ingestion('INFO', f"Bucketed {len(links)} links into {len(buckets)} platform queues.")
 
 
-            all_remaining = []
+            remaining_urls = []
+            original_count = len(links)
 
             with ThreadPoolExecutor(max_workers=len(buckets)) as platform_executor:
                 futures = {platform_executor.submit(self._manage_platform_queue, plat, urls): plat for plat, urls in buckets.items()}
@@ -70,10 +71,12 @@ class ExternalIngestor:
                         stats["processed"] += worker_stats["processed"]
                         stats["skipped"] += worker_stats["skipped"]
                         stats["errors"] += worker_stats["errors"]
-                        all_remaining.extend(worker_remaining)
+                        remaining_urls.extend(worker_remaining)
                         batch_index_queue.extend(worker_index_data)
                     except Exception as e:
-                        log_ingestion("ERROR", "Platform manager crash", platform=platform, error=str(e))
+                        crashed_urls = buckets.get(platform, [])
+                        remaining_urls.extend(crashed_urls)
+                        log_ingestion("ERROR", "Platform manager crash; preserving platform URLs in source queue", platform=platform, preserved=len(crashed_urls), error=str(e))
 
 
             if batch_index_queue:
@@ -85,8 +88,16 @@ class ExternalIngestor:
                     log_ingestion("ERROR", "RAM Sync failed during batch finalization", error=str(sync_e))
 
 
-            self._write_back([])
-            log_ingestion('INFO', f"[OK] Ingestion cycle complete. {len(all_remaining)} failed links logged for explicit retry.")
+            self._write_back(remaining_urls)
+            removed_count = max(0, original_count - len(remaining_urls))
+            log_ingestion(
+                "INFO",
+                "Source queue rewritten after ingestion",
+                original=original_count,
+                removed=removed_count,
+                remaining=len(remaining_urls),
+            )
+            log_ingestion('INFO', f"[OK] Ingestion cycle complete. {len(remaining_urls)} deferred/crash-preserved links kept in source queue.")
 
         except Exception as e:
             log_ingestion("ERROR", "ExternalIngestor failed", error=str(e))
@@ -109,7 +120,7 @@ class ExternalIngestor:
 
         with ThreadPoolExecutor(max_workers=num_workers) as executor:
             pending_urls = iter(urls)
-            in_flight = set()
+            in_flight = {}
 
             for _ in range(num_workers):
                 if ONLINE_STOP_AFTER_CURRENT.is_set():
@@ -118,12 +129,20 @@ class ExternalIngestor:
                     next_url = next(pending_urls)
                 except StopIteration:
                     break
-                in_flight.add(executor.submit(self._worker_item, platform, next_url, jitter))
+                in_flight[executor.submit(self._worker_item, platform, next_url, jitter)] = next_url
 
             while in_flight:
-                done, in_flight = wait(in_flight, return_when=FIRST_COMPLETED)
+                done, _ = wait(in_flight.keys(), return_when=FIRST_COMPLETED)
                 for future in done:
-                    success, url_out, stats_out, index_list = future.result()
+                    current_url = in_flight.pop(future, "")
+                    try:
+                        success, url_out, stats_out, index_list = future.result()
+                    except Exception as exc:
+                        plat_stats["errors"] += 1
+                        if current_url:
+                            self._log_failure(current_url, f"Worker crash: {exc}")
+                        log_ingestion("ERROR", "Online ingestion worker crash", platform=platform, url=current_url, error=str(exc))
+                        continue
 
                     plat_stats["processed"] += stats_out["processed"]
                     plat_stats["skipped"] += stats_out["skipped"]
@@ -131,9 +150,6 @@ class ExternalIngestor:
 
                     if index_list:
                         plat_index_data.extend(index_list)
-
-                    if not success:
-                        plat_remaining.append(url_out)
 
                 if ONLINE_STOP_AFTER_CURRENT.is_set():
                     continue
@@ -143,12 +159,12 @@ class ExternalIngestor:
                         next_url = next(pending_urls)
                     except StopIteration:
                         break
-                    in_flight.add(executor.submit(self._worker_item, platform, next_url, jitter))
+                    in_flight[executor.submit(self._worker_item, platform, next_url, jitter)] = next_url
 
             if ONLINE_STOP_AFTER_CURRENT.is_set():
                 for url_left in pending_urls:
                     plat_remaining.append(url_left)
-                log_ingestion("INFO", "Stop-after-current acknowledged; remaining URLs deferred", platform=platform, deferred=len(plat_remaining))
+                log_ingestion("INFO", "Stop-after-current acknowledged; deferred URLs preserved in source queue", platform=platform, deferred=len(plat_remaining))
 
         return plat_stats, plat_remaining, plat_index_data
 
