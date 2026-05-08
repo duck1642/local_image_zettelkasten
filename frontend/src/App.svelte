@@ -60,7 +60,7 @@
 
           async function closeNow() {
             forceClosing = true;
-            await appWindow.close();
+            await appWindow.destroy();
           }
 
           async function fetchRuntimeStatus() {
@@ -95,8 +95,7 @@
               if (!pollRes.ok) continue;
               const poll = await pollRes.json();
               if (!poll?.any_running) {
-                forceClosing = true;
-                await appWindow.close();
+                await closeNow();
                 return;
               }
             }

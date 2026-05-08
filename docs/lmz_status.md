@@ -170,6 +170,8 @@ SQLite stores runtime asset/index metadata plus a disposable derived topic/WD qu
     - `git diff --check`
 - Close guard + unknown URL log labeling fixed. Done (will be checked):
   - Window close now fails open when no ingestion is running or runtime-status cannot be reached.
+  - Forced/idled close uses Tauri `destroy()` to bypass re-entering the close-request guard.
+  - Tauri capability now grants `core:window:allow-destroy`; latest warning was missing permission, not close-flow logic.
   - Close guard still prompts stop-after-current when ingestion is actually running.
   - Unknown online URL buckets are labeled `other` internally and shown as `[OTHER URL]` in Logs instead of `[GENERIC]`.
   - Validation used:
