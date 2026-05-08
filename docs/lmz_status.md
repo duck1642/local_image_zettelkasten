@@ -61,6 +61,7 @@ python -B -c "import ast, pathlib; [ast.parse(path.read_text(encoding='utf-8-sig
 python -B -c "import core, web_api, db.sqlite_operator, db.search_manager, queue_service, tagging.service; print('IMPORT OK')"
 cd frontend
 npm run check
+npm run test:mock-vault
 npm run test:large-vault
 npm run build
 npm run build:sidecar
@@ -68,6 +69,18 @@ git diff --check
 ```
 
 Known build note: Vite may need to run outside the sandbox because it spawns helper processes.
+
+VSCode-friendly test launchers:
+
+```powershell
+.\tests\test-mock-vault.bat
+.\tests\test-mock-vault-headed.bat
+.\tests\test-large-vault.bat
+.\tests\test-large-vault-headed.bat
+.\tests\test-playwright.bat
+.\tests\test-playwright-headed.bat
+.\tests\test-playwright-ui.bat
+```
 
 ## Documentation Notes
 
@@ -197,6 +210,13 @@ Known build note: Vite may need to run outside the sandbox because it spawns hel
   - fullscreen pan state resets after drag and when zoom returns to 1.
   - production API startup retry handles delayed sidecar readiness.
   - ingest paths honor `paths.local_ingest` and `paths.online_ingest`.
+- Mock-vault validation harness:
+  - isolated fixture lives under `tests/fixtures/mock-vault/`.
+  - frontend Playwright mocks API/media/review/RAM without touching the real vault.
+  - backend pytest uses `LMZ_CONFIG_PATH` and temp fixture copies.
+  - batch launchers live under `tests/` for VSCode terminal use.
+  - `source_url` and platform are read-only in Inspector; artist remains editable.
+  - mock-vault tests cover artist edit refresh, source/platform read-only behavior, masonry stale-data prevention, fullscreen pan/backdrop behavior, review filename encoding, video path rendering, and RAM unavailable state.
 
 ## Deferred / Will Do Later
 
@@ -256,13 +276,11 @@ Known build note: Vite may need to run outside the sandbox because it spawns hel
   - verify hover handle alignment.
   - verify content across 320-760 px.
 - Fullscreen zoom/pan:
-  - verify pan then backdrop click behavior.
-  - verify zoom back to 1 then backdrop click closes.
   - verify video controls remain reliable.
 - Filmstrip:
   - verify sizing, animation, thumbnail ergonomics, active-state visibility.
 - RAM tracker:
-  - verify footer text, polling behavior, unavailable frontend-memory display.
+  - verify real footer polling behavior over long app sessions.
 - GIF behavior:
   - original GIF animation should work in focus and markdown.
   - vault/inspector thumbnails are static first-frame previews.
@@ -275,7 +293,7 @@ Known build note: Vite may need to run outside the sandbox because it spawns hel
   - `delete` removes item/sidecar and decrements count.
   - `variant` ingests once and removes review source.
   - variant failure returns non-2xx and keeps item pending.
-  - image/video pairs render in both panes.
+  - real image/video review pairs render in both panes.
 - Review Windows file-lock edge case:
   - cleanup failures should remain visible as `pending_cleanup`.
   - Cleanup section should retry them.
@@ -286,27 +304,20 @@ Known build note: Vite may need to run outside the sandbox because it spawns hel
 - Local ingestion:
   - successful local ingest leaves originals untouched.
   - similar duplicate moves only staged copy to review.
-  - two rapid starts return one success and one `409`.
-  - retry reuses defaults and `skip_similarity`.
-  - large folder starts without materializing/sorting whole tree.
-  - configured local/online ingest paths are honored.
+  - real large folder starts without materializing/sorting whole tree.
 - Review storage:
   - same-name files quarantine to unique storage filenames.
   - sidecars retain human `original_name`.
   - staged local names display as originals.
-  - encoded review action/asset URLs work.
   - `/review-assets/{filename}` works on clean startup.
-  - orphan sidecar cleanup still works with `media.ext.json`.
 - Online queue safety:
   - normal and force queues preserve only their own deferred URLs.
   - failed queue receives only real failed URLs.
   - stop-after-current leaves not-yet-started URLs in source queue.
   - platform manager crash preserves that platform bucket.
-  - startup import works with `as_completed`.
 - Metadata edit flow:
-  - selected item artist/platform/source URL updates tile, inspector, selected group, and grouping.
-  - source URL empty -> shared URL moves item into URL group.
-  - masonry remains stable after metadata update without stale artist/source data.
+  - real-vault artist edit updates tile and inspector.
+  - platform/source URL stay read-only in Inspector.
 - Sidecar/API startup:
   - simulated delayed backend does not permanently fail first production API calls.
 
