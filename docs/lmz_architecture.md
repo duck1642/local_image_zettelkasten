@@ -299,9 +299,9 @@ Rules:
 Search is one input with structured prefixes:
 
 - `a:` artist.
-- `@` platform.
-- `#` note-frontmatter topic.
-- `*` WD tag.
+- `p:` platform.
+- `t:` note-frontmatter topic.
+- `#` WD tag.
 - `>` command.
 - `;` separates filter segments.
 

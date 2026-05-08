@@ -251,3 +251,10 @@ Encrypt `.secrets.yaml` and `cookies.txt` at rest and implement improved credent
 
 ### Task
 Implement "Orphan/Ghost" integrity checks and periodic SHA256 re-verification to detect bit-rot.
+
+---
+
+## Phase 14 — Browser Extension Integration (Resilient Ingestion)
+
+### Task
+Develop a browser extension to capture media URLs directly from the active webpage and send them to the backend. This provides a resilient fallback for media ingestion, bypassing the need for backend scrapers (e.g., `gallery-dl`, `yt-dlp`) that are vulnerable to platform rate-limiting, CAPTCHAs, and API breakages.
