@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "check": "svelte-check --tsconfig ./tsconfig.app.json && tsc -p tsconfig.node.json",
-    "test:large-vault": "set NODE_PATH=./node_modules&& playwright test --config playwright.config.ts",
+    "test:large-vault": "set NODE_PATH=./node_modules&& playwright test --config playwright.config.ts large-vault.spec.ts",
+    "test:mock-vault": "set NODE_PATH=./node_modules&& playwright test --config playwright.config.ts mock-vault.spec.ts",
     "tauri": "tauri",
     "build:sidecar": "python ../tools/maintenance/build_tauri_sidecar.py --clean"
   },

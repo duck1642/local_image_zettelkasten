@@ -11,7 +11,14 @@ from typing import Optional
 
 SRC_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SRC_DIR.parent
-CONFIG_PATH = PROJECT_ROOT / "config" / "config.yaml"
+_CONFIG_PATH_ENV = os.environ.get("LMZ_CONFIG_PATH")
+if _CONFIG_PATH_ENV:
+    _config_path_candidate = Path(_CONFIG_PATH_ENV).expanduser()
+    CONFIG_PATH = (_config_path_candidate if _config_path_candidate.is_absolute() else PROJECT_ROOT / _config_path_candidate).resolve()
+    CONFIG_ROOT = CONFIG_PATH.parent
+else:
+    CONFIG_PATH = PROJECT_ROOT / "config" / "config.yaml"
+    CONFIG_ROOT = PROJECT_ROOT
 
 def _early_load_config() -> dict:
 
@@ -30,7 +37,7 @@ def _resolve_path(key: str, default: str) -> Path:
 
     path_str = _paths.get(key) or default
     p = Path(path_str)
-    return p.resolve() if p.is_absolute() else (PROJECT_ROOT / p).resolve()
+    return p.resolve() if p.is_absolute() else (CONFIG_ROOT / p).resolve()
 
 VAULT_DIR = _resolve_path('vault', "data/vault")
 
@@ -193,8 +200,9 @@ def get_config() -> dict:
                 'vault_tile_min_width': 190,
                 'prefixes': {
                     'command': '>',
-                    'platform': '@',
+                    'platform': 'p:',
                     'artist': 'a:',
+                    'topic': 't:',
                     'tag': '#'
                 }
             },

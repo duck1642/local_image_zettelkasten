@@ -47,6 +47,8 @@ coverage.xml
 *.py,cover
 .hypothesis/
 .pytest_cache/
+tests/.pytest-tmp/
+pytest-cache-files-*/
 cover/
 
 # Translations
@@ -202,3 +204,8 @@ stable_layout_notes.ts.txt
 stable_masonry.svelte.txt
 test_input/
 test_videos/
+
+# Tracked deterministic test fixtures
+!tests/fixtures/mock-vault/config.yaml
+!tests/fixtures/mock-vault/data/
+!tests/fixtures/mock-vault/data/**

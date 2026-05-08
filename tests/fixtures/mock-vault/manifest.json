@@ -1,0 +1,101 @@
+{
+  "items": [
+    {
+      "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "extension": ".jpg",
+      "mime_type": "image/jpeg",
+      "original_filename": "solo-a.jpg",
+      "source_url": "",
+      "date_added": "2026-01-01T00:00:00Z",
+      "platform": "local",
+      "artist": "Mock Solo",
+      "url": "/mock-vault/assets/aa/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.svg",
+      "thumbnail_url": "/mock-vault/assets/aa/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.svg",
+      "width": 320,
+      "height": 240,
+      "topics": ["mock-topic"],
+      "wd_tags": { "rating": "safe", "characters": ["mock_character"], "general": ["mock_tag"] }
+    },
+    {
+      "hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "extension": ".gif",
+      "mime_type": "image/gif",
+      "original_filename": "group-b.gif",
+      "source_url": "https://mock.local/shared/1",
+      "date_added": "2026-01-01T00:00:01Z",
+      "platform": "pixiv",
+      "artist": "Mock Group B",
+      "url": "/mock-vault/assets/bb/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.svg",
+      "thumbnail_url": "/mock-vault/assets/bb/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.svg",
+      "width": 300,
+      "height": 300,
+      "topics": ["group-topic"],
+      "wd_tags": { "rating": "safe", "characters": [], "general": ["gif_like"] }
+    },
+    {
+      "hash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "extension": ".mp4",
+      "mime_type": "video/mp4",
+      "original_filename": "group-c.mp4",
+      "source_url": "https://mock.local/shared/1",
+      "date_added": "2026-01-01T00:00:02Z",
+      "platform": "youtube",
+      "artist": "Mock Group C",
+      "url": "/mock-vault/video/cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.mp4",
+      "thumbnail_url": "/mock-vault/assets/cc/cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.svg",
+      "width": 400,
+      "height": 225,
+      "topics": ["video-topic"],
+      "wd_tags": { "rating": "safe", "characters": [], "general": ["video_like"] }
+    }
+  ],
+  "review": [
+    {
+      "filename": "review%20encoded+name.jpg",
+      "display_name": "Original Review Name.jpg",
+      "url": "/review-assets/review%2520encoded%2Bname.jpg",
+      "mime_type": "image/jpeg",
+      "extension": ".jpg",
+      "state": "pending",
+      "section": "pending",
+      "metadata": {
+        "original_name": "Original Review Name.jpg",
+        "best_match": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "best_match": {
+        "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "url": "/mock-vault/assets/aa/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.svg",
+        "artist": "Mock Solo",
+        "mime_type": "image/jpeg",
+        "extension": ".jpg"
+      }
+    },
+    {
+      "filename": "cleanup-item.jpg",
+      "display_name": "Locked Cleanup Item.jpg",
+      "url": "/review-assets/cleanup-item.jpg",
+      "mime_type": "image/jpeg",
+      "extension": ".jpg",
+      "state": "pending_cleanup",
+      "section": "cleanup",
+      "last_action": "variant",
+      "last_cleanup_error": "mock locked file",
+      "metadata": {
+        "original_name": "Locked Cleanup Item.jpg",
+        "target_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "best_match": null
+    }
+  ],
+  "queues": {
+    "normal": ["https://mock.local/normal/1"],
+    "force": ["https://mock.local/force/1"],
+    "failed": ["https://mock.local/failed/1"]
+  },
+  "expectations": {
+    "initialGroups": 2,
+    "afterSoloSourceUrlMovesToSharedGroup": 1,
+    "editedArtist": "Mock Edited Artist",
+    "sharedSourceUrl": "https://mock.local/shared/1"
+  }
+}

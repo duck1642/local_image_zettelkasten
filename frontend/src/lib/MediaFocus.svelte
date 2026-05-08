@@ -11,7 +11,15 @@
   export let startTime: number = 0;
   
   const dispatch = createEventDispatcher();
-  const appWindow = getCurrentWindow();
+  function currentWindowSafe() {
+    try {
+      return getCurrentWindow();
+    } catch {
+      return { setFullscreen: async () => {} };
+    }
+  }
+
+  const appWindow = currentWindowSafe();
   const MIN_SCALE = 1;
   const MAX_SCALE = 6;
   const KEYBOARD_STEP = 0.25;

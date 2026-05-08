@@ -1,0 +1,220 @@
+import { expect, test, type Page, type Route } from '@playwright/test';
+import manifestData from '../fixtures/mock-vault/manifest.json';
+
+type MockItem = {
+  hash: string;
+  artist: string;
+  platform: string;
+  source_url: string;
+  url: string;
+  thumbnail_url: string;
+  [key: string]: unknown;
+};
+
+const manifest = manifestData as {
+  items: MockItem[];
+  review: unknown[];
+  queues: Record<string, string[]>;
+  expectations: Record<string, string | number>;
+};
+
+function cloneItems() {
+  return manifest.items.map((item) => ({ ...item }));
+}
+
+function facetItems(items: MockItem[], key: string) {
+  const counts = new Map<string, number>();
+  for (const item of items) {
+    const value = String(item[key] || '').trim();
+    if (value) counts.set(value, (counts.get(value) || 0) + 1);
+  }
+  return [...counts.entries()].map(([value, count]) => ({ value, count }));
+}
+
+async function fulfillJson(route: Route, body: unknown, status = 200) {
+  await route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
+}
+
+async function installMockVaultApi(page: Page, options: { memoryFails?: boolean } = {}) {
+  let items = cloneItems();
+  const reviewItems = JSON.parse(JSON.stringify(manifest.review));
+  const appConfig = {
+    ui: {
+      vault_layout_mode: 'masonry',
+      vault_tile_min_width: 190,
+      inspector_width: 360,
+      inspector_visible: true,
+      ram_track_enabled: true,
+      prefixes: { command: '>', artist: 'a:', platform: 'p:', topic: 't:', tag: '#' }
+    }
+  };
+
+  await page.route('**/api/items**', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const detailMatch = url.pathname.match(/\/api\/items\/([a-f0-9]{64})(?:\/.*)?$/);
+    if (detailMatch) {
+      const hash = detailMatch[1];
+      const item = items.find((entry) => entry.hash === hash);
+      if (!item) return fulfillJson(route, { detail: 'not found' }, 404);
+      if (request.method() === 'PATCH') {
+        const patch = JSON.parse(request.postData() || '{}');
+        items = items.map((entry) => entry.hash === hash ? { ...entry, ...patch } : entry);
+        return fulfillJson(route, { status: 'success' });
+      }
+      return fulfillJson(route, item);
+    }
+
+    const limit = Math.max(1, Math.min(Number(url.searchParams.get('limit') || 50), 100000));
+    return fulfillJson(route, {
+      items: items.slice(0, limit),
+      has_more: items.length > limit,
+      next_cursor: items.length > limit ? String(limit) : null
+    });
+  });
+
+  await page.route('**/api/config', async (route) => fulfillJson(route, appConfig));
+  await page.route('**/api/session-key', async (route) => fulfillJson(route, { key: 'mock-key' }));
+  await page.route('**/api/stats', async (route) => fulfillJson(route, { total_items: items.length }));
+  await page.route('**/api/queue-stats', async (route) => fulfillJson(route, {
+    normal: manifest.queues.normal.length,
+    force: manifest.queues.force.length,
+    failed: manifest.queues.failed.length
+  }));
+  await page.route('**/api/review/count', async (route) => fulfillJson(route, { count: reviewItems.length, pending: 1, cleanup: 1 }));
+  await page.route('**/api/review/cleanup', async (route) => fulfillJson(route, { status: 'success', cleaned: 0, failed: 0, cleaned_orphans: 0, failed_orphans: 0 }));
+  await page.route('**/api/review/*/action**', async (route) => fulfillJson(route, { status: 'success', action: 'keep', message: 'mock action ok' }));
+  await page.route('**/api/review', async (route) => fulfillJson(route, reviewItems));
+  await page.route('**/api/facets**', async (route) => {
+    const kind = new URL(route.request().url()).searchParams.get('kind') || 'artist';
+    const key = kind === 'wd_tag' ? 'artist' : kind;
+    return fulfillJson(route, { kind, items: facetItems(items, key) });
+  });
+  await page.route('**/api/system/memory', async (route) => {
+    if (options.memoryFails) return fulfillJson(route, { detail: 'unavailable' }, 500);
+    return fulfillJson(route, { backend_mb: 42.5 });
+  });
+  await page.route('**/api/logs/ui', async (route) => fulfillJson(route, { status: 'ok' }));
+  await page.route('**/mock-vault/assets/**', async (route) => {
+    const assetName = new URL(route.request().url()).pathname.split('/').pop() || 'mock.svg';
+    await route.fulfill({
+      status: 200,
+      contentType: 'image/svg+xml',
+      body: `<svg xmlns="http://www.w3.org/2000/svg" width="320" height="240"><rect width="320" height="240" fill="#1f2937"/><text x="24" y="124" fill="#fff">${assetName.slice(0, 6)}</text></svg>`
+    });
+  });
+  await page.route('**/mock-vault/video/**', async (route) => {
+    await route.fulfill({ status: 204, body: '' });
+  });
+  await page.route('**/review-assets/**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'image/svg+xml',
+      body: '<svg xmlns="http://www.w3.org/2000/svg" width="240" height="180"><rect width="240" height="180" fill="#334155"/><text x="24" y="96" fill="#fff">Review</text></svg>'
+    });
+  });
+}
+
+async function openMockVault(page: Page, options: { memoryFails?: boolean } = {}) {
+  await installMockVaultApi(page, options);
+  await page.goto('/?lmz_test_page_size=100');
+  await expect(page.getByTestId('vault-tile').first()).toBeVisible();
+  await expect(page.locator('.bottom-status')).toContainText('Total Items: 3');
+}
+
+test('mock vault fixture is isolated and renders grouped media paths', async ({ page }) => {
+  await openMockVault(page);
+
+  await expect(page.locator('.bottom-status')).toContainText('Showing 2 groups');
+  await expect(page.getByText('Mock Solo')).toBeVisible();
+  await expect(page.getByText('Mock Group B')).toBeVisible();
+  await page.getByText('Mock Group B').click();
+  await page.locator('aside.inspector .group-nav button').last().click();
+  await expect(page.locator('aside.inspector video')).toHaveAttribute('src', /mock-vault\/video/);
+});
+
+test('metadata edit refreshes tile, inspector, and group membership', async ({ page }) => {
+  await openMockVault(page);
+
+  await page.getByText('Mock Solo').click();
+  await expect(page.getByLabel('Artist')).toHaveValue('Mock Solo');
+  await page.getByLabel('Artist').fill(String(manifest.expectations.editedArtist));
+  await page.getByLabel('Source URL').fill(String(manifest.expectations.sharedSourceUrl));
+  await page.getByRole('button', { name: 'Save Changes' }).click();
+
+  await expect(page.getByText(String(manifest.expectations.editedArtist))).toBeVisible();
+  await expect(page.getByLabel('Artist')).toHaveValue(String(manifest.expectations.editedArtist));
+  await expect(page.locator('.bottom-status')).toContainText(`Showing ${manifest.expectations.afterSoloSourceUrlMovesToSharedGroup} groups`);
+});
+
+test('masonry keeps current data after metadata update cache reuse', async ({ page }) => {
+  await openMockVault(page);
+
+  await page.getByText('Mock Solo').click();
+  await page.getByLabel('Artist').fill('Cache Fresh Artist');
+  await page.getByRole('button', { name: 'Save Changes' }).click();
+  await page.getByTestId('virtual-scroller').evaluate((node) => {
+    const el = node as HTMLElement;
+    el.scrollTop = 200;
+    el.dispatchEvent(new Event('scroll'));
+    el.scrollTop = 0;
+    el.dispatchEvent(new Event('scroll'));
+  });
+
+  await expect(page.getByText('Cache Fresh Artist')).toBeVisible();
+  await expect(page.getByText('Mock Solo')).toHaveCount(0);
+});
+
+test('fullscreen pan suppresses one backdrop click then closes after reset', async ({ page }) => {
+  await openMockVault(page);
+
+  await page.getByText('Mock Solo').click();
+  await page.getByTitle('Fullscreen').click({ force: true });
+  await expect(page.locator('.focus-overlay.fullscreen')).toBeVisible();
+
+  const frame = page.locator('.media-frame');
+  await frame.dispatchEvent('wheel', { deltaY: -180, ctrlKey: true, clientX: 400, clientY: 300 });
+  const box = await frame.boundingBox();
+  expect(box).not.toBeNull();
+  await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box!.x + box!.width / 2 + 40, box!.y + box!.height / 2 + 20);
+  await page.mouse.up();
+  await page.locator('.focus-overlay.fullscreen').dispatchEvent('click');
+  await expect(page.locator('.focus-overlay.fullscreen')).toBeVisible();
+
+  for (let i = 0; i < 10; i += 1) {
+    await frame.dispatchEvent('wheel', { deltaY: 240, ctrlKey: true, clientX: 400, clientY: 300 });
+  }
+  await page.waitForTimeout(150);
+  await page.locator('.focus-overlay.fullscreen').dispatchEvent('click');
+  await expect(page.locator('.focus-overlay.fullscreen')).toHaveCount(0);
+});
+
+test('review fixture uses display names and encoded asset/action paths', async ({ page }) => {
+  const reviewRequests: string[] = [];
+  await openMockVault(page);
+  page.on('request', (request) => {
+    if (request.url().includes('/api/review/') || request.url().includes('/review-assets/')) {
+      reviewRequests.push(request.url());
+    }
+  });
+
+  await page.getByRole('button', { name: /Review/ }).click();
+  await expect(page.getByRole('button', { name: 'Original Review Name.jpg pending' })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Locked Cleanup Item\.jpg/ })).toBeVisible();
+  await page.getByRole('button', { name: /Original Review Name\.jpg/ }).click();
+  await page.getByRole('button', { name: 'Keep Visible' }).click();
+
+  expect(reviewRequests.some((url) => url.includes('review%2520encoded%2Bname.jpg'))).toBeTruthy();
+});
+
+test('ram footer handles available and unavailable states', async ({ page }) => {
+  await openMockVault(page);
+  await expect(page.locator('.ram-status')).toContainText('RAM: backend 42.5 MB');
+
+  const failingPage = await page.context().newPage();
+  await openMockVault(failingPage, { memoryFails: true });
+  await expect(failingPage.locator('.ram-status')).toContainText('RAM: unavailable');
+  await failingPage.close();
+});

@@ -1,0 +1,73 @@
+external_tools:
+  cookies_path: secrets/cookies.txt
+  proxy: ''
+  user_agent: LMZ mock vault test agent
+firewall:
+  allowed_extensions:
+    - .jpg
+    - .jpeg
+    - .png
+    - .gif
+    - .webp
+    - .jfif
+    - .mp4
+    - .webm
+    - .ogv
+  allowed_mimes:
+    - image/jpeg
+    - image/png
+    - image/gif
+    - image/webp
+    - video/mp4
+    - video/webm
+    - video/ogg
+hash_algorithm: sha256
+ingestion_concurrency:
+  global_max_workers: 2
+  platforms:
+    default:
+      workers: 1
+      jitter_range: [0, 0]
+log_level: INFO
+paths:
+  batches: data/batches
+  db: data/db/lmz_mock.db
+  input: data/input
+  local_ingest: data/local_ingest
+  logs: data/logs
+  models: data/models
+  online_ingest: data/online_ingest
+  queues: data/queues
+  review: data/review
+  secrets: data/secrets
+  vault: data/vault
+  wd_tags: data/wd-tags
+processing:
+  background_preset: white
+  custom_color: [255, 255, 255]
+  flatten_transparency: true
+tagging:
+  device: cpu
+  display_source: yaml
+  enabled: false
+  fail_ingestion_on_error: false
+  max_tags: 5
+  model_repo: mock/model
+  threshold: 0.35
+  video:
+    enabled: false
+    frame_count: 1
+    merge_high_confidence: 0.75
+    merge_min_frames: 1
+ui:
+  inspector_visible: true
+  inspector_width: 360
+  prefixes:
+    artist: 'a:'
+    command: '>'
+    platform: 'p:'
+    topic: 't:'
+    tag: '#'
+  ram_track_enabled: true
+  vault_layout_mode: masonry
+  vault_tile_min_width: 190
