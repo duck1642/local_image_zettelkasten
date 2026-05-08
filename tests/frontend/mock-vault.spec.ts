@@ -133,18 +133,20 @@ test('mock vault fixture is isolated and renders grouped media paths', async ({ 
   await expect(page.locator('aside.inspector video')).toHaveAttribute('src', /mock-vault\/video/);
 });
 
-test('metadata edit refreshes tile, inspector, and group membership', async ({ page }) => {
+test('artist edit refreshes tile while source URL and platform stay read-only', async ({ page }) => {
   await openMockVault(page);
 
   await page.getByText('Mock Solo').click();
   await expect(page.getByLabel('Artist')).toHaveValue('Mock Solo');
+  await expect(page.getByLabel('Source URL')).toHaveAttribute('readonly', '');
+  await expect(page.locator('aside.inspector')).toContainText('Platform');
+  await expect(page.locator('aside.inspector input#inspector-platform')).toHaveCount(0);
   await page.getByLabel('Artist').fill(String(manifest.expectations.editedArtist));
-  await page.getByLabel('Source URL').fill(String(manifest.expectations.sharedSourceUrl));
   await page.getByRole('button', { name: 'Save Changes' }).click();
 
   await expect(page.getByText(String(manifest.expectations.editedArtist))).toBeVisible();
   await expect(page.getByLabel('Artist')).toHaveValue(String(manifest.expectations.editedArtist));
-  await expect(page.locator('.bottom-status')).toContainText(`Showing ${manifest.expectations.afterSoloSourceUrlMovesToSharedGroup} groups`);
+  await expect(page.locator('.bottom-status')).toContainText(`Showing ${manifest.expectations.initialGroups} groups`);
 });
 
 test('masonry keeps current data after metadata update cache reuse', async ({ page }) => {

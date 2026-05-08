@@ -83,7 +83,7 @@
       const res = await apiFetch(`/api/items/${item.hash}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ artist, source_url: sourceUrl, platform })
+        body: JSON.stringify({ artist })
       });
       if (!res.ok) throw new Error('Failed to save');
       isDirty = false;
@@ -271,7 +271,7 @@
 
     <div class="group-container">
       <label class="section-label" for="inspector-source-url">Source URL</label>
-      <input id="inspector-source-url" type="text" bind:value={sourceUrl} on:input={handleInput} placeholder="Source URL" />
+      <input id="inspector-source-url" type="text" bind:value={sourceUrl} placeholder="Source URL" readonly />
     </div>
 
     <div class="group-container horizontal">

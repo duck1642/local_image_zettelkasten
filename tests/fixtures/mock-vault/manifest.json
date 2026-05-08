@@ -94,8 +94,6 @@
   },
   "expectations": {
     "initialGroups": 2,
-    "afterSoloSourceUrlMovesToSharedGroup": 1,
-    "editedArtist": "Mock Edited Artist",
-    "sharedSourceUrl": "https://mock.local/shared/1"
+    "editedArtist": "Mock Edited Artist"
   }
 }
