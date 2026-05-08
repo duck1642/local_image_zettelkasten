@@ -93,13 +93,16 @@ export function createMasonryLayoutEngine(): MasonryLayoutEngine {
              columnHeights = [...prevPos.columnHeightsBefore];
              break;
           }
-          positions.push(prevPos);
+          positions.push({ ...prevPos, group });
           if (prevPos.height > maxPositionHeight) maxPositionHeight = prevPos.height;
           startIndex = i + 1;
        }
        if (startIndex === groups.length && groups.length === lastPositions.length) {
+           const layout = { ...lastCache, positions };
            lastActiveIndexes = activeIndexes;
-           return lastCache;
+           lastCache = layout;
+           lastPositions = positions;
+           return layout;
        }
        if (startIndex === lastPositions.length) {
           columnHeights = [...lastPositions[lastPositions.length - 1].columnHeightsBefore];

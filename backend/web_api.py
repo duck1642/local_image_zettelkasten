@@ -1449,9 +1449,8 @@ class LocalIngestStartRequest(BaseModel):
     defaults: LocalIngestDefaults | None = None
     skip_similarity: bool = False
 
-def _expand_local_ingest_paths(paths: list[str], stop_event: threading.Event | None = None) -> list[Path]:
+def _iter_local_ingest_paths(paths: list[str], stop_event: threading.Event | None = None):
     allowed_exts = {ext.lstrip(".").lower() for ext in get_config().get("firewall", {}).get("allowed_extensions", [])}
-    collected: list[Path] = []
     seen = set()
     for raw in paths or []:
         if stop_event and stop_event.is_set():
@@ -1468,10 +1467,10 @@ def _expand_local_ingest_paths(paths: list[str], stop_event: threading.Event | N
             key = str(path)
             if key not in seen:
                 seen.add(key)
-                collected.append(path)
+                yield path
             continue
         if path.is_dir():
-            for child in sorted(path.rglob("*")):
+            for child in path.rglob("*"):
                 if stop_event and stop_event.is_set():
                     break
                 if not child.is_file():
@@ -1482,8 +1481,7 @@ def _expand_local_ingest_paths(paths: list[str], stop_event: threading.Event | N
                 key = str(child.resolve())
                 if key not in seen:
                     seen.add(key)
-                    collected.append(child.resolve())
-    return collected
+                    yield child.resolve()
 
 def _snapshot_local_ingest_state() -> dict:
     with LOCAL_INGEST_LOCK:
@@ -1562,41 +1560,22 @@ def _cleanup_local_run_dir(run_dir: Path):
 def _run_local_ingest_worker(raw_paths: list[str], defaults: dict, skip_similarity: bool, run_id: str):
     cfg = get_config()
     run_dir = LOCAL_INGEST_DIR / run_id
-    staged_items: list[tuple[Path, Path]] = []
+    discovered = 0
     try:
-        paths = _expand_local_ingest_paths(raw_paths, LOCAL_STOP_AFTER_CURRENT)
-        with LOCAL_INGEST_LOCK:
-            LOCAL_INGEST_STATE["scanned"] = len(paths)
-            LOCAL_INGEST_STATE["phase"] = "stopping" if LOCAL_STOP_AFTER_CURRENT.is_set() else "staging"
-
-        if not paths:
-            with LOCAL_INGEST_LOCK:
-                LOCAL_INGEST_STATE["phase"] = "finished" if LOCAL_STOP_AFTER_CURRENT.is_set() else "failed"
-                if not LOCAL_STOP_AFTER_CURRENT.is_set():
-                    _append_local_ingest_result(
-                        {
-                            "path": "",
-                            "source_path": "",
-                            "staged_path": "",
-                            "name": "",
-                            "status": "failed",
-                            "message": "No valid local files found",
-                        }
-                    )
-                    LOCAL_INGEST_STATE["summary"]["failed"] = 1
-            return
-
         run_dir.mkdir(parents=True, exist_ok=True)
-        for index, source_path in enumerate(paths, start=1):
+        for source_path in _iter_local_ingest_paths(raw_paths, LOCAL_STOP_AFTER_CURRENT):
             if LOCAL_STOP_AFTER_CURRENT.is_set():
                 break
-            staged_path = run_dir / _safe_staged_filename(index, source_path)
+            discovered += 1
+            with LOCAL_INGEST_LOCK:
+                LOCAL_INGEST_STATE["scanned"] = discovered
+                LOCAL_INGEST_STATE["phase"] = "staging"
+            staged_path = run_dir / _safe_staged_filename(discovered, source_path)
             try:
                 shutil.copy2(source_path, staged_path)
-                staged_items.append((source_path, staged_path))
                 with LOCAL_INGEST_LOCK:
-                    LOCAL_INGEST_STATE["staged"] = len(staged_items)
-                    LOCAL_INGEST_STATE["queued"] = len(staged_items)
+                    LOCAL_INGEST_STATE["staged"] = int(LOCAL_INGEST_STATE.get("staged") or 0) + 1
+                    LOCAL_INGEST_STATE["queued"] = int(LOCAL_INGEST_STATE.get("queued") or 0) + 1
             except Exception as exc:
                 message = f"Local staging failed: {exc}"
                 with LOCAL_INGEST_LOCK:
@@ -1612,16 +1591,8 @@ def _run_local_ingest_worker(raw_paths: list[str], defaults: dict, skip_similari
                             "message": message,
                         }
                     )
+                continue
 
-        with LOCAL_INGEST_LOCK:
-            LOCAL_INGEST_STATE["phase"] = "stopping" if LOCAL_STOP_AFTER_CURRENT.is_set() else "running"
-            LOCAL_INGEST_STATE["queued"] = len(staged_items)
-
-        for source_path, staged_path in staged_items:
-            if LOCAL_STOP_AFTER_CURRENT.is_set():
-                with LOCAL_INGEST_LOCK:
-                    LOCAL_INGEST_STATE["phase"] = "stopping"
-                break
             metadata = {
                 "artist": defaults.get("artist") or "Local",
                 "platform": defaults.get("platform") or "Local",
@@ -1629,6 +1600,8 @@ def _run_local_ingest_worker(raw_paths: list[str], defaults: dict, skip_similari
                 "original_path": str(source_path),
                 "staged_from": "local",
             }
+            with LOCAL_INGEST_LOCK:
+                LOCAL_INGEST_STATE["phase"] = "running"
             try:
                 ok, message, _ = process_file(staged_path, cfg, metadata=metadata, delete_source=True, skip_similarity=skip_similarity)
                 if ok:
@@ -1645,6 +1618,7 @@ def _run_local_ingest_worker(raw_paths: list[str], defaults: dict, skip_similari
 
             with LOCAL_INGEST_LOCK:
                 LOCAL_INGEST_STATE["processed"] += 1
+                LOCAL_INGEST_STATE["queued"] = max(0, int(LOCAL_INGEST_STATE.get("queued") or 0) - 1)
                 LOCAL_INGEST_STATE["summary"][status] = int(LOCAL_INGEST_STATE["summary"].get(status, 0)) + 1
                 _append_local_ingest_result(
                     {
@@ -1658,6 +1632,27 @@ def _run_local_ingest_worker(raw_paths: list[str], defaults: dict, skip_similari
                 )
                 if status == "failed":
                     LOCAL_INGEST_STATE["failed_paths"].append(str(source_path))
+                if not LOCAL_STOP_AFTER_CURRENT.is_set():
+                    LOCAL_INGEST_STATE["phase"] = "scanning"
+
+        if discovered == 0:
+            with LOCAL_INGEST_LOCK:
+                LOCAL_INGEST_STATE["phase"] = "finished" if LOCAL_STOP_AFTER_CURRENT.is_set() else "failed"
+                if not LOCAL_STOP_AFTER_CURRENT.is_set():
+                    _append_local_ingest_result(
+                        {
+                            "path": "",
+                            "source_path": "",
+                            "staged_path": "",
+                            "name": "",
+                            "status": "failed",
+                            "message": "No valid local files found",
+                        }
+                    )
+                    LOCAL_INGEST_STATE["summary"]["failed"] = 1
+        elif LOCAL_STOP_AFTER_CURRENT.is_set():
+            with LOCAL_INGEST_LOCK:
+                LOCAL_INGEST_STATE["phase"] = "stopping"
     except Exception as exc:
         log_system("ERROR", "Local ingest worker crashed", run_id=run_id, error=str(exc), traceback=traceback.format_exc())
         with LOCAL_INGEST_LOCK:

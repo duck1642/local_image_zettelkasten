@@ -15,6 +15,7 @@
   const MIN_SCALE = 1;
   const MAX_SCALE = 6;
   const KEYBOARD_STEP = 0.25;
+  const DRAG_CLICK_SUPPRESSION_MS = 120;
 
   let videoElement: HTMLVideoElement;
   let mediaFrameEl: HTMLElement;
@@ -27,6 +28,7 @@
   let dragStartY = 0;
   let dragOriginX = 0;
   let dragOriginY = 0;
+  let pointerMovedResetTimer: number | null = null;
   let filmstripOpen = false;
   let appliedMode: 'wide' | 'fullscreen' | '' = '';
   let activeHash = '';
@@ -71,6 +73,7 @@
     if (scale === 1) {
       translateX = 0;
       translateY = 0;
+      pointerMoved = false;
     }
   }
 
@@ -91,6 +94,10 @@
     if (mode !== 'fullscreen' || scale <= 1) return;
     const target = event.target as HTMLElement;
     if (target.closest('button, input, select, textarea') || target.tagName === 'VIDEO') return;
+    if (pointerMovedResetTimer !== null) {
+      window.clearTimeout(pointerMovedResetTimer);
+      pointerMovedResetTimer = null;
+    }
     event.preventDefault();
     isDragging = true;
     pointerMoved = false;
@@ -114,6 +121,10 @@
     if (!isDragging) return;
     isDragging = false;
     mediaFrameEl?.releasePointerCapture(event.pointerId);
+    pointerMovedResetTimer = window.setTimeout(() => {
+      pointerMoved = false;
+      pointerMovedResetTimer = null;
+    }, DRAG_CLICK_SUPPRESSION_MS);
   }
 
   function nextItem() {
@@ -207,6 +218,7 @@
   }
 
   onDestroy(async () => {
+    if (pointerMovedResetTimer !== null) window.clearTimeout(pointerMovedResetTimer);
     try {
       await appWindow.setFullscreen(false);
     } catch {}

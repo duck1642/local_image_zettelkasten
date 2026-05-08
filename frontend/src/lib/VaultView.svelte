@@ -126,6 +126,10 @@
     return groupOrder.map((id) => groupsById.get(id)!);
   }
 
+  function rebuildGroupsFromItems(nextItems: VaultItem[]): VaultGroup[] {
+    return appendToGroups(nextItems, true);
+  }
+
   function emitStatus(totalItems: number, groups: number, moreAvailable: boolean, layoutMode: VaultLayoutMode) {
     if (
       lastStatus.totalItems === totalItems &&
@@ -212,7 +216,7 @@
         groupedItems = appendToGroups(newItems, false);
       } else {
         items = newItems;
-        groupedItems = appendToGroups(newItems, true);
+        groupedItems = rebuildGroupsFromItems(newItems);
       }
       nextCursor = data.next_cursor || null;
       hasMore = data.has_more || false;
@@ -337,6 +341,7 @@
 
   function setSingleSelection(item: VaultItem) {
     selectedItem = item;
+    selectedGroup = hashIndex.get(item.hash)?.group ?? null;
     selectedHashes = new Set([item.hash]);
     lastSelectedHash = item.hash;
     focusStartTime = 0;
@@ -391,8 +396,14 @@
   function handleUpdate(event: CustomEvent) {
     const { hash, artist, source_url, platform } = event.detail;
     uiLog('INFO', `Item updated: ${hash.substring(0, 12)}`, { artist, platform });
-    items = items.map((item) => (item.hash === hash ? { ...item, artist, source_url, platform } : item));
-    if (selectedItem && selectedItem.hash === hash) selectedItem = { ...selectedItem, artist, source_url, platform };
+    const nextItems = items.map((item) => (item.hash === hash ? { ...item, artist, source_url, platform } : item));
+    items = nextItems;
+    groupedItems = rebuildGroupsFromItems(nextItems);
+    if (selectedItem) {
+      const entry = hashIndex.get(selectedItem.hash);
+      selectedItem = entry?.item ?? (selectedItem.hash === hash ? { ...selectedItem, artist, source_url, platform } : selectedItem);
+      selectedGroup = entry?.group ?? null;
+    }
   }
 
   function handleFocusMode(event: CustomEvent) {

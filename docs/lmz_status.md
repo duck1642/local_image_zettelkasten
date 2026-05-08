@@ -105,11 +105,11 @@ SQLite stores runtime asset/index metadata plus a disposable derived topic/WD qu
 - Documented Python AST check fails on BOM files. Done (will be checked).
   - Cause: command uses `encoding='utf-8'`; several backend files start with UTF-8 BOM.
   - Code/doc: `docs/lmz_status.md:285`, `backend/core.py:1`.
-- Pixiv token is still in normal config.
-  - Cause: docs say secrets-backed, but `config/config.yaml` has `external_tools.pixiv_token`.
-  - Code/config: `config/config.yaml:3`.
-- Docs contain old search syntax.
-  - Cause: current code uses `p:`, `t:`, `#`; status doc still says repeated `@` and `*` in one section.
+- Pixiv token normal-config cleanup is fixed.
+  - `config/config.yaml` no longer has `external_tools.pixiv_token`; token loading is secrets-backed.
+  - Code/config: `config/config.yaml`, `secrets/.secrets.yaml`.
+- Search syntax docs are updated.
+  - Current docs use `p:`, `t:`, and `#` consistently.
   - Code/doc: `frontend/src/lib/search.ts:26`, `docs/lmz_status.md:234`.
 - Local folder expansion can block API. Done (will be checked).
   - Cause: recursive `path.rglob("*")` and sorting run synchronously before the background worker starts.
@@ -420,9 +420,9 @@ Current semantics:
 
 - Different prefix types use AND.
 - Repeated `a:` artist filters use OR.
-- Repeated `@` platform filters use OR.
-- Repeated `#` topic filters use AND.
-- Repeated `*` WD tag filters use AND.
+- Repeated `p:` platform filters use OR.
+- Repeated `t:` topic filters use AND.
+- Repeated `#` WD tag filters use AND.
 - Plain text terms use AND.
 
 Implemented:
