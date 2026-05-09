@@ -87,12 +87,14 @@ VSCode-friendly test launchers:
 - `docs/lmz_architecture.md`: durable architecture details.
 - `docs/lmz_roadmap.md`: phase history and future work.
 - Search syntax:
+  - Live hint: `/cmd; a:artist; p:platform; t:topic; #wd-tag`.
   - `/` command.
   - `a:` artist.
   - `p:` platform.
   - `t:` note-frontmatter topic.
   - `#` WD tag.
   - `;` separates structured filters.
+  - Command syntax is hardcoded in frontend search parser/search UI.
 - Search semantics:
   - Different prefix types use AND.
   - Repeated `a:` and `p:` use OR.
@@ -184,12 +186,6 @@ VSCode-friendly test launchers:
   - stop-after-current keeps not-yet-started URLs.
   - worker/platform crashes are logged and preserved.
   - queue rewrite logs original/removed/remaining counts.
-- Search prefixes are hardcoded:
-  - `/` command.
-  - `a:` artist.
-  - `p:` platform.
-  - `t:` topic.
-  - `#` WD tag.
 - Metadata/index performance:
   - disposable SQLite metadata index for topics and WD tags.
   - startup repair, watchdog reindex, status endpoint, rebuild endpoint.
@@ -265,7 +261,7 @@ VSCode-friendly test launchers:
   - full Tauri stack upgrade to `2.11.x` is deferred.
 - Maintenance Tools UI Integration 
   - The current maintenance scripts for capturing cookies (`backend/scripts/auth_cookies_builder.py`) and authenticating with Pixiv (`backend/scripts/auth_pixiv_auto.py`) only run in the CLI. These need to be connected to the Svelte UI so users can manage authentication directly from the desktop application without dropping into the terminal.
-- Need to seperate local ingestion logs and online-ingestion logs.
+- Need to separate local ingestion logs and online-ingestion logs.
 - Need to check whether ASCII issues exists in logs and codes.  
 
 ## Done But Needs Check

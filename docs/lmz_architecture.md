@@ -216,6 +216,7 @@ Top-level structure:
 - `App.svelte`: application shell, sidebar navigation, footer, shared tab layout.
 - `VaultView.svelte`: vault page state, search integration, renderer selection, selection state, inspector/focus wiring.
 - `SearchBar.svelte` and `search.ts`: structured search parsing, commands, suggestions, Tab autocomplete.
+  - Live syntax hint: `/cmd; a:artist; p:platform; t:topic; #wd-tag`.
 - `VaultGroupTile.svelte`: shared visual tile for grouped and single media.
 - `Inspector.svelte`: metadata, topics, WD tags, grouped navigation, tag/open/copy/save actions.
 - `MediaFocus.svelte`: wide/fullscreen media view, grouped navigation, filmstrip, fullscreen zoom/pan.
@@ -278,7 +279,7 @@ Vault commands:
 - `/media-all`
 - `/media-image`
 - `/media-video`
-- `>toggle-inspector`
+- `/toggle-inspector`
 - `/ram-track`
 - `/scan-auth`
 
