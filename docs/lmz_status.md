@@ -328,6 +328,13 @@ VSCode-friendly test launchers:
   - ingest note writes use `atomic_write_text`.
   - review replace preserves old manual YAML metadata onto the replacement.
   - one-time manual metadata migration script added.
+  - Resolved Gemini findings:
+    - Broken transactional boundaries in item PATCH.
+    - Inconsistent non-atomic ingest Markdown writes.
+    - WD tags resurrecting from JSON cache.
+    - impossible explicit zero WD tags.
+    - manual Markdown `artist` / `date_added` edits ignored and overwritten.
+    - review replace destroying old manual metadata.
   - targeted backend pytest passes; needs real-vault migration/reindex smoke before closing fully.
 
 ### Useful Checks
