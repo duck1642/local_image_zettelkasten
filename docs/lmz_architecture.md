@@ -428,7 +428,7 @@ Logs live under root-level `logs/`.
 Current layout:
 
 - `logs/raw/`: terminal output and raw tracebacks.
-- `logs/structured/`: JSONL streams for system, frontend UI, ingestion, auth status, and activity events.
+- `logs/structured/`: JSONL streams for system, frontend UI, ingestion, auth status, and ingestion-audit events.
 
 Frontend logging is batched through `frontend/src/lib/logger.ts`.
 

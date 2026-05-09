@@ -22,7 +22,7 @@ from pydantic import BaseModel
 from db.sqlite_operator import init_database, normalize_source_url
 from utils import get_config, ASSETS_DIR, REVIEW_DIR, LOCAL_INGEST_DIR, note_path_for, asset_path_for, calculate_file_hash
 from processor import process_file
-from logger import log_auth, log_review, log_svelte, log_system, RAW_LOGS_DIR, STRUCTURED_LOGS_DIR
+from logger import log_auth, log_ingest_local, log_review, log_svelte, log_system, RAW_LOGS_DIR, STRUCTURED_LOGS_DIR
 from md_generator import MANUAL_FRONTMATTER_FIELDS, load_note_frontmatter, load_note_topics, load_note_wd_tags, generate_markdown
 from metadata_index import (
     indexed_item_metadata,
@@ -91,10 +91,11 @@ MUTATING_METHODS = {"POST", "PATCH", "DELETE"}
 LOG_FILES = {
     "system.jsonl": STRUCTURED_LOGS_DIR / "system.jsonl",
     "svelte.jsonl": STRUCTURED_LOGS_DIR / "svelte.jsonl",
-    "ingestion.jsonl": STRUCTURED_LOGS_DIR / "ingestion.jsonl",
+    "ingest_local.jsonl": STRUCTURED_LOGS_DIR / "ingest_local.jsonl",
+    "ingest_online.jsonl": STRUCTURED_LOGS_DIR / "ingest_online.jsonl",
     "review.jsonl": STRUCTURED_LOGS_DIR / "review.jsonl",
     "auth.jsonl": STRUCTURED_LOGS_DIR / "auth.jsonl",
-    "activity.jsonl": STRUCTURED_LOGS_DIR / "activity.jsonl",
+    "ingestion_audit.jsonl": STRUCTURED_LOGS_DIR / "ingestion_audit.jsonl",
     "terminal.log": RAW_LOGS_DIR / "terminal.log",
 }
 
@@ -1569,7 +1570,7 @@ def _cleanup_local_run_dir(run_dir: Path):
         if run_dir.exists():
             shutil.rmtree(run_dir)
     except OSError as exc:
-        log_system("WARNING", "Failed to clean local ingest staging directory", run_id=run_dir.name, path=str(run_dir), error=str(exc))
+        log_ingest_local("WARNING", "Failed to clean local ingest staging directory", run_id=run_dir.name, path=str(run_dir), error=str(exc))
 
 def _run_local_ingest_worker(raw_paths: list[str], defaults: dict, skip_similarity: bool, run_id: str):
     cfg = get_config()
@@ -1668,7 +1669,7 @@ def _run_local_ingest_worker(raw_paths: list[str], defaults: dict, skip_similari
             with LOCAL_INGEST_LOCK:
                 LOCAL_INGEST_STATE["phase"] = "stopping"
     except Exception as exc:
-        log_system("ERROR", "Local ingest worker crashed", run_id=run_id, error=str(exc), traceback=traceback.format_exc())
+        log_ingest_local("ERROR", "Local ingest worker crashed", run_id=run_id, error=str(exc), traceback=traceback.format_exc())
         with LOCAL_INGEST_LOCK:
             LOCAL_INGEST_STATE["phase"] = "failed"
             LOCAL_INGEST_STATE["summary"]["failed"] = int(LOCAL_INGEST_STATE["summary"].get("failed", 0)) + 1

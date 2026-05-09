@@ -36,10 +36,11 @@
     { label: 'system.jsonl (Backend)', value: 'system.jsonl' },
     { label: 'terminal.log (Python Stdout)', value: 'terminal.log' },
     { label: 'svelte.jsonl (Frontend)', value: 'svelte.jsonl' },
-    { label: 'ingestion.jsonl (Worker)', value: 'ingestion.jsonl' },
+    { label: 'ingest_local.jsonl (Ingest Local)', value: 'ingest_local.jsonl' },
+    { label: 'ingest_online.jsonl (Ingest Online)', value: 'ingest_online.jsonl' },
     { label: 'review.jsonl (Review)', value: 'review.jsonl' },
     { label: 'auth.jsonl (Auth)', value: 'auth.jsonl' },
-    { label: 'activity.jsonl (Audit)', value: 'activity.jsonl' },
+    { label: 'ingestion_audit.jsonl (Ingestion Audit)', value: 'ingestion_audit.jsonl' },
   ];
 
   // Fields to exclude from inline extras (already shown in columns)

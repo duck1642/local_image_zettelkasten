@@ -69,7 +69,7 @@
       logReconnectTimer = null;
     }
     if (logSource) logSource.close();
-    logSource = new EventSource(apiUrl('/api/logs?filename=ingestion.jsonl'));
+    logSource = new EventSource(apiUrl('/api/logs?filename=ingest_online.jsonl'));
     logSource.onmessage = (e) => {
       try {
         const entry = JSON.parse(e.data);

@@ -1,5 +1,5 @@
 ﻿
-from logger import log_ingestion
+from logger import log_ingest_local, log_ingest_online
 from utils import setup_directories, get_config, INPUT_DIR, VAULT_DIR, DB_PATH, REVIEW_DIR, QUEUES_DIR
 from processor import process_file
 from external_ingestion import ExternalIngestor
@@ -18,10 +18,10 @@ def main():
     finally:
         conn.close()
 
-    log_ingestion('INFO', f"\nLMZ Unified System - Starting")
-    log_ingestion('INFO', f"Input: {INPUT_DIR}")
-    log_ingestion('INFO', f"Vault: {VAULT_DIR}")
-    log_ingestion('INFO', f"DB: {DB_PATH}\n")
+    log_ingest_online('INFO', f"\nLMZ Unified System - Starting")
+    log_ingest_online('INFO', f"Input: {INPUT_DIR}")
+    log_ingest_online('INFO', f"Vault: {VAULT_DIR}")
+    log_ingest_online('INFO', f"DB: {DB_PATH}\n")
 
     stats = {"processed": 0, "skipped": 0, "errors": 0}
 
@@ -35,16 +35,16 @@ def main():
         links_file = QUEUES_DIR / filename
         if links_file.exists():
             mode_str = "FORCE (No Size Check)" if skip_val else "NORMAL"
-            log_ingestion('INFO', f"Found {filename} [{mode_str}]. Starting Ingestion...")
+            log_ingest_online('INFO', f"Found {filename} [{mode_str}]. Starting Ingestion...")
             ingestor = ExternalIngestor(str(links_file), skip_validation=skip_val)
             ext_stats = ingestor.run()
             stats["processed"] += ext_stats.get("processed", 0)
             stats["skipped"] += ext_stats.get("skipped", 0)
             stats["errors"] += ext_stats.get("errors", 0)
         else:
-            log_ingestion('INFO', f"  No {filename} found. Skipping.")
+            log_ingest_online('INFO', f"  No {filename} found. Skipping.")
 
-    log_ingestion('INFO', f"\nScanning local input folder for remaining files...")
+    log_ingest_local('INFO', f"\nScanning local input folder for remaining files...")
 
     if not INPUT_DIR.exists():
         INPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -61,7 +61,7 @@ def main():
         success, message, idx_data = process_file(filepath, config, delete_source=True, sync_index=False)
 
         if success:
-            log_ingestion('INFO', f"{message}")
+            log_ingest_local('INFO', f"{message}")
             stats["processed"] += 1
             if idx_data:
                 local_index_queue.append(idx_data)
@@ -70,16 +70,16 @@ def main():
             if parent != INPUT_DIR and parent.exists() and not any(parent.iterdir()):
                 parent.rmdir()
         elif "Duplicate ignored" in message:
-            log_ingestion('INFO', f"{message}")
+            log_ingest_local('INFO', f"{message}")
             stats["skipped"] += 1
         else:
-            log_ingestion('INFO', f"{message}")
+            log_ingest_local('INFO', f"{message}")
             stats["errors"] += 1
 
 
     if local_index_queue:
-        log_ingestion('INFO', f"Syncing RAM indexes for {len(local_index_queue)} local items...")
+        log_ingest_local('INFO', f"Syncing RAM indexes for {len(local_index_queue)} local items...")
         for item in local_index_queue:
             search_manager.update_indexes(**item)
 
-    log_ingestion('INFO', f"\nFINAL SUMMARY: {stats['processed']} Added | {stats['skipped']} Skipped/Duplicates | {stats['errors']} Errors")
+    log_ingest_local('INFO', f"\nFINAL SUMMARY: {stats['processed']} Added | {stats['skipped']} Skipped/Duplicates | {stats['errors']} Errors")

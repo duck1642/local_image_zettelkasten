@@ -42,12 +42,18 @@ svelte_handler = RotatingFileHandler(STRUCTURED_LOGS_DIR / "svelte.jsonl", maxBy
 svelte_handler.setFormatter(JSONFormatter())
 if not svelte_logger.handlers: svelte_logger.addHandler(svelte_handler)
 
-# 4. Ingestion Logger (The Worker)
-ingestion_logger = logging.getLogger("lmz_ingestion")
-ingestion_logger.setLevel(logging.INFO)
-ingestion_handler = RotatingFileHandler(STRUCTURED_LOGS_DIR / "ingestion.jsonl", maxBytes=5*1024*1024, backupCount=3, encoding="utf-8")
-ingestion_handler.setFormatter(JSONFormatter())
-if not ingestion_logger.handlers: ingestion_logger.addHandler(ingestion_handler)
+# 4. Ingestion Loggers (Worker)
+ingest_local_logger = logging.getLogger("lmz_ingest_local")
+ingest_local_logger.setLevel(logging.INFO)
+ingest_local_handler = RotatingFileHandler(STRUCTURED_LOGS_DIR / "ingest_local.jsonl", maxBytes=5*1024*1024, backupCount=3, encoding="utf-8")
+ingest_local_handler.setFormatter(JSONFormatter())
+if not ingest_local_logger.handlers: ingest_local_logger.addHandler(ingest_local_handler)
+
+ingest_online_logger = logging.getLogger("lmz_ingest_online")
+ingest_online_logger.setLevel(logging.INFO)
+ingest_online_handler = RotatingFileHandler(STRUCTURED_LOGS_DIR / "ingest_online.jsonl", maxBytes=5*1024*1024, backupCount=3, encoding="utf-8")
+ingest_online_handler.setFormatter(JSONFormatter())
+if not ingest_online_logger.handlers: ingest_online_logger.addHandler(ingest_online_handler)
 
 # 5. Auth / credential status logger
 auth_logger = logging.getLogger("lmz_auth")
@@ -79,7 +85,13 @@ def log_svelte(level, message, **kwargs):
     _log(svelte_logger, level, message, **kwargs)
 
 def log_ingestion(level, message, **kwargs):
-    _log(ingestion_logger, level, message, **kwargs)
+    _log(ingest_online_logger, level, message, **kwargs)
+
+def log_ingest_local(level, message, **kwargs):
+    _log(ingest_local_logger, level, message, **kwargs)
+
+def log_ingest_online(level, message, **kwargs):
+    _log(ingest_online_logger, level, message, **kwargs)
 
 def log_auth(level, message, **kwargs):
     _log(auth_logger, level, message, **kwargs)
@@ -92,8 +104,8 @@ def log_review(level, message, **kwargs):
 # activity logging remains unchanged
 activity_logger = logging.getLogger("lmz_activity")
 activity_logger.setLevel(logging.INFO)
-# Also move activity.jsonl to structured folder to be accessible seamlessly
-act_handler = RotatingFileHandler(STRUCTURED_LOGS_DIR / "activity.jsonl", maxBytes=5*1024*1024, backupCount=2, encoding="utf-8")
+# Canonical ingestion audit stream
+act_handler = RotatingFileHandler(STRUCTURED_LOGS_DIR / "ingestion_audit.jsonl", maxBytes=5*1024*1024, backupCount=2, encoding="utf-8")
 act_handler.setFormatter(JSONFormatter())
 if not activity_logger.handlers: activity_logger.addHandler(act_handler)
 

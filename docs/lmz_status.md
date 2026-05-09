@@ -266,6 +266,13 @@ VSCode-friendly test launchers:
 
 ## Done But Needs Check
 
+- Logging stream split and rename:
+  - online ingestion logs now write to `ingest_online.jsonl`.
+  - local ingestion logs now write to `ingest_local.jsonl`.
+  - ingestion audit logs now write to `ingestion_audit.jsonl`.
+  - legacy `ingestion.jsonl` and `activity.jsonl` support removed from API/UI and old files deleted.
+  - needs quick UI verification in App Logs dropdown and live stream behavior.
+
 - Virtual renderer:
   - automated large-vault Playwright checks pass for 10k/100k masonry/grid and grouped mixed media.
   - needs real-vault smoke for offscreen video unmount behavior.

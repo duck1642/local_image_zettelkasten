@@ -11,7 +11,8 @@ from utils import get_config, QUEUES_DIR, ASSETS_DIR, existing_note_path_for
 from db.sqlite_operator import connect_database, normalize_source_url
 from db.search_manager import search_manager
 from processor import process_file
-from logger import log_ingestion
+from logger import log_ingest_online
+log_ingestion = log_ingest_online
 
 from downloaders.gallery_dl_wrapper import download_gallery, inspect_gallery
 from downloaders.yt_dlp_wrapper import download_video, inspect_youtube_community
@@ -33,7 +34,7 @@ class ExternalIngestor:
         max_global = self.config.get("ingestion_concurrency", {}).get("global_max_workers", 10)
         if GLOBAL_WORKER_LIMIT is None or GLOBAL_WORKER_LIMIT._value != max_global:
             GLOBAL_WORKER_LIMIT = threading.Semaphore(max_global)
-            log_ingestion("INFO", f"Global Ingestion Semaphore initialized with {max_global} slots.")
+            log_ingest_online("INFO", f"Global Ingestion Semaphore initialized with {max_global} slots.")
 
     def run(self) -> dict:
 
@@ -41,7 +42,7 @@ class ExternalIngestor:
         batch_index_queue = []
 
         if not self.links_file.exists():
-            log_ingestion("WARNING", f"Ingestion skipped: {self.links_file.name} not found")
+            log_ingest_online("WARNING", f"Ingestion skipped: {self.links_file.name} not found")
             return stats
 
         try:
