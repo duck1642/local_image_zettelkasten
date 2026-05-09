@@ -263,6 +263,8 @@ VSCode-friendly test launchers:
 - Tauri package alignment:
   - frontend `@tauri-apps/api` is pinned to `2.10.1` to match Rust `tauri 2.10.x`.
   - full Tauri stack upgrade to `2.11.x` is deferred.
+- Maintenance Tools UI Integration 
+  - The current maintenance scripts for capturing cookies (`backend/scripts/auth_cookies_builder.py`) and authenticating with Pixiv (`backend/scripts/auth_pixiv_auto.py`) only run in the CLI. These need to be connected to the Svelte UI so users can manage authentication directly from the desktop application without dropping into the terminal.
 - Default command prefix will be changed to `/` from `>`. 
 - Also will check how prefixes are connected to settings. Will check how changeable prefix codes work and decide to keep or delete.
 - Need to seperate local ingestion logs and online-ingestion logs.
@@ -388,10 +390,6 @@ VSCode-friendly test launchers:
 3. **Naive Subprocess Buffering**
    - **File:** `backend/fingerprint.py`
    - **Issue:** Uses `subprocess.run(..., capture_output=True)` for FFmpeg. If FFmpeg encounters a corrupt video and dumps 100,000 lines of warnings into `stderr`, Python will buffer the entire string into memory. It should route `stderr=subprocess.DEVNULL` unless explicitly parsing it to prevent memory ballooning.
-
-### Deferred Work / Will Do Later
-
-- **Maintenance Tools UI Integration:** The current maintenance scripts for capturing cookies (`backend/scripts/auth_cookies_builder.py`) and authenticating with Pixiv (`backend/scripts/auth_pixiv_auto.py`) only run in the CLI. These need to be connected to the Svelte UI so users can manage authentication directly from the desktop application without dropping into the terminal.
 
 ## Issue Remediation Plan
 
