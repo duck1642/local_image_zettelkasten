@@ -1,4 +1,5 @@
 import subprocess
+import threading
 from pathlib import Path
 
 from PIL import Image
@@ -9,6 +10,12 @@ THUMBNAIL_DIR = PROJECT_ROOT / "data" / "ui_cache" / "thumbnails"
 TARGET_WIDTH = 600
 MAX_HEIGHT = 800
 JPEG_QUALITY = 80
+GENERATION_CONCURRENCY = 2
+_GENERATION_SEMAPHORE = threading.Semaphore(GENERATION_CONCURRENCY)
+
+
+class ThumbnailBusyError(RuntimeError):
+    pass
 
 
 def thumbnail_path_for(item_hash: str) -> Path:
@@ -22,6 +29,16 @@ def video_thumbnail_path_for(item_hash: str) -> Path:
 def _asset_path_for(item_hash: str, extension: str | None, mime_type: str | None) -> Path:
     ext = extension or EXT_MAP.get(mime_type or "", ".jpg")
     return ASSETS_DIR / item_hash[:2] / f"{item_hash}{ext}"
+
+
+def _expected_thumbnail_path(item_hash: str, mime_type: str | None) -> Path:
+    if (mime_type or "").startswith("video/"):
+        return video_thumbnail_path_for(item_hash)
+    return thumbnail_path_for(item_hash)
+
+
+def _thumbnail_is_fresh(thumb_path: Path, asset_path: Path) -> bool:
+    return thumb_path.exists() and thumb_path.stat().st_mtime >= asset_path.stat().st_mtime
 
 
 def generate_image_thumbnail(asset_path: Path, item_hash: str) -> Path:
@@ -57,27 +74,62 @@ def generate_video_thumbnail(asset_path: Path, item_hash: str) -> Path:
     return thumb_path
 
 
-def get_or_generate_thumbnail(item_hash: str, extension: str | None, mime_type: str | None) -> Path | None:
+def ensure_thumbnail(item_hash: str, extension: str | None, mime_type: str | None, wait: bool = True) -> Path | None:
     asset_path = _asset_path_for(item_hash, extension, mime_type)
     if not asset_path.exists():
         return None
 
-    is_video = (mime_type or "").startswith("video/")
+    thumb_path = _expected_thumbnail_path(item_hash, mime_type)
+    if _thumbnail_is_fresh(thumb_path, asset_path):
+        return thumb_path
 
-    if is_video:
-        thumb_path = video_thumbnail_path_for(item_hash)
-        if thumb_path.exists() and thumb_path.stat().st_mtime >= asset_path.stat().st_mtime:
+    acquired = _GENERATION_SEMAPHORE.acquire(blocking=wait)
+    if not acquired:
+        raise ThumbnailBusyError("thumbnail generation is busy")
+    try:
+        if _thumbnail_is_fresh(thumb_path, asset_path):
             return thumb_path
-        try:
+        if (mime_type or "").startswith("video/"):
             return generate_video_thumbnail(asset_path, item_hash)
-        except Exception:
-            return None
-    else:
-        thumb_path = thumbnail_path_for(item_hash)
-        if thumb_path.exists() and thumb_path.stat().st_mtime >= asset_path.stat().st_mtime:
-            return thumb_path
+        return generate_image_thumbnail(asset_path, item_hash)
+    except Exception as e:
+        log_system("ERROR", "Thumbnail generation failed", hash=item_hash, error=str(e))
+        return None
+    finally:
+        _GENERATION_SEMAPHORE.release()
+
+
+def get_or_generate_thumbnail(item_hash: str, extension: str | None, mime_type: str | None) -> Path | None:
+    return ensure_thumbnail(item_hash, extension, mime_type, wait=False)
+
+
+def repair_missing_thumbnails(conn, limit: int = 100) -> dict:
+    limit = max(1, int(limit or 100))
+    generated = 0
+    skipped = 0
+    failed = 0
+    checked = 0
+    rows = conn.execute(
+        "SELECT hash, file_extension, mime_type FROM items ORDER BY date_added DESC"
+    )
+    for item_hash, extension, mime_type in rows:
+        if checked >= limit:
+            break
+        checked += 1
+        asset_path = _asset_path_for(item_hash, extension, mime_type)
+        if not asset_path.exists():
+            skipped += 1
+            continue
+        thumb_path = _expected_thumbnail_path(item_hash, mime_type)
+        if _thumbnail_is_fresh(thumb_path, asset_path):
+            skipped += 1
+            continue
         try:
-            return generate_image_thumbnail(asset_path, item_hash)
-        except Exception as e:
-            log_system("ERROR", "Thumbnail generation failed", hash=item_hash, error=str(e))
-            return None
+            if ensure_thumbnail(item_hash, extension, mime_type, wait=True):
+                generated += 1
+            else:
+                failed += 1
+        except Exception:
+            failed += 1
+    log_system("INFO", "Thumbnail repair batch finished", checked=checked, generated=generated, skipped=skipped, failed=failed)
+    return {"checked": checked, "generated": generated, "skipped": skipped, "failed": failed}

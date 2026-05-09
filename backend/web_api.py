@@ -34,7 +34,7 @@ from metadata_index import (
     start_metadata_watchdog,
 )
 from tagging import load_tag_cache, tag_media
-from thumbnails import get_or_generate_thumbnail
+from thumbnails import ThumbnailBusyError, get_or_generate_thumbnail
 from utils import SECRETS_DIR, WD_TAGS_DIR, atomic_write_text, get_cookie_auth_status
 from ingest_control import ONLINE_STOP_AFTER_CURRENT, LOCAL_STOP_AFTER_CURRENT
 
@@ -661,7 +661,10 @@ def _get_thumbnail_sync(item_hash: str):
         cursor.execute("SELECT file_extension, mime_type FROM items WHERE hash = ?", (item_hash,))
         row = cursor.fetchone()
         if not row: raise HTTPException(status_code=404)
-        thumb_path = get_or_generate_thumbnail(item_hash, row[0], row[1])
+        try:
+            thumb_path = get_or_generate_thumbnail(item_hash, row[0], row[1])
+        except ThumbnailBusyError:
+            raise HTTPException(status_code=503, detail="Thumbnail generation busy")
         if not thumb_path: raise HTTPException(status_code=500, detail="Thumbnail generation failed")
         return FileResponse(
             thumb_path, media_type="image/jpeg",

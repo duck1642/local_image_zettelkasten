@@ -349,6 +349,20 @@ VSCode-friendly test launchers:
     - SearchManager lock blocking queries during VP-tree rebuild.
     - SQLite connection churn during concurrent ingestion.
   - targeted backend pytest passes; needs real-vault ingest/search smoke before closing fully.
+- P2 runtime robustness:
+  - Media focus tries Tauri fullscreen first, then browser fullscreen fallback.
+  - review `delete`, `variant`, `replace`, and cleanup retry unmount media before POST to reduce Windows file-lock failures.
+  - `gallery-dl` and `yt-dlp` subprocess timeouts are configurable under `external_tools.timeouts` with previous defaults preserved.
+  - thumbnails use one shared backend ensure path for ingest pregeneration, repair/backfill, and API fallback.
+  - thumbnail generation is semaphore-throttled; saturated API fallback returns HTTP 503 instead of blocking worker threads.
+  - sampled video frame extraction uses one FFmpeg subprocess per sampled batch.
+  - Resolved Gemini findings:
+    - missing browser fullscreen fallback.
+    - Windows review file-lock risk before destructive actions.
+    - long downloader timeout values hardcoded in wrappers.
+    - thumbnail burst generation saturating API worker threads.
+    - redundant per-frame FFmpeg subprocesses during video embedding extraction.
+  - targeted backend/frontend checks pass; needs real-vault ingest/review/thumbnail smoke before closing fully.
 
 ### Useful Checks
 
@@ -356,22 +370,6 @@ VSCode-friendly test launchers:
 - **Backend Dependencies:** Run `pip list --outdated` with your Python virtual environment activated to check for updates on PyPI. Note: `yt-dlp` and `gallery-dl` are auto-updated by the maintenance script.
 
 ## Current Issues
-
-- **[Found during Gemini's inspection]** `frontend/src/lib/MediaFocus.svelte` has no browser/HTML5 fullscreen fallback. Outside Tauri, fullscreen mode may only update LMZ UI state while native/browser fullscreen silently does nothing. Crash risk is low because Tauri fullscreen calls are guarded.
-
-### Backend Architectural & Performance Issues (Found during Gemini's inspection)
-
-1. **Redundant FFmpeg Subprocesses**
-   - **Severity:** MEDIUM
-   - **File:** `backend/fingerprint.py` (~line 92 in `extract_sampled_video_frames`)
-   - **The Mechanism:** To generate an AI visual embedding, the code calculates 5 timestamps and loops over them, calling `extract_video_frame()` each time. That function executes `subprocess.run(['ffmpeg', ...])`.
-   - **Why it's broken:** Generating an embedding requires spawning 5 separate OS-level FFmpeg processes per video. Each process must independently open the video, parse the container headers, and seek to the target frame, severely slowing down video ingestion.
-
-2. **I/O Bound Thumbnail Generation CPU Locking**
-   - **Severity:** LOW (Medium on UX)
-   - **File:** `backend/thumbnails.py` (`generate_image_thumbnail`)
-   - **The Mechanism:** Thumbnails are generated dynamically using `Image.thumbnail` from Pillow.
-   - **Why it's broken:** Standard image resizing is highly CPU-bound. If a user rapidly scrolls the Masonry view and requests 100 missing thumbnails, the FastAPI thread pool (`asyncio.to_thread`) fills up with CPU-blocking tasks, potentially stalling other API endpoints (like search or queue status).
 
 ### Low-Level Backend Inconsistencies (Found during Gemini's inspection)
 
@@ -387,28 +385,11 @@ VSCode-friendly test launchers:
    - **File:** `backend/fingerprint.py`
    - **Issue:** Uses `subprocess.run(..., capture_output=True)` for FFmpeg. If FFmpeg encounters a corrupt video and dumps 100,000 lines of warnings into `stderr`, Python will buffer the entire string into memory. It should route `stderr=subprocess.DEVNULL` unless explicitly parsing it to prevent memory ballooning.
 
-### Hidden Backend Fragilities (Found during Gemini's inspection)
-
-1. **Windows File-Lock Hostility**
-   - **File:** `backend/web_api.py`
-   - **Issue:** When the frontend renders an image/video from `/review-assets`, the Chromium webview often holds an OS-level read-lock on Windows. If the user clicks "Delete" or "Variant", `path.unlink()` will fail with a permission error. The backend catches this and pushes it to `pending_cleanup`, but it's a fragile band-aid. The frontend should actively unmount/hide the media element before sending the POST request.
-
-2. **External Downloader Dependency Coupling & Long Timeouts**
-   - **File:** `backend/downloaders/gallery_dl_wrapper.py`, `backend/downloaders/yt_dlp_wrapper.py`
-   - **Issue:** `gallery-dl` and `yt-dlp` run via `subprocess.run()` with built-in OS-level timeouts (5 minutes and 10 minutes respectively). While these timeouts successfully prevent permanent thread deadlocks if a site rate-limits the downloader, waiting up to 10 minutes for a stuck subprocess to die can consume a `ThreadPoolExecutor` worker slot for a very long time, making the UI queue appear "frozen" to the user.
-
 ### Deferred Work / Will Do Later
 
 - **Maintenance Tools UI Integration:** The current maintenance scripts for capturing cookies (`backend/scripts/auth_cookies_builder.py`) and authenticating with Pixiv (`backend/scripts/auth_pixiv_auto.py`) only run in the CLI. These need to be connected to the Svelte UI so users can manage authentication directly from the desktop application without dropping into the terminal.
 
 ## Issue Remediation Plan
-
-### P2 UX / Runtime Robustness
-
-- Browser/HTML5 fullscreen fallback missing.
-- Windows review file-lock risk; frontend should unmount review media before actions.
-- Downloader subprocess timeouts can hold worker slots for 5-10 minutes.
-- Thumbnail generation bursts can saturate worker threads.
 
 ### P3 Cleanup / Observability
 
@@ -420,6 +401,5 @@ VSCode-friendly test launchers:
 ### Recommended Fix Batches
 
 1. `os.path` cleanup; logging for swallowed exceptions.
-2. Windows review unmount/action flow.
-3. FFmpeg frame extraction consolidation.
-4. downloader timeout/cancel behavior; thumbnail throttling/cache behavior.
+2. subprocess buffering cleanup where stderr is not parsed.
+3. Architecture/status docs drift review after implementation batches settle.

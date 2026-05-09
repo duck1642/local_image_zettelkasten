@@ -16,6 +16,14 @@ from utils import ONLINE_INGEST_DIR, get_config, get_cookie_auth_status, get_coo
 _AUTH_STATUS_LOGGED = set()
 
 
+def _timeout(name: str, default: int) -> int:
+    try:
+        value = get_config().get("external_tools", {}).get("timeouts", {}).get(name, default)
+        return max(1, int(value))
+    except (TypeError, ValueError):
+        return default
+
+
 def _is_community_url(url: str) -> bool:
     parsed = urlparse(url)
     path = parsed.path.lower()
@@ -351,7 +359,7 @@ def download_video(url: str, metadata_info: dict = None) -> tuple[bool, dict]:
         meta_cmd.append(url)
 
         print(f"   [INFO] Fetching YouTube metadata...")
-        meta_res = subprocess.run(meta_cmd, capture_output=True, text=True, timeout=120)
+        meta_res = subprocess.run(meta_cmd, capture_output=True, text=True, timeout=_timeout("yt_dlp_metadata", 120))
 
         artist = "Unknown"
         title = ""
@@ -378,7 +386,7 @@ def download_video(url: str, metadata_info: dict = None) -> tuple[bool, dict]:
         dl_cmd.append(url)
 
         print(f"   [INFO] Running yt-dlp for YouTube...")
-        dl_res = subprocess.run(dl_cmd, capture_output=True, text=True, timeout=600)
+        dl_res = subprocess.run(dl_cmd, capture_output=True, text=True, timeout=_timeout("yt_dlp_download", 600))
 
         if dl_res.returncode != 0:
             shutil.rmtree(session_dir, ignore_errors=True)

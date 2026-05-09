@@ -15,7 +15,7 @@
     try {
       return getCurrentWindow();
     } catch {
-      return { setFullscreen: async () => {} };
+      return null;
     }
   }
 
@@ -153,18 +153,53 @@
 
   async function handleModeChange(newMode: 'wide' | 'fullscreen') {
     uiLog('INFO', `MediaFocus mode changed to: ${newMode}`);
-    try {
-      await appWindow.setFullscreen(newMode === 'fullscreen');
-    } catch (error) {
-      uiLog('ERROR', 'Failed to toggle native fullscreen', { error: String(error) });
+    if (newMode === 'fullscreen') {
+      const tauriOk = await setTauriFullscreen(true);
+      if (!tauriOk || !document.fullscreenElement) await setBrowserFullscreen(true);
+      return;
     }
+    await exitAllFullscreen();
+  }
+
+  async function setTauriFullscreen(enabled: boolean) {
+    if (!appWindow || !(window as any).__TAURI_INTERNALS__) return false;
+    try {
+      await appWindow.setFullscreen(enabled);
+      return true;
+    } catch (error) {
+      uiLog('WARNING', 'Failed to toggle native fullscreen', { enabled, error: String(error) });
+      return false;
+    }
+  }
+
+  async function setBrowserFullscreen(enabled: boolean) {
+    try {
+      if (enabled) {
+        if (document.fullscreenElement) return true;
+        if (!document.documentElement.requestFullscreen) return false;
+        await document.documentElement.requestFullscreen();
+        return true;
+      }
+      if (!document.fullscreenElement) return true;
+      if (!document.exitFullscreen) return false;
+      await document.exitFullscreen();
+      return true;
+    } catch (error) {
+      uiLog('WARNING', 'Failed to toggle browser fullscreen', { enabled, error: String(error) });
+      return false;
+    }
+  }
+
+  async function exitAllFullscreen() {
+    await setTauriFullscreen(false);
+    await setBrowserFullscreen(false);
   }
 
   async function close(reason: string | Event = 'unknown') {
     const reasonStr = typeof reason === 'string' ? reason : 'overlay_or_btn_click';
     uiLog('INFO', `MediaFocus closing because: ${reasonStr}`);
     try {
-      await appWindow.setFullscreen(false);
+      await exitAllFullscreen();
     } catch {
     } finally {
       dispatch('close');
@@ -227,9 +262,7 @@
 
   onDestroy(async () => {
     if (pointerMovedResetTimer !== null) window.clearTimeout(pointerMovedResetTimer);
-    try {
-      await appWindow.setFullscreen(false);
-    } catch {}
+    await exitAllFullscreen();
   });
 </script>
 

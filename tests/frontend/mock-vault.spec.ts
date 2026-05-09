@@ -35,7 +35,7 @@ async function fulfillJson(route: Route, body: unknown, status = 200) {
   await route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 }
 
-async function installMockVaultApi(page: Page, options: { memoryFails?: boolean } = {}) {
+async function installMockVaultApi(page: Page, options: { memoryFails?: boolean; onReviewAction?: () => Promise<void> } = {}) {
   let items = cloneItems();
   const reviewItems = JSON.parse(JSON.stringify(manifest.review));
   const appConfig = {
@@ -83,7 +83,10 @@ async function installMockVaultApi(page: Page, options: { memoryFails?: boolean 
   }));
   await page.route('**/api/review/count', async (route) => fulfillJson(route, { count: reviewItems.length, pending: 1, cleanup: 1 }));
   await page.route('**/api/review/cleanup', async (route) => fulfillJson(route, { status: 'success', cleaned: 0, failed: 0, cleaned_orphans: 0, failed_orphans: 0 }));
-  await page.route('**/api/review/*/action**', async (route) => fulfillJson(route, { status: 'success', action: 'keep', message: 'mock action ok' }));
+  await page.route('**/api/review/*/action**', async (route) => {
+    await options.onReviewAction?.();
+    return fulfillJson(route, { status: 'success', action: 'keep', message: 'mock action ok' });
+  });
   await page.route('**/api/review', async (route) => fulfillJson(route, reviewItems));
   await page.route('**/api/facets**', async (route) => {
     const kind = new URL(route.request().url()).searchParams.get('kind') || 'artist';
@@ -115,7 +118,7 @@ async function installMockVaultApi(page: Page, options: { memoryFails?: boolean 
   });
 }
 
-async function openMockVault(page: Page, options: { memoryFails?: boolean } = {}) {
+async function openMockVault(page: Page, options: { memoryFails?: boolean; onReviewAction?: () => Promise<void> } = {}) {
   await installMockVaultApi(page, options);
   await page.goto('/?lmz_test_page_size=100');
   await expect(page.getByTestId('vault-tile').first()).toBeVisible();
@@ -193,6 +196,44 @@ test('fullscreen pan suppresses one backdrop click then closes after reset', asy
   await expect(page.locator('.focus-overlay.fullscreen')).toHaveCount(0);
 });
 
+test('fullscreen uses browser fallback when native fullscreen is unavailable', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(window, '__TAURI_INTERNALS__', {
+      configurable: true,
+      get: () => undefined,
+      set: () => {}
+    });
+    let fullscreenElement: Element | null = null;
+    Object.defineProperty(document, 'fullscreenElement', {
+      configurable: true,
+      get: () => fullscreenElement
+    });
+    Object.defineProperty(Element.prototype, 'requestFullscreen', {
+      configurable: true,
+      value: async () => {
+        (window as any).__browserFsRequests = ((window as any).__browserFsRequests || 0) + 1;
+        fullscreenElement = document.documentElement;
+      }
+    });
+    Object.defineProperty(Document.prototype, 'exitFullscreen', {
+      configurable: true,
+      value: async () => {
+        (window as any).__browserFsExits = ((window as any).__browserFsExits || 0) + 1;
+        fullscreenElement = null;
+      }
+    });
+  });
+  await openMockVault(page);
+
+  await page.getByText('Mock Solo').click();
+  await page.getByTitle('Fullscreen').click({ force: true });
+  await expect(page.locator('.focus-overlay.fullscreen')).toBeVisible();
+  await expect.poll(() => page.evaluate(() => (window as any).__browserFsRequests || 0)).toBe(1);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.focus-overlay.fullscreen')).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => (window as any).__browserFsExits || 0)).toBeGreaterThanOrEqual(1);
+});
+
 test('review fixture uses display names and encoded asset/action paths', async ({ page }) => {
   const reviewRequests: string[] = [];
   await openMockVault(page);
@@ -209,6 +250,22 @@ test('review fixture uses display names and encoded asset/action paths', async (
   await page.getByRole('button', { name: 'Keep Visible' }).click();
 
   expect(reviewRequests.some((url) => url.includes('review%2520encoded%2Bname.jpg'))).toBeTruthy();
+});
+
+test('review destructive actions unmount media before posting', async ({ page }) => {
+  let mediaUnmountedBeforePost = false;
+  await openMockVault(page, {
+    onReviewAction: async () => {
+      mediaUnmountedBeforePost = await page.locator('.review-main .pane img, .review-main .pane video').count() === 0;
+    }
+  });
+
+  await page.getByRole('button', { name: /Review/ }).click();
+  await page.getByRole('button', { name: /Original Review Name\.jpg/ }).click();
+  await expect(page.locator('.review-main .pane img')).toHaveCount(2);
+  await page.getByRole('button', { name: 'Save Variant' }).click();
+
+  await expect.poll(() => mediaUnmountedBeforePost).toBeTruthy();
 });
 
 test('ram footer handles available and unavailable states', async ({ page }) => {

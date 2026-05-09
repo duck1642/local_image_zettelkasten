@@ -27,7 +27,7 @@ def fresh_backend(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *module_names
     if str(BACKEND) not in sys.path:
         sys.path.insert(0, str(BACKEND))
     for name in list(sys.modules):
-        if name in {"utils", "web_api", "queue_service", "md_generator", "metadata_index", "processor", "external_ingestion"} or name.startswith(("logger", "db.", "tagging")):
+        if name in {"utils", "web_api", "queue_service", "md_generator", "metadata_index", "processor", "external_ingestion", "thumbnails", "fingerprint"} or name.startswith(("logger", "db.", "tagging", "downloaders")):
             del sys.modules[name]
     return [importlib.import_module(name) for name in module_names]
 
@@ -592,3 +592,141 @@ def test_hot_ingestion_paths_use_lightweight_db_helper(monkeypatch, tmp_path):
     assert "connect_database()" in inspect.getsource(external_ingestion.ExternalIngestor._url_complete)
     assert "connect_database()" in inspect.getsource(external_ingestion.ExternalIngestor._instagram_complete)
     assert "connect_database()" in inspect.getsource(external_ingestion.ExternalIngestor._rollback_batch)
+
+
+def test_downloader_wrappers_use_configured_timeouts(monkeypatch, tmp_path):
+    gallery, yt_dlp = fresh_backend(monkeypatch, tmp_path, "downloaders.gallery_dl_wrapper", "downloaders.yt_dlp_wrapper")
+    gallery_timeouts = []
+    yt_timeouts = []
+
+    class Result:
+        returncode = 1
+        stdout = ""
+        stderr = "failed"
+
+    def gallery_run(*args, **kwargs):
+        gallery_timeouts.append(kwargs.get("timeout"))
+        return Result()
+
+    def yt_run(*args, **kwargs):
+        yt_timeouts.append(kwargs.get("timeout"))
+        return Result()
+
+    monkeypatch.setattr(gallery, "get_config", lambda: {"external_tools": {"timeouts": {"gallery_metadata": 7, "gallery_download": 8}}})
+    monkeypatch.setattr(gallery, "_base_args", lambda url: [])
+    monkeypatch.setattr(gallery.subprocess, "run", gallery_run)
+    gallery.inspect_gallery("https://example.test/item")
+    gallery.download_gallery("https://example.test/item", metadata_info={"platform": "X", "download_url": "https://example.test/item"})
+
+    monkeypatch.setattr(yt_dlp, "get_config", lambda: {"external_tools": {"timeouts": {"yt_dlp_metadata": 9, "yt_dlp_download": 10}}})
+    monkeypatch.setattr(yt_dlp, "get_cookie_path", lambda: None)
+    monkeypatch.setattr(yt_dlp, "get_cookie_auth_status", lambda: {})
+    monkeypatch.setattr(yt_dlp.subprocess, "run", yt_run)
+    yt_dlp.download_video("https://www.youtube.com/watch?v=mock")
+
+    assert gallery_timeouts[:2] == [7, 8]
+    assert yt_timeouts[:2] == [9, 10]
+
+
+def test_downloader_wrapper_timeout_defaults(monkeypatch, tmp_path):
+    gallery, yt_dlp = fresh_backend(monkeypatch, tmp_path, "downloaders.gallery_dl_wrapper", "downloaders.yt_dlp_wrapper")
+
+    monkeypatch.setattr(gallery, "get_config", lambda: {})
+    monkeypatch.setattr(yt_dlp, "get_config", lambda: {})
+
+    assert gallery._timeout("gallery_metadata", 120) == 120
+    assert gallery._timeout("gallery_download", 300) == 300
+    assert yt_dlp._timeout("yt_dlp_metadata", 120) == 120
+    assert yt_dlp._timeout("yt_dlp_download", 600) == 600
+
+
+def test_thumbnail_repair_uses_shared_helper_and_skips_fresh(monkeypatch, tmp_path):
+    utils, sqlite_operator, thumbnails = fresh_backend(monkeypatch, tmp_path, "utils", "db.sqlite_operator", "thumbnails")
+    fresh_hash = "a" * 64
+    stale_hash = "b" * 64
+    conn = insert_mock_item(sqlite_operator, fresh_hash)
+    conn.execute(
+        """
+        INSERT INTO items(hash, original_filename, file_extension, mime_type, size_bytes, date_added, source_url, source_url_norm, platform, source_artist, phash)
+        VALUES (?, ?, '.jpg', 'image/jpeg', 10, ?, '', '', 'local', ?, '')
+        """,
+        (stale_hash, f"{stale_hash}.jpg", "2026-01-03 00:00:00", "DB Artist"),
+    )
+    conn.commit()
+    for item_hash in [fresh_hash, stale_hash]:
+        asset = utils.asset_path_for(item_hash, ".jpg", "image/jpeg")
+        asset.parent.mkdir(parents=True, exist_ok=True)
+        asset.write_bytes(b"asset")
+    fresh_thumb = thumbnails.thumbnail_path_for(fresh_hash)
+    fresh_thumb.parent.mkdir(parents=True, exist_ok=True)
+    fresh_thumb.write_bytes(b"thumb")
+    calls = []
+
+    def fake_ensure(item_hash, extension, mime_type, wait=True):
+        calls.append((item_hash, extension, mime_type, wait))
+        return thumbnails.thumbnail_path_for(item_hash)
+
+    monkeypatch.setattr(thumbnails, "ensure_thumbnail", fake_ensure)
+
+    result = thumbnails.repair_missing_thumbnails(conn, limit=10)
+
+    assert calls == [(stale_hash, ".jpg", "image/jpeg", True)]
+    assert result["generated"] == 1
+    assert result["skipped"] == 1
+    conn.close()
+
+
+def test_thumbnail_api_returns_503_when_generation_is_busy(monkeypatch, tmp_path):
+    sqlite_operator, web_api = fresh_backend(monkeypatch, tmp_path, "db.sqlite_operator", "web_api")
+    item_hash = "c" * 64
+    conn = insert_mock_item(sqlite_operator, item_hash)
+    conn.close()
+
+    def busy(*args, **kwargs):
+        raise web_api.ThumbnailBusyError("busy")
+
+    monkeypatch.setattr(web_api, "get_or_generate_thumbnail", busy)
+
+    with pytest.raises(HTTPException) as exc:
+        web_api._get_thumbnail_sync(item_hash)
+
+    assert exc.value.status_code == 503
+
+
+def test_no_duplicate_thumbnail_generation_paths_outside_thumbnail_module(monkeypatch, tmp_path):
+    processor, web_api = fresh_backend(monkeypatch, tmp_path, "processor", "web_api")
+
+    processor_source = inspect.getsource(processor)
+    web_api_source = inspect.getsource(web_api)
+
+    assert "ensure_thumbnail(" in inspect.getsource(processor.process_file)
+    assert "get_or_generate_thumbnail(" in inspect.getsource(web_api._get_thumbnail_sync)
+    assert "generate_image_thumbnail(" not in processor_source
+    assert "generate_video_thumbnail(" not in processor_source
+    assert "generate_image_thumbnail(" not in web_api_source
+    assert "generate_video_thumbnail(" not in web_api_source
+
+
+def test_sampled_video_extraction_uses_one_ffmpeg_subprocess(monkeypatch, tmp_path):
+    fingerprint, = fresh_backend(monkeypatch, tmp_path, "fingerprint")
+    calls = []
+
+    def fake_run(cmd, *args, **kwargs):
+        calls.append(cmd)
+        for value in cmd:
+            if isinstance(value, str) and value.endswith(".png"):
+                path = Path(value)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                from PIL import Image
+                image = Image.new("RGB", (2, 2), "red")
+                image.save(path)
+        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(fingerprint, "get_video_duration", lambda path: 10.0)
+    monkeypatch.setattr(fingerprint.subprocess, "run", fake_run)
+
+    frames = fingerprint.extract_sampled_video_frames(tmp_path / "video.mp4", frame_count=5)
+
+    assert len(frames) == 5
+    assert len(calls) == 1
+    assert calls[0].count("-i") == 5

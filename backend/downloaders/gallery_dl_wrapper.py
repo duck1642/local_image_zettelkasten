@@ -11,6 +11,14 @@ from utils import ONLINE_INGEST_DIR, get_config, get_cookie_auth_status, get_coo
 _AUTH_STATUS_LOGGED = set()
 
 
+def _timeout(name: str, default: int) -> int:
+    try:
+        value = get_config().get("external_tools", {}).get("timeouts", {}).get(name, default)
+        return max(1, int(value))
+    except (TypeError, ValueError):
+        return default
+
+
 def _extract_artist(data: dict, platform: str) -> str:
     def extract_from_field(field_val) -> str:
         if isinstance(field_val, dict):
@@ -221,7 +229,7 @@ def inspect_gallery(url: str) -> tuple[bool, dict]:
     original_url = url
     download_url = _normalized_url(url)
     meta_cmd = ["gallery-dl", "-j"] + _base_args(download_url) + [download_url]
-    result = subprocess.run(meta_cmd, capture_output=True, text=True, timeout=120)
+    result = subprocess.run(meta_cmd, capture_output=True, text=True, timeout=_timeout("gallery_metadata", 120))
 
     if result.returncode != 0:
         return False, {"error": f"Metadata failed: {result.stderr}"}
@@ -284,7 +292,7 @@ def download_gallery(url: str, metadata_info: dict = None) -> tuple[bool, dict]:
         dl_cmd.append(download_url)
 
         print(f"   [INFO] Running gallery-dl for {platform}...")
-        dl_res = subprocess.run(dl_cmd, capture_output=True, text=True, timeout=300)
+        dl_res = subprocess.run(dl_cmd, capture_output=True, text=True, timeout=_timeout("gallery_download", 300))
 
         if dl_res.returncode != 0:
             shutil.rmtree(session_dir, ignore_errors=True)

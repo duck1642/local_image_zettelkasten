@@ -35,6 +35,7 @@
   let selectedFilename = '';
   let loading = true;
   let acting = false;
+  let mediaMounted = true;
 
   const VIDEO_EXTENSIONS = new Set(['.mp4', '.webm', '.ogv', '.mov', '.m4v', '.avi', '.mkv']);
 
@@ -95,6 +96,7 @@
       const data = await res.json();
       items = Array.isArray(data) ? data : [];
       ensureSelection(items);
+      mediaMounted = true;
       await refreshReviewCount();
     } catch (e) {
       uiLog('ERROR', 'Failed to load review queue', { error: String(e) });
@@ -115,6 +117,7 @@
     }
 
     acting = true;
+    if (action !== 'keep') await unmountMediaForFileAction();
     try {
       const filename = encodeURIComponent(current.filename);
       const res = await apiFetch(`/api/review/${filename}/action?action=${action}`, { method: 'POST' });
@@ -131,6 +134,7 @@
       }
       await loadReview();
     } catch (e) {
+      mediaMounted = true;
       uiLog('ERROR', 'Review action failed', { action, error: String(e) });
       alert(`Review action "${action}" failed. Check App Logs for details.`);
     } finally {
@@ -141,6 +145,7 @@
   async function retryCleanup() {
     if (acting) return;
     acting = true;
+    await unmountMediaForFileAction();
     try {
       const res = await apiFetch('/api/review/cleanup', { method: 'POST' });
       const payload = await res.json().catch(() => ({}));
@@ -153,11 +158,21 @@
       });
       await loadReview();
     } catch (e) {
+      mediaMounted = true;
       uiLog('ERROR', 'Review cleanup retry failed', { error: String(e) });
       alert('Review cleanup retry failed. Check App Logs for details.');
     } finally {
       acting = false;
     }
+  }
+
+  function nextAnimationFrame() {
+    return new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  }
+
+  async function unmountMediaForFileAction() {
+    mediaMounted = false;
+    await nextAnimationFrame();
   }
 
   function selectItem(item: ReviewItem) {
@@ -229,11 +244,13 @@
 
           <div class="panes">
             <div class="pane">
-              {#if isVideoMedia(current)}
-                <!-- svelte-ignore a11y_media_has_caption -->
-                <video src={mediaUrl(current)} controls preload="metadata"></video>
-              {:else}
-                <img src={mediaUrl(current)} alt="Review cleanup item" />
+              {#if mediaMounted}
+                {#if isVideoMedia(current)}
+                  <!-- svelte-ignore a11y_media_has_caption -->
+                  <video src={mediaUrl(current)} controls preload="metadata"></video>
+                {:else}
+                  <img src={mediaUrl(current)} alt="Review cleanup item" />
+                {/if}
               {/if}
             </div>
             <div class="pane detail-pane">
@@ -264,22 +281,24 @@
 
           <div class="panes">
             <div class="pane">
-              {#if isVideoMedia(current)}
-                <!-- svelte-ignore a11y_media_has_caption -->
-                <video src={mediaUrl(current)} controls preload="metadata"></video>
-              {:else}
-                <img src={mediaUrl(current)} alt="New" />
+              {#if mediaMounted}
+                {#if isVideoMedia(current)}
+                  <!-- svelte-ignore a11y_media_has_caption -->
+                  <video src={mediaUrl(current)} controls preload="metadata"></video>
+                {:else}
+                  <img src={mediaUrl(current)} alt="New" />
+                {/if}
               {/if}
             </div>
             <div class="pane">
-              {#if current.best_match}
+              {#if mediaMounted && current.best_match}
                 {#if isVideoMedia(current.best_match)}
                   <!-- svelte-ignore a11y_media_has_caption -->
                   <video src={mediaUrl(current.best_match)} controls preload="metadata"></video>
                 {:else}
                   <img src={mediaUrl(current.best_match)} alt="Match" />
                 {/if}
-              {:else}
+              {:else if mediaMounted}
                 <div class="no-match">No best-match preview available.</div>
               {/if}
             </div>

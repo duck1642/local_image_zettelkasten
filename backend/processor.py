@@ -24,6 +24,7 @@ from md_generator import generate_markdown
 from metadata_index import safe_reindex_item_metadata
 from logger import log_activity, log_system
 from tagging import tag_media
+from thumbnails import ensure_thumbnail
 
 def _safe_review_name(name: str) -> str:
     invalid = '<>:"/\\|?*'
@@ -384,6 +385,10 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
 
         conn.commit()
 
+        try:
+            ensure_thumbnail(file_hash, target_ext, mime_type, wait=True)
+        except Exception as thumb_exc:
+            log_system("WARNING", "Ingest thumbnail pregeneration failed", hash=file_hash, error=str(thumb_exc))
 
         if sync_index:
             search_manager.update_indexes(**index_data)

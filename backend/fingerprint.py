@@ -1,6 +1,7 @@
 
 import json
 import subprocess
+import tempfile
 from io import BytesIO
 from pathlib import Path
 
@@ -117,11 +118,32 @@ def extract_video_frame(video_path: Path, timestamp: float) -> Image.Image:
 def extract_sampled_video_frames(video_path: Path, frame_count: int = 5) -> list[tuple[float, Image.Image]]:
 
     duration = get_video_duration(video_path)
+    timestamps = sample_video_timestamps(duration, frame_count)
+    if not timestamps:
+        return []
+
     frames = []
-    for timestamp in sample_video_timestamps(duration, frame_count):
-        image = extract_video_frame(video_path, timestamp)
-        if image is not None:
-            frames.append((timestamp, image))
+    try:
+        with tempfile.TemporaryDirectory(prefix="lmz_frames_") as tmp:
+            tmp_dir = Path(tmp)
+            cmd = ['ffmpeg', '-y', '-loglevel', 'error']
+            for timestamp in timestamps:
+                cmd.extend(['-ss', f"{timestamp:.3f}", '-i', str(video_path)])
+            frame_paths = []
+            for index in range(len(timestamps)):
+                frame_path = tmp_dir / f"frame_{index:03d}.png"
+                frame_paths.append(frame_path)
+                cmd.extend(['-map', f"{index}:v:0", '-frames:v', '1', str(frame_path)])
+
+            subprocess.run(cmd, capture_output=True, check=True, timeout=90)
+            for timestamp, frame_path in zip(timestamps, frame_paths):
+                if not frame_path.exists():
+                    continue
+                with Image.open(frame_path) as image:
+                    frames.append((timestamp, image.convert('RGB').copy()))
+    except Exception as exc:
+        from logger import log_system
+        log_system("WARNING", "Sampled video frame extraction failed", file=str(video_path), error=str(exc))
     return frames
 
 def get_visual_embedding(video_path: Path) -> bytes:
