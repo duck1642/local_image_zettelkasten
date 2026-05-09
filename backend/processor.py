@@ -8,7 +8,7 @@ from typing import Tuple, Optional
 from datetime import datetime
 from utils import (
     ASSETS_DIR, REVIEW_DIR, calculate_file_hash, calculate_phash,
-    flatten_image, get_normalization_color, note_path_for
+    atomic_write_text, flatten_image, get_normalization_color, note_path_for
 )
 from fingerprint import (
     get_audio_fingerprint, get_visual_embedding,
@@ -350,8 +350,7 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
         if md_content:
             md_path = note_path_for(file_hash)
             md_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(md_path, 'w', encoding='utf-8') as f:
-                f.write(md_content)
+            atomic_write_text(md_path, md_content)
 
 
         source_url = metadata.get('source_url', '')
@@ -375,8 +374,7 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
                 if md_content:
                     md_path = note_path_for(file_hash)
                     md_path.parent.mkdir(parents=True, exist_ok=True)
-                    with open(md_path, 'w', encoding='utf-8') as f:
-                        f.write(md_content)
+                    atomic_write_text(md_path, md_content)
         except Exception as tag_exc:
             log_system("WARNING", "Tagging enrichment crashed", hash=file_hash, error=str(tag_exc))
             if config.get('tagging', {}).get('fail_ingestion_on_error', False):

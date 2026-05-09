@@ -23,7 +23,7 @@ from db.sqlite_operator import init_database, normalize_source_url
 from utils import get_config, ASSETS_DIR, REVIEW_DIR, LOCAL_INGEST_DIR, note_path_for, asset_path_for, calculate_file_hash
 from processor import process_file
 from logger import log_auth, log_review, log_svelte, log_system, RAW_LOGS_DIR, STRUCTURED_LOGS_DIR
-from md_generator import load_note_topics, load_note_wd_tags, generate_markdown
+from md_generator import MANUAL_FRONTMATTER_FIELDS, load_note_frontmatter, load_note_topics, load_note_wd_tags, generate_markdown
 from metadata_index import (
     indexed_item_metadata,
     metadata_facets,
@@ -390,6 +390,33 @@ def _review_db_has_hashes(hashes: list[str]) -> set[str]:
         cursor = conn.cursor()
         cursor.execute(f"SELECT hash FROM items WHERE hash IN ({placeholders})", clean)
         return {row[0] for row in cursor.fetchall() if row and row[0]}
+    finally:
+        conn.close()
+
+def _manual_frontmatter_for_hash(item_hash: str) -> dict:
+    frontmatter = load_note_frontmatter(item_hash)
+    return {
+        field: frontmatter[field]
+        for field in MANUAL_FRONTMATTER_FIELDS
+        if field in frontmatter
+    }
+
+def _apply_manual_frontmatter_to_item(item_hash: str, manual_fields: dict):
+    if not manual_fields:
+        return
+    conn = init_database()
+    try:
+        md_content = generate_markdown(conn, item_hash, manual_overrides=manual_fields)
+        if not md_content:
+            raise RuntimeError("replacement note generation returned empty content")
+        note_path = note_path_for(item_hash)
+        note_path.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_text(note_path, md_content)
+        safe_reindex_item_metadata(conn, item_hash, "review_replace_preserve")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         conn.close()
 
@@ -1045,15 +1072,18 @@ def _update_item_sync(item_hash: str, update: ItemUpdate):
         cursor.execute("SELECT 1 FROM items WHERE hash = ?", (item_hash,))
         if not cursor.fetchone():
             raise HTTPException(status_code=404)
+        manual_overrides = {}
         if update.artist is not None:
             cursor.execute("UPDATE items SET source_artist = ? WHERE hash = ?", (update.artist, item_hash))
+            manual_overrides["artist"] = update.artist
         if update.source_url is not None:
             cursor.execute("UPDATE items SET source_url = ?, source_url_norm = ? WHERE hash = ?", (update.source_url, normalize_source_url(update.source_url), item_hash))
         if update.platform is not None:
             cursor.execute("UPDATE items SET platform = ? WHERE hash = ?", (update.platform, item_hash))
-        conn.commit()
+        if update.topics is not None:
+            manual_overrides["topics"] = update.topics
         
-        md_content = generate_markdown(conn, item_hash, topics_override=update.topics)
+        md_content = generate_markdown(conn, item_hash, topics_override=update.topics, manual_overrides=manual_overrides)
         if md_content:
             note_path = note_path_for(item_hash)
             note_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1062,6 +1092,9 @@ def _update_item_sync(item_hash: str, update: ItemUpdate):
             conn.commit()
             
         return {"status": "success"}
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         conn.close()
 
@@ -1900,6 +1933,7 @@ def _review_action_sync(filename: str, action: str):
         return {"status": "success", "action": action, "message": message}
 
     target_hash = ""
+    replacement_manual_fields = {}
     if action == "replace":
         target_hash = str(sidecar.get("best_match") or "").strip()
         if not target_hash:
@@ -1915,9 +1949,10 @@ def _review_action_sync(filename: str, action: str):
             message = "Replace target no longer exists in DB. Item kept pending."
             log_review("WARNING", "Review replace warning", action=action, filename=filename, display_name=display_name, target_hash=target_hash, detail=message)
             return {"status": "warning", "action": action, "message": message}
+        replacement_manual_fields = _manual_frontmatter_for_hash(target_hash)
 
     try:
-        ok, process_message, _ = process_file(
+        ok, process_message, idx_data = process_file(
             file_path,
             get_config(),
             metadata=metadata,
@@ -1932,6 +1967,18 @@ def _review_action_sync(filename: str, action: str):
         status_code = _review_failure_status(process_message)
         log_review("ERROR", "Review action failed", action=action, filename=filename, display_name=display_name, target_hash=target_hash, error=process_message)
         raise HTTPException(status_code=status_code, detail=process_message)
+
+    preserve_error = ""
+    if action == "replace":
+        new_hash = str((idx_data or {}).get("file_hash") or "").strip()
+        if not new_hash:
+            preserve_error = "replacement hash was not returned by processor"
+        else:
+            try:
+                _apply_manual_frontmatter_to_item(new_hash, replacement_manual_fields)
+            except Exception as exc:
+                preserve_error = str(exc)
+                log_review("ERROR", "Review replace metadata preservation failed", action=action, filename=filename, display_name=display_name, target_hash=target_hash, new_hash=new_hash, error=preserve_error)
 
     resolved_state = "resolved_replace" if action == "replace" else "resolved_variant"
     sidecar = _set_review_state(sidecar, resolved_state, action=action, target_hash=target_hash)
@@ -1951,6 +1998,10 @@ def _review_action_sync(filename: str, action: str):
         }
     elif not sidecar_deleted:
         log_review("WARNING", "Review sidecar cleanup pending after successful ingest", action=action, filename=filename, display_name=display_name, state=resolved_state, target_hash=target_hash, error=sidecar_err)
+
+    if preserve_error:
+        message = "Replacement ingested, but old target was kept because manual metadata preservation failed."
+        return {"status": "warning", "action": action, "message": message, "error": preserve_error}
 
     if action == "replace":
         replace_result = _delete_item_after_replacement(target_hash)

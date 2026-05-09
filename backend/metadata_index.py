@@ -18,6 +18,7 @@ from utils import NOTES_DIR, WD_TAGS_DIR, existing_note_path_for, wd_tag_cache_p
 HASH_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 READY_KEY = "initial_backfill_complete"
 REPAIR_BATCH_SIZE = 500
+WD_FRONTMATTER_FIELDS = ("wd_rating", "wd_character_tags", "wd_tags")
 
 _repair_lock = threading.Lock()
 _repair_running = False
@@ -164,33 +165,50 @@ def _tag_name(tag) -> str:
     return ""
 
 
-def _wd_from_frontmatter(frontmatter: dict) -> dict:
-    rating = str(frontmatter.get("wd_rating") or "").strip()
-    characters = normalize_topic_list(frontmatter.get("wd_character_tags"))
-    tags = normalize_topic_list(frontmatter.get("wd_tags"))
+def _cache_wd_payload(item_hash: str) -> dict:
+    cache_data = load_tag_cache(item_hash)
+    if cache_data.get("status") != "ok":
+        return {"status": "missing"}
     return {
-        "status": "ok" if rating or characters or tags else "missing",
-        "source": "yaml",
-        "rating": {"label": rating} if rating else {},
-        "character_tags": [{"name": tag} for tag in characters],
-        "tags": [{"name": tag} for tag in tags],
+        "status": "ok",
+        "source": "cache",
+        "rating": cache_data.get("rating") or {},
+        "character_tags": cache_data.get("character_tags") or [],
+        "tags": cache_data.get("tags") or [],
     }
 
 
 def _wd_payload(item_hash: str, frontmatter: dict) -> dict:
-    payload = _wd_from_frontmatter(frontmatter)
-    if payload.get("status") == "ok":
-        return payload
-    cache_data = load_tag_cache(item_hash)
-    if cache_data.get("status") == "ok":
-        return {
-            "status": "ok",
-            "source": "cache",
-            "rating": cache_data.get("rating") or {},
-            "character_tags": cache_data.get("character_tags") or [],
-            "tags": cache_data.get("tags") or [],
-        }
-    return payload
+    has_wd_fields = any(field in frontmatter for field in WD_FRONTMATTER_FIELDS)
+    cache_payload = _cache_wd_payload(item_hash)
+    if not has_wd_fields:
+        return cache_payload
+
+    if "wd_rating" in frontmatter:
+        rating = str(frontmatter.get("wd_rating") or "").strip()
+        rating_payload = {"label": rating} if rating else {}
+    else:
+        rating_payload = cache_payload.get("rating") or {}
+
+    if "wd_character_tags" in frontmatter:
+        characters = normalize_topic_list(frontmatter.get("wd_character_tags"))
+        character_payload = [{"name": tag} for tag in characters]
+    else:
+        character_payload = cache_payload.get("character_tags") or []
+
+    if "wd_tags" in frontmatter:
+        tags = normalize_topic_list(frontmatter.get("wd_tags"))
+        tag_payload = [{"name": tag} for tag in tags]
+    else:
+        tag_payload = cache_payload.get("tags") or []
+
+    return {
+        "status": "ok",
+        "source": "yaml",
+        "rating": rating_payload,
+        "character_tags": character_payload,
+        "tags": tag_payload,
+    }
 
 
 def _wd_rows(payload: dict) -> list[tuple[str, str]]:
@@ -226,6 +244,12 @@ def reindex_item_metadata(conn: sqlite3.Connection, item_hash: str) -> dict:
     wd_payload = _wd_payload(item_hash, frontmatter) if not error else {"status": "missing"}
     wd_rows = _wd_rows(wd_payload)
     status = "error" if error else "ok"
+
+    if not error:
+        if "artist" in frontmatter:
+            conn.execute("UPDATE items SET source_artist = ? WHERE hash = ?", (str(frontmatter.get("artist") or ""), item_hash))
+        if "date_added" in frontmatter and str(frontmatter.get("date_added") or "").strip():
+            conn.execute("UPDATE items SET date_added = ? WHERE hash = ?", (str(frontmatter.get("date_added")).strip(), item_hash))
 
     conn.execute("DELETE FROM item_topics WHERE item_hash = ?", (item_hash,))
     conn.execute("DELETE FROM item_wd_tags WHERE item_hash = ?", (item_hash,))

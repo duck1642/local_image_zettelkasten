@@ -1,6 +1,6 @@
 # LMZ Current Status
 
-Last updated: 2026-05-08
+Last updated: 2026-05-09
 
 ## Current Status
 
@@ -320,6 +320,15 @@ VSCode-friendly test launchers:
   - platform/source URL stay read-only in Inspector.
 - Sidecar/API startup:
   - simulated delayed backend does not permanently fail first production API calls.
+- P0 data integrity:
+  - Markdown-owned manual metadata implemented for `title`, `artist`, `date_added`, `topics`, and WD fields.
+  - PATCH artist/topics writes DB cache and Markdown through one rollback-capable path.
+  - metadata reindex reads Markdown `artist` and non-empty `date_added` back into SQLite.
+  - WD YAML fields are authoritative, including explicit empty tag lists.
+  - ingest note writes use `atomic_write_text`.
+  - review replace preserves old manual YAML metadata onto the replacement.
+  - one-time manual metadata migration script added.
+  - targeted backend pytest passes; needs real-vault migration/reindex smoke before closing fully.
 
 ### Useful Checks
 
@@ -344,31 +353,25 @@ VSCode-friendly test launchers:
    - **The Mechanism:** Every invocation of `process_file` calls `conn = init_database()`, establishing a brand-new connection. During online ingestion, `ExternalIngestor` maps `_worker_item` to a `ThreadPoolExecutor`.
    - **Why it's broken:** When downloading galleries with concurrent workers, 10+ threads are continuously spinning up, querying, committing, and tearing down hundreds of distinct SQLite connections. This causes significant, unnecessary OS-level lock contention and CPU overhead, despite WAL mode.
 
-3. **Broken Transactional Boundaries**
-   - **Severity:** HIGH (Data Integrity Risk)
-   - **File:** `backend/web_api.py` (~line 1054 in `_update_item_sync`)
-   - **The Mechanism:** During an item `PATCH` (e.g., editing an artist), the code updates the DB row and immediately calls `conn.commit()`. On the *next* lines, it attempts to generate and write the new Markdown note to disk via `atomic_write_text`.
-   - **Why it's broken:** If the disk write fails (permissions, disk full, syntax error), the API throws an exception, but the database has already been permanently mutated. The SQLite state and the Markdown source-of-truth are now desynced.
-
-4. **Redundant FFmpeg Subprocesses**
+3. **Redundant FFmpeg Subprocesses**
    - **Severity:** MEDIUM
    - **File:** `backend/fingerprint.py` (~line 92 in `extract_sampled_video_frames`)
    - **The Mechanism:** To generate an AI visual embedding, the code calculates 5 timestamps and loops over them, calling `extract_video_frame()` each time. That function executes `subprocess.run(['ffmpeg', ...])`.
    - **Why it's broken:** Generating an embedding requires spawning 5 separate OS-level FFmpeg processes per video. Each process must independently open the video, parse the container headers, and seek to the target frame, severely slowing down video ingestion.
 
-5. **ML Model Initialization Thrashing**
+4. **ML Model Initialization Thrashing**
    - **Severity:** HIGH
    - **File:** `backend/tagging/service.py` (inside `tag_media`)
    - **The Mechanism:** Every invocation of `tag_media` creates a brand new `ort.InferenceSession` and loads the WD-Tagger model weights into RAM/VRAM.
    - **Why it's broken:** Loading an ONNX model is incredibly CPU and memory intensive (often taking 0.5 - 3 seconds). Doing this per-image instead of caching the session globally at the module level means a batch of 100 images forces the backend to allocate and destroy the ML model 100 separate times.
 
-6. **O(N) Full-Table Scan for Stale Metadata**
+5. **O(N) Full-Table Scan for Stale Metadata**
    - **Severity:** MEDIUM (High at scale)
    - **File:** `backend/metadata_index.py` (`stale_metadata_hashes`)
    - **The Mechanism:** The watchdog/repair worker queries `SELECT ... FROM items LEFT JOIN item_metadata_files` and immediately calls `.fetchall()`. It then loops over the entire result set in Python to find stale rows.
    - **Why it's broken:** For a vault with 100,000 items, `.fetchall()` loads a 100,000-row tuple array into Python memory every time the repair worker looks for the next batch of 500 items. This causes massive RAM spikes and stalls the SQLite connection. It should stream via `.fetchmany()`.
 
-7. **I/O Bound Thumbnail Generation CPU Locking**
+6. **I/O Bound Thumbnail Generation CPU Locking**
    - **Severity:** LOW (Medium on UX)
    - **File:** `backend/thumbnails.py` (`generate_image_thumbnail`)
    - **The Mechanism:** Thumbnails are generated dynamically using `Image.thumbnail` from Pillow.
@@ -376,38 +379,17 @@ VSCode-friendly test launchers:
 
 ### Low-Level Backend Inconsistencies (Found during Gemini's inspection)
 
-1. **Inconsistent File Writing (Missing Atomicity)**
-   - **File:** `backend/processor.py` (~lines 353, 378)
-   - **Issue:** The code bypasses the highly robust `atomic_write_text` helper and uses a standard `with open(md_path, 'w')` when generating Markdown notes. If the app crashes or loses power mid-write, the Markdown file will be permanently corrupted (0 bytes).
-
-2. **Swallowed Exceptions (Silent Failures)**
+1. **Swallowed Exceptions (Silent Failures)**
    - **File:** `backend/utils.py` (`calculate_phash`), `backend/fingerprint.py` (`get_audio_fingerprint`, `get_visual_embedding`)
    - **Issue:** Critical errors (corrupt images, missing FFmpeg, OOM ML loading) are swallowed by bare `except Exception:` blocks that return fallback values without logging the traceback. This makes debugging edge-cases in user-provided media nearly impossible.
 
-3. **Mixing `os.path` with `pathlib.Path`**
+2. **Mixing `os.path` with `pathlib.Path`**
    - **File:** `backend/scripts/update_downloaders_and_regenerate_notes.py` (line 39)
    - **Issue:** The script uses `if not os.path.exists(DB_PATH):` instead of the modern, idiomatic `if not DB_PATH.exists():` used everywhere else in the project.
 
-4. **Naive Subprocess Buffering**
+3. **Naive Subprocess Buffering**
    - **File:** `backend/fingerprint.py`
    - **Issue:** Uses `subprocess.run(..., capture_output=True)` for FFmpeg. If FFmpeg encounters a corrupt video and dumps 100,000 lines of warnings into `stderr`, Python will buffer the entire string into memory. It should route `stderr=subprocess.DEVNULL` unless explicitly parsing it to prevent memory ballooning.
-
-### Metadata Indexing Flaws (Found during Gemini's inspection)
-
-1. **WD Tags Resurrect Themselves (Cache Overwrites Markdown)**
-   - **Severity:** CRITICAL (Data Integrity)
-   - **File:** `backend/md_generator.py`, `backend/metadata_index.py`
-   - **Issue:** If a user manually deletes an incorrect AI tag from the Markdown frontmatter, the system will resurrect it. When `generate_markdown()` recreates the note, it calls `wd_frontmatter_fields()`, which pulls from the hidden JSON cache (`data/wd-tags/...json`) instead of merging the existing Markdown frontmatter.
-
-2. **Impossible to Have "Zero Tags"**
-   - **Severity:** HIGH
-   - **File:** `backend/metadata_index.py` (`_wd_payload`)
-   - **Issue:** If a user explicitly empties the tags in Markdown (`wd_tags: []`), the parser sets the payload status to `"missing"`. It then falls back to the JSON cache and injects the AI tags back into the SQLite search index. You can never explicitly have a media item with zero tags if an AI tag cache exists for it.
-
-3. **Core Metadata Edits are Ignored and Overwritten**
-   - **Severity:** CRITICAL (Data Integrity)
-   - **File:** `backend/metadata_index.py`, `backend/web_api.py`
-   - **Issue:** If a user manually edits the `artist` or `date_added` in the Markdown file, the watchdog detects the change but `reindex_item_metadata()` only updates `item_topics` and `item_wd_tags`. It does not update the `items` table in SQLite. Later, `generate_markdown()` pulls the stale artist/date from SQLite and overwrites the user's manual Markdown edits. The flow is currently DB/Cache -> Markdown, breaking the "Markdown is the source of truth" philosophy.
 
 ### Hidden Backend Fragilities (Found during Gemini's inspection)
 
@@ -415,15 +397,11 @@ VSCode-friendly test launchers:
    - **File:** `backend/db/search_manager.py`
    - **Issue:** The `SearchManager` uses a single `threading.Lock()`. When `_rebuild_deferred_indexes_locked` rebuilds the VP-Trees (which can take several seconds of pure Python math), every single API request trying to query an image or video is completely blocked. This will cause the frontend to stutter or API requests to timeout under load.
 
-2. **The "Replace" Review Action Destroys User Metadata**
-   - **File:** `backend/web_api.py` (`_review_action_sync`)
-   - **Issue:** When replacing a media item via the Review UI, the system ingests the new file and deletes the old one. The new item generates a fresh Markdown note, permanently destroying any manual topics, custom tags, or modified dates on the OLD item.
-
-3. **Windows File-Lock Hostility**
+2. **Windows File-Lock Hostility**
    - **File:** `backend/web_api.py`
    - **Issue:** When the frontend renders an image/video from `/review-assets`, the Chromium webview often holds an OS-level read-lock on Windows. If the user clicks "Delete" or "Variant", `path.unlink()` will fail with a permission error. The backend catches this and pushes it to `pending_cleanup`, but it's a fragile band-aid. The frontend should actively unmount/hide the media element before sending the POST request.
 
-4. **External Downloader Dependency Coupling & Long Timeouts**
+3. **External Downloader Dependency Coupling & Long Timeouts**
    - **File:** `backend/downloaders/gallery_dl_wrapper.py`, `backend/downloaders/yt_dlp_wrapper.py`
    - **Issue:** `gallery-dl` and `yt-dlp` run via `subprocess.run()` with built-in OS-level timeouts (5 minutes and 10 minutes respectively). While these timeouts successfully prevent permanent thread deadlocks if a site rate-limits the downloader, waiting up to 10 minutes for a stuck subprocess to die can consume a `ThreadPoolExecutor` worker slot for a very long time, making the UI queue appear "frozen" to the user.
 
@@ -432,15 +410,6 @@ VSCode-friendly test launchers:
 - **Maintenance Tools UI Integration:** The current maintenance scripts for capturing cookies (`backend/scripts/auth_cookies_builder.py`) and authenticating with Pixiv (`backend/scripts/auth_pixiv_auto.py`) only run in the CLI. These need to be connected to the Svelte UI so users can manage authentication directly from the desktop application without dropping into the terminal.
 
 ## Issue Remediation Plan
-
-### P0 Data Integrity
-
-- PATCH DB commit before markdown write.
-- Non-atomic markdown writes in `processor.py`.
-- WD tags resurrect from cache.
-- Explicit zero WD tags impossible.
-- Manual markdown `artist` / `date_added` edits ignored and overwritten.
-- Review replace does not preserve old manual metadata.
 
 ### P1 Performance Hotspots
 
@@ -466,8 +435,7 @@ VSCode-friendly test launchers:
 
 ### Recommended Fix Batches
 
-1. Atomic markdown writes; PATCH transaction order; `os.path` cleanup; logging for swallowed exceptions.
-2. WD tag source-of-truth semantics; zero-tags semantics; manual markdown metadata sync policy.
-3. Review replace metadata preservation; Windows review unmount/action flow.
-4. ONNX session cache; stale metadata scan streaming; N+1 fallback mitigation.
-5. SearchManager lock/rebuild strategy; SQLite connection lifecycle; downloader timeout/cancel behavior; thumbnail throttling/cache behavior.
+1. `os.path` cleanup; logging for swallowed exceptions.
+2. Windows review unmount/action flow.
+3. ONNX session cache; stale metadata scan streaming; N+1 fallback mitigation.
+4. SearchManager lock/rebuild strategy; SQLite connection lifecycle; downloader timeout/cancel behavior; thumbnail throttling/cache behavior.

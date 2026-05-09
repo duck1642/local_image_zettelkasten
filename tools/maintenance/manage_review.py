@@ -6,6 +6,9 @@ from pathlib import Path
 from utils import REVIEW_DIR, get_config
 from processor import process_file
 
+def review_sidecar_path(path: Path) -> Path:
+    return path.with_suffix(path.suffix + '.json')
+
 def get_review_items():
     if not REVIEW_DIR.exists():
         return []
@@ -26,7 +29,7 @@ def interactive_menu():
         print(f"Found {len(items)} items awaiting your decision:\n")
 
         for i, f in enumerate(items, 1):
-            json_path = f.with_suffix('.json')
+            json_path = review_sidecar_path(f)
             info = ""
             if json_path.exists():
                 try:
@@ -69,7 +72,7 @@ def interactive_menu():
             print("[ERROR] Invalid command.")
 
 def manage_single_item(item_path):
-    json_path = item_path.with_suffix('.json')
+    json_path = review_sidecar_path(item_path)
     best_match = "Unknown"
     distance = "?"
     new_phash = "Unknown"
@@ -107,7 +110,7 @@ def manage_single_item(item_path):
 
 def approve_file(filename):
     file_path = REVIEW_DIR / filename
-    json_path = file_path.with_suffix('.json')
+    json_path = review_sidecar_path(file_path)
 
     if not file_path.exists():
         return
@@ -135,7 +138,7 @@ def approve_file(filename):
 
 def reject_file(filename):
     file_path = REVIEW_DIR / filename
-    json_path = file_path.with_suffix('.json')
+    json_path = review_sidecar_path(file_path)
 
     if file_path.exists():
         file_path.unlink()
