@@ -263,6 +263,10 @@ VSCode-friendly test launchers:
 - Tauri package alignment:
   - frontend `@tauri-apps/api` is pinned to `2.10.1` to match Rust `tauri 2.10.x`.
   - full Tauri stack upgrade to `2.11.x` is deferred.
+- Default command prefix will be changed to `/` from `>`. 
+- Also will check how prefixes are connected to settings. Will check how changeable prefix codes work and decide to keep or delete.
+- Need to seperate local ingestion logs and online-ingestion logs.
+- Need to check whether ASCII issues exists in logs and codes.  
 
 ## Done But Needs Check
 
