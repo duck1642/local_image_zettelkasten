@@ -194,7 +194,7 @@ test('mixed grouped media stays bounded and can switch layout', async ({ page })
   await openLargeVault(page, { total: 10_000, layout: 'masonry', scenario: 'grouped' });
   await scrollAndAssert(page, 'masonry', 10_000);
 
-  await page.getByTestId('vault-search-input').fill('>grid');
+  await page.getByTestId('vault-search-input').fill('/grid');
   await page.getByTestId('vault-search-input').press('Enter');
   await expect(page.getByTestId('grid-renderer-item').first()).toBeVisible();
   await scrollAndAssert(page, 'grid', 10_000);

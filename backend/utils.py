@@ -198,13 +198,6 @@ def get_config() -> dict:
             'ui': {
                 'vault_layout_mode': 'masonry',
                 'vault_tile_min_width': 190,
-                'prefixes': {
-                    'command': '>',
-                    'platform': 'p:',
-                    'artist': 'a:',
-                    'topic': 't:',
-                    'tag': '#'
-                }
             },
             'firewall': {
                 'allowed_extensions': ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.jfif', '.mp4', '.webm', '.ogv'],

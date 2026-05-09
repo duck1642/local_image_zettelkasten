@@ -32,7 +32,7 @@ export function parseSearchQuery(query: string): SearchFilters {
     } else if (segment.startsWith('#')) {
       const value = segment.slice(1).trim();
       if (value) filters.wd_tags.push(value);
-    } else if (segment.startsWith('>')) {
+    } else if (segment.startsWith('/')) {
       const value = segment.slice(1).trim();
       if (value) filters.command = value;
     } else {
@@ -67,6 +67,6 @@ export function getActiveSegment(query: string, cursor: number): ActiveSegment {
   if (content.startsWith('p:')) return { kind: 'platform', prefix: 'p:', value: query.slice(contentStart + 2, cursor).trimStart(), segmentStart: contentStart, segmentEnd, valueStart: contentStart + 2 };
   if (content.startsWith('t:')) return { kind: 'topic', prefix: 't:', value: query.slice(contentStart + 2, cursor).trimStart(), segmentStart: contentStart, segmentEnd, valueStart: contentStart + 2 };
   if (content.startsWith('#')) return { kind: 'wd_tag', prefix: '#', value: query.slice(contentStart + 1, cursor).trimStart(), segmentStart: contentStart, segmentEnd, valueStart: contentStart + 1 };
-  if (content.startsWith('>')) return { kind: 'command', prefix: '>', value: query.slice(contentStart + 1, cursor).trimStart(), segmentStart: contentStart, segmentEnd, valueStart: contentStart + 1 };
+  if (content.startsWith('/')) return { kind: 'command', prefix: '/', value: query.slice(contentStart + 1, cursor).trimStart(), segmentStart: contentStart, segmentEnd, valueStart: contentStart + 1 };
   return { kind: 'none', prefix: '', value: '', segmentStart: contentStart, segmentEnd, valueStart: contentStart };
 }

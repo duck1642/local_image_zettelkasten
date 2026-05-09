@@ -268,19 +268,19 @@ Renderer responsibilities:
 
 Vault commands:
 
-- `>masonry`
-- `>grid`
-- `>zoom-in`
-- `>zoom-out`
-- `>sort-newest`
-- `>sort-oldest`
-- `>sort-artist`
-- `>media-all`
-- `>media-image`
-- `>media-video`
+- `/masonry`
+- `/grid`
+- `/zoom-in`
+- `/zoom-out`
+- `/sort-newest`
+- `/sort-oldest`
+- `/sort-artist`
+- `/media-all`
+- `/media-image`
+- `/media-video`
 - `>toggle-inspector`
-- `>ram-track`
-- `>scan-auth`
+- `/ram-track`
+- `/scan-auth`
 
 ## Vault Grouping
 
@@ -302,7 +302,7 @@ Search is one input with structured prefixes:
 - `p:` platform.
 - `t:` note-frontmatter topic.
 - `#` WD tag.
-- `>` command.
+- `/` command.
 - `;` separates filter segments.
 
 Filter semantics:
@@ -391,7 +391,7 @@ Auth visibility:
 
 - Startup runs an auth scan.
 - `POST /api/auth/scan` runs a manual scan.
-- Vault command `>scan-auth` triggers the manual scan.
+- Vault command `/scan-auth` triggers the manual scan.
 - Results are written to `logs/structured/auth.jsonl`.
 - Logs report only availability states, never cookie or token values.
 

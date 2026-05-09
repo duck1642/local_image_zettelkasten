@@ -554,20 +554,20 @@ def _get_search_suggestions_sync(kind: str, q: str = "", limit: int = 20):
 
     if kind == "command":
         commands = [
-            ">masonry",
-            ">grid",
-            ">zoom-in",
-            ">zoom-out",
+            "/masonry",
+            "/grid",
+            "/zoom-in",
+            "/zoom-out",
             ">toggle-inspector",
-            ">ram-track",
-            ">scan-auth",
-            ">cleanup-review",
-            ">sort-newest",
-            ">sort-oldest",
-            ">sort-artist",
-            ">media-all",
-            ">media-image",
-            ">media-video",
+            "/ram-track",
+            "/scan-auth",
+            "/cleanup-review",
+            "/sort-newest",
+            "/sort-oldest",
+            "/sort-artist",
+            "/media-all",
+            "/media-image",
+            "/media-video",
         ]
         items = [
             {"value": cmd, "count": 0}

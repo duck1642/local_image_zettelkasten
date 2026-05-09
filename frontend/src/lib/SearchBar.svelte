@@ -7,20 +7,20 @@
 
   const dispatch = createEventDispatcher();
   const availableCommands = [
-    '>masonry',
-    '>grid',
-    '>zoom-in',
-    '>zoom-out',
-    '>toggle-inspector',
-    '>ram-track',
-    '>scan-auth',
-    '>cleanup-review',
-    '>sort-newest',
-    '>sort-oldest',
-    '>sort-artist',
-    '>media-all',
-    '>media-image',
-    '>media-video'
+    '/masonry',
+    '/grid',
+    '/zoom-in',
+    '/zoom-out',
+    '/toggle-inspector',
+    '/ram-track',
+    '/scan-auth',
+    '/cleanup-review',
+    '/sort-newest',
+    '/sort-oldest',
+    '/sort-artist',
+    '/media-all',
+    '/media-image',
+    '/media-video'
   ];
 
   let searchQuery = '';
@@ -236,7 +236,7 @@
     <input
       type="text"
       data-testid="vault-search-input"
-      placeholder="> cmd; a: artist; p: platform; t: topic; # wd-tag"
+      placeholder="/cmd; a:artist; p:platform; t:topic; #wd-tag"
       bind:this={searchInputEl}
       bind:value={searchQuery}
       on:input={handleSearchInput}

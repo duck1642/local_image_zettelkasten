@@ -44,8 +44,7 @@ async function installMockVaultApi(page: Page, options: { memoryFails?: boolean;
       vault_tile_min_width: 190,
       inspector_width: 360,
       inspector_visible: true,
-      ram_track_enabled: true,
-      prefixes: { command: '>', artist: 'a:', platform: 'p:', topic: 't:', tag: '#' }
+      ram_track_enabled: true
     }
   };
 

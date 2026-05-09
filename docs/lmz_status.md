@@ -87,7 +87,7 @@ VSCode-friendly test launchers:
 - `docs/lmz_architecture.md`: durable architecture details.
 - `docs/lmz_roadmap.md`: phase history and future work.
 - Search syntax:
-  - `>` command.
+  - `/` command.
   - `a:` artist.
   - `p:` platform.
   - `t:` note-frontmatter topic.
@@ -99,14 +99,14 @@ VSCode-friendly test launchers:
   - Repeated `t:` and `#` use AND.
   - Plain text terms use AND.
 - Current commands include:
-  - `>masonry`, `>grid`.
-  - `>zoom-in`, `>zoom-out`.
-  - `>toggle-inspector`.
-  - `>ram-track`.
-  - `>scan-auth`.
-  - `>cleanup-review`.
-  - `>sort-newest`, `>sort-oldest`, `>sort-artist`.
-  - `>media-all`, `>media-image`, `>media-video`.
+  - `/masonry`, `/grid`.
+  - `/zoom-in`, `/zoom-out`.
+  - `/toggle-inspector`.
+  - `/ram-track`.
+  - `/scan-auth`.
+  - `/cleanup-review`.
+  - `/sort-newest`, `/sort-oldest`, `/sort-artist`.
+  - `/media-all`, `/media-image`, `/media-video`.
 
 ## Done Tasks
 
@@ -118,7 +118,7 @@ VSCode-friendly test launchers:
 - Auth status scan implemented:
   - startup scan.
   - `/api/auth/scan`.
-  - `>scan-auth`.
+  - `/scan-auth`.
   - auth log dropdown.
   - secret values are not logged.
 - Auth config cleanup:
@@ -129,7 +129,7 @@ VSCode-friendly test launchers:
 - RAM tracker implemented:
   - `/api/system/memory`.
   - footer display.
-  - persisted `>ram-track`.
+  - persisted `/ram-track`.
 - Fullscreen media zoom/pan implemented.
 - Wide/fullscreen grouped-media filmstrip implemented.
 - Inspector toggle and resize implemented.
@@ -184,8 +184,8 @@ VSCode-friendly test launchers:
   - stop-after-current keeps not-yet-started URLs.
   - worker/platform crashes are logged and preserved.
   - queue rewrite logs original/removed/remaining counts.
-- Search prefix remap completed:
-  - `>` command.
+- Search prefixes are hardcoded:
+  - `/` command.
   - `a:` artist.
   - `p:` platform.
   - `t:` topic.
@@ -265,8 +265,6 @@ VSCode-friendly test launchers:
   - full Tauri stack upgrade to `2.11.x` is deferred.
 - Maintenance Tools UI Integration 
   - The current maintenance scripts for capturing cookies (`backend/scripts/auth_cookies_builder.py`) and authenticating with Pixiv (`backend/scripts/auth_pixiv_auto.py`) only run in the CLI. These need to be connected to the Svelte UI so users can manage authentication directly from the desktop application without dropping into the terminal.
-- Default command prefix will be changed to `/` from `>`. 
-- Also will check how prefixes are connected to settings. Will check how changeable prefix codes work and decide to keep or delete.
 - Need to seperate local ingestion logs and online-ingestion logs.
 - Need to check whether ASCII issues exists in logs and codes.  
 

@@ -62,12 +62,6 @@ tagging:
 ui:
   inspector_visible: true
   inspector_width: 360
-  prefixes:
-    artist: 'a:'
-    command: '>'
-    platform: 'p:'
-    topic: 't:'
-    tag: '#'
   ram_track_enabled: true
   vault_layout_mode: masonry
   vault_tile_min_width: 190

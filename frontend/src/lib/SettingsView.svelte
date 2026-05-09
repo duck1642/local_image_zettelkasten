@@ -47,18 +47,6 @@
     </div>
 
     <div class="form-grid">
-      <label for="settings-cmd-prefix">Command Prefix</label>
-      <input id="settings-cmd-prefix" type="text" value={$config.ui.prefixes.command} on:input={(event) => setConfig((draft) => draft.ui.prefixes.command = textValue(event))} />
-
-      <label for="settings-artist-prefix">Artist Prefix</label>
-      <input id="settings-artist-prefix" type="text" value={$config.ui.prefixes.artist} on:input={(event) => setConfig((draft) => draft.ui.prefixes.artist = textValue(event))} />
-
-      <label for="settings-tag-prefix">Tag Prefix</label>
-      <input id="settings-tag-prefix" type="text" value={$config.ui.prefixes.tag} on:input={(event) => setConfig((draft) => draft.ui.prefixes.tag = textValue(event))} />
-
-      <label for="settings-platform-prefix">Platform Prefix</label>
-      <input id="settings-platform-prefix" type="text" value={$config.ui.prefixes.platform} on:input={(event) => setConfig((draft) => draft.ui.prefixes.platform = textValue(event))} />
-
       <label for="settings-layout-mode">Vault Layout Mode</label>
       <select id="settings-layout-mode" value={$config.ui.vault_layout_mode} on:change={(event) => setConfig((draft) => draft.ui.vault_layout_mode = textValue(event))}>
         <option value="masonry">Masonry</option>
@@ -152,64 +140,64 @@
         </div>
         <div class="divider"></div>
         <div class="shortcut-row">
-          <span class="key">&gt;grid</span>
+          <span class="key">/grid</span>
           <span class="desc">Switch Vault to Grid Layout</span>
         </div>
         <div class="shortcut-row">
-          <span class="key">&gt;masonry</span>
+          <span class="key">/masonry</span>
           <span class="desc">Switch Vault to Masonry Layout</span>
         </div>
         <div class="shortcut-row">
-          <span class="key">&gt;zoom-in</span>
+          <span class="key">/zoom-in</span>
           <span class="desc">Increase Vault Tile Size</span>
         </div>
         <div class="shortcut-row">
-          <span class="key">&gt;zoom-out</span>
+          <span class="key">/zoom-out</span>
           <span class="desc">Decrease Vault Tile Size</span>
         </div>
         <div class="shortcut-row">
-          <span class="key">&gt;toggle-inspector</span>
+          <span class="key">/toggle-inspector</span>
           <span class="desc">Toggle Inspector Panel</span>
         </div>
         <div class="shortcut-row">
-          <span class="key">&gt;ram-track</span>
+          <span class="key">/ram-track</span>
           <span class="desc">Toggle RAM Tracker Footer</span>
         </div>
         <div class="shortcut-row">
-          <span class="key">&gt;scan-auth</span>
+          <span class="key">/scan-auth</span>
           <span class="desc">Run Auth Status Scan</span>
         </div>
         <div class="shortcut-row">
-          <span class="key">&gt;cleanup-review</span>
+          <span class="key">/cleanup-review</span>
           <span class="desc">Retry Review Cleanup</span>
         </div>
         <div class="shortcut-row">
-          <span class="key">&gt;sort-newest</span>
+          <span class="key">/sort-newest</span>
           <span class="desc">Sort Vault by Newest</span>
         </div>
         <div class="shortcut-row">
-          <span class="key">&gt;sort-oldest</span>
+          <span class="key">/sort-oldest</span>
           <span class="desc">Sort Vault by Oldest</span>
         </div>
         <div class="shortcut-row">
-          <span class="key">&gt;sort-artist</span>
+          <span class="key">/sort-artist</span>
           <span class="desc">Sort Vault by Artist</span>
         </div>
         <div class="shortcut-row">
-          <span class="key">&gt;media-all</span>
+          <span class="key">/media-all</span>
           <span class="desc">Show All Media Types</span>
         </div>
         <div class="shortcut-row">
-          <span class="key">&gt;media-image</span>
+          <span class="key">/media-image</span>
           <span class="desc">Filter Images Only</span>
         </div>
         <div class="shortcut-row">
-          <span class="key">&gt;media-video</span>
+          <span class="key">/media-video</span>
           <span class="desc">Filter Videos Only</span>
         </div>
         <div class="divider"></div>
         <div class="shortcut-row">
-          <span class="key">&gt;</span>
+          <span class="key">/</span>
           <span class="desc">Command Prefix</span>
         </div>
         <div class="shortcut-row">
