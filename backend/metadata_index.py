@@ -380,7 +380,7 @@ def _row_stale(row) -> bool:
 
 def stale_metadata_hashes(conn: sqlite3.Connection, limit: int | None = None) -> list[str]:
     ensure_metadata_schema(conn)
-    rows = conn.execute("""
+    cursor = conn.execute("""
         SELECT
             items.hash,
             item_metadata_files.item_hash,
@@ -394,14 +394,34 @@ def stale_metadata_hashes(conn: sqlite3.Connection, limit: int | None = None) ->
         FROM items
         LEFT JOIN item_metadata_files ON item_metadata_files.item_hash = items.hash
         ORDER BY items.date_added DESC
-    """).fetchall()
+    """)
     stale = []
-    for row in rows:
+    for row in cursor:
         if _row_stale(row):
             stale.append(row[0])
             if limit and len(stale) >= limit:
                 break
     return stale
+
+
+def stale_metadata_count(conn: sqlite3.Connection) -> int:
+    ensure_metadata_schema(conn)
+    cursor = conn.execute("""
+        SELECT
+            items.hash,
+            item_metadata_files.item_hash,
+            item_metadata_files.note_path,
+            item_metadata_files.note_mtime_ns,
+            item_metadata_files.note_size,
+            item_metadata_files.wd_path,
+            item_metadata_files.wd_mtime_ns,
+            item_metadata_files.wd_size,
+            item_metadata_files.status
+        FROM items
+        LEFT JOIN item_metadata_files ON item_metadata_files.item_hash = items.hash
+        ORDER BY items.date_added DESC
+    """)
+    return sum(1 for row in cursor if _row_stale(row))
 
 
 def reindex_stale_metadata_batch(conn: sqlite3.Connection, limit: int = REPAIR_BATCH_SIZE) -> dict:
@@ -437,7 +457,7 @@ def metadata_index_status(conn: sqlite3.Connection) -> dict:
     error_count = conn.execute("SELECT COUNT(*) FROM item_metadata_files WHERE status = 'error'").fetchone()[0]
     topic_count = conn.execute("SELECT COUNT(*) FROM item_topics").fetchone()[0]
     wd_count = conn.execute("SELECT COUNT(*) FROM item_wd_tags").fetchone()[0]
-    stale_count = len(stale_metadata_hashes(conn, limit=None))
+    stale_count = stale_metadata_count(conn)
     return {
         "ready": metadata_index_ready(conn),
         "repair_running": _repair_running,

@@ -8,7 +8,7 @@ import shutil
 import re
 
 from utils import get_config, QUEUES_DIR, ASSETS_DIR, existing_note_path_for
-from db.sqlite_operator import init_database, normalize_source_url
+from db.sqlite_operator import connect_database, normalize_source_url
 from db.search_manager import search_manager
 from processor import process_file
 from logger import log_ingestion
@@ -395,7 +395,7 @@ class ExternalIngestor:
         if not shortcode:
             return self._url_complete(url, expected_count)
 
-        conn = init_database()
+        conn = connect_database()
         try:
             rows = conn.execute(
                 'SELECT hash, file_extension FROM items WHERE LOWER(source_url) LIKE LOWER(?)',
@@ -424,7 +424,7 @@ class ExternalIngestor:
             conn.close()
 
     def _url_complete(self, url: str, expected_count: int = None) -> bool:
-        conn = init_database()
+        conn = connect_database()
         try:
             rows = conn.execute(
                 'SELECT hash, file_extension FROM items WHERE source_url_norm = ?',
@@ -453,7 +453,7 @@ class ExternalIngestor:
             conn.close()
 
     def _rollback_batch(self, batch_data: List[dict]) -> int:
-        conn = init_database()
+        conn = connect_database()
         rolled_back = 0
         try:
             for item in batch_data:

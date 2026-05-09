@@ -56,6 +56,7 @@ class SearchManager:
 
         self.is_hydrated = False
         self._sync_lock = threading.Lock()
+        self._rebuild_lock = threading.Lock()
         self._initialized = True
 
     def hydrate(self, conn: sqlite3.Connection):
@@ -98,42 +99,45 @@ class SearchManager:
     def query_image(self, phash: str, threshold: int = 5) -> List[Tuple[str, int, str]]:
 
         with self._sync_lock:
-            results = []
+            global_snapshot = self.global_tree.snapshot()
+            tile_snapshot = self.tile_tree.snapshot()
+
+        results = []
+        global_matches = BKTreeSearcher.query_snapshot(global_snapshot, phash, threshold)
+        for h, dist in global_matches:
+            results.append((h, dist, "Global"))
 
 
-            global_matches = self.global_tree.query(phash, threshold)
-            for h, dist in global_matches:
-                results.append((h, dist, "Global"))
+        tile_matches = BKTreeSearcher.query_snapshot(tile_snapshot, phash, threshold)
+        for h, dist in tile_matches:
+            results.append((h, dist, "Fragment-to-Whole"))
 
-
-            tile_matches = self.tile_tree.query(phash, threshold)
-            for h, dist in tile_matches:
-                results.append((h, dist, "Fragment-to-Whole"))
-
-            return results
+        return results
 
     def query_video(self, audio_hash: bytes, visual_embedding: bytes, ai_threshold: float = 0.08, audio_threshold: float = 0.85) -> List[Tuple[str, float, str]]:
 
         with self._sync_lock:
-            results = []
+            audio_snapshot = self.audio_tree.snapshot()
+            video_snapshot = self.video_tree.snapshot()
+
+        results = []
+
+        if audio_hash:
+
+            dist_threshold = 1.0 - audio_threshold
+            audio_matches = VPTreeSearcher.query_snapshot(audio_snapshot, audio_hash, dist_threshold)
+            for f_hash, dist in audio_matches:
+                similarity = 1.0 - dist
+                results.append((f_hash, similarity, "Sonic"))
 
 
-            if audio_hash:
+        if visual_embedding:
+            ai_matches = VPTreeSearcher.query_snapshot(video_snapshot, visual_embedding, ai_threshold)
+            for h, dist in ai_matches:
+                similarity = 1.0 - dist
+                results.append((h, similarity, "Semantic"))
 
-                dist_threshold = 1.0 - audio_threshold
-                audio_matches = self.audio_tree.query(audio_hash, dist_threshold)
-                for f_hash, dist in audio_matches:
-                    similarity = 1.0 - dist
-                    results.append((f_hash, similarity, "Sonic"))
-
-
-            if visual_embedding:
-                ai_matches = self.video_tree.query(visual_embedding, ai_threshold)
-                for h, dist in ai_matches:
-                    similarity = 1.0 - dist
-                    results.append((h, similarity, "Semantic"))
-
-            return results
+        return results
 
     def url_exists(self, url: str) -> bool:
 
@@ -143,19 +147,24 @@ class SearchManager:
     def query_global_only(self, phash: str, threshold: int = 5) -> list:
 
         with self._sync_lock:
-            return self.global_tree.query(phash, threshold)
+            snapshot = self.global_tree.snapshot()
+        return BKTreeSearcher.query_snapshot(snapshot, phash, threshold)
 
     def update_indexes(self, file_hash: str, phash: Optional[str], url: Optional[str], tiles: List[Tuple[int, str]] = None, audio_hash: bytes = None, visual_embedding: bytes = None):
 
+        should_rebuild = False
         with self._sync_lock:
             self._update_indexes_unlocked(file_hash, phash, url, tiles, audio_hash, visual_embedding)
             if self._vp_pending_count_locked() >= self.VP_PENDING_REBUILD_THRESHOLD:
-                self._rebuild_deferred_indexes_locked("pending_threshold")
+                should_rebuild = True
+        if should_rebuild:
+            self._rebuild_deferred_indexes("pending_threshold")
 
     def update_indexes_batch(self, items: list[dict]):
 
         if not items:
             return
+        should_rebuild = False
         with self._sync_lock:
             for item in items:
                 self._update_indexes_unlocked(
@@ -167,12 +176,13 @@ class SearchManager:
                     item.get("visual_embedding"),
                 )
             log_ingestion("INFO", "RAM index batch update queued", count=len(items))
-            self._rebuild_deferred_indexes_locked("batch_update")
+            should_rebuild = self._vp_pending_count_locked() > 0
+        if should_rebuild:
+            self._rebuild_deferred_indexes("batch_update")
 
     def rebuild_deferred_indexes(self):
 
-        with self._sync_lock:
-            self._rebuild_deferred_indexes_locked("explicit")
+        self._rebuild_deferred_indexes("explicit")
 
     def _update_indexes_unlocked(self, file_hash: str, phash: Optional[str], url: Optional[str], tiles: List[Tuple[int, str]] = None, audio_hash: bytes = None, visual_embedding: bytes = None):
 
@@ -213,6 +223,50 @@ class SearchManager:
                 duration_ms=duration_ms,
                 rebuild_count=tree.rebuild_count,
             )
+
+    def _rebuild_deferred_indexes(self, reason: str):
+
+        if not self._rebuild_lock.acquire(blocking=False):
+            return
+        needs_follow_up = False
+        try:
+            with self._sync_lock:
+                plans = [
+                    ("video", self.video_tree, self.video_tree.rebuild_plan()),
+                    ("audio", self.audio_tree, self.audio_tree.rebuild_plan()),
+                ]
+
+            replacements = []
+            for name, tree, plan in plans:
+                if not plan:
+                    continue
+                started = time.perf_counter()
+                replacement = tree.build_replacement(plan)
+                duration_ms = round((time.perf_counter() - started) * 1000, 2)
+                replacements.append((name, tree, plan, replacement, duration_ms))
+
+            for name, tree, plan, replacement, duration_ms in replacements:
+                with self._sync_lock:
+                    stats = tree.apply_replacement(plan, replacement)
+                    pending = tree.pending_count()
+                    rebuild_count = tree.rebuild_count
+                log_ingestion(
+                    "INFO",
+                    "VP-tree index rebuilt" if stats.get("rebuilt") else "VP-tree index rebuild skipped",
+                    tree=name,
+                    reason=reason,
+                    indexed=stats.get("indexed", tree.indexed_count()),
+                    merged=stats.get("merged", 0),
+                    pending=pending,
+                    duration_ms=duration_ms,
+                    rebuild_count=rebuild_count,
+                )
+            with self._sync_lock:
+                needs_follow_up = self._vp_pending_count_locked() >= self.VP_PENDING_REBUILD_THRESHOLD
+        finally:
+            self._rebuild_lock.release()
+        if needs_follow_up:
+            self._rebuild_deferred_indexes(f"{reason}_followup")
 
 
 search_manager = SearchManager()

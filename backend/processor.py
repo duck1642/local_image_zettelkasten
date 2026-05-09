@@ -16,7 +16,7 @@ from fingerprint import (
 )
 from validators import get_mime_type, is_allowed_mime
 from db.sqlite_operator import (
-    init_database, check_duplicate_hash, insert_to_database,
+    connect_database, check_duplicate_hash, insert_to_database,
     get_all_video_signatures, insert_tiles
 )
 from db.search_manager import search_manager
@@ -227,7 +227,7 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
         return False, f"Invalid extension: {filepath.suffix}", None
 
     file_hash = calculate_file_hash(filepath)
-    conn = init_database()
+    conn = connect_database()
     if check_duplicate_hash(conn, file_hash):
         conn.close()
         log_system("INFO", f"Skipped: Duplicate hash", hash=file_hash, file=filepath.name)

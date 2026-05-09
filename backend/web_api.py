@@ -644,14 +644,9 @@ def _get_facets_sync(kind: str, q: str = "", limit: int = 100):
         if metadata_index_ready(conn):
             return {"kind": kind, "items": metadata_facets(conn, kind, needle.casefold(), limit)}
 
-        log_system("WARNING", "Metadata index not ready; using legacy facet scan", kind=kind)
-        cursor.execute("SELECT hash FROM items ORDER BY date_added DESC")
-        rows = cursor.fetchall()
-        if kind == "topic":
-            items = _count_python_facets(rows, load_note_topics, needle, limit)
-        else:
-            items = _count_python_facets(rows, _wd_names_for_hash, needle, limit)
-        return {"kind": kind, "items": items}
+        start_metadata_repair_worker(full=False)
+        log_system("WARNING", "Metadata index not ready; skipping legacy facet scan and starting repair", kind=kind)
+        return {"kind": kind, "items": []}
     finally:
         conn.close()
 
@@ -831,11 +826,12 @@ def _get_items_sync(field, value, sort, media_type, artist, platform, filename, 
                 params.append(f"%{wd_value.casefold()}%")
 
         has_frontmatter_filter = bool(topic_filters or wd_tag_filters)
-        has_python_frontmatter_filter = has_frontmatter_filter and not use_metadata_index
-        if has_python_frontmatter_filter:
-            log_system("WARNING", "Metadata index not ready; using legacy item filter scan")
+        if has_frontmatter_filter and not use_metadata_index:
+            start_metadata_repair_worker(full=False)
+            log_system("WARNING", "Metadata index not ready; skipping topic/WD filter scan and starting repair")
+            return {"items": [], "has_more": False, "next_cursor": None}
 
-        if cursor and not has_python_frontmatter_filter:
+        if cursor:
             cursor_payload = _decode_cursor(cursor)
             cursor_date = str(cursor_payload.get("date") or "")
             cursor_hash = str(cursor_payload.get("hash") or "")
@@ -864,28 +860,13 @@ def _get_items_sync(field, value, sort, media_type, artist, platform, filename, 
         if sort == 'oldest': order_clause = " ORDER BY date_added ASC, hash ASC"
         elif sort == 'artist': order_clause = " ORDER BY COALESCE(source_artist, '') COLLATE NOCASE ASC, date_added DESC, hash DESC"
 
-        sql_limit = 100000 if has_python_frontmatter_filter else limit + 1
-
-        cursor_obj.execute(f"{base_query}{where_clause}{order_clause} LIMIT {sql_limit}", tuple(params))
+        cursor_obj.execute(f"{base_query}{where_clause}{order_clause} LIMIT {limit + 1}", tuple(params))
         rows = cursor_obj.fetchall()
 
         items = []
-        topic_lowers = [value.lower() for value in topic_filters]
-        wd_tag_lowers = [value.lower() for value in wd_tag_filters]
 
         for row in rows:
             h, ext = row[0], (row[1] or "")
-
-            if topic_lowers and not use_metadata_index:
-                note_topics = load_note_topics(h)
-                topic_strings = [t.lower() for t in note_topics]
-                if not all(any(topic_value in topic_string for topic_string in topic_strings) for topic_value in topic_lowers):
-                    continue
-
-            if wd_tag_lowers and not use_metadata_index:
-                wd_strings = [name.lower() for name in _wd_names_for_hash(h)]
-                if not all(any(wd_value in wd_string for wd_string in wd_strings) for wd_value in wd_tag_lowers):
-                    continue
 
             items.append({
                 "hash": h, "extension": ext, "mime_type": row[2],
@@ -895,9 +876,6 @@ def _get_items_sync(field, value, sort, media_type, artist, platform, filename, 
                 "thumbnail_url": f"/api/thumbnails/{h}",
                 "width": row[8], "height": row[9]
             })
-
-        if has_python_frontmatter_filter and cursor:
-            items = [item for item in items if _item_after_cursor(item, cursor, sort)]
 
         has_more = len(items) > limit
         if has_more:

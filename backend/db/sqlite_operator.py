@@ -1,9 +1,13 @@
 
 import sqlite3
+import threading
 from pathlib import Path
 from datetime import datetime
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 from utils import DB_PATH
+
+_SCHEMA_READY = False
+_SCHEMA_LOCK = threading.Lock()
 
 
 def normalize_source_url(url: str) -> str:
@@ -22,6 +26,7 @@ def normalize_source_url(url: str) -> str:
     return urlunsplit((scheme, host, path, query, ""))
 
 def init_database():
+    global _SCHEMA_READY
 
     conn = sqlite3.connect(DB_PATH, timeout=5)
     cursor = conn.cursor()
@@ -97,6 +102,19 @@ def init_database():
     ensure_metadata_schema(conn)
 
     conn.commit()
+    _SCHEMA_READY = True
+    return conn
+
+
+def connect_database():
+    if not _SCHEMA_READY or not DB_PATH.exists():
+        with _SCHEMA_LOCK:
+            if not _SCHEMA_READY or not DB_PATH.exists():
+                return init_database()
+    conn = sqlite3.connect(DB_PATH, timeout=5)
+    cursor = conn.cursor()
+    cursor.execute('PRAGMA journal_mode=WAL;')
+    cursor.execute('PRAGMA foreign_keys = ON;')
     return conn
 
 def check_duplicate_hash(conn: sqlite3.Connection, file_hash: str) -> bool:

@@ -1,9 +1,13 @@
 import asyncio
+import concurrent.futures
 import importlib
 import inspect
 import json
 import shutil
 import sys
+import threading
+import time
+import types
 from pathlib import Path
 
 import pytest
@@ -23,7 +27,7 @@ def fresh_backend(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *module_names
     if str(BACKEND) not in sys.path:
         sys.path.insert(0, str(BACKEND))
     for name in list(sys.modules):
-        if name in {"utils", "web_api", "queue_service", "md_generator", "metadata_index", "processor"} or name.startswith(("logger", "db.", "tagging")):
+        if name in {"utils", "web_api", "queue_service", "md_generator", "metadata_index", "processor", "external_ingestion"} or name.startswith(("logger", "db.", "tagging")):
             del sys.modules[name]
     return [importlib.import_module(name) for name in module_names]
 
@@ -357,3 +361,234 @@ def test_review_replace_preserves_old_manual_metadata(monkeypatch, tmp_path):
     assert new_data["date_added"] == "2020-01-01 00:00:00"
     assert new_data["topics"] == ["preserved"]
     assert new_data["wd_tags"] == []
+
+
+def test_wd_tagger_reuses_cached_session(monkeypatch, tmp_path):
+    service, utils = fresh_backend(monkeypatch, tmp_path, "tagging.service", "utils")
+    source = tmp_path / "tagged.jpg"
+    source.write_bytes(b"image")
+    calls = {"sessions": 0}
+
+    class FakeSession:
+        def __init__(self, path, providers=None):
+            calls["sessions"] += 1
+
+        def get_inputs(self):
+            return [types.SimpleNamespace(name="input", shape=[1, 448, 448, 3])]
+
+        def get_outputs(self):
+            return [types.SimpleNamespace(name="output")]
+
+        def get_providers(self):
+            return ["CPUExecutionProvider"]
+
+    fake_ort = types.SimpleNamespace(
+        get_available_providers=lambda: ["CPUExecutionProvider"],
+        InferenceSession=FakeSession,
+    )
+    fake_hf = types.SimpleNamespace(hf_hub_download=lambda **kwargs: "")
+    monkeypatch.setitem(sys.modules, "onnxruntime", fake_ort)
+    monkeypatch.setitem(sys.modules, "huggingface_hub", fake_hf)
+    monkeypatch.setattr(service, "get_mime_type", lambda path: "image/jpeg")
+    monkeypatch.setattr(service, "_ensure_model_files", lambda repo, hf: (tmp_path / "model.onnx", tmp_path / "tags.csv"))
+    monkeypatch.setattr(service, "_load_labels", lambda path: [{"name": "safe", "category": "9"}])
+    monkeypatch.setattr(service.Image, "open", lambda path: types.SimpleNamespace(seek=lambda frame: None))
+    monkeypatch.setattr(service, "_predict_image_tags", lambda *args, **kwargs: ({"label": "safe"}, [], [{"name": "tag"}]))
+
+    first = service.tag_media(source, item_hash="6" * 64, config={"tagging": {"device": "cpu"}})
+    second = service.tag_media(source, item_hash="7" * 64, config={"tagging": {"device": "cpu"}})
+
+    assert first.status == "ok"
+    assert second.status == "ok"
+    assert calls["sessions"] == 1
+    assert utils.wd_tag_cache_path_for("6" * 64).exists()
+
+
+def test_wd_tagger_concurrent_calls_initialize_session_once(monkeypatch, tmp_path):
+    service, = fresh_backend(monkeypatch, tmp_path, "tagging.service")
+    source = tmp_path / "tagged.jpg"
+    source.write_bytes(b"image")
+    calls = {"sessions": 0}
+
+    class FakeSession:
+        def __init__(self, path, providers=None):
+            time.sleep(0.05)
+            calls["sessions"] += 1
+
+        def get_inputs(self):
+            return [types.SimpleNamespace(name="input", shape=[1, 448, 448, 3])]
+
+        def get_outputs(self):
+            return [types.SimpleNamespace(name="output")]
+
+        def get_providers(self):
+            return ["CPUExecutionProvider"]
+
+    monkeypatch.setitem(sys.modules, "onnxruntime", types.SimpleNamespace(get_available_providers=lambda: ["CPUExecutionProvider"], InferenceSession=FakeSession))
+    monkeypatch.setitem(sys.modules, "huggingface_hub", types.SimpleNamespace(hf_hub_download=lambda **kwargs: ""))
+    monkeypatch.setattr(service, "get_mime_type", lambda path: "image/jpeg")
+    monkeypatch.setattr(service, "_ensure_model_files", lambda repo, hf: (tmp_path / "model.onnx", tmp_path / "tags.csv"))
+    monkeypatch.setattr(service, "_load_labels", lambda path: [{"name": "safe", "category": "9"}])
+    monkeypatch.setattr(service.Image, "open", lambda path: types.SimpleNamespace(seek=lambda frame: None))
+    monkeypatch.setattr(service, "_predict_image_tags", lambda *args, **kwargs: ({"label": "safe"}, [], []))
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+        results = list(executor.map(lambda index: service.tag_media(source, item_hash=f"{index:064x}", config={"tagging": {"device": "cpu"}}), range(4)))
+
+    assert [result.status for result in results] == ["ok", "ok", "ok", "ok"]
+    assert calls["sessions"] == 1
+
+
+def test_wd_tagger_failed_session_is_not_cached(monkeypatch, tmp_path):
+    service, = fresh_backend(monkeypatch, tmp_path, "tagging.service")
+    source = tmp_path / "tagged.jpg"
+    source.write_bytes(b"image")
+    calls = {"sessions": 0}
+
+    class FakeSession:
+        def __init__(self, path, providers=None):
+            calls["sessions"] += 1
+            if calls["sessions"] == 1:
+                raise RuntimeError("load failed")
+
+        def get_inputs(self):
+            return [types.SimpleNamespace(name="input", shape=[1, 448, 448, 3])]
+
+        def get_outputs(self):
+            return [types.SimpleNamespace(name="output")]
+
+        def get_providers(self):
+            return ["CPUExecutionProvider"]
+
+    monkeypatch.setitem(sys.modules, "onnxruntime", types.SimpleNamespace(get_available_providers=lambda: ["CPUExecutionProvider"], InferenceSession=FakeSession))
+    monkeypatch.setitem(sys.modules, "huggingface_hub", types.SimpleNamespace(hf_hub_download=lambda **kwargs: ""))
+    monkeypatch.setattr(service, "get_mime_type", lambda path: "image/jpeg")
+    monkeypatch.setattr(service, "_ensure_model_files", lambda repo, hf: (tmp_path / "model.onnx", tmp_path / "tags.csv"))
+    monkeypatch.setattr(service, "_load_labels", lambda path: [{"name": "safe", "category": "9"}])
+    monkeypatch.setattr(service.Image, "open", lambda path: types.SimpleNamespace(seek=lambda frame: None))
+    monkeypatch.setattr(service, "_predict_image_tags", lambda *args, **kwargs: ({"label": "safe"}, [], []))
+
+    failed = service.tag_media(source, item_hash="8" * 64, config={"tagging": {"device": "cpu"}})
+    recovered = service.tag_media(source, item_hash="9" * 64, config={"tagging": {"device": "cpu"}})
+
+    assert failed.status == "failed"
+    assert recovered.status == "ok"
+    assert calls["sessions"] == 2
+
+
+def test_stale_metadata_scan_streams_and_respects_limit(monkeypatch, tmp_path):
+    metadata_index, = fresh_backend(monkeypatch, tmp_path, "metadata_index")
+    seen = {"rows": 0}
+
+    class Cursor:
+        def __iter__(self):
+            for index in range(10):
+                seen["rows"] += 1
+                yield (str(index), None, "", 0, 0, "", 0, 0, "")
+
+        def fetchall(self):
+            raise AssertionError("fetchall must not be used")
+
+    class Conn:
+        def execute(self, *args, **kwargs):
+            return Cursor()
+
+    monkeypatch.setattr(metadata_index, "ensure_metadata_schema", lambda conn: None)
+
+    assert metadata_index.stale_metadata_hashes(Conn(), limit=3) == ["0", "1", "2"]
+    assert seen["rows"] == 3
+
+
+def test_metadata_status_uses_streaming_stale_count(monkeypatch, tmp_path):
+    metadata_index, = fresh_backend(monkeypatch, tmp_path, "metadata_index")
+
+    class ScalarCursor:
+        def __init__(self, value):
+            self.value = value
+
+        def fetchone(self):
+            return (self.value,)
+
+    class StaleCursor:
+        def __iter__(self):
+            yield ("a", None, "", 0, 0, "", 0, 0, "")
+            yield ("b", "b", "", 0, 0, "", 0, 0, "ok")
+
+        def fetchall(self):
+            raise AssertionError("fetchall must not be used")
+
+    class Conn:
+        def execute(self, sql, *args):
+            if "FROM items" in sql and "LEFT JOIN item_metadata_files" in sql:
+                return StaleCursor()
+            return ScalarCursor(0)
+
+    monkeypatch.setattr(metadata_index, "ensure_metadata_schema", lambda conn: None)
+    monkeypatch.setattr(metadata_index, "metadata_index_ready", lambda conn: False)
+    monkeypatch.setattr(metadata_index, "_row_stale", lambda row: row[0] == "a")
+
+    status = metadata_index.metadata_index_status(Conn())
+
+    assert status["stale"] == 1
+
+
+def test_topic_filter_not_ready_skips_legacy_disk_scan(monkeypatch, tmp_path):
+    web_api, = fresh_backend(monkeypatch, tmp_path, "web_api")
+    repair_calls = []
+    monkeypatch.setattr(web_api, "metadata_index_ready", lambda conn: False)
+    monkeypatch.setattr(web_api, "start_metadata_repair_worker", lambda full=False: repair_calls.append(full) or {"status": "started"})
+    monkeypatch.setattr(web_api, "load_note_topics", lambda item_hash: (_ for _ in ()).throw(AssertionError("legacy note scan called")))
+    monkeypatch.setattr(web_api, "_wd_names_for_hash", lambda item_hash: (_ for _ in ()).throw(AssertionError("legacy wd scan called")))
+
+    result = web_api._get_items_sync(None, None, "newest", "all", [], [], [], ["topic"], [], [], None, 25)
+
+    assert result == {"items": [], "has_more": False, "next_cursor": None}
+    assert repair_calls == [False]
+
+    facet = web_api._get_facets_sync("topic", "topic", 25)
+
+    assert facet == {"kind": "topic", "items": []}
+    assert repair_calls == [False, False]
+
+
+def test_search_manager_query_sees_pending_during_vp_rebuild(monkeypatch, tmp_path):
+    search_manager_module, = fresh_backend(monkeypatch, tmp_path, "db.search_manager")
+    manager = search_manager_module.SearchManager()
+    manager.video_tree = search_manager_module.VPTreeSearcher(search_manager_module._cosine_dist)
+    manager.audio_tree = search_manager_module.VPTreeSearcher(search_manager_module._hamming_dist_audio)
+    manager.global_tree = search_manager_module.BKTreeSearcher()
+    manager.tile_tree = search_manager_module.BKTreeSearcher()
+    manager.url_registry = search_manager_module.URLRegistry()
+
+    import numpy as np
+
+    sig = np.array([1.0, 0.0], dtype=np.float32).tobytes()
+    manager.video_tree.add("video-hash", sig)
+    started = threading.Event()
+    release = threading.Event()
+    original_make_tree = search_manager_module.VPTreeSearcher._make_tree
+
+    def slow_make_tree(self, items):
+        started.set()
+        release.wait(timeout=2)
+        return original_make_tree(self, items)
+
+    monkeypatch.setattr(search_manager_module.VPTreeSearcher, "_make_tree", slow_make_tree)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(manager.rebuild_deferred_indexes)
+        assert started.wait(timeout=2)
+        matches = manager.query_video(None, sig, ai_threshold=0.01)
+        release.set()
+        future.result(timeout=2)
+
+    assert matches == [("video-hash", 1.0, "Semantic")]
+
+
+def test_hot_ingestion_paths_use_lightweight_db_helper(monkeypatch, tmp_path):
+    processor, external_ingestion = fresh_backend(monkeypatch, tmp_path, "processor", "external_ingestion")
+
+    assert "connect_database()" in inspect.getsource(processor.process_file)
+    assert "connect_database()" in inspect.getsource(external_ingestion.ExternalIngestor._url_complete)
+    assert "connect_database()" in inspect.getsource(external_ingestion.ExternalIngestor._instagram_complete)
+    assert "connect_database()" in inspect.getsource(external_ingestion.ExternalIngestor._rollback_batch)

@@ -1,5 +1,6 @@
 import csv
 import json
+import threading
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -12,6 +13,22 @@ from fingerprint import extract_sampled_video_frames
 from logger import log_system
 from utils import MODELS_DIR, atomic_write_text, calculate_file_hash, get_config, wd_tag_cache_path_for
 from validators import get_mime_type
+
+
+@dataclass
+class _ModelState:
+    model_path: Path
+    tags_path: Path
+    labels: list[dict[str, str]]
+    session: Any
+    input_meta: Any
+    output_meta: Any
+    provider: str
+    provider_warning: str
+
+
+_MODEL_CACHE: dict[tuple[str, str, tuple[str, ...]], _ModelState] = {}
+_MODEL_CACHE_LOCK = threading.Lock()
 
 
 @dataclass
@@ -86,13 +103,13 @@ def tag_media(media_path: str | Path, item_hash: str = None, config: dict = None
         import onnxruntime as ort
         from huggingface_hub import hf_hub_download
 
-        model_path, tags_path = _ensure_model_files(model_repo, hf_hub_download)
-        labels = _load_labels(tags_path)
-        providers, provider_warning = _providers_for_device(device, ort)
-        session = ort.InferenceSession(str(model_path), providers=providers)
-        input_meta = session.get_inputs()[0]
-        output_meta = session.get_outputs()[0]
-        provider = session.get_providers()[0] if session.get_providers() else ""
+        model_state = _cached_model_state(model_repo, device, ort, hf_hub_download)
+        labels = model_state.labels
+        session = model_state.session
+        input_meta = model_state.input_meta
+        output_meta = model_state.output_meta
+        provider = model_state.provider
+        provider_warning = model_state.provider_warning
         if media_type == "video":
             samples = extract_sampled_video_frames(media_path, video_frame_count)
             if not samples:
@@ -154,6 +171,34 @@ def _write_result(result: TagResult):
         return
     target = wd_tag_cache_path_for(result.hash)
     atomic_write_text(target, json.dumps(result.to_dict(), indent=2, ensure_ascii=False))
+
+
+def _cached_model_state(model_repo: str, device: str, ort, hf_hub_download) -> _ModelState:
+    providers, provider_warning = _providers_for_device(device, ort)
+    cache_key = (model_repo, (device or "auto").lower(), tuple(providers))
+    with _MODEL_CACHE_LOCK:
+        cached = _MODEL_CACHE.get(cache_key)
+        if cached is not None:
+            return cached
+
+        model_path, tags_path = _ensure_model_files(model_repo, hf_hub_download)
+        labels = _load_labels(tags_path)
+        session = ort.InferenceSession(str(model_path), providers=providers)
+        input_meta = session.get_inputs()[0]
+        output_meta = session.get_outputs()[0]
+        provider = session.get_providers()[0] if session.get_providers() else ""
+        state = _ModelState(
+            model_path=model_path,
+            tags_path=tags_path,
+            labels=labels,
+            session=session,
+            input_meta=input_meta,
+            output_meta=output_meta,
+            provider=provider,
+            provider_warning=provider_warning,
+        )
+        _MODEL_CACHE[cache_key] = state
+        return state
 
 
 def _ensure_model_files(model_repo: str, hf_hub_download):

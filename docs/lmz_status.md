@@ -336,6 +336,19 @@ VSCode-friendly test launchers:
     - manual Markdown `artist` / `date_added` edits ignored and overwritten.
     - review replace destroying old manual metadata.
   - targeted backend pytest passes; needs real-vault migration/reindex smoke before closing fully.
+- P1 performance:
+  - WD tagger caches ONNX session/model labels per model/device/provider selection.
+  - metadata stale scan streams rows and status counts stale rows without building a full list.
+  - topic/WD item and facet filters skip legacy disk scans when metadata index is not ready and start repair instead.
+  - SearchManager queries use snapshots; VP-tree rebuild work happens outside the query lock.
+  - hot ingestion paths use a lightweight SQLite connector after schema initialization.
+  - Resolved Gemini findings:
+    - WD ONNX session recreated per `tag_media()`.
+    - metadata stale scan full `.fetchall()`.
+    - N+1 fallback scan for topic/WD filters when metadata index is not ready.
+    - SearchManager lock blocking queries during VP-tree rebuild.
+    - SQLite connection churn during concurrent ingestion.
+  - targeted backend pytest passes; needs real-vault ingest/search smoke before closing fully.
 
 ### Useful Checks
 
@@ -348,37 +361,13 @@ VSCode-friendly test launchers:
 
 ### Backend Architectural & Performance Issues (Found during Gemini's inspection)
 
-1. **N+1 Query & Synchronous Disk I/O Block**
-   - **Severity:** CRITICAL
-   - **File:** `backend/web_api.py` (~line 900 in `_get_items_sync`)
-   - **The Mechanism:** When the metadata index is missing/hydrating and a user filters by topic or tag, the fallback logic executes a `LIMIT 100000` SQL query. It then loops over these rows in Python, synchronously calling `load_note_topics()` and `_wd_names_for_hash()` for each row until the pagination limit is reached.
-   - **Why it's broken:** Reading thousands of small `.md` and `.json` files from disk synchronously inside a single-threaded API route will entirely block the backend event loop, causing massive latency or frontend timeouts on large vaults.
-
-2. **SQLite Connection Thrashing**
-   - **Severity:** HIGH
-   - **File:** `backend/processor.py` (line 230 in `process_file`) & `backend/external_ingestion.py`
-   - **The Mechanism:** Every invocation of `process_file` calls `conn = init_database()`, establishing a brand-new connection. During online ingestion, `ExternalIngestor` maps `_worker_item` to a `ThreadPoolExecutor`.
-   - **Why it's broken:** When downloading galleries with concurrent workers, 10+ threads are continuously spinning up, querying, committing, and tearing down hundreds of distinct SQLite connections. This causes significant, unnecessary OS-level lock contention and CPU overhead, despite WAL mode.
-
-3. **Redundant FFmpeg Subprocesses**
+1. **Redundant FFmpeg Subprocesses**
    - **Severity:** MEDIUM
    - **File:** `backend/fingerprint.py` (~line 92 in `extract_sampled_video_frames`)
    - **The Mechanism:** To generate an AI visual embedding, the code calculates 5 timestamps and loops over them, calling `extract_video_frame()` each time. That function executes `subprocess.run(['ffmpeg', ...])`.
    - **Why it's broken:** Generating an embedding requires spawning 5 separate OS-level FFmpeg processes per video. Each process must independently open the video, parse the container headers, and seek to the target frame, severely slowing down video ingestion.
 
-4. **ML Model Initialization Thrashing**
-   - **Severity:** HIGH
-   - **File:** `backend/tagging/service.py` (inside `tag_media`)
-   - **The Mechanism:** Every invocation of `tag_media` creates a brand new `ort.InferenceSession` and loads the WD-Tagger model weights into RAM/VRAM.
-   - **Why it's broken:** Loading an ONNX model is incredibly CPU and memory intensive (often taking 0.5 - 3 seconds). Doing this per-image instead of caching the session globally at the module level means a batch of 100 images forces the backend to allocate and destroy the ML model 100 separate times.
-
-5. **O(N) Full-Table Scan for Stale Metadata**
-   - **Severity:** MEDIUM (High at scale)
-   - **File:** `backend/metadata_index.py` (`stale_metadata_hashes`)
-   - **The Mechanism:** The watchdog/repair worker queries `SELECT ... FROM items LEFT JOIN item_metadata_files` and immediately calls `.fetchall()`. It then loops over the entire result set in Python to find stale rows.
-   - **Why it's broken:** For a vault with 100,000 items, `.fetchall()` loads a 100,000-row tuple array into Python memory every time the repair worker looks for the next batch of 500 items. This causes massive RAM spikes and stalls the SQLite connection. It should stream via `.fetchmany()`.
-
-6. **I/O Bound Thumbnail Generation CPU Locking**
+2. **I/O Bound Thumbnail Generation CPU Locking**
    - **Severity:** LOW (Medium on UX)
    - **File:** `backend/thumbnails.py` (`generate_image_thumbnail`)
    - **The Mechanism:** Thumbnails are generated dynamically using `Image.thumbnail` from Pillow.
@@ -400,15 +389,11 @@ VSCode-friendly test launchers:
 
 ### Hidden Backend Fragilities (Found during Gemini's inspection)
 
-1. **The "Pause The World" Thread Lock**
-   - **File:** `backend/db/search_manager.py`
-   - **Issue:** The `SearchManager` uses a single `threading.Lock()`. When `_rebuild_deferred_indexes_locked` rebuilds the VP-Trees (which can take several seconds of pure Python math), every single API request trying to query an image or video is completely blocked. This will cause the frontend to stutter or API requests to timeout under load.
-
-2. **Windows File-Lock Hostility**
+1. **Windows File-Lock Hostility**
    - **File:** `backend/web_api.py`
    - **Issue:** When the frontend renders an image/video from `/review-assets`, the Chromium webview often holds an OS-level read-lock on Windows. If the user clicks "Delete" or "Variant", `path.unlink()` will fail with a permission error. The backend catches this and pushes it to `pending_cleanup`, but it's a fragile band-aid. The frontend should actively unmount/hide the media element before sending the POST request.
 
-3. **External Downloader Dependency Coupling & Long Timeouts**
+2. **External Downloader Dependency Coupling & Long Timeouts**
    - **File:** `backend/downloaders/gallery_dl_wrapper.py`, `backend/downloaders/yt_dlp_wrapper.py`
    - **Issue:** `gallery-dl` and `yt-dlp` run via `subprocess.run()` with built-in OS-level timeouts (5 minutes and 10 minutes respectively). While these timeouts successfully prevent permanent thread deadlocks if a site rate-limits the downloader, waiting up to 10 minutes for a stuck subprocess to die can consume a `ThreadPoolExecutor` worker slot for a very long time, making the UI queue appear "frozen" to the user.
 
@@ -417,14 +402,6 @@ VSCode-friendly test launchers:
 - **Maintenance Tools UI Integration:** The current maintenance scripts for capturing cookies (`backend/scripts/auth_cookies_builder.py`) and authenticating with Pixiv (`backend/scripts/auth_pixiv_auto.py`) only run in the CLI. These need to be connected to the Svelte UI so users can manage authentication directly from the desktop application without dropping into the terminal.
 
 ## Issue Remediation Plan
-
-### P1 Performance Hotspots
-
-- WD ONNX session recreated per `tag_media()`.
-- Metadata stale scan full `.fetchall()`.
-- N+1 fallback scan for topic/WD filters when metadata index is not ready.
-- SearchManager lock blocks queries during VP-tree rebuild.
-- SQLite connection churn during concurrent ingestion.
 
 ### P2 UX / Runtime Robustness
 
@@ -444,5 +421,5 @@ VSCode-friendly test launchers:
 
 1. `os.path` cleanup; logging for swallowed exceptions.
 2. Windows review unmount/action flow.
-3. ONNX session cache; stale metadata scan streaming; N+1 fallback mitigation.
-4. SearchManager lock/rebuild strategy; SQLite connection lifecycle; downloader timeout/cancel behavior; thumbnail throttling/cache behavior.
+3. FFmpeg frame extraction consolidation.
+4. downloader timeout/cancel behavior; thumbnail throttling/cache behavior.
