@@ -7,7 +7,10 @@ import time
 import shutil
 import re
 
-from utils import get_config, QUEUES_DIR, ASSETS_DIR, existing_note_path_for
+from utils import (
+    get_config, QUEUES_DIR, existing_asset_path_for, existing_note_path_for,
+    existing_wd_tag_cache_path_for
+)
 from db.sqlite_operator import connect_database, normalize_source_url
 from db.search_manager import search_manager
 from processor import process_file
@@ -421,7 +424,7 @@ class ExternalIngestor:
         conn = connect_database()
         try:
             rows = conn.execute(
-                'SELECT hash, file_extension FROM items WHERE LOWER(source_url) LIKE LOWER(?)',
+                'SELECT hash, file_extension, mime_type, storage_id FROM items WHERE LOWER(source_url) LIKE LOWER(?)',
                 (f"%/{shortcode}%",)
             ).fetchall()
 
@@ -429,8 +432,8 @@ class ExternalIngestor:
                 return False
 
             missing_assets = []
-            for file_hash, file_extension in rows:
-                asset_path = ASSETS_DIR / file_hash[:2] / f"{file_hash}{file_extension}"
+            for file_hash, file_extension, mime_type, storage_id in rows:
+                asset_path = existing_asset_path_for(file_hash, file_extension, mime_type, storage_id=storage_id)
                 if not asset_path.exists():
                     missing_assets.append(file_hash)
 
@@ -450,7 +453,7 @@ class ExternalIngestor:
         conn = connect_database()
         try:
             rows = conn.execute(
-                'SELECT hash, file_extension FROM items WHERE source_url_norm = ?',
+                'SELECT hash, file_extension, mime_type, storage_id FROM items WHERE source_url_norm = ?',
                 (normalize_source_url(url),)
             ).fetchall()
 
@@ -458,8 +461,8 @@ class ExternalIngestor:
                 return False
 
             missing_assets = []
-            for file_hash, file_extension in rows:
-                asset_path = ASSETS_DIR / file_hash[:2] / f"{file_hash}{file_extension}"
+            for file_hash, file_extension, mime_type, storage_id in rows:
+                asset_path = existing_asset_path_for(file_hash, file_extension, mime_type, storage_id=storage_id)
                 if not asset_path.exists():
                     missing_assets.append(file_hash)
 
@@ -485,21 +488,26 @@ class ExternalIngestor:
                     continue
 
                 row = conn.execute(
-                    'SELECT file_extension FROM items WHERE hash = ?',
+                    'SELECT file_extension, mime_type, storage_id FROM items WHERE hash = ?',
                     (file_hash,)
                 ).fetchone()
 
                 file_extension = row[0] if row else ""
+                mime_type = row[1] if row else ""
+                storage_id = row[2] if row else ""
                 conn.execute('DELETE FROM items WHERE hash = ?', (file_hash,))
 
                 if file_extension:
-                    asset_path = ASSETS_DIR / file_hash[:2] / f"{file_hash}{file_extension}"
+                    asset_path = existing_asset_path_for(file_hash, file_extension, mime_type, storage_id=storage_id)
                     if asset_path.exists():
                         asset_path.unlink()
 
-                note_path = existing_note_path_for(file_hash)
+                note_path = existing_note_path_for(file_hash, storage_id=storage_id)
                 if note_path.exists():
                     note_path.unlink()
+                wd_path = existing_wd_tag_cache_path_for(file_hash, storage_id=storage_id)
+                if wd_path.exists():
+                    wd_path.unlink()
 
                 rolled_back += 1
 

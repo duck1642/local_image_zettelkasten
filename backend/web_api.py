@@ -20,7 +20,12 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from db.sqlite_operator import init_database, normalize_source_url
-from utils import get_config, ASSETS_DIR, REVIEW_DIR, LOCAL_INGEST_DIR, note_path_for, asset_path_for, calculate_file_hash
+from utils import (
+    get_config, ASSETS_DIR, REVIEW_DIR, LOCAL_INGEST_DIR, note_path_for,
+    asset_path_for, calculate_file_hash, asset_url_for, existing_asset_path_for,
+    existing_note_path_for, existing_wd_tag_cache_path_for, legacy_asset_path_for,
+    legacy_note_path_for, legacy_sharded_note_path_for, legacy_wd_tag_cache_path_for
+)
 from processor import process_file
 from logger import log_auth, log_ingest_audit, log_ingest_local, log_review, log_svelte, log_system, RAW_LOGS_DIR, STRUCTURED_LOGS_DIR
 from md_generator import MANUAL_FRONTMATTER_FIELDS, load_note_frontmatter, load_note_topics, load_note_wd_tags, generate_markdown
@@ -410,7 +415,7 @@ def _apply_manual_frontmatter_to_item(item_hash: str, manual_fields: dict):
         md_content = generate_markdown(conn, item_hash, manual_overrides=manual_fields)
         if not md_content:
             raise RuntimeError("replacement note generation returned empty content")
-        note_path = note_path_for(item_hash)
+        note_path = note_path_for(item_hash, conn=conn)
         note_path.parent.mkdir(parents=True, exist_ok=True)
         atomic_write_text(note_path, md_content)
         safe_reindex_item_metadata(conn, item_hash, "review_replace_preserve")
@@ -420,6 +425,28 @@ def _apply_manual_frontmatter_to_item(item_hash: str, manual_fields: dict):
         raise
     finally:
         conn.close()
+
+def _unique_existing_or_target_paths(paths: list[Path]) -> list[Path]:
+    seen = set()
+    unique = []
+    for path in paths:
+        key = str(path)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(path)
+    return unique
+
+def _item_file_paths(item_hash: str, extension: str, mime_type: str, storage_id: str | None, conn=None) -> list[Path]:
+    return _unique_existing_or_target_paths([
+        asset_path_for(item_hash, extension, mime_type, storage_id=storage_id),
+        legacy_asset_path_for(item_hash, extension, mime_type),
+        note_path_for(item_hash, storage_id=storage_id, conn=conn),
+        legacy_sharded_note_path_for(item_hash),
+        legacy_note_path_for(item_hash),
+        existing_wd_tag_cache_path_for(item_hash, storage_id=storage_id, conn=conn),
+        legacy_wd_tag_cache_path_for(item_hash),
+    ])
 
 def _tail_lines(path: Path, count: int = 150) -> list[str]:
     if not path.exists():
@@ -659,11 +686,11 @@ def _get_thumbnail_sync(item_hash: str):
     conn = init_database()
     cursor = conn.cursor()
     try:
-        cursor.execute("SELECT file_extension, mime_type FROM items WHERE hash = ?", (item_hash,))
+        cursor.execute("SELECT file_extension, mime_type, storage_id FROM items WHERE hash = ?", (item_hash,))
         row = cursor.fetchone()
         if not row: raise HTTPException(status_code=404)
         try:
-            thumb_path = get_or_generate_thumbnail(item_hash, row[0], row[1])
+            thumb_path = get_or_generate_thumbnail(item_hash, row[0], row[1], storage_id=row[2])
         except ThumbnailBusyError:
             raise HTTPException(status_code=503, detail="Thumbnail generation busy")
         if not thumb_path: raise HTTPException(status_code=500, detail="Thumbnail generation failed")
@@ -800,7 +827,7 @@ def _get_items_sync(field, value, sort, media_type, artist, platform, filename, 
     conn = init_database()
     cursor_obj = conn.cursor()
     try:
-        base_query = "SELECT hash, file_extension, mime_type, original_filename, source_url, date_added, platform, source_artist, width, height FROM items"
+        base_query = "SELECT hash, file_extension, mime_type, original_filename, source_url, date_added, platform, source_artist, width, height, storage_id FROM items"
         conditions = []
         params = []
         use_metadata_index = bool(topic_filters or wd_tag_filters) and metadata_index_ready(conn)
@@ -876,7 +903,7 @@ def _get_items_sync(field, value, sort, media_type, artist, platform, filename, 
                 "hash": h, "extension": ext, "mime_type": row[2],
                 "original_filename": row[3], "source_url": row[4],
                 "date_added": row[5], "platform": row[6], "artist": row[7],
-                "url": f"/vault/{h[:2]}/{h}{ext}",
+                "url": asset_url_for(h, ext, row[2], storage_id=row[10]),
                 "thumbnail_url": f"/api/thumbnails/{h}",
                 "width": row[8], "height": row[9]
             })
@@ -896,6 +923,7 @@ def _get_items_sync(field, value, sort, media_type, artist, platform, filename, 
 
 def _get_item_details(h, row, conn=None):
     ext = row[1] or ""
+    storage_id = row[10] if len(row) > 10 else None
     try:
         if conn is not None:
             metadata = indexed_item_metadata(conn, h)
@@ -935,7 +963,7 @@ def _get_item_details(h, row, conn=None):
         "hash": h, "extension": ext, "mime_type": row[2] or "",
         "original_filename": row[3], "source_url": row[4],
         "date_added": row[5], "platform": row[6], "artist": row[7],
-        "url": f"/vault/{h[:2]}/{h}{ext}",
+        "url": asset_url_for(h, ext, row[2] or "", storage_id=storage_id),
         "thumbnail_url": f"/api/thumbnails/{h}",
         "width": row[8], "height": row[9],
         "topics": topics,
@@ -950,7 +978,7 @@ def _get_item_sync(item_hash: str):
     conn = init_database()
     cursor = conn.cursor()
     try:
-        cursor.execute("SELECT hash, file_extension, mime_type, original_filename, source_url, date_added, platform, source_artist, width, height FROM items WHERE hash = ?", (item_hash,))
+        cursor.execute("SELECT hash, file_extension, mime_type, original_filename, source_url, date_added, platform, source_artist, width, height, storage_id FROM items WHERE hash = ?", (item_hash,))
         row = cursor.fetchone()
         if not row: raise HTTPException(status_code=404)
         return _get_item_details(item_hash, row, conn)
@@ -965,11 +993,11 @@ def _get_item_path_sync(item_hash: str):
     conn = init_database()
     cursor = conn.cursor()
     try:
-        cursor.execute("SELECT file_extension, mime_type FROM items WHERE hash = ?", (item_hash,))
+        cursor.execute("SELECT file_extension, mime_type, storage_id FROM items WHERE hash = ?", (item_hash,))
         row = cursor.fetchone()
         if not row: raise HTTPException(status_code=404)
         # Using utils instead of ui
-        path = asset_path_for(item_hash, row[0] or "", row[1] or "")
+        path = existing_asset_path_for(item_hash, row[0] or "", row[1] or "", storage_id=row[2])
         return {"absolute_path": str(path.resolve())}
     finally:
         conn.close()
@@ -985,7 +1013,7 @@ def _get_item_note_path_sync(item_hash: str):
         cursor.execute("SELECT hash FROM items WHERE hash = ?", (item_hash,))
         row = cursor.fetchone()
         if not row: raise HTTPException(status_code=404)
-        path = note_path_for(item_hash)
+        path = existing_note_path_for(item_hash, conn=conn)
         return {"absolute_path": str(path.resolve())}
     finally:
         conn.close()
@@ -998,11 +1026,11 @@ def _open_item_folder_sync(item_hash: str):
     conn = init_database()
     cursor = conn.cursor()
     try:
-        cursor.execute("SELECT file_extension, mime_type FROM items WHERE hash = ?", (item_hash,))
+        cursor.execute("SELECT file_extension, mime_type, storage_id FROM items WHERE hash = ?", (item_hash,))
         row = cursor.fetchone()
         if not row:
             raise HTTPException(status_code=404)
-        path = asset_path_for(item_hash, row[0] or "", row[1] or "")
+        path = existing_asset_path_for(item_hash, row[0] or "", row[1] or "", storage_id=row[2])
         if not path.exists():
             raise HTTPException(status_code=404, detail="Asset missing")
         if sys.platform == "win32":
@@ -1026,7 +1054,7 @@ def _open_item_note_sync(item_hash: str):
         row = cursor.fetchone()
         if not row:
             raise HTTPException(status_code=404)
-        path = note_path_for(item_hash)
+        path = existing_note_path_for(item_hash, conn=conn)
         if not path.exists():
             raise HTTPException(status_code=404, detail="Note missing")
         _open_path_external(path)
@@ -1067,7 +1095,7 @@ def _update_item_sync(item_hash: str, update: ItemUpdate):
         
         md_content = generate_markdown(conn, item_hash, topics_override=update.topics, manual_overrides=manual_overrides)
         if md_content:
-            note_path = note_path_for(item_hash)
+            note_path = note_path_for(item_hash, conn=conn)
             note_path.parent.mkdir(parents=True, exist_ok=True)
             atomic_write_text(note_path, md_content)
             safe_reindex_item_metadata(conn, item_hash, "item_patch")
@@ -1089,16 +1117,12 @@ async def bulk_delete_items(request: BulkDeleteRequest):
     return await asyncio.to_thread(_bulk_delete_items_sync, request.hashes)
 
 def _delete_item_row(cursor, conn, item_hash: str):
-    cursor.execute("SELECT file_extension, mime_type FROM items WHERE hash = ?", (item_hash,))
+    cursor.execute("SELECT file_extension, mime_type, storage_id FROM items WHERE hash = ?", (item_hash,))
     row = cursor.fetchone()
     if not row:
         return {"hash": item_hash, "status": "missing", "cleanup_errors": []}
 
-    cleanup_paths = [
-        asset_path_for(item_hash, row[0] or "", row[1] or ""),
-        note_path_for(item_hash),
-        WD_TAGS_DIR / item_hash[:2] / f"{item_hash}.json",
-    ]
+    cleanup_paths = _item_file_paths(item_hash, row[0] or "", row[1] or "", row[2], conn)
 
     cursor.execute("DELETE FROM items WHERE hash = ?", (item_hash,))
     conn.commit()
@@ -1120,16 +1144,12 @@ def _delete_item_after_replacement(item_hash: str):
     conn = init_database()
     cursor = conn.cursor()
     try:
-        cursor.execute("SELECT file_extension, mime_type FROM items WHERE hash = ?", (item_hash,))
+        cursor.execute("SELECT file_extension, mime_type, storage_id FROM items WHERE hash = ?", (item_hash,))
         row = cursor.fetchone()
         if not row:
             return {"hash": item_hash, "status": "missing", "cleanup_errors": []}
 
-        cleanup_paths = [
-            asset_path_for(item_hash, row[0] or "", row[1] or ""),
-            note_path_for(item_hash),
-            WD_TAGS_DIR / item_hash[:2] / f"{item_hash}.json",
-        ]
+        cleanup_paths = _item_file_paths(item_hash, row[0] or "", row[1] or "", row[2], conn)
         existing_paths = [path for path in cleanup_paths if path.exists()]
         trash_dir = REVIEW_DIR / ".replace-trash"
         trash_dir.mkdir(parents=True, exist_ok=True)
@@ -1227,27 +1247,27 @@ async def trigger_tagging(item_hash: str):
         conn = init_database()
         cursor = conn.cursor()
         try:
-            cursor.execute("SELECT file_extension, mime_type FROM items WHERE hash = ?", (item_hash,))
+            cursor.execute("SELECT file_extension, mime_type, storage_id FROM items WHERE hash = ?", (item_hash,))
             row = cursor.fetchone()
             if not row:
                 raise HTTPException(status_code=404)
             
-            asset_path = asset_path_for(item_hash, row[0] or "", row[1] or "")
+            asset_path = existing_asset_path_for(item_hash, row[0] or "", row[1] or "", storage_id=row[2])
             if not asset_path.exists():
                 raise HTTPException(status_code=404, detail="Asset missing")
 
             log_system("INFO", f"Triggering AI tagging for {item_hash}")
-            tag_media(asset_path, item_hash=item_hash, config=get_config())
+            tag_media(asset_path, item_hash=item_hash, config=get_config(), storage_id=row[2])
             
             md_content = generate_markdown(conn, item_hash)
             if md_content:
-                note_path = note_path_for(item_hash)
+                note_path = note_path_for(item_hash, storage_id=row[2])
                 note_path.parent.mkdir(parents=True, exist_ok=True)
                 atomic_write_text(note_path, md_content)
                 safe_reindex_item_metadata(conn, item_hash, "manual_tag")
                 conn.commit()
             
-            cursor.execute("SELECT hash, file_extension, mime_type, original_filename, source_url, date_added, platform, source_artist, width, height FROM items WHERE hash = ?", (item_hash,))
+            cursor.execute("SELECT hash, file_extension, mime_type, original_filename, source_url, date_added, platform, source_artist, width, height, storage_id FROM items WHERE hash = ?", (item_hash,))
             updated_row = cursor.fetchone()
             return _get_item_details(item_hash, updated_row, conn)
         finally:
@@ -1881,11 +1901,11 @@ def _get_review_items_sync(include_resolved: bool = False):
         try:
             placeholders = ",".join("?" for _ in best_hashes)
             cursor = conn.cursor()
-            cursor.execute(f"SELECT hash, file_extension, mime_type, source_artist FROM items WHERE hash IN ({placeholders})", best_hashes)
+            cursor.execute(f"SELECT hash, file_extension, mime_type, source_artist, storage_id FROM items WHERE hash IN ({placeholders})", best_hashes)
             for row in cursor.fetchall():
                 match_map[row[0]] = {
                     "hash": row[0],
-                    "url": f"/vault/{row[0][:2]}/{row[0]}{row[1]}" if row[1] else f"/vault/{row[0][:2]}/{row[0]}",
+                    "url": asset_url_for(row[0], row[1] or "", row[2] or "", storage_id=row[4]),
                     "artist": row[3],
                     "mime_type": row[2] or "",
                     "extension": row[1] or "",

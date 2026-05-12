@@ -8,6 +8,37 @@ from utils import DB_PATH
 
 _SCHEMA_READY = False
 _SCHEMA_LOCK = threading.Lock()
+STORAGE_ID_WIDTH = 12
+STORAGE_ID_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyz"
+
+
+def int_to_storage_id(value: int) -> str:
+    value = int(value)
+    if value < 0:
+        raise ValueError("storage id value must be non-negative")
+    if value == 0:
+        encoded = "0"
+    else:
+        chars = []
+        base = len(STORAGE_ID_ALPHABET)
+        while value:
+            value, remainder = divmod(value, base)
+            chars.append(STORAGE_ID_ALPHABET[remainder])
+        encoded = "".join(reversed(chars))
+    if len(encoded) > STORAGE_ID_WIDTH:
+        raise ValueError("storage id counter exceeded 12 base36 characters")
+    return encoded.rjust(STORAGE_ID_WIDTH, "0")
+
+
+def storage_id_to_int(storage_id: str) -> int | None:
+    text = str(storage_id or "").strip().lower()
+    if not text or any(ch not in STORAGE_ID_ALPHABET for ch in text):
+        return None
+    value = 0
+    base = len(STORAGE_ID_ALPHABET)
+    for ch in text:
+        value = value * base + STORAGE_ID_ALPHABET.index(ch)
+    return value
 
 
 def normalize_source_url(url: str) -> str:
@@ -50,7 +81,8 @@ def init_database():
             audio_hash BLOB,
             visual_embedding BLOB,
             width INTEGER,
-            height INTEGER
+            height INTEGER,
+            storage_id TEXT UNIQUE
         )
     ''')
 
@@ -89,6 +121,18 @@ def init_database():
         cursor.execute("ALTER TABLE items ADD COLUMN height INTEGER")
     if 'source_url_norm' not in columns:
         cursor.execute("ALTER TABLE items ADD COLUMN source_url_norm TEXT")
+    if 'storage_id' not in columns:
+        cursor.execute("ALTER TABLE items ADD COLUMN storage_id TEXT")
+
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS storage_id_counter (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            next_value INTEGER NOT NULL
+        )
+    ''')
+    cursor.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_items_storage_id ON items(storage_id)')
+    _ensure_storage_counter(conn)
+    _backfill_missing_storage_ids(conn)
 
     cursor.execute('SELECT hash, source_url FROM items WHERE source_url IS NOT NULL AND source_url != "" AND (source_url_norm IS NULL OR source_url_norm = "")')
     rows = cursor.fetchall()
@@ -122,6 +166,51 @@ def check_duplicate_hash(conn: sqlite3.Connection, file_hash: str) -> bool:
     cursor = conn.cursor()
     cursor.execute('SELECT 1 FROM items WHERE hash = ?', (file_hash,))
     return cursor.fetchone() is not None
+
+
+def _ensure_storage_counter(conn: sqlite3.Connection):
+    cursor = conn.cursor()
+    row = cursor.execute("SELECT next_value FROM storage_id_counter WHERE id = 1").fetchone()
+    max_value = 0
+    for (storage_id,) in cursor.execute('SELECT storage_id FROM items WHERE storage_id IS NOT NULL AND storage_id != ""'):
+        parsed = storage_id_to_int(storage_id)
+        if parsed is not None:
+            max_value = max(max_value, parsed)
+    next_value = max_value + 1
+    if row is None:
+        cursor.execute("INSERT INTO storage_id_counter(id, next_value) VALUES (1, ?)", (next_value,))
+    elif int(row[0]) < next_value:
+        cursor.execute("UPDATE storage_id_counter SET next_value = ? WHERE id = 1", (next_value,))
+
+
+def allocate_storage_id(conn: sqlite3.Connection) -> str:
+    _ensure_storage_counter(conn)
+    cursor = conn.cursor()
+    while True:
+        row = cursor.execute(
+            "UPDATE storage_id_counter SET next_value = next_value + 1 WHERE id = 1 RETURNING next_value - 1"
+        ).fetchone()
+        next_value = int(row[0] if row else 1)
+        storage_id = int_to_storage_id(next_value)
+        exists = cursor.execute("SELECT 1 FROM items WHERE storage_id = ?", (storage_id,)).fetchone()
+        if not exists:
+            return storage_id
+
+
+def _backfill_missing_storage_ids(conn: sqlite3.Connection):
+    cursor = conn.cursor()
+    rows = cursor.execute(
+        'SELECT hash FROM items WHERE storage_id IS NULL OR storage_id = "" ORDER BY date_added ASC, hash ASC'
+    ).fetchall()
+    for (file_hash,) in rows:
+        cursor.execute("UPDATE items SET storage_id = ? WHERE hash = ?", (allocate_storage_id(conn), file_hash))
+
+
+def storage_id_for_hash(conn: sqlite3.Connection, file_hash: str) -> str | None:
+    row = conn.execute("SELECT storage_id FROM items WHERE hash = ?", (file_hash,)).fetchone()
+    if not row:
+        return None
+    return row[0] or None
 
 def get_all_phashes(conn: sqlite3.Connection) -> list[tuple[str, str]]:
 
@@ -173,6 +262,7 @@ def reset_database():
         cursor.execute('DROP TABLE IF EXISTS item_metadata_files')
         cursor.execute('DROP TABLE IF EXISTS metadata_index_state')
         cursor.execute('DROP TABLE IF EXISTS item_tiles')
+        cursor.execute('DROP TABLE IF EXISTS storage_id_counter')
         cursor.execute('DROP TABLE IF EXISTS items')
         conn.commit()
     except Exception:
@@ -190,7 +280,7 @@ def check_duplicate_url(conn: sqlite3.Connection, url: str) -> bool:
     cursor.execute('SELECT 1 FROM items WHERE source_url_norm = ?', (normalize_source_url(url),))
     return cursor.fetchone() is not None
 
-def insert_to_database(conn: sqlite3.Connection, filepath: Path, file_hash: str, mime_type: str, target_ext: str, metadata: dict = None, file_size: int = None, timestamp: datetime = None, phash: str = None, audio_hash: bytes = None, visual_embedding: bytes = None, width: int = None, height: int = None):
+def insert_to_database(conn: sqlite3.Connection, filepath: Path, file_hash: str, mime_type: str, target_ext: str, metadata: dict = None, file_size: int = None, timestamp: datetime = None, phash: str = None, audio_hash: bytes = None, visual_embedding: bytes = None, width: int = None, height: int = None, storage_id: str = None) -> str:
     metadata = metadata or {}
     source_url = metadata.get('source_url', "")
     source_url_norm = normalize_source_url(source_url)
@@ -204,10 +294,12 @@ def insert_to_database(conn: sqlite3.Connection, filepath: Path, file_hash: str,
         timestamp = datetime.now()
 
     cursor = conn.cursor()
+    existing_storage = storage_id_for_hash(conn, file_hash)
+    storage_id = existing_storage or storage_id or allocate_storage_id(conn)
     cursor.execute('''
         INSERT INTO items
-        (hash, original_filename, file_extension, mime_type, size_bytes, date_added, source_url, source_url_norm, platform, source_artist, phash, audio_hash, visual_embedding, width, height)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (hash, original_filename, file_extension, mime_type, size_bytes, date_added, source_url, source_url_norm, platform, source_artist, phash, audio_hash, visual_embedding, width, height, storage_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(hash) DO UPDATE SET
             original_filename = excluded.original_filename,
             file_extension = excluded.file_extension,
@@ -222,7 +314,8 @@ def insert_to_database(conn: sqlite3.Connection, filepath: Path, file_hash: str,
             audio_hash = excluded.audio_hash,
             visual_embedding = excluded.visual_embedding,
             width = excluded.width,
-            height = excluded.height
+            height = excluded.height,
+            storage_id = COALESCE(items.storage_id, excluded.storage_id)
     ''', (
         file_hash,
         filepath.name,
@@ -238,5 +331,7 @@ def insert_to_database(conn: sqlite3.Connection, filepath: Path, file_hash: str,
         audio_hash,
         visual_embedding,
         width,
-        height
+        height,
+        storage_id
     ))
+    return storage_id

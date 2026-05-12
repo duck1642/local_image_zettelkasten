@@ -4,7 +4,7 @@ import yaml
 from datetime import datetime
 
 from tagging import wd_frontmatter_fields
-from utils import existing_note_path_for
+from utils import existing_note_path_for, storage_shard_for_hash
 
 MANUAL_FRONTMATTER_FIELDS = (
     "title",
@@ -32,7 +32,7 @@ def generate_markdown(conn: sqlite3.Connection, file_hash: str, asset_rel_path: 
 
     cursor = conn.cursor()
     cursor.execute('''
-        SELECT original_filename, mime_type, file_extension, source_url, platform, source_artist, date_added, phash
+        SELECT original_filename, mime_type, file_extension, source_url, platform, source_artist, date_added, phash, storage_id
         FROM items
         WHERE hash = ?
     ''', (file_hash,))
@@ -42,13 +42,14 @@ def generate_markdown(conn: sqlite3.Connection, file_hash: str, asset_rel_path: 
     if not row:
         return ""
 
-    original_filename, mime_type, file_extension, source_url, platform, source_artist, date_added, phash = row
+    original_filename, mime_type, file_extension, source_url, platform, source_artist, date_added, phash, storage_id = row
 
     existing_frontmatter = load_note_frontmatter(file_hash)
     date_added_str = _format_date_added(date_added)
 
-    shard_folder = file_hash[:2]
-    asset_link = asset_rel_path if asset_rel_path else f"../../assets/{shard_folder}/{file_hash}{file_extension}"
+    filename_id = storage_id or file_hash
+    shard_folder = storage_shard_for_hash(file_hash)
+    asset_link = asset_rel_path if asset_rel_path else f"../../assets/{shard_folder}/{filename_id}{file_extension}"
 
     is_video = mime_type.startswith('video/')
     asset_type = "video" if is_video else "image"

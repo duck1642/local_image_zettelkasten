@@ -262,13 +262,76 @@ def test_ingest_seeds_markdown_artist_from_metadata_and_reindexes(monkeypatch, t
     )
 
     conn = sqlite_operator.init_database()
-    row = conn.execute("SELECT source_artist FROM items WHERE hash = ?", (item_hash,)).fetchone()
+    row = conn.execute("SELECT source_artist, storage_id FROM items WHERE hash = ?", (item_hash,)).fetchone()
     note_data = frontmatter_from_markdown(utils.note_path_for(item_hash).read_text(encoding="utf-8"))
 
     assert ok
     assert idx_data["file_hash"] == item_hash
     assert row[0] == "Ingest Artist"
+    assert len(row[1]) == 12
+    assert utils.storage_asset_path_for(item_hash, row[1], ".jpg", "image/jpeg").exists()
+    assert not utils.legacy_asset_path_for(item_hash, ".jpg", "image/jpeg").exists()
+    assert utils.note_path_for(item_hash).name == f"{row[1]}.md"
     assert note_data["artist"] == "Ingest Artist"
+    conn.close()
+
+
+def test_storage_id_backfill_and_legacy_asset_fallback(monkeypatch, tmp_path):
+    utils, sqlite_operator = fresh_backend(monkeypatch, tmp_path, "utils", "db.sqlite_operator")
+    item_hash = "a1" * 32
+    conn = insert_mock_item(sqlite_operator, item_hash)
+    conn.close()
+
+    conn = sqlite_operator.init_database()
+    storage_id = conn.execute("SELECT storage_id FROM items WHERE hash = ?", (item_hash,)).fetchone()[0]
+    legacy_asset = utils.legacy_asset_path_for(item_hash, ".jpg", "image/jpeg")
+    legacy_asset.parent.mkdir(parents=True, exist_ok=True)
+    legacy_asset.write_bytes(b"legacy")
+
+    assert len(storage_id) == 12
+    assert utils.asset_path_for(item_hash, ".jpg", "image/jpeg", conn=conn).name == f"{storage_id}.jpg"
+    assert utils.existing_asset_path_for(item_hash, ".jpg", "image/jpeg", conn=conn) == legacy_asset
+    conn.close()
+
+
+def test_compact_storage_migration_dry_run_and_apply(monkeypatch, tmp_path):
+    utils, sqlite_operator = fresh_backend(monkeypatch, tmp_path, "utils", "db.sqlite_operator")
+    item_hash = "ab" * 32
+    conn = insert_mock_item(sqlite_operator, item_hash)
+    legacy_asset = utils.legacy_asset_path_for(item_hash, ".jpg", "image/jpeg")
+    legacy_asset.parent.mkdir(parents=True, exist_ok=True)
+    legacy_asset.write_bytes(b"asset")
+    legacy_note = utils.legacy_sharded_note_path_for(item_hash)
+    legacy_note.parent.mkdir(parents=True, exist_ok=True)
+    legacy_note.write_text(
+        f"---\nhash: {item_hash}\n---\n\n![](../../assets/{item_hash[:2]}/{item_hash}.jpg)\n",
+        encoding="utf-8",
+    )
+    conn.execute("UPDATE items SET storage_id = NULL WHERE hash = ?", (item_hash,))
+    conn.commit()
+    conn.close()
+
+    tool_path = ROOT / "tools" / "maintenance" / "migrate_compact_storage_ids.py"
+    spec = importlib.util.spec_from_file_location("migrate_compact_storage_ids", tool_path)
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+
+    dry = migration.run(False, False)
+    conn = sqlite_operator.connect_database()
+    assert dry["ids_assigned"] == 1
+    assert conn.execute("SELECT storage_id FROM items WHERE hash = ?", (item_hash,)).fetchone()[0] is None
+    conn.close()
+
+    applied = migration.run(True, False)
+    conn = sqlite_operator.connect_database()
+    storage_id = conn.execute("SELECT storage_id FROM items WHERE hash = ?", (item_hash,)).fetchone()[0]
+    compact_note = utils.note_path_for(item_hash, storage_id=storage_id)
+
+    assert applied["ids_assigned"] == 1
+    assert utils.storage_asset_path_for(item_hash, storage_id, ".jpg", "image/jpeg").exists()
+    assert compact_note.exists()
+    assert f"../../assets/{item_hash[:2]}/{storage_id}.jpg" in compact_note.read_text(encoding="utf-8")
+    assert legacy_asset.exists()
     conn.close()
 
 

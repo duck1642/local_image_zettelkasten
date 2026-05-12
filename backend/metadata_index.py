@@ -12,7 +12,7 @@ import yaml
 from logger import log_system
 from md_generator import normalize_topic_list
 from tagging import load_tag_cache
-from utils import NOTES_DIR, WD_TAGS_DIR, existing_note_path_for, wd_tag_cache_path_for
+from utils import DB_PATH, NOTES_DIR, WD_TAGS_DIR, existing_note_path_for, existing_wd_tag_cache_path_for
 
 
 HASH_RE = re.compile(r"^[0-9a-fA-F]{64}$")
@@ -115,7 +115,7 @@ def _file_sig(path: Path) -> tuple[str, int | None, int | None]:
 
 def _current_sigs(item_hash: str) -> dict:
     note_path = existing_note_path_for(item_hash)
-    wd_path = wd_tag_cache_path_for(item_hash)
+    wd_path = existing_wd_tag_cache_path_for(item_hash)
     note_path_str, note_mtime, note_size = _file_sig(note_path)
     wd_path_str, wd_mtime, wd_size = _file_sig(wd_path)
     return {
@@ -518,7 +518,17 @@ def _hash_from_metadata_path(path: str | Path) -> str | None:
     if path.suffix.lower() not in {".md", ".json"}:
         return None
     item_hash = path.stem
-    return item_hash if HASH_RE.match(item_hash) else None
+    if HASH_RE.match(item_hash):
+        return item_hash
+    try:
+        if DB_PATH.exists():
+            with sqlite3.connect(DB_PATH, timeout=5) as conn:
+                row = conn.execute("SELECT hash FROM items WHERE storage_id = ?", (item_hash,)).fetchone()
+                if row:
+                    return row[0]
+    except sqlite3.Error:
+        return None
+    return None
 
 
 def _watchdog_flush():

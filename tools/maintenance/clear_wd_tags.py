@@ -11,7 +11,7 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 from db.sqlite_operator import init_database
-from utils import existing_note_path_for, wd_tag_cache_path_for
+from utils import existing_note_path_for, existing_wd_tag_cache_path_for
 
 
 WD_KEYS = ["wd_rating", "wd_character_tags", "wd_tags"]
@@ -29,7 +29,7 @@ def item_hashes(target_hash: str = "") -> list[str]:
 
 
 def clear_json(file_hash: str, apply: bool) -> str:
-    path = wd_tag_cache_path_for(file_hash)
+    path = existing_wd_tag_cache_path_for(file_hash)
     if not path.exists():
         return "missing"
     if apply:

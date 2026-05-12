@@ -11,7 +11,7 @@ from PIL import Image
 
 from fingerprint import extract_sampled_video_frames
 from logger import log_system
-from utils import MODELS_DIR, atomic_write_text, calculate_file_hash, get_config, wd_tag_cache_path_for
+from utils import MODELS_DIR, atomic_write_text, calculate_file_hash, get_config, existing_wd_tag_cache_path_for, wd_tag_cache_path_for
 from validators import get_mime_type
 
 
@@ -57,7 +57,7 @@ class TagResult:
         return asdict(self)
 
 
-def tag_media(media_path: str | Path, item_hash: str = None, config: dict = None) -> TagResult:
+def tag_media(media_path: str | Path, item_hash: str = None, config: dict = None, storage_id: str = None) -> TagResult:
     config = config or get_config()
     tag_config = config.get("tagging", {})
     media_path = Path(media_path)
@@ -76,27 +76,27 @@ def tag_media(media_path: str | Path, item_hash: str = None, config: dict = None
 
         if not tag_config.get("enabled", True):
             result = _result(item_hash, media_path, model_repo, device, "", threshold, max_tags, "skipped", error="tagging disabled")
-            _write_result(result)
+            _write_result(result, storage_id)
             return result
 
         if not media_path.exists():
             result = _result(item_hash, media_path, model_repo, device, "", threshold, max_tags, "failed", error="media path does not exist")
-            _write_result(result)
+            _write_result(result, storage_id)
             return result
     except Exception as exc:
         result = _result(item_hash or "", media_path, model_repo, device, "", threshold, max_tags, "failed", error=str(exc))
-        _write_result(result)
+        _write_result(result, storage_id)
         return result
 
     mime_type = get_mime_type(media_path) or ""
     media_type = "video" if mime_type.startswith("video/") else "image" if mime_type.startswith("image/") else "unknown"
     if media_type == "video" and not video_config.get("enabled", True):
         result = _result(item_hash, media_path, model_repo, device, "", threshold, max_tags, "skipped", error="video tagging disabled", media_type="video")
-        _write_result(result)
+        _write_result(result, storage_id)
         return result
     if media_type == "unknown":
         result = _result(item_hash, media_path, model_repo, device, "", threshold, max_tags, "skipped", error=f"unsupported media type: {mime_type or 'unknown'}", media_type="unknown")
-        _write_result(result)
+        _write_result(result, storage_id)
         return result
 
     try:
@@ -114,7 +114,7 @@ def tag_media(media_path: str | Path, item_hash: str = None, config: dict = None
             samples = extract_sampled_video_frames(media_path, video_frame_count)
             if not samples:
                 result = _result(item_hash, media_path, model_repo, device, provider, threshold, max_tags, "failed", error="could not extract video frames", media_type="video")
-                _write_result(result)
+                _write_result(result, storage_id)
                 return result
             sampled_frames = []
             for timestamp, image in samples:
@@ -127,7 +127,7 @@ def tag_media(media_path: str | Path, item_hash: str = None, config: dict = None
                 })
             rating, character_tags, tags = _merge_frame_tags(sampled_frames, max_tags, merge_min_frames, merge_high_confidence)
             result = _result(item_hash, media_path, model_repo, device, provider, threshold, max_tags, "ok", rating, character_tags, tags, provider_warning, "video", sampled_frames, len(sampled_frames))
-            _write_result(result)
+            _write_result(result, storage_id)
             log_system("INFO", "WD video tagger completed", hash=item_hash, path=str(media_path), frame_count=len(sampled_frames), tag_count=len(tags), provider=provider)
             return result
         image = Image.open(media_path)
@@ -136,12 +136,12 @@ def tag_media(media_path: str | Path, item_hash: str = None, config: dict = None
         status = "ok"
         error = provider_warning
         result = _result(item_hash, media_path, model_repo, device, provider, threshold, max_tags, status, rating, character_tags, tags, error, "image")
-        _write_result(result)
+        _write_result(result, storage_id)
         log_system("INFO", "WD tagger completed", hash=item_hash, path=str(media_path), tag_count=len(tags), provider=provider)
         return result
     except Exception as exc:
         result = _result(item_hash, media_path, model_repo, device, "", threshold, max_tags, "failed", error=str(exc), media_type=media_type)
-        _write_result(result)
+        _write_result(result, storage_id)
         log_system("WARNING", "WD tagger failed", hash=item_hash, path=str(media_path), error=str(exc))
         return result
 
@@ -166,10 +166,10 @@ def _result(item_hash: str, media_path: Path, model_repo: str, device: str, prov
     )
 
 
-def _write_result(result: TagResult):
+def _write_result(result: TagResult, storage_id: str = None):
     if not result.hash:
         return
-    target = wd_tag_cache_path_for(result.hash)
+    target = wd_tag_cache_path_for(result.hash, storage_id=storage_id)
     atomic_write_text(target, json.dumps(result.to_dict(), indent=2, ensure_ascii=False))
 
 
@@ -345,7 +345,7 @@ def _merge_tag_group(sampled_frames: list[dict[str, Any]], key: str, max_tags: i
 
 
 def load_tag_cache(item_hash: str) -> dict:
-    path = wd_tag_cache_path_for(item_hash)
+    path = existing_wd_tag_cache_path_for(item_hash)
     if not path.exists():
         return {}
     try:

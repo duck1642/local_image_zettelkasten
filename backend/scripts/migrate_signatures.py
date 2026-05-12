@@ -6,7 +6,7 @@ from tqdm import tqdm
 
 from db.sqlite_operator import init_database
 from fingerprint import get_audio_fingerprint, get_visual_embedding
-from utils import ASSETS_DIR, DB_PATH
+from utils import DB_PATH, existing_asset_path_for
 
 def migrate():
     print(f"[INFO] LMZ Signature Migration - Target: {DB_PATH}")
@@ -14,7 +14,7 @@ def migrate():
     cursor = conn.cursor()
 
 
-    cursor.execute("SELECT hash, file_extension, mime_type FROM items WHERE mime_type LIKE 'video/%'")
+    cursor.execute("SELECT hash, file_extension, mime_type, storage_id FROM items WHERE mime_type LIKE 'video/%'")
     videos = cursor.fetchall()
 
     if not videos:
@@ -27,9 +27,8 @@ def migrate():
     updates = 0
     errors = 0
 
-    for f_hash, ext, mime in tqdm(videos, desc="Migrating", unit="file"):
-        shard = f_hash[:2]
-        file_path = ASSETS_DIR / shard / f"{f_hash}{ext}"
+    for f_hash, ext, mime, storage_id in tqdm(videos, desc="Migrating", unit="file"):
+        file_path = existing_asset_path_for(f_hash, ext, mime, storage_id=storage_id)
 
         if not file_path.exists():
             print(f"[WARN] File missing in vault: {file_path.name}")

@@ -53,7 +53,7 @@ def regenerate_markdowns():
     for (file_hash,) in rows:
         md_content = generate_markdown(conn, file_hash)
         if md_content:
-            md_path = note_path_for(file_hash)
+            md_path = note_path_for(file_hash, conn=conn)
             md_path.parent.mkdir(parents=True, exist_ok=True)
             with open(md_path, 'w', encoding='utf-8') as f:
                 f.write(md_content)

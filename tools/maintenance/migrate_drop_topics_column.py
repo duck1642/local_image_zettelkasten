@@ -21,11 +21,15 @@ ITEM_COLUMNS = [
     "size_bytes",
     "date_added",
     "source_url",
+    "source_url_norm",
     "platform",
     "source_artist",
     "phash",
     "audio_hash",
     "visual_embedding",
+    "width",
+    "height",
+    "storage_id",
 ]
 
 
@@ -85,11 +89,15 @@ def _migrate(conn: sqlite3.Connection):
                 size_bytes INTEGER,
                 date_added DATETIME DEFAULT CURRENT_TIMESTAMP,
                 source_url TEXT,
+                source_url_norm TEXT,
                 platform TEXT,
                 source_artist TEXT,
                 phash TEXT,
                 audio_hash BLOB,
-                visual_embedding BLOB
+                visual_embedding BLOB,
+                width INTEGER,
+                height INTEGER,
+                storage_id TEXT UNIQUE
             )
             """
         )

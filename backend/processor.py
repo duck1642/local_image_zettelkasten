@@ -8,7 +8,8 @@ from typing import Tuple, Optional
 from datetime import datetime
 from utils import (
     ASSETS_DIR, REVIEW_DIR, calculate_file_hash, calculate_phash,
-    atomic_write_text, flatten_image, get_normalization_color, note_path_for
+    atomic_write_text, flatten_image, get_normalization_color, note_path_for,
+    storage_asset_path_for, storage_shard_for_hash
 )
 from fingerprint import (
     get_audio_fingerprint, get_visual_embedding,
@@ -16,7 +17,7 @@ from fingerprint import (
 )
 from validators import get_mime_type, is_allowed_mime
 from db.sqlite_operator import (
-    connect_database, check_duplicate_hash, insert_to_database,
+    connect_database, check_duplicate_hash, insert_to_database, allocate_storage_id,
     get_all_video_signatures, insert_tiles
 )
 from db.search_manager import search_manager
@@ -326,20 +327,21 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
     md_path = None
 
     try:
-        shard_folder = file_hash[:2]
-        new_filename = f"{file_hash}{target_ext}"
+        storage_id = allocate_storage_id(conn)
+        shard_folder = storage_shard_for_hash(file_hash)
+        new_filename = f"{storage_id}{target_ext}"
 
         shard_path = ASSETS_DIR / shard_folder
         shard_path.mkdir(parents=True, exist_ok=True)
 
-        vault_path = shard_path / new_filename
+        vault_path = storage_asset_path_for(file_hash, storage_id, target_ext, mime_type)
         asset_rel_path = f"../../assets/{shard_folder}/{new_filename}"
 
         file_size = filepath.stat().st_size
 
         shutil.copy2(filepath, vault_path)
 
-        insert_to_database(conn, filepath, file_hash, mime_type, target_ext, metadata, file_size=file_size, timestamp=master_timestamp, phash=phash, audio_hash=audio_hash, visual_embedding=visual_embedding, width=width, height=height)
+        storage_id = insert_to_database(conn, filepath, file_hash, mime_type, target_ext, metadata, file_size=file_size, timestamp=master_timestamp, phash=phash, audio_hash=audio_hash, visual_embedding=visual_embedding, width=width, height=height, storage_id=storage_id)
 
         if tiles:
             insert_tiles(conn, file_hash, tiles)
@@ -349,7 +351,7 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
 
         md_content = generate_markdown(conn, file_hash, asset_rel_path, title=title)
         if md_content:
-            md_path = note_path_for(file_hash)
+            md_path = note_path_for(file_hash, storage_id=storage_id)
             md_path.parent.mkdir(parents=True, exist_ok=True)
             atomic_write_text(md_path, md_content)
 
@@ -365,7 +367,7 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
         }
 
         try:
-            tag_result = tag_media(vault_path, item_hash=file_hash, config=config)
+            tag_result = tag_media(vault_path, item_hash=file_hash, config=config, storage_id=storage_id)
             if tag_result.status != "ok":
                 log_system("WARNING", "Tagging enrichment did not complete", hash=file_hash, status=tag_result.status, error=tag_result.error)
                 if config.get('tagging', {}).get('fail_ingestion_on_error', False):
@@ -373,7 +375,7 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
             else:
                 md_content = generate_markdown(conn, file_hash, asset_rel_path, title=title)
                 if md_content:
-                    md_path = note_path_for(file_hash)
+                    md_path = note_path_for(file_hash, storage_id=storage_id)
                     md_path.parent.mkdir(parents=True, exist_ok=True)
                     atomic_write_text(md_path, md_content)
         except Exception as tag_exc:

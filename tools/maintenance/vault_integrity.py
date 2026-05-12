@@ -13,11 +13,11 @@ SRC_DIR = PROJECT_ROOT_PATH / "backend"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from utils import ASSETS_DIR, DB_PATH, NOTES_DIR, PROJECT_ROOT, note_path_for
+from utils import ASSETS_DIR, DB_PATH, NOTES_DIR, PROJECT_ROOT, existing_asset_path_for, existing_note_path_for
 
 
-def asset_path(file_hash: str, file_extension: str) -> Path:
-    return ASSETS_DIR / file_hash[:2] / f"{file_hash}{file_extension}"
+def asset_path(file_hash: str, file_extension: str, mime_type: str = "", storage_id: str = "") -> Path:
+    return existing_asset_path_for(file_hash, file_extension, mime_type, storage_id=storage_id)
 
 
 def load_notes() -> dict:
@@ -53,7 +53,7 @@ def load_notes() -> dict:
 def load_db_rows(conn: sqlite3.Connection) -> dict:
     cursor = conn.cursor()
     rows = cursor.execute(
-        "SELECT hash, original_filename, file_extension, mime_type, size_bytes, date_added, source_url, platform, source_artist, phash FROM items"
+        "SELECT hash, original_filename, file_extension, mime_type, size_bytes, date_added, source_url, platform, source_artist, phash, storage_id FROM items"
     ).fetchall()
     return {
         row[0]: {
@@ -66,7 +66,8 @@ def load_db_rows(conn: sqlite3.Connection) -> dict:
             "source_url": row[6],
             "platform": row[7],
             "source_artist": row[8],
-            "phash": row[9]
+            "phash": row[9],
+            "storage_id": row[10] or ""
         }
         for row in rows
     }
@@ -87,7 +88,7 @@ def build_report(conn: sqlite3.Connection) -> dict:
 
     missing_db_assets = []
     for row in db_rows.values():
-        path = asset_path(row["hash"], row["file_extension"])
+        path = asset_path(row["hash"], row["file_extension"], row["mime_type"], row["storage_id"])
         if not path.exists():
             missing_db_assets.append(row)
 
@@ -99,7 +100,7 @@ def build_report(conn: sqlite3.Connection) -> dict:
     orphan_assets = {
         file_hash: path
         for file_hash, path in assets.items()
-        if file_hash not in db_rows
+        if file_hash not in db_rows and file_hash not in {row.get("storage_id") for row in db_rows.values()}
     }
 
     db_by_url = {}
@@ -196,7 +197,7 @@ def repair(conn: sqlite3.Connection, report: dict) -> dict:
     matched_orphans = set()
 
     for row in report["missing_db_assets"]:
-        note_path = note_path_for(row["hash"])
+        note_path = existing_note_path_for(row["hash"], storage_id=row.get("storage_id"))
         if note_path.exists():
             continue
 
