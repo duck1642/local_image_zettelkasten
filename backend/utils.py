@@ -302,6 +302,8 @@ def calculate_phash(filepath: Path) -> Optional[str]:
             hash_obj = imagehash.phash(img)
             return str(hash_obj)
     except Exception:
+        from logger import log_system
+        log_system("WARNING", "Image perceptual hash failed", file=str(filepath), exc_info=True)
         return None
 
 def get_cookie_path() -> Optional[Path]:

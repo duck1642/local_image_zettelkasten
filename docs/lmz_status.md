@@ -1,6 +1,6 @@
 # LMZ Current Status
 
-Last updated: 2026-05-09
+Last updated: 2026-05-12
 
 ## Current Status
 
@@ -370,6 +370,17 @@ VSCode-friendly test launchers:
     - thumbnail burst generation saturating API worker threads.
     - redundant per-frame FFmpeg subprocesses during video embedding extraction.
   - targeted backend/frontend checks pass; needs real-vault ingest/review/thumbnail smoke before closing fully.
+- P3 cleanup / observability:
+  - logger helpers support `exc_info=True`; JSON logs include tracebacks through existing formatter.
+  - `calculate_phash`, `is_silent`, `get_audio_fingerprint`, `get_video_duration`, and `get_visual_embedding` now log warning tracebacks before fallback returns.
+  - FFmpeg frame extraction no longer buffers stderr where stderr is not parsed.
+  - audio fingerprinting keeps stdout parsing but discards unused stderr.
+  - maintenance script uses `DB_PATH.exists()` instead of `os.path.exists(DB_PATH)`.
+  - Resolved Gemini findings:
+    - swallowed low-level media exceptions with no traceback.
+    - naive FFmpeg stderr buffering in fingerprint frame extraction.
+    - mixed `os.path` / `pathlib.Path` check in maintenance script.
+  - backend pytest, AST, import, and diff whitespace checks pass; needs real-vault corrupt-media/log smoke before closing fully.
 
 ### Useful Checks
 
@@ -378,31 +389,18 @@ VSCode-friendly test launchers:
 
 ## Current Issues
 
-### Low-Level Backend Inconsistencies (Found during Gemini's inspection)
-
-1. **Swallowed Exceptions (Silent Failures)**
-   - **File:** `backend/utils.py` (`calculate_phash`), `backend/fingerprint.py` (`get_audio_fingerprint`, `get_visual_embedding`)
-   - **Issue:** Critical errors (corrupt images, missing FFmpeg, OOM ML loading) are swallowed by bare `except Exception:` blocks that return fallback values without logging the traceback. This makes debugging edge-cases in user-provided media nearly impossible.
-
-2. **Mixing `os.path` with `pathlib.Path`**
-   - **File:** `backend/scripts/update_downloaders_and_regenerate_notes.py` (line 39)
-   - **Issue:** The script uses `if not os.path.exists(DB_PATH):` instead of the modern, idiomatic `if not DB_PATH.exists():` used everywhere else in the project.
-
-3. **Naive Subprocess Buffering**
-   - **File:** `backend/fingerprint.py`
-   - **Issue:** Uses `subprocess.run(..., capture_output=True)` for FFmpeg. If FFmpeg encounters a corrupt video and dumps 100,000 lines of warnings into `stderr`, Python will buffer the entire string into memory. It should route `stderr=subprocess.DEVNULL` unless explicitly parsing it to prevent memory ballooning.
+- No active low-level backend inconsistency batch after P3.
 
 ## Issue Remediation Plan
 
-### P3 Cleanup / Observability
+### Next Documentation / Drift Pass
 
-- Swallowed exceptions in `calculate_phash`, `get_audio_fingerprint`, and `get_visual_embedding`.
-- Naive subprocess buffering.
-- `os.path.exists(DB_PATH)` cosmetic script cleanup.
-- Architecture/status docs drift.
+- Review `docs/lmz_architecture.md` against current backend/frontend shape.
+- Reconcile `docs/lmz_roadmap.md` phase notes with current status.
+- Keep status doc as the operational handoff source.
 
 ### Recommended Fix Batches
 
-1. `os.path` cleanup; logging for swallowed exceptions.
-2. subprocess buffering cleanup where stderr is not parsed.
-3. Architecture/status docs drift review after implementation batches settle.
+1. Architecture/status docs drift review.
+2. Real-vault corrupt-media/log smoke for P3.
+3. Real-vault validation of remaining P0/P1/P2 smoke items.

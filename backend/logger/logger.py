@@ -72,11 +72,17 @@ if not review_logger.handlers: review_logger.addHandler(review_handler)
 # --- Helper Functions ---
 
 def _log(logger, level, message, **kwargs):
+    exc_info = kwargs.pop("exc_info", None)
     level_name = str(level or "INFO").upper()
     if level_name not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
         level_name = "INFO"
         kwargs = {"invalid_level": level, **kwargs}
-    logger.log(getattr(logging, level_name), message, extra={"extra_data": kwargs} if kwargs else {})
+    logger.log(
+        getattr(logging, level_name),
+        message,
+        extra={"extra_data": kwargs} if kwargs else {},
+        exc_info=exc_info,
+    )
 
 def log_system(level, message, **kwargs):
     _log(system_logger, level, message, **kwargs)

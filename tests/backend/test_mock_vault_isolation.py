@@ -2,7 +2,9 @@ import asyncio
 import concurrent.futures
 import importlib
 import inspect
+import io
 import json
+import logging
 import shutil
 import sys
 import threading
@@ -710,9 +712,11 @@ def test_no_duplicate_thumbnail_generation_paths_outside_thumbnail_module(monkey
 def test_sampled_video_extraction_uses_one_ffmpeg_subprocess(monkeypatch, tmp_path):
     fingerprint, = fresh_backend(monkeypatch, tmp_path, "fingerprint")
     calls = []
+    kwargs_seen = []
 
     def fake_run(cmd, *args, **kwargs):
         calls.append(cmd)
+        kwargs_seen.append(kwargs)
         for value in cmd:
             if isinstance(value, str) and value.endswith(".png"):
                 path = Path(value)
@@ -730,3 +734,109 @@ def test_sampled_video_extraction_uses_one_ffmpeg_subprocess(monkeypatch, tmp_pa
     assert len(frames) == 5
     assert len(calls) == 1
     assert calls[0].count("-i") == 5
+    assert kwargs_seen[0]["stderr"] == fingerprint.subprocess.DEVNULL
+
+
+def test_calculate_phash_logs_failures_with_traceback(monkeypatch, tmp_path):
+    utils, = fresh_backend(monkeypatch, tmp_path, "utils")
+    logger = importlib.import_module("logger")
+    calls = []
+
+    def fake_log_system(level, message, **kwargs):
+        calls.append((level, message, kwargs))
+
+    def fail_open(path):
+        raise OSError("bad image")
+
+    monkeypatch.setattr(logger, "log_system", fake_log_system)
+    monkeypatch.setitem(sys.modules, "imagehash", types.SimpleNamespace(phash=lambda img: "unused"))
+    from PIL import Image as PILImage
+    monkeypatch.setattr(PILImage, "open", fail_open)
+
+    assert utils.calculate_phash(tmp_path / "bad.jpg") is None
+    assert calls == [
+        (
+            "WARNING",
+            "Image perceptual hash failed",
+            {"file": str(tmp_path / "bad.jpg"), "exc_info": True},
+        )
+    ]
+
+
+def test_logger_helper_writes_traceback_to_json(monkeypatch, tmp_path):
+    logger_impl, = fresh_backend(monkeypatch, tmp_path, "logger.logger")
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(logger_impl.JSONFormatter())
+    test_logger = logging.getLogger("lmz_test_exc_info")
+    old_handlers = test_logger.handlers[:]
+    old_propagate = test_logger.propagate
+    test_logger.handlers = [handler]
+    test_logger.propagate = False
+
+    try:
+        try:
+            raise RuntimeError("logged failure")
+        except RuntimeError:
+            logger_impl._log(test_logger, "WARNING", "Traceback check", file="bad.jpg", exc_info=True)
+
+        record = json.loads(stream.getvalue())
+        assert record["message"] == "Traceback check"
+        assert record["file"] == "bad.jpg"
+        assert "RuntimeError: logged failure" in record["exception"]
+    finally:
+        test_logger.handlers = old_handlers
+        test_logger.propagate = old_propagate
+
+
+def test_fingerprint_fallback_failures_are_logged(monkeypatch, tmp_path):
+    fingerprint, = fresh_backend(monkeypatch, tmp_path, "fingerprint")
+    logger = importlib.import_module("logger")
+    calls = []
+    video = tmp_path / "bad.mp4"
+
+    def fake_log_system(level, message, **kwargs):
+        calls.append((level, message, kwargs))
+
+    monkeypatch.setattr(logger, "log_system", fake_log_system)
+
+    monkeypatch.setattr(fingerprint.subprocess, "run", lambda *args, **kwargs: (_ for _ in ()).throw(OSError("ffmpeg missing")))
+    assert fingerprint.is_silent(video) is True
+
+    monkeypatch.setattr(fingerprint, "is_silent", lambda path: False)
+    assert fingerprint.get_audio_fingerprint(video) == b""
+
+    assert fingerprint.get_video_duration(video) == 0.0
+
+    monkeypatch.setattr(fingerprint, "get_model", lambda: (_ for _ in ()).throw(RuntimeError("model load failed")))
+    assert fingerprint.get_visual_embedding(video) == b""
+
+    assert [call[1] for call in calls] == [
+        "Video silence detection failed",
+        "Audio fingerprint failed",
+        "Video duration probe failed",
+        "Video visual embedding failed",
+    ]
+    assert all(call[0] == "WARNING" for call in calls)
+    assert all(call[2]["file"] == str(video) for call in calls)
+    assert all(call[2]["exc_info"] is True for call in calls)
+
+
+def test_video_frame_extraction_discards_stderr(monkeypatch, tmp_path):
+    fingerprint, = fresh_backend(monkeypatch, tmp_path, "fingerprint")
+    kwargs_seen = []
+
+    def fake_run(cmd, *args, **kwargs):
+        kwargs_seen.append(kwargs)
+        from PIL import Image
+        buffer = io.BytesIO()
+        Image.new("RGB", (2, 2), "red").save(buffer, format="PNG")
+        return types.SimpleNamespace(stdout=buffer.getvalue())
+
+    monkeypatch.setattr(fingerprint.subprocess, "run", fake_run)
+
+    frame = fingerprint.extract_video_frame(tmp_path / "video.mp4", 1.0)
+
+    assert frame.size == (2, 2)
+    assert kwargs_seen[0]["stdout"] == fingerprint.subprocess.PIPE
+    assert kwargs_seen[0]["stderr"] == fingerprint.subprocess.DEVNULL

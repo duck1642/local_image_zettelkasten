@@ -5,20 +5,24 @@
 ## Phase 1 — Core Image Pipeline ✅
 
 ### Task
+
 Build the input processor.
 - Takes images from input folder
 - Processes them, adds to database
 - Moves them to vault folder and creates a markdown file per image
 
 ### Key Decisions
+
 - Use SHA256 hash values as filenames for unique identity
 - Add MIME type and extension filter — check MIME type first, fall back to extension
 - Using SHA256 for now; can be swapped for other algorithms later
 
 ### Resolved Research
+
 - **Hash collisions for similar images:** SHA256 only detects exact duplicates. Similar images (e.g. different resolutions of the same image) require perceptual hashing (pHash). Addressed in Phase 5.
 
 ### What I Learned
+
 - `def func() -> data_type:` means the function returns the given data type
 
 ---
@@ -26,10 +30,12 @@ Build the input processor.
 ## Phase 2 — Video & Organized Storage ✅
 
 ### Task
+
 - Separate vault into two folders so images and markdown files are no longer mixed
 - Add video support
 
 ### Key Decisions
+
 - Split vault: `assets/` for images/videos, `notes/` for markdown files
 - Use relative paths for markdown links
 - Add `.mp4`, `.webm`, `.ogv`, `.gif` MIME and extension support
@@ -39,12 +45,15 @@ Build the input processor.
 ## Phase 3 — External Ingestion ✅
 
 ### Task
+
 Fetch images/videos from various platforms by URL, download to input folder, process as usual.
 
 ### Key Decisions
+
 - Use `gallery-dl` and `yt-dlp` — industry standard, easy to integrate
 
 ### Resolved Research
+
 - **gallery-dl vs Instaloader for Instagram:** Went with gallery-dl for consistency. Offline archive parsing added in Phase 5 as a safer alternative for Instagram.
 - **Cookies/authentication for platform access:** Addressed in Phase 5 with cookies.txt approach and `.secrets.yaml` separation.
 
@@ -53,18 +62,22 @@ Fetch images/videos from various platforms by URL, download to input folder, pro
 ## Phase 4 — Authentication & Platform Support ✅
 
 ### Task
+
 Handle platform-specific access restrictions.
 
 ### Key Decisions
+
 - **Pixiv:** OAuth 2.0 PKCE flow
 - **Instagram/X:** `cookies.txt` containing session credentials
 - **Pinterest:** No special handling needed — worked out of the box
 
 ### Resolved Research
+
 - **Is cookies.txt safe?** Went with a semi-manual approach: a script that takes cookies from the user and writes them to `cookies.txt`. Safer than manual editing. Stored path in `.secrets.yaml` to isolate credentials from config.
 - **Alternative to cookies.txt:** No better option found for gallery-dl compatibility. Mitigated risk via `.secrets.yaml` separation and a note to never commit the file. Encryption at rest planned for a future phase.
 
 ### What I Learned
+
 - API authentication is painful
 
 ---
@@ -72,21 +85,25 @@ Handle platform-specific access restrictions.
 ## Phase 5 — Bug Fixes & Hardening ✅
 
 ### Task
+
 Fix bugs found during review. Stabilize the pipeline for high-volume use.
 Add duplication check methods.
 
 ### Key Decisions
+
 - **Pixiv Ugoira:** Downloaded as `.zip`. Use ffmpeg to convert to `.webm` or `.mp4`
 - **Playwright for Pixiv auth:** Safer than manual OAuth. Dedicated browser for authentication
 - **Semi-manual cookies approach:** Script takes cookies from user, saves to `cookies.txt`. Safest option available
 - **Retry logic:** Retry twice then skip, to handle transient restrictions
 
 ### Resolved Research
+
 - **Platform-ordered downloads to reduce restrictions:** Implemented platform-bucketed `ThreadPoolExecutor`. URLs grouped by platform, platform-specific delays applied.
 - **X/Instagram archive extraction:** Implemented `parse_ig.py` and `parse_x.py` offline parsers. Extract links, write batches of 50 to `pending_links.md`.
 - **Protecting cookies.txt from AI context:** Marked clearly in docs and file tree as `⛔ DO NOT TOUCH`. Encryption at rest deferred to a future phase.
 
 ### What I Learned
+
 - Claude Opus is strong for bug fixing
 - Gemini-Claude feedback loop made bug fixing more effective
 
@@ -95,6 +112,7 @@ Add duplication check methods.
 ## Phase 6 — Optimization & Multi-Modal Intelligence ✅
 
 ### Task
+
 Do some optimization for searching.
 Upgrade and harden duplication check methods.
 
@@ -109,6 +127,7 @@ Upgrade and harden duplication check methods.
 | **Video AI Search** | $O(\log N)$ | **Optimized.** VP-Tree Cosine distance. |
 
 ### Key Decisions (Optimization)
+
 - **RAM-Based Indexing:** Hydrate BK-Trees and URL sets into memory at startup for logarithmic scaling.
 - **Advanced Concurrency:** Global Semaphore limit + per-platform `ThreadPoolExecutor` with random Jitter.
 - **Multi-Modal Video:** Combined **Sonic Similarity** (Chromaprint) and **Semantic AI** (5-point frame sequence).
@@ -120,11 +139,13 @@ Upgrade and harden duplication check methods.
 ## Phase 7 — Metadata Integrity & Stabilization ✅
 
 ### Task
+
 Fix the "Artist" metadata gap and enable platform-agnostic ingestion.
 Implement an Integrity Gate to prevent corrupted downloads.
 Check how paths handled. Everything must be relative to project folder
 
 ### Completed & Verified
+
 - **The Integrity Gate:** 
     - Implemented a file-size verification system for `yt-dlp` and `gallery-dl`.
     - **Dual Mode:** `normal_pending_links.md` (Strict validation) vs `force_pending_links.md` (Bypass).
@@ -146,9 +167,11 @@ Check how paths handled. Everything must be relative to project folder
 ## Phase 8 — Modern Management UI, Local Tagging, and API Hardening
 
 ### Task
+
 Build a practical desktop interface for vault management, add local AI tagging, and harden the local API/runtime boundary.
 
 ### Completed So Far
+
 - Replaced the broken Flet/PySide direction with a Tauri + Svelte desktop UI backed by FastAPI.
 - Removed old PySide UI code, `gui.py`, PySide dependencies.
 - Added a Svelte vault with virtualized masonry/grid layouts, grouped source URL tiles, infinite loading, and command-driven media/sort filters.
@@ -189,6 +212,7 @@ Build a practical desktop interface for vault management, add local AI tagging, 
 - Added a practical Tauri CSP for local backend/media access.
 
 ### Still In Progress / Needs Refinement
+
 - Virtual masonry/grid renderers need continued real-vault validation for long-scroll stability, video unmounting, grouped-media state, and zoom behavior.
 - Inspector resize works, but separator/handle alignment still needs polish.
 - Fullscreen zoom/pan works at core level, but interaction details still need refinement.
@@ -207,9 +231,11 @@ Build a practical desktop interface for vault management, add local AI tagging, 
 ## Phase 9 — UI Refinement, Search Scaling, Config Cache, and Runtime Cleanup
 
 ### Task
+
 Finish the active Tauri/Svelte vault experience, validate the virtual renderer path, scale search/facet handling, and remove the remaining deferred runtime debt.
 
 ### Planned
+
 - Polish inspector resize UI, especially the separator/resize-handle alignment.
 - Refine fullscreen zoom/pan and grouped-media filmstrip behavior.
 - Decide whether GIFs should remain static in vault tiles or get animation-aware preview/tagging behavior.
@@ -229,6 +255,7 @@ Finish the active Tauri/Svelte vault experience, validate the virtual renderer p
 ## Phase 10 — Reverse Search & Provenance
 
 ### Task
+
 Recover the "Exact Source" of orphan files using pHash-based reverse lookups and auto-filling missing metadata from online databases.
 
 ---
@@ -236,6 +263,7 @@ Recover the "Exact Source" of orphan files using pHash-based reverse lookups and
 ## Phase 11 — Modular Logic & Advanced Vision
 
 ### Task
+
 Implement the **Strategy Pattern** for switchable deduplication algorithms and upgrade tiling to a **Sliding Window** system.
 
 ---
@@ -243,6 +271,7 @@ Implement the **Strategy Pattern** for switchable deduplication algorithms and u
 ## Phase 12 — Security & Credential Hardening
 
 ### Task
+
 Encrypt `.secrets.yaml` and `cookies.txt` at rest and implement improved credential isolation.
 
 ---
@@ -250,6 +279,7 @@ Encrypt `.secrets.yaml` and `cookies.txt` at rest and implement improved credent
 ## Phase 13 — Maintenance & Vault Health
 
 ### Task
+
 Implement "Orphan/Ghost" integrity checks and periodic SHA256 re-verification to detect bit-rot.
 
 ---
@@ -257,4 +287,5 @@ Implement "Orphan/Ghost" integrity checks and periodic SHA256 re-verification to
 ## Phase 14 — Browser Extension Integration (Resilient Ingestion)
 
 ### Task
+
 Develop a browser extension to capture media URLs directly from the active webpage and send them to the backend. This provides a resilient fallback for media ingestion, bypassing the need for backend scrapers (e.g., `gallery-dl`, `yt-dlp`) that are vulnerable to platform rate-limiting, CAPTCHAs, and API breakages.

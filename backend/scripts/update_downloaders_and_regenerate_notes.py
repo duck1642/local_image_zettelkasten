@@ -1,7 +1,6 @@
 ﻿
 import subprocess
 import sys
-import os
 import sqlite3
 from pathlib import Path
 
@@ -36,7 +35,7 @@ def regenerate_markdowns():
     from utils import DB_PATH, NOTES_DIR, note_path_for
     from md_generator import generate_markdown
 
-    if not os.path.exists(DB_PATH):
+    if not DB_PATH.exists():
         print(f"[ERROR] Database not found at {DB_PATH}")
         return
 

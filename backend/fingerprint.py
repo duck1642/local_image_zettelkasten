@@ -27,7 +27,14 @@ def is_silent(video_path: Path, threshold_db: float = -60.0) -> bool:
             '-f', 'null', '-'
         ]
 
-        result = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=60)
+        result = subprocess.run(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+            timeout=60,
+        )
 
 
         import re
@@ -40,6 +47,8 @@ def is_silent(video_path: Path, threshold_db: float = -60.0) -> bool:
 
         return True
     except Exception:
+        from logger import log_system
+        log_system("WARNING", "Video silence detection failed", file=str(video_path), exc_info=True)
         return True
 
 def get_audio_fingerprint(video_path: Path) -> bytes:
@@ -52,7 +61,8 @@ def get_audio_fingerprint(video_path: Path) -> bytes:
 
         result = subprocess.run(
             ['fpcalc', '-raw', '-json', '-length', '120', str(video_path)],
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
             text=True,
             check=False,
             timeout=120
@@ -67,6 +77,8 @@ def get_audio_fingerprint(video_path: Path) -> bytes:
                 return np.array(raw_fp, dtype=np.int32).tobytes()
         return b''
     except Exception:
+        from logger import log_system
+        log_system("WARNING", "Audio fingerprint failed", file=str(video_path), exc_info=True)
         return b''
 
 def get_video_duration(video_path: Path) -> float:
@@ -87,6 +99,8 @@ def get_video_duration(video_path: Path) -> float:
         duration_str = probe.stdout.strip()
         return float(duration_str) if duration_str and duration_str != 'N/A' else 0.0
     except Exception:
+        from logger import log_system
+        log_system("WARNING", "Video duration probe failed", file=str(video_path), exc_info=True)
         return 0.0
 
 def sample_video_timestamps(duration: float, frame_count: int = 5) -> list[float]:
@@ -108,7 +122,13 @@ def extract_video_frame(video_path: Path, timestamp: float) -> Image.Image:
             'ffmpeg', '-y', '-ss', f"{timestamp:.3f}", '-i', str(video_path),
             '-frames:v', '1', '-f', 'image2pipe', '-vcodec', 'png', '-'
         ]
-        frame_proc = subprocess.run(frame_cmd, capture_output=True, check=True, timeout=60)
+        frame_proc = subprocess.run(
+            frame_cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=True,
+            timeout=60,
+        )
         return Image.open(BytesIO(frame_proc.stdout)).convert('RGB')
     except Exception as exc:
         from logger import log_system
@@ -135,7 +155,13 @@ def extract_sampled_video_frames(video_path: Path, frame_count: int = 5) -> list
                 frame_paths.append(frame_path)
                 cmd.extend(['-map', f"{index}:v:0", '-frames:v', '1', str(frame_path)])
 
-            subprocess.run(cmd, capture_output=True, check=True, timeout=90)
+            subprocess.run(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=True,
+                timeout=90,
+            )
             for timestamp, frame_path in zip(timestamps, frame_paths):
                 if not frame_path.exists():
                     continue
@@ -170,6 +196,8 @@ def get_visual_embedding(video_path: Path) -> bytes:
         return avg_vector.astype(np.float32).tobytes()
 
     except Exception:
+        from logger import log_system
+        log_system("WARNING", "Video visual embedding failed", file=str(video_path), exc_info=True)
         return b''
 
 def compare_audio_fingerprints(fp1_bytes: bytes, fp2_bytes: bytes) -> float:
