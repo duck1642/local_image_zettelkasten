@@ -11,7 +11,7 @@ def run_auth_auto():
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
-        print("\na Playwright is not installed.")
+        print("\n[ERROR] Playwright is not installed.")
         print("   Install it with:")
         print("     pip install playwright")
         print("     playwright install chromium")
@@ -20,7 +20,7 @@ def run_auth_auto():
         run_auth()
         return
 
-    print("\nY  LMZ Pixiv Authenticator (Auto Mode) Y ")
+    print("\n[INFO] LMZ Pixiv Authenticator (Auto Mode)")
     print("-------------------------------------------")
     print("A browser window will open. Log in to your Pixiv account.")
     print("The auth code will be captured automatically - no F12 needed!\n")
@@ -84,14 +84,14 @@ def run_auth_auto():
         page.on('response', handle_response)
         page.route('**/*', handle_route)
 
-        print(f"Y Opening Pixiv login page...")
+        print("[INFO] Opening Pixiv login page...")
 
         try:
             page.goto(login_url, wait_until='domcontentloaded', timeout=60000)
         except Exception:
             pass
 
-        print("a3 Waiting for you to log in... (the browser window should be open)")
+        print("[INFO] Waiting for you to log in... (the browser window should be open)")
         print("   Close the browser window to cancel.\n")
 
         timeout_seconds = 300
@@ -122,12 +122,12 @@ def run_auth_auto():
             pass
 
     if not captured_code:
-        print("\na Could not capture the auth code.")
+        print("\n[ERROR] Could not capture the auth code.")
         print("   The browser may have been closed before login completed.")
         print("   You can try again, or use the manual method: python auth_pixiv.py --manual")
         return
 
-    print(f"Y Code captured: {captured_code[:8]}... Negotiating with Pixiv servers...")
+    print(f"[INFO] Code captured: {captured_code[:8]}... Negotiating with Pixiv servers...")
 
     data = urllib.parse.urlencode({
         'client_id': CLIENT_ID,
@@ -149,16 +149,16 @@ def run_auth_auto():
 
             if refresh_token:
                 save_token(refresh_token)
-                print(f"\nYZ Success! Your Pixiv Refresh Token has been securely saved to .secrets.yaml.")
+                print("\n[OK] Your Pixiv Refresh Token has been securely saved to .secrets.yaml.")
                 print("   LMZ will now automatically authenticate and download from Pixiv.")
             else:
-                print(f"\na Failed to extract refresh_token from response.")
+                print("\n[ERROR] Failed to extract refresh_token from response.")
                 print(f"   Response: {json.dumps(resp_data, indent=2)[:200]}")
     except urllib.error.HTTPError as e:
         error_info = e.read().decode('utf-8')
-        print(f"\na Network error during authentication: HTTP {e.code} - {error_info}")
+        print(f"\n[ERROR] Network error during authentication: HTTP {e.code} - {error_info}")
     except Exception as e:
-        print(f"\na An unexpected error occurred: {e}")
+        print(f"\n[ERROR] An unexpected error occurred: {e}")
 
 if __name__ == '__main__':
     run_auth_auto()

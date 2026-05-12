@@ -18,11 +18,11 @@ def migrate():
     videos = cursor.fetchall()
 
     if not videos:
-        print("a1i  No videos found in database for migration.")
+        print("[INFO] No videos found in database for migration.")
         conn.close()
         return
 
-    print(f"YS Found {len(videos)} videos. Starting re-calculation...")
+    print(f"[INFO] Found {len(videos)} videos. Starting re-calculation...")
 
     updates = 0
     errors = 0
@@ -32,7 +32,7 @@ def migrate():
         file_path = ASSETS_DIR / shard / f"{f_hash}{ext}"
 
         if not file_path.exists():
-            print(f"as i  File missing in vault: {file_path.name}")
+            print(f"[WARN] File missing in vault: {file_path.name}")
             errors += 1
             continue
 

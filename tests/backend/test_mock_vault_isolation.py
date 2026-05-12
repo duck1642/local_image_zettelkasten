@@ -789,6 +789,88 @@ def test_logger_helper_writes_traceback_to_json(monkeypatch, tmp_path):
         test_logger.propagate = old_propagate
 
 
+def test_ingest_log_helpers_route_to_separate_streams(monkeypatch, tmp_path):
+    logger_impl, = fresh_backend(monkeypatch, tmp_path, "logger.logger")
+    streams = {}
+    targets = {
+        "local": logger_impl.ingest_local_logger,
+        "online": logger_impl.ingest_online_logger,
+        "audit": logger_impl.activity_logger,
+    }
+    old_state = {}
+
+    for name, target in targets.items():
+        stream = io.StringIO()
+        handler = logging.StreamHandler(stream)
+        handler.setFormatter(logger_impl.JSONFormatter())
+        streams[name] = stream
+        old_state[name] = (target.handlers[:], target.propagate)
+        target.handlers = [handler]
+        target.propagate = False
+
+    try:
+        logger_impl.log_ingest_local("INFO", "local item", run_id="run-local")
+        logger_impl.log_ingest_online("INFO", "online item", queue="normal")
+        logger_impl.log_ingest_audit("INFO", "audit summary", ingest_type="local")
+
+        assert "local item" in streams["local"].getvalue()
+        assert "online item" not in streams["local"].getvalue()
+        assert "online item" in streams["online"].getvalue()
+        assert "local item" not in streams["online"].getvalue()
+        assert "audit summary" in streams["audit"].getvalue()
+    finally:
+        for name, target in targets.items():
+            handlers, propagate = old_state[name]
+            target.handlers = handlers
+            target.propagate = propagate
+
+
+def test_log_activity_records_ingest_type_and_run_id(monkeypatch, tmp_path):
+    logger_impl, = fresh_backend(monkeypatch, tmp_path, "logger.logger")
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(logger_impl.JSONFormatter())
+    old_handlers = logger_impl.activity_logger.handlers[:]
+    old_propagate = logger_impl.activity_logger.propagate
+    logger_impl.activity_logger.handlers = [handler]
+    logger_impl.activity_logger.propagate = False
+
+    try:
+        logger_impl.log_activity(
+            original_name="source.jpg",
+            vault_id="abc",
+            platform="Local",
+            artist="Tester",
+            ingest_type="local",
+            run_id="run-1",
+        )
+
+        record = json.loads(stream.getvalue())
+        assert record["message"] == "Ingestion successful"
+        assert record["ingest_type"] == "local"
+        assert record["run_id"] == "run-1"
+        assert record["status"] == "success"
+
+        stream.seek(0)
+        stream.truncate(0)
+        logger_impl.log_activity(
+            original_name="source.jpg",
+            vault_id="abc",
+            platform="Local",
+            artist="Tester",
+            ingest_type="local",
+            run_id="run-1",
+            status="failed",
+        )
+        record = json.loads(stream.getvalue())
+        assert record["level"] == "ERROR"
+        assert record["message"] == "Ingestion failed"
+        assert record["status"] == "failed"
+    finally:
+        logger_impl.activity_logger.handlers = old_handlers
+        logger_impl.activity_logger.propagate = old_propagate
+
+
 def test_fingerprint_fallback_failures_are_logged(monkeypatch, tmp_path):
     fingerprint, = fresh_backend(monkeypatch, tmp_path, "fingerprint")
     logger = importlib.import_module("logger")
@@ -840,3 +922,55 @@ def test_video_frame_extraction_discards_stderr(monkeypatch, tmp_path):
     assert frame.size == (2, 2)
     assert kwargs_seen[0]["stdout"] == fingerprint.subprocess.PIPE
     assert kwargs_seen[0]["stderr"] == fingerprint.subprocess.DEVNULL
+
+
+def test_search_manager_runtime_logs_route_to_system(monkeypatch, tmp_path):
+    search_manager_module, = fresh_backend(monkeypatch, tmp_path, "db.search_manager")
+    calls = []
+
+    monkeypatch.setattr(search_manager_module, "log_system", lambda level, message, **kwargs: calls.append((level, message, kwargs)))
+    monkeypatch.setattr(search_manager_module, "get_all_urls", lambda conn: [])
+    monkeypatch.setattr(search_manager_module, "get_all_phashes", lambda conn: [])
+    monkeypatch.setattr(search_manager_module, "get_all_tiles", lambda conn: [])
+    monkeypatch.setattr(search_manager_module, "get_all_video_signatures", lambda conn: [])
+
+    manager = search_manager_module.SearchManager()
+    manager.is_hydrated = False
+    manager.hydrate(object())
+    manager.update_indexes_batch([{"file_hash": "hash", "phash": None, "url": "", "tiles": []}])
+
+    messages = [call[1] for call in calls]
+    assert "Hydrating RAM indexes from SQLite..." in messages
+    assert any(message.startswith("Hydration complete:") for message in messages)
+    assert "RAM index batch update queued" in messages
+
+
+def test_local_ingest_worker_emits_local_and_audit_logs(monkeypatch, tmp_path):
+    web_api, = fresh_backend(monkeypatch, tmp_path, "web_api")
+    source = tmp_path / "source.jpg"
+    source.write_bytes(b"image")
+    local_calls = []
+    audit_calls = []
+
+    def fake_process_file(path, config, metadata=None, delete_source=False, skip_similarity=False):
+        assert metadata["ingest_type"] == "local"
+        assert metadata["run_id"] == "run-local"
+        if delete_source:
+            path.unlink()
+        return True, "Success: source.jpg", {"file_hash": "abc", "phash": None, "url": "", "tiles": []}
+
+    monkeypatch.setattr(web_api, "process_file", fake_process_file)
+    monkeypatch.setattr(web_api, "log_ingest_local", lambda level, message, **kwargs: local_calls.append((level, message, kwargs)))
+    monkeypatch.setattr(web_api, "log_ingest_audit", lambda level, message, **kwargs: audit_calls.append((level, message, kwargs)))
+
+    web_api._prepare_local_ingest_run("run-local", {"artist": "A", "platform": "Local"}, False, 1)
+    web_api._run_local_ingest_worker([str(source)], {"artist": "A", "platform": "Local"}, False, "run-local")
+
+    local_messages = [call[1] for call in local_calls]
+    assert "Local ingest run started" in local_messages
+    assert "Local ingest item processed" in local_messages
+    assert "Local ingest run finished" in local_messages
+    assert any(call[2].get("status") == "ingested" for call in local_calls)
+    assert audit_calls[-1][1] == "Local ingestion run summary"
+    assert audit_calls[-1][2]["ingest_type"] == "local"
+    assert audit_calls[-1][2]["summary_ingested"] == 1

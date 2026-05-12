@@ -409,6 +409,8 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
 
         artist = metadata.get('artist', 'Local')
         platform = metadata.get('platform', 'Local')
+        ingest_type = metadata.get('ingest_type') or ("local" if metadata.get("staged_from") == "local" else "online" if source_url else "local")
+        run_id = metadata.get('run_id', '')
 
         log_activity(
             original_name=filepath.name,
@@ -416,7 +418,9 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
             platform=platform,
             artist=artist,
             source_url=source_url,
-            timestamp_str=master_timestamp_str
+            timestamp_str=master_timestamp_str,
+            ingest_type=ingest_type,
+            run_id=run_id,
         )
 
         return True, f"Success: {filepath.name} -> {new_filename}", index_data

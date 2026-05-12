@@ -19,11 +19,11 @@ def interactive_menu():
         items = get_review_items()
 
         print("\n" + "="*50)
-        print("Y LMZ VISUAL DUPLICATE REVIEW")
+        print("[INFO] LMZ VISUAL DUPLICATE REVIEW")
         print("="*50)
 
         if not items:
-            print("Y The review folder is empty. Everything is clean!")
+            print("[INFO] The review folder is empty. Everything is clean.")
             break
 
         print(f"Found {len(items)} items awaiting your decision:\n")
@@ -90,11 +90,11 @@ def manage_single_item(item_path):
             pass
 
     print(f"\n" + "-"*60)
-    print(f"Y REVIEWING: {item_path.name}")
-    print(f"YZ  New pHash:      {new_phash}")
-    print(f"Y Best Match:     {best_match}")
-    print(f"Y Min Distance:   {distance}")
-    print(f"as i   Total Conflicts: {total_conflicts} items in vault")
+    print(f"[INFO] REVIEWING: {item_path.name}")
+    print(f"[INFO] New pHash:      {new_phash}")
+    print(f"[INFO] Best Match:     {best_match}")
+    print(f"[INFO] Min Distance:   {distance}")
+    print(f"[INFO] Total Conflicts: {total_conflicts} items in vault")
     print("-"*60)
     print("\nActions:")
     print("1. Approve (Keep and move to Vault)")
@@ -142,7 +142,7 @@ def reject_file(filename):
 
     if file_path.exists():
         file_path.unlink()
-        print(f"Yi   Deleted: {filename}")
+        print(f"[OK] Deleted: {filename}")
 
     if json_path.exists():
         json_path.unlink()
@@ -151,4 +151,4 @@ if __name__ == "__main__":
     try:
         interactive_menu()
     except KeyboardInterrupt:
-        print("\nY Exiting Review Manager.")
+        print("\n[INFO] Exiting Review Manager.")

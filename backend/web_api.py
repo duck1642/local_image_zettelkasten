@@ -22,7 +22,7 @@ from pydantic import BaseModel
 from db.sqlite_operator import init_database, normalize_source_url
 from utils import get_config, ASSETS_DIR, REVIEW_DIR, LOCAL_INGEST_DIR, note_path_for, asset_path_for, calculate_file_hash
 from processor import process_file
-from logger import log_auth, log_ingest_local, log_review, log_svelte, log_system, RAW_LOGS_DIR, STRUCTURED_LOGS_DIR
+from logger import log_auth, log_ingest_audit, log_ingest_local, log_review, log_svelte, log_system, RAW_LOGS_DIR, STRUCTURED_LOGS_DIR
 from md_generator import MANUAL_FRONTMATTER_FIELDS, load_note_frontmatter, load_note_topics, load_note_wd_tags, generate_markdown
 from metadata_index import (
     indexed_item_metadata,
@@ -1543,7 +1543,7 @@ def _append_local_ingest_result(result: dict):
     if overflow > 0:
         del LOCAL_INGEST_STATE["results"][:overflow]
 
-def _prepare_local_ingest_run(run_id: str, defaults: dict, skip_similarity: bool):
+def _prepare_local_ingest_run(run_id: str, defaults: dict, skip_similarity: bool, path_count: int = 0):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with LOCAL_INGEST_LOCK:
         if LOCAL_INGEST_STATE["running"]:
@@ -1564,6 +1564,15 @@ def _prepare_local_ingest_run(run_id: str, defaults: dict, skip_similarity: bool
         LOCAL_INGEST_STATE["started_at"] = now
         LOCAL_INGEST_STATE["finished_at"] = None
         LOCAL_INGEST_STATE["stop_requested"] = False
+    log_ingest_local(
+        "INFO",
+        "Local ingest run started",
+        run_id=run_id,
+        path_count=path_count,
+        artist=defaults.get("artist") or "Local",
+        platform=defaults.get("platform") or "Local",
+        skip_similarity=bool(skip_similarity),
+    )
 
 def _cleanup_local_run_dir(run_dir: Path):
     try:
@@ -1593,6 +1602,14 @@ def _run_local_ingest_worker(raw_paths: list[str], defaults: dict, skip_similari
                     LOCAL_INGEST_STATE["queued"] = int(LOCAL_INGEST_STATE.get("queued") or 0) + 1
             except Exception as exc:
                 message = f"Local staging failed: {exc}"
+                log_ingest_local(
+                    "ERROR",
+                    "Local ingest staging failed",
+                    run_id=run_id,
+                    source_path=str(source_path),
+                    name=source_path.name,
+                    error=str(exc),
+                )
                 with LOCAL_INGEST_LOCK:
                     LOCAL_INGEST_STATE["summary"]["failed"] = int(LOCAL_INGEST_STATE["summary"].get("failed", 0)) + 1
                     LOCAL_INGEST_STATE["failed_paths"].append(str(source_path))
@@ -1614,6 +1631,8 @@ def _run_local_ingest_worker(raw_paths: list[str], defaults: dict, skip_similari
                 "source_url": defaults.get("source_url") or "",
                 "original_path": str(source_path),
                 "staged_from": "local",
+                "ingest_type": "local",
+                "run_id": run_id,
             }
             with LOCAL_INGEST_LOCK:
                 LOCAL_INGEST_STATE["phase"] = "running"
@@ -1630,6 +1649,15 @@ def _run_local_ingest_worker(raw_paths: list[str], defaults: dict, skip_similari
             except Exception as exc:
                 status = "failed"
                 message = f"Local ingest crash: {exc}"
+            log_ingest_local(
+                "INFO" if status in {"ingested", "duplicate", "review"} else "ERROR",
+                "Local ingest item processed",
+                run_id=run_id,
+                status=status,
+                source_path=str(source_path),
+                name=source_path.name,
+                result_message=message,
+            )
 
             with LOCAL_INGEST_LOCK:
                 LOCAL_INGEST_STATE["processed"] += 1
@@ -1654,6 +1682,7 @@ def _run_local_ingest_worker(raw_paths: list[str], defaults: dict, skip_similari
             with LOCAL_INGEST_LOCK:
                 LOCAL_INGEST_STATE["phase"] = "finished" if LOCAL_STOP_AFTER_CURRENT.is_set() else "failed"
                 if not LOCAL_STOP_AFTER_CURRENT.is_set():
+                    log_ingest_local("WARNING", "Local ingest found no valid files", run_id=run_id)
                     _append_local_ingest_result(
                         {
                             "path": "",
@@ -1666,6 +1695,7 @@ def _run_local_ingest_worker(raw_paths: list[str], defaults: dict, skip_similari
                     )
                     LOCAL_INGEST_STATE["summary"]["failed"] = 1
         elif LOCAL_STOP_AFTER_CURRENT.is_set():
+            log_ingest_local("INFO", "Local ingest stop-after-current acknowledged", run_id=run_id)
             with LOCAL_INGEST_LOCK:
                 LOCAL_INGEST_STATE["phase"] = "stopping"
     except Exception as exc:
@@ -1693,7 +1723,30 @@ def _run_local_ingest_worker(raw_paths: list[str], defaults: dict, skip_similari
             LOCAL_INGEST_STATE["running"] = False
             LOCAL_INGEST_STATE["finished_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             LOCAL_INGEST_STATE["stop_requested"] = False
+            summary = dict(LOCAL_INGEST_STATE.get("summary") or {})
+            phase = str(LOCAL_INGEST_STATE.get("phase") or "")
         LOCAL_STOP_AFTER_CURRENT.clear()
+        log_ingest_local(
+            "INFO" if phase == "finished" else "ERROR",
+            "Local ingest run finished",
+            run_id=run_id,
+            phase=phase,
+            summary_ingested=summary.get("ingested", 0),
+            summary_review=summary.get("review", 0),
+            summary_failed=summary.get("failed", 0),
+            summary_duplicate=summary.get("duplicate", 0),
+        )
+        log_ingest_audit(
+            "INFO" if phase == "finished" else "ERROR",
+            "Local ingestion run summary",
+            ingest_type="local",
+            run_id=run_id,
+            phase=phase,
+            summary_ingested=summary.get("ingested", 0),
+            summary_review=summary.get("review", 0),
+            summary_failed=summary.get("failed", 0),
+            summary_duplicate=summary.get("duplicate", 0),
+        )
 
 @app.post("/api/local-ingest/start")
 async def local_ingest_start(body: LocalIngestStartRequest):
@@ -1702,7 +1755,7 @@ async def local_ingest_start(body: LocalIngestStartRequest):
         raise HTTPException(status_code=400, detail="No local paths provided")
     defaults = body.defaults.model_dump() if body.defaults else {}
     run_id = _local_run_id()
-    _prepare_local_ingest_run(run_id, defaults, bool(body.skip_similarity))
+    _prepare_local_ingest_run(run_id, defaults, bool(body.skip_similarity), len(raw_paths))
     asyncio.get_running_loop().run_in_executor(None, _run_local_ingest_worker, raw_paths, defaults, bool(body.skip_similarity), run_id)
     return {"status": "success", "run_id": run_id, "phase": "scanning"}
 
@@ -1721,7 +1774,7 @@ async def local_ingest_retry_failed():
     if not failed_paths:
         return {"status": "success", "queued": 0, "phase": "idle"}
     run_id = _local_run_id()
-    _prepare_local_ingest_run(run_id, defaults, skip_similarity)
+    _prepare_local_ingest_run(run_id, defaults, skip_similarity, len(failed_paths))
     asyncio.get_running_loop().run_in_executor(None, _run_local_ingest_worker, failed_paths, defaults, skip_similarity, run_id)
     return {"status": "success", "run_id": run_id, "phase": "scanning", "queued": len(failed_paths)}
 

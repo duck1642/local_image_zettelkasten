@@ -243,7 +243,8 @@ VSCode-friendly test launchers:
   - `get_config()` still reparses YAML often.
   - safe invalidation is needed before broad caching.
 - Video embedding performance:
-  - V1 still extracts five frames with separate ffmpeg calls.
+  - sampled frame extraction now uses one FFmpeg subprocess per batch.
+  - embedding/tagging still depends on extracting sampled original video frames.
 - Video hover preview strategy:
   - current hover preview can download original video.
   - options: file-size cap, backend preview clip endpoint, animated WebP thumbnail.
@@ -261,17 +262,18 @@ VSCode-friendly test launchers:
   - full Tauri stack upgrade to `2.11.x` is deferred.
 - Maintenance Tools UI Integration 
   - The current maintenance scripts for capturing cookies (`backend/scripts/auth_cookies_builder.py`) and authenticating with Pixiv (`backend/scripts/auth_pixiv_auto.py`) only run in the CLI. These need to be connected to the Svelte UI so users can manage authentication directly from the desktop application without dropping into the terminal.
-- Need to separate local ingestion logs and online-ingestion logs.
-- Need to check whether ASCII issues exists in logs and codes.  
 
 ## Done But Needs Check
 
 - Logging stream split and rename:
-  - online ingestion logs now write to `ingest_online.jsonl`.
-  - local ingestion logs now write to `ingest_local.jsonl`.
-  - ingestion audit logs now write to `ingestion_audit.jsonl`.
-  - legacy `ingestion.jsonl` and `activity.jsonl` support removed from API/UI and old files deleted.
-  - needs quick UI verification in App Logs dropdown and live stream behavior.
+  - online ingestion lifecycle logs now write to `ingest_online.jsonl`.
+  - local desktop ingestion lifecycle logs now write to `ingest_local.jsonl`.
+  - ingestion summaries and item audit entries now write to `ingestion_audit.jsonl`.
+  - SearchManager RAM hydration, batch index updates, and VP-tree rebuild logs now write to `system.jsonl`.
+  - legacy `log_ingestion` alias removed; old `ingestion.jsonl` and `activity.jsonl` support remains absent from API/UI.
+  - obvious backend/tools CLI mojibake prefixes cleaned up.
+  - targeted backend pytest, AST, import, static grep, and diff whitespace checks pass.
+  - needs real UI verification in App Logs dropdown/live stream and real local/online ingest log smoke.
 
 - Virtual renderer:
   - automated large-vault Playwright checks pass for 10k/100k masonry/grid and grouped mixed media.

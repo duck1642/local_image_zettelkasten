@@ -51,8 +51,8 @@ def _opener(config: dict):
             jar.load(str(cookie_path), ignore_discard=True, ignore_expires=True)
             handlers.append(HTTPCookieProcessor(jar))
         except Exception as exc:
-            from logger import log_ingestion
-            log_ingestion("WARNING", "Cookie jar load failed", path=str(cookie_path), error=str(exc))
+            from logger import log_ingest_online
+            log_ingest_online("WARNING", "Cookie jar load failed", path=str(cookie_path), error=str(exc))
     proxy = config.get('external_tools', {}).get('proxy')
     if proxy:
         handlers.append(ProxyHandler({'http': proxy, 'https': proxy}))

@@ -6,12 +6,12 @@ from pathlib import Path
 
 def update_tools():
 
-    print("Y i   LMZ Maintenance - Updating External Tools...")
+    print("[INFO] LMZ Maintenance - Updating External Tools...")
 
     tools = ["yt-dlp", "gallery-dl"]
 
     for tool in tools:
-        print(f"Y Updating {tool}...")
+        print(f"[INFO] Updating {tool}...")
         cmd = [sys.executable, "-m", "pip", "install", "-U", tool, "--break-system-packages"]
         try:
             res = subprocess.run(cmd, capture_output=True, text=True)
@@ -30,7 +30,7 @@ def update_tools():
 
 def regenerate_markdowns():
 
-    print("Y LMZ Maintenance - Regenerating all Markdown files from Database...")
+    print("[INFO] LMZ Maintenance - Regenerating all Markdown files from Database...")
     from db.sqlite_operator import init_database
     from utils import DB_PATH, NOTES_DIR, note_path_for
     from md_generator import generate_markdown
@@ -44,7 +44,7 @@ def regenerate_markdowns():
     cursor.execute("SELECT hash FROM items")
     rows = cursor.fetchall()
 
-    print(f"Y Found {len(rows)} items in database.")
+    print(f"[INFO] Found {len(rows)} items in database.")
 
     notes_dir = NOTES_DIR
     notes_dir.mkdir(parents=True, exist_ok=True)

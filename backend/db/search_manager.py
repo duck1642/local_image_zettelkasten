@@ -6,7 +6,7 @@ from typing import List, Tuple, Optional
 
 from db.searchers import BKTreeSearcher, URLRegistry, VPTreeSearcher
 from db.sqlite_operator import get_all_phashes, get_all_tiles, get_all_urls, get_all_video_signatures
-from logger import log_ingestion
+from logger import log_system
 
 def _cosine_dist(v1_bytes: bytes, v2_bytes: bytes) -> float:
 
@@ -65,7 +65,7 @@ class SearchManager:
             if self.is_hydrated:
                 return
 
-            log_ingestion('INFO', "Hydrating RAM indexes from SQLite...")
+            log_system('INFO', "Hydrating RAM indexes from SQLite...")
 
 
             urls = get_all_urls(conn)
@@ -94,7 +94,7 @@ class SearchManager:
             self._rebuild_deferred_indexes_locked("hydrate")
 
             self.is_hydrated = True
-            log_ingestion('INFO', f"Hydration complete: {len(urls)} URLs | {len(phashes)} Images | {len(v_sigs)} Videos indexed in RAM.")
+            log_system('INFO', f"Hydration complete: {len(urls)} URLs | {len(phashes)} Images | {len(v_sigs)} Videos indexed in RAM.")
 
     def query_image(self, phash: str, threshold: int = 5) -> List[Tuple[str, int, str]]:
 
@@ -175,7 +175,7 @@ class SearchManager:
                     item.get("audio_hash"),
                     item.get("visual_embedding"),
                 )
-            log_ingestion("INFO", "RAM index batch update queued", count=len(items))
+            log_system("INFO", "RAM index batch update queued", count=len(items))
             should_rebuild = self._vp_pending_count_locked() > 0
         if should_rebuild:
             self._rebuild_deferred_indexes("batch_update")
@@ -212,7 +212,7 @@ class SearchManager:
             started = time.perf_counter()
             stats = tree.build_index()
             duration_ms = round((time.perf_counter() - started) * 1000, 2)
-            log_ingestion(
+            log_system(
                 "INFO",
                 "VP-tree index rebuilt" if stats.get("rebuilt") else "VP-tree index rebuild skipped",
                 tree=name,
@@ -250,7 +250,7 @@ class SearchManager:
                     stats = tree.apply_replacement(plan, replacement)
                     pending = tree.pending_count()
                     rebuild_count = tree.rebuild_count
-                log_ingestion(
+                log_system(
                     "INFO",
                     "VP-tree index rebuilt" if stats.get("rebuilt") else "VP-tree index rebuild skipped",
                     tree=name,

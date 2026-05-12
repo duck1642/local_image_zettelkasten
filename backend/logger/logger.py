@@ -90,14 +90,14 @@ def log_system(level, message, **kwargs):
 def log_svelte(level, message, **kwargs):
     _log(svelte_logger, level, message, **kwargs)
 
-def log_ingestion(level, message, **kwargs):
-    _log(ingest_online_logger, level, message, **kwargs)
-
 def log_ingest_local(level, message, **kwargs):
     _log(ingest_local_logger, level, message, **kwargs)
 
 def log_ingest_online(level, message, **kwargs):
     _log(ingest_online_logger, level, message, **kwargs)
+
+def log_ingest_audit(level, message, **kwargs):
+    _log(activity_logger, level, message, **kwargs)
 
 def log_auth(level, message, **kwargs):
     _log(auth_logger, level, message, **kwargs)
@@ -107,7 +107,7 @@ def log_review(level, message, **kwargs):
     if str(level or "").upper() in {"WARNING", "ERROR", "CRITICAL"}:
         _log(system_logger, level, message, **kwargs)
 
-# activity logging remains unchanged
+# Canonical ingestion audit logger
 activity_logger = logging.getLogger("lmz_activity")
 activity_logger.setLevel(logging.INFO)
 # Canonical ingestion audit stream
@@ -115,7 +115,30 @@ act_handler = RotatingFileHandler(STRUCTURED_LOGS_DIR / "ingestion_audit.jsonl",
 act_handler.setFormatter(JSONFormatter())
 if not activity_logger.handlers: activity_logger.addHandler(act_handler)
 
-def log_activity(original_name, vault_id, platform, artist, source_url="", timestamp_str=None):
+def log_activity(
+    original_name,
+    vault_id,
+    platform,
+    artist,
+    source_url="",
+    timestamp_str=None,
+    ingest_type="unknown",
+    run_id="",
+    status="success",
+):
     if timestamp_str is None: timestamp_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    extra = {"original_name": original_name, "vault_id": vault_id, "platform": platform, "artist": artist, "source_url": source_url, "event_time": timestamp_str}
-    activity_logger.info("Ingestion successful", extra={"extra_data": extra})
+    extra = {
+        "original_name": original_name,
+        "vault_id": vault_id,
+        "platform": platform,
+        "artist": artist,
+        "source_url": source_url,
+        "event_time": timestamp_str,
+        "ingest_type": ingest_type,
+        "run_id": run_id,
+        "status": status,
+    }
+    normalized_status = str(status or "unknown").lower()
+    level = "INFO" if normalized_status == "success" else "ERROR"
+    message = "Ingestion successful" if normalized_status == "success" else f"Ingestion {normalized_status}"
+    _log(activity_logger, level, message, **extra)
