@@ -4,7 +4,6 @@ import hashlib
 import yaml
 import os
 import shutil
-import sqlite3
 import tempfile
 from pathlib import Path
 from typing import Optional
@@ -74,59 +73,24 @@ EXT_MAP = {
 def storage_shard_for_hash(item_hash: str) -> str:
     return str(item_hash or "")[:2] or "00"
 
-def resolve_storage_id(item_hash: str, conn=None) -> str | None:
-    item_hash = str(item_hash or "").strip()
-    if not item_hash:
-        return None
-    try:
-        if conn is not None:
-            row = conn.execute("SELECT storage_id FROM items WHERE hash = ?", (item_hash,)).fetchone()
-        elif DB_PATH.exists():
-            with sqlite3.connect(DB_PATH, timeout=5) as local_conn:
-                row = local_conn.execute("SELECT storage_id FROM items WHERE hash = ?", (item_hash,)).fetchone()
-        else:
-            row = None
-    except sqlite3.Error:
-        return None
-    if not row:
-        return None
-    return row[0] or None
-
-def legacy_asset_path_for(item_hash: str, extension: str | None, mime_type: str | None = None) -> Path:
-    ext = extension or EXT_MAP.get(mime_type or "", ".jpg")
-    return ASSETS_DIR / storage_shard_for_hash(item_hash) / f"{item_hash}{ext}"
+def require_storage_id(storage_id: str | None) -> str:
+    value = str(storage_id or "").strip()
+    if not value:
+        raise ValueError("storage_id is required for compact storage paths")
+    return value
 
 def storage_asset_path_for(item_hash: str, storage_id: str, extension: str | None, mime_type: str | None = None) -> Path:
+    storage_id = require_storage_id(storage_id)
     ext = extension or EXT_MAP.get(mime_type or "", ".jpg")
     return ASSETS_DIR / storage_shard_for_hash(item_hash) / f"{storage_id}{ext}"
 
-def asset_path_for(item_hash: str, extension: str | None, mime_type: str | None, storage_id: str | None = None, conn=None) -> Path:
-    storage_id = storage_id or resolve_storage_id(item_hash, conn)
-    if storage_id:
-        return storage_asset_path_for(item_hash, storage_id, extension, mime_type)
-    return legacy_asset_path_for(item_hash, extension, mime_type)
+def asset_path_for(item_hash: str, extension: str | None, mime_type: str | None, storage_id: str) -> Path:
+    return storage_asset_path_for(item_hash, storage_id, extension, mime_type)
 
-def existing_asset_path_for(item_hash: str, extension: str | None, mime_type: str | None = None, storage_id: str | None = None, conn=None) -> Path:
-    storage_id = storage_id or resolve_storage_id(item_hash, conn)
-    if storage_id:
-        compact_path = storage_asset_path_for(item_hash, storage_id, extension, mime_type)
-        if compact_path.exists():
-            return compact_path
-    legacy_path = legacy_asset_path_for(item_hash, extension, mime_type)
-    if legacy_path.exists():
-        return legacy_path
-    return storage_asset_path_for(item_hash, storage_id, extension, mime_type) if storage_id else legacy_path
-
-def asset_url_for(item_hash: str, extension: str | None, mime_type: str | None = None, storage_id: str | None = None, conn=None) -> str:
-    storage_id = storage_id or resolve_storage_id(item_hash, conn)
+def asset_url_for(item_hash: str, extension: str | None, mime_type: str | None = None, storage_id: str | None = None) -> str:
+    storage_id = require_storage_id(storage_id)
     ext = extension or EXT_MAP.get(mime_type or "", ".jpg")
-    path_id = storage_id or item_hash
-    if storage_id:
-        compact_path = storage_asset_path_for(item_hash, storage_id, ext)
-        legacy_path = legacy_asset_path_for(item_hash, ext)
-        if legacy_path.exists() and not compact_path.exists():
-            path_id = item_hash
-    return f"/vault/{storage_shard_for_hash(item_hash)}/{path_id}{ext}"
+    return f"/vault/{storage_shard_for_hash(item_hash)}/{storage_id}{ext}"
 
 DEFAULT_ALLOWED_MIMES = {
     'image/jpeg',
@@ -159,52 +123,15 @@ def setup_directories():
     ]:
         directory.mkdir(parents=True, exist_ok=True)
 
-def note_path_for(file_hash: str, storage_id: str | None = None, conn=None) -> Path:
+def note_path_for(file_hash: str, storage_id: str) -> Path:
 
-    storage_id = storage_id or resolve_storage_id(file_hash, conn)
-    filename_id = storage_id or file_hash
-    return NOTES_DIR / storage_shard_for_hash(file_hash) / f"{filename_id}.md"
+    storage_id = require_storage_id(storage_id)
+    return NOTES_DIR / storage_shard_for_hash(file_hash) / f"{storage_id}.md"
 
-def legacy_sharded_note_path_for(file_hash: str) -> Path:
+def wd_tag_cache_path_for(file_hash: str, storage_id: str) -> Path:
 
-    return NOTES_DIR / storage_shard_for_hash(file_hash) / f"{file_hash}.md"
-
-def legacy_note_path_for(file_hash: str) -> Path:
-
-    return NOTES_DIR / f"{file_hash}.md"
-
-def existing_note_path_for(file_hash: str, storage_id: str | None = None, conn=None) -> Path:
-
-    compact_path = note_path_for(file_hash, storage_id, conn)
-    if compact_path.exists():
-        return compact_path
-    legacy_sharded_path = legacy_sharded_note_path_for(file_hash)
-    if legacy_sharded_path.exists():
-        return legacy_sharded_path
-    flat_path = legacy_note_path_for(file_hash)
-    if flat_path.exists():
-        return flat_path
-    return compact_path
-
-def wd_tag_cache_path_for(file_hash: str, storage_id: str | None = None, conn=None) -> Path:
-
-    storage_id = storage_id or resolve_storage_id(file_hash, conn)
-    filename_id = storage_id or file_hash
-    return WD_TAGS_DIR / storage_shard_for_hash(file_hash) / f"{filename_id}.json"
-
-def legacy_wd_tag_cache_path_for(file_hash: str) -> Path:
-
-    return WD_TAGS_DIR / storage_shard_for_hash(file_hash) / f"{file_hash}.json"
-
-def existing_wd_tag_cache_path_for(file_hash: str, storage_id: str | None = None, conn=None) -> Path:
-
-    compact_path = wd_tag_cache_path_for(file_hash, storage_id, conn)
-    if compact_path.exists():
-        return compact_path
-    legacy_path = legacy_wd_tag_cache_path_for(file_hash)
-    if legacy_path.exists():
-        return legacy_path
-    return compact_path
+    storage_id = require_storage_id(storage_id)
+    return WD_TAGS_DIR / storage_shard_for_hash(file_hash) / f"{storage_id}.json"
 
 def validate_config_schema(config: dict):
 

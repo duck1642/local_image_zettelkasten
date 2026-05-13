@@ -4,7 +4,7 @@ import yaml
 from datetime import datetime
 
 from tagging import wd_frontmatter_fields
-from utils import existing_note_path_for, storage_shard_for_hash
+from utils import note_path_for, require_storage_id, storage_shard_for_hash
 
 MANUAL_FRONTMATTER_FIELDS = (
     "title",
@@ -44,12 +44,12 @@ def generate_markdown(conn: sqlite3.Connection, file_hash: str, asset_rel_path: 
 
     original_filename, mime_type, file_extension, source_url, platform, source_artist, date_added, phash, storage_id = row
 
-    existing_frontmatter = load_note_frontmatter(file_hash)
+    storage_id = require_storage_id(storage_id)
+    existing_frontmatter = load_note_frontmatter(file_hash, storage_id)
     date_added_str = _format_date_added(date_added)
 
-    filename_id = storage_id or file_hash
     shard_folder = storage_shard_for_hash(file_hash)
-    asset_link = asset_rel_path if asset_rel_path else f"../../assets/{shard_folder}/{filename_id}{file_extension}"
+    asset_link = asset_rel_path if asset_rel_path else f"../../assets/{shard_folder}/{storage_id}{file_extension}"
 
     is_video = mime_type.startswith('video/')
     asset_type = "video" if is_video else "image"
@@ -65,7 +65,7 @@ def generate_markdown(conn: sqlite3.Connection, file_hash: str, asset_rel_path: 
         "platform": platform or "",
         "artist": source_artist or "",
         "phash": phash or "",
-        "topics": topics_override if topics_override is not None else load_note_topics(file_hash),
+        "topics": topics_override if topics_override is not None else load_note_topics(file_hash, storage_id),
         "file_format": mime_type or ""
     }
     for field in ("title", "artist", "date_added"):
@@ -74,7 +74,7 @@ def generate_markdown(conn: sqlite3.Connection, file_hash: str, asset_rel_path: 
     if topics_override is None and "topics" in existing_frontmatter:
         frontmatter["topics"] = normalize_topic_list(existing_frontmatter.get("topics"))
 
-    cache_wd_fields = wd_frontmatter_fields(file_hash)
+    cache_wd_fields = wd_frontmatter_fields(file_hash, storage_id)
     for field in WD_FRONTMATTER_FIELDS:
         frontmatter[field] = existing_frontmatter[field] if field in existing_frontmatter else cache_wd_fields.get(field, [] if field != "wd_rating" else "")
     for field, value in (manual_overrides or {}).items():
@@ -100,8 +100,8 @@ def normalize_topic_list(topics) -> list[str]:
     return [topic.strip() for topic in normalized.split("\n") if topic.strip()]
 
 
-def load_note_frontmatter(file_hash: str) -> dict:
-    path = existing_note_path_for(file_hash)
+def load_note_frontmatter(file_hash: str, storage_id: str) -> dict:
+    path = note_path_for(file_hash, storage_id)
     if not path.exists():
         return {}
     try:
@@ -129,15 +129,15 @@ def load_note_frontmatter(file_hash: str) -> dict:
     return data if isinstance(data, dict) else {}
 
 
-def load_note_topics(file_hash: str, fallback=None) -> list[str]:
-    frontmatter = load_note_frontmatter(file_hash)
+def load_note_topics(file_hash: str, storage_id: str, fallback=None) -> list[str]:
+    frontmatter = load_note_frontmatter(file_hash, storage_id)
     if "topics" in frontmatter:
         return normalize_topic_list(frontmatter.get("topics"))
     return normalize_topic_list(fallback)
 
 
-def load_note_wd_tags(file_hash: str) -> dict:
-    frontmatter = load_note_frontmatter(file_hash)
+def load_note_wd_tags(file_hash: str, storage_id: str) -> dict:
+    frontmatter = load_note_frontmatter(file_hash, storage_id)
     has_wd_fields = any(field in frontmatter for field in WD_FRONTMATTER_FIELDS)
     rating = str(frontmatter.get("wd_rating") or "").strip()
     characters = normalize_topic_list(frontmatter.get("wd_character_tags"))

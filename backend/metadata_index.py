@@ -1,5 +1,4 @@
 import json
-import re
 import sqlite3
 import threading
 import time
@@ -12,10 +11,9 @@ import yaml
 from logger import log_system
 from md_generator import normalize_topic_list
 from tagging import load_tag_cache
-from utils import DB_PATH, NOTES_DIR, WD_TAGS_DIR, existing_note_path_for, existing_wd_tag_cache_path_for
+from utils import NOTES_DIR, WD_TAGS_DIR, note_path_for, wd_tag_cache_path_for
 
 
-HASH_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 READY_KEY = "initial_backfill_complete"
 REPAIR_BATCH_SIZE = 500
 WD_FRONTMATTER_FIELDS = ("wd_rating", "wd_character_tags", "wd_tags")
@@ -26,6 +24,8 @@ _watchdog_lock = threading.Lock()
 _watchdog_observer = None
 _watchdog_pending: set[str] = set()
 _watchdog_timer: threading.Timer | None = None
+_watchdog_storage_map: dict[str, str] = {}
+_watchdog_storage_map_lock = threading.Lock()
 
 
 def ensure_metadata_schema(conn: sqlite3.Connection):
@@ -39,6 +39,7 @@ def ensure_metadata_schema(conn: sqlite3.Connection):
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS item_metadata_files (
             item_hash TEXT PRIMARY KEY,
+            storage_id TEXT,
             note_path TEXT,
             note_mtime_ns INTEGER,
             note_size INTEGER,
@@ -51,6 +52,9 @@ def ensure_metadata_schema(conn: sqlite3.Connection):
             FOREIGN KEY(item_hash) REFERENCES items(hash) ON DELETE CASCADE
         )
     """)
+    columns = {row[1] for row in cursor.execute("PRAGMA table_info(item_metadata_files)").fetchall()}
+    if "storage_id" not in columns:
+        cursor.execute("ALTER TABLE item_metadata_files ADD COLUMN storage_id TEXT")
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS item_topics (
             item_hash TEXT NOT NULL,
@@ -113,9 +117,9 @@ def _file_sig(path: Path) -> tuple[str, int | None, int | None]:
         return str(path), None, None
 
 
-def _current_sigs(item_hash: str) -> dict:
-    note_path = existing_note_path_for(item_hash)
-    wd_path = existing_wd_tag_cache_path_for(item_hash)
+def _current_sigs(item_hash: str, storage_id: str) -> dict:
+    note_path = note_path_for(item_hash, storage_id)
+    wd_path = wd_tag_cache_path_for(item_hash, storage_id)
     note_path_str, note_mtime, note_size = _file_sig(note_path)
     wd_path_str, wd_mtime, wd_size = _file_sig(wd_path)
     return {
@@ -128,8 +132,8 @@ def _current_sigs(item_hash: str) -> dict:
     }
 
 
-def _load_frontmatter(item_hash: str) -> tuple[dict, str]:
-    path = existing_note_path_for(item_hash)
+def _load_frontmatter(item_hash: str, storage_id: str) -> tuple[dict, str]:
+    path = note_path_for(item_hash, storage_id)
     if not path.exists():
         return {}, ""
     try:
@@ -165,8 +169,8 @@ def _tag_name(tag) -> str:
     return ""
 
 
-def _cache_wd_payload(item_hash: str) -> dict:
-    cache_data = load_tag_cache(item_hash)
+def _cache_wd_payload(item_hash: str, storage_id: str) -> dict:
+    cache_data = load_tag_cache(item_hash, storage_id)
     if cache_data.get("status") != "ok":
         return {"status": "missing"}
     return {
@@ -178,9 +182,9 @@ def _cache_wd_payload(item_hash: str) -> dict:
     }
 
 
-def _wd_payload(item_hash: str, frontmatter: dict) -> dict:
+def _wd_payload(item_hash: str, storage_id: str, frontmatter: dict) -> dict:
     has_wd_fields = any(field in frontmatter for field in WD_FRONTMATTER_FIELDS)
-    cache_payload = _cache_wd_payload(item_hash)
+    cache_payload = _cache_wd_payload(item_hash, storage_id)
     if not has_wd_fields:
         return cache_payload
 
@@ -228,20 +232,33 @@ def _wd_rows(payload: dict) -> list[tuple[str, str]]:
     return rows
 
 
-def _item_exists(conn: sqlite3.Connection, item_hash: str) -> bool:
-    row = conn.execute("SELECT 1 FROM items WHERE hash = ?", (item_hash,)).fetchone()
-    return row is not None
+def _item_storage_id(conn: sqlite3.Connection, item_hash: str) -> str | None:
+    row = conn.execute("SELECT storage_id FROM items WHERE hash = ?", (item_hash,)).fetchone()
+    if row is None:
+        return None
+    return row[0] or ""
+
+
+def _remember_watchdog_storage(item_hash: str, storage_id: str):
+    if not storage_id:
+        return
+    with _watchdog_storage_map_lock:
+        _watchdog_storage_map[storage_id] = item_hash
 
 
 def reindex_item_metadata(conn: sqlite3.Connection, item_hash: str) -> dict:
     ensure_metadata_schema(conn)
-    if not _item_exists(conn, item_hash):
+    storage_id = _item_storage_id(conn, item_hash)
+    if storage_id is None:
         return {"item_hash": item_hash, "status": "missing_item"}
+    if not storage_id:
+        raise ValueError(f"item {item_hash} is missing storage_id")
 
-    sigs = _current_sigs(item_hash)
-    frontmatter, error = _load_frontmatter(item_hash)
+    _remember_watchdog_storage(item_hash, storage_id)
+    sigs = _current_sigs(item_hash, storage_id)
+    frontmatter, error = _load_frontmatter(item_hash, storage_id)
     topics = normalize_topic_list(frontmatter.get("topics")) if not error else []
-    wd_payload = _wd_payload(item_hash, frontmatter) if not error else {"status": "missing"}
+    wd_payload = _wd_payload(item_hash, storage_id, frontmatter) if not error else {"status": "missing"}
     wd_rows = _wd_rows(wd_payload)
     status = "error" if error else "ok"
 
@@ -274,11 +291,12 @@ def reindex_item_metadata(conn: sqlite3.Connection, item_hash: str) -> dict:
     conn.execute(
         """
         INSERT INTO item_metadata_files(
-            item_hash, note_path, note_mtime_ns, note_size,
+            item_hash, storage_id, note_path, note_mtime_ns, note_size,
             wd_path, wd_mtime_ns, wd_size, indexed_at, status, error
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(item_hash) DO UPDATE SET
+            storage_id = excluded.storage_id,
             note_path = excluded.note_path,
             note_mtime_ns = excluded.note_mtime_ns,
             note_size = excluded.note_size,
@@ -291,6 +309,7 @@ def reindex_item_metadata(conn: sqlite3.Connection, item_hash: str) -> dict:
         """,
         (
             item_hash,
+            storage_id,
             sigs["note_path"],
             sigs["note_mtime_ns"],
             sigs["note_size"],
@@ -306,6 +325,7 @@ def reindex_item_metadata(conn: sqlite3.Connection, item_hash: str) -> dict:
         log_system("WARNING", "Metadata index parse failed", hash=item_hash, error=error)
     return {
         "item_hash": item_hash,
+        "storage_id": storage_id,
         "status": status,
         "topics": len(topics),
         "wd_tags": len(wd_rows),
@@ -315,15 +335,22 @@ def reindex_item_metadata(conn: sqlite3.Connection, item_hash: str) -> dict:
 
 def mark_metadata_index_error(conn: sqlite3.Connection, item_hash: str, error: str):
     ensure_metadata_schema(conn)
-    sigs = _current_sigs(item_hash)
+    storage_id = _item_storage_id(conn, item_hash)
+    if storage_id is None:
+        return
+    if not storage_id:
+        raise ValueError(f"item {item_hash} is missing storage_id")
+    _remember_watchdog_storage(item_hash, storage_id)
+    sigs = _current_sigs(item_hash, storage_id)
     conn.execute(
         """
         INSERT INTO item_metadata_files(
-            item_hash, note_path, note_mtime_ns, note_size,
+            item_hash, storage_id, note_path, note_mtime_ns, note_size,
             wd_path, wd_mtime_ns, wd_size, indexed_at, status, error
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'error', ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'error', ?)
         ON CONFLICT(item_hash) DO UPDATE SET
+            storage_id = excluded.storage_id,
             note_path = excluded.note_path,
             note_mtime_ns = excluded.note_mtime_ns,
             note_size = excluded.note_size,
@@ -336,6 +363,7 @@ def mark_metadata_index_error(conn: sqlite3.Connection, item_hash: str, error: s
         """,
         (
             item_hash,
+            storage_id,
             sigs["note_path"],
             sigs["note_mtime_ns"],
             sigs["note_size"],
@@ -362,18 +390,25 @@ def safe_reindex_item_metadata(conn: sqlite3.Connection, item_hash: str, context
 
 def _row_stale(row) -> bool:
     item_hash = row[0]
-    if row[1] is None:
+    storage_id = row[1]
+    indexed_hash = row[2]
+    indexed_storage_id = row[3]
+    if indexed_hash is None:
         return True
-    sigs = _current_sigs(item_hash)
+    if not storage_id:
+        return True
+    if indexed_storage_id != storage_id:
+        return True
+    sigs = _current_sigs(item_hash, storage_id)
     sig_changed = (
-        row[2] != sigs["note_path"]
-        or row[3] != sigs["note_mtime_ns"]
-        or row[4] != sigs["note_size"]
-        or row[5] != sigs["wd_path"]
-        or row[6] != sigs["wd_mtime_ns"]
-        or row[7] != sigs["wd_size"]
+        row[4] != sigs["note_path"]
+        or row[5] != sigs["note_mtime_ns"]
+        or row[6] != sigs["note_size"]
+        or row[7] != sigs["wd_path"]
+        or row[8] != sigs["wd_mtime_ns"]
+        or row[9] != sigs["wd_size"]
     )
-    if row[8] != "ok":
+    if row[10] != "ok":
         return sig_changed
     return sig_changed
 
@@ -383,7 +418,9 @@ def stale_metadata_hashes(conn: sqlite3.Connection, limit: int | None = None) ->
     cursor = conn.execute("""
         SELECT
             items.hash,
+            items.storage_id,
             item_metadata_files.item_hash,
+            item_metadata_files.storage_id,
             item_metadata_files.note_path,
             item_metadata_files.note_mtime_ns,
             item_metadata_files.note_size,
@@ -409,7 +446,9 @@ def stale_metadata_count(conn: sqlite3.Connection) -> int:
     cursor = conn.execute("""
         SELECT
             items.hash,
+            items.storage_id,
             item_metadata_files.item_hash,
+            item_metadata_files.storage_id,
             item_metadata_files.note_path,
             item_metadata_files.note_mtime_ns,
             item_metadata_files.note_size,
@@ -511,24 +550,34 @@ def start_metadata_repair_worker(full: bool = False) -> dict:
     return {"status": "started", "full": full}
 
 
+def _load_watchdog_storage_map():
+    try:
+        from db.sqlite_operator import init_database
+
+        conn = init_database()
+        try:
+            rows = conn.execute(
+                "SELECT storage_id, hash FROM items WHERE storage_id IS NOT NULL AND storage_id != ''"
+            ).fetchall()
+        finally:
+            conn.close()
+    except Exception as exc:
+        log_system("WARNING", "Metadata watchdog storage map refresh failed", error=str(exc))
+        return
+    with _watchdog_storage_map_lock:
+        _watchdog_storage_map.clear()
+        _watchdog_storage_map.update({str(storage_id): item_hash for storage_id, item_hash in rows if storage_id and item_hash})
+
+
 def _hash_from_metadata_path(path: str | Path) -> str | None:
     path = Path(path)
     if path.name.startswith("lmztmp-") or path.suffix == ".tmp":
         return None
     if path.suffix.lower() not in {".md", ".json"}:
         return None
-    item_hash = path.stem
-    if HASH_RE.match(item_hash):
-        return item_hash
-    try:
-        if DB_PATH.exists():
-            with sqlite3.connect(DB_PATH, timeout=5) as conn:
-                row = conn.execute("SELECT hash FROM items WHERE storage_id = ?", (item_hash,)).fetchone()
-                if row:
-                    return row[0]
-    except sqlite3.Error:
-        return None
-    return None
+    storage_id = path.stem.removesuffix("_video")
+    with _watchdog_storage_map_lock:
+        return _watchdog_storage_map.get(storage_id)
 
 
 def _watchdog_flush():
@@ -558,7 +607,7 @@ def _watchdog_queue_hashes(hashes: Iterable[str]):
     global _watchdog_timer
     with _watchdog_lock:
         for item_hash in hashes:
-            if HASH_RE.match(item_hash):
+            if item_hash:
                 _watchdog_pending.add(item_hash)
         if _watchdog_timer is None:
             _watchdog_timer = threading.Timer(0.5, _watchdog_flush)
@@ -595,6 +644,7 @@ def start_metadata_watchdog() -> dict:
         WD_TAGS_DIR.mkdir(parents=True, exist_ok=True)
         observer.schedule(handler, str(NOTES_DIR), recursive=True)
         observer.schedule(handler, str(WD_TAGS_DIR), recursive=True)
+        _load_watchdog_storage_map()
         observer.start()
         _watchdog_observer = observer
         log_system("INFO", "Metadata watchdog started", notes=str(NOTES_DIR), wd_tags=str(WD_TAGS_DIR))
@@ -629,7 +679,9 @@ def indexed_item_metadata(conn: sqlite3.Connection, item_hash: str) -> dict:
     row = conn.execute("""
         SELECT
             items.hash,
+            items.storage_id,
             item_metadata_files.item_hash,
+            item_metadata_files.storage_id,
             item_metadata_files.note_path,
             item_metadata_files.note_mtime_ns,
             item_metadata_files.note_size,

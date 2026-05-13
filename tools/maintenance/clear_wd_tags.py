@@ -11,25 +11,29 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 from db.sqlite_operator import init_database
-from utils import existing_note_path_for, existing_wd_tag_cache_path_for
+from utils import note_path_for, wd_tag_cache_path_for
 
 
 WD_KEYS = ["wd_rating", "wd_character_tags", "wd_tags"]
 
 
-def item_hashes(target_hash: str = "") -> list[str]:
+def items(target_hash: str = "") -> list[tuple[str, str]]:
     if target_hash:
-        return [target_hash]
+        where = "WHERE hash = ?"
+        params = (target_hash,)
+    else:
+        where = ""
+        params = ()
     conn = init_database()
     try:
-        rows = conn.execute("SELECT hash FROM items ORDER BY hash").fetchall()
-        return [str(row[0]) for row in rows]
+        rows = conn.execute(f"SELECT hash, storage_id FROM items {where} ORDER BY hash", params).fetchall()
+        return [(str(row[0]), str(row[1] or "")) for row in rows]
     finally:
         conn.close()
 
 
-def clear_json(file_hash: str, apply: bool) -> str:
-    path = existing_wd_tag_cache_path_for(file_hash)
+def clear_json(file_hash: str, storage_id: str, apply: bool) -> str:
+    path = wd_tag_cache_path_for(file_hash, storage_id)
     if not path.exists():
         return "missing"
     if apply:
@@ -46,8 +50,8 @@ def split_frontmatter(text: str):
     return parts[1], parts[2]
 
 
-def clear_yaml(file_hash: str, apply: bool) -> str:
-    path = existing_note_path_for(file_hash)
+def clear_yaml(file_hash: str, storage_id: str, apply: bool) -> str:
+    path = note_path_for(file_hash, storage_id)
     if not path.exists():
         return "missing"
     text = path.read_text(encoding="utf-8")
@@ -81,18 +85,18 @@ def run(target_hash: str, target: str, apply: bool) -> dict:
         "yaml_unchanged": 0,
         "errors": 0,
     }
-    for file_hash in item_hashes(target_hash):
+    for file_hash, storage_id in items(target_hash):
         results["items"] += 1
         try:
             if target in {"json", "both"}:
-                status = clear_json(file_hash, apply)
+                status = clear_json(file_hash, storage_id, apply)
                 if status == "deleted":
                     results["json_deleted"] += 1
                 else:
                     results["json_missing"] += 1
                 print(f"JSON {status.upper()} {file_hash}")
             if target in {"yaml", "both"}:
-                status = clear_yaml(file_hash, apply)
+                status = clear_yaml(file_hash, storage_id, apply)
                 if status == "cleared":
                     results["yaml_cleared"] += 1
                 elif status == "missing":

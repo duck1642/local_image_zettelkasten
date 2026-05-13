@@ -13,7 +13,7 @@ SRC_DIR = PROJECT_ROOT / "backend"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from utils import DB_PATH, NOTES_DIR, PROJECT_ROOT as LMZ_ROOT, atomic_write_text, existing_note_path_for
+from utils import DB_PATH, NOTES_DIR, PROJECT_ROOT as LMZ_ROOT, atomic_write_text, note_path_for
 
 
 def split_frontmatter(text: str):
@@ -43,16 +43,16 @@ def backup_notes() -> Path:
 
 def load_db_rows(conn: sqlite3.Connection) -> list[dict]:
     rows = conn.execute(
-        "SELECT hash, source_artist, date_added FROM items ORDER BY date_added DESC, hash DESC"
+        "SELECT hash, storage_id, source_artist, date_added FROM items ORDER BY date_added DESC, hash DESC"
     ).fetchall()
     return [
-        {"hash": row[0], "artist": row[1] or "", "date_added": row[2] or ""}
+        {"hash": row[0], "storage_id": row[1] or "", "artist": row[2] or "", "date_added": row[3] or ""}
         for row in rows
     ]
 
 
 def migrate_note(row: dict, apply: bool) -> str:
-    note_path = existing_note_path_for(row["hash"])
+    note_path = note_path_for(row["hash"], row["storage_id"])
     if not note_path.exists():
         return "missing_note"
     text = note_path.read_text(encoding="utf-8")

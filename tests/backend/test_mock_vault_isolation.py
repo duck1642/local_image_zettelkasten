@@ -36,19 +36,42 @@ def fresh_backend(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *module_names
 
 def insert_mock_item(sqlite_operator, item_hash: str, artist: str = "DB Artist", date_added: str = "2026-01-02 03:04:05"):
     conn = sqlite_operator.init_database()
+    storage_id = sqlite_operator.allocate_storage_id(conn)
     conn.execute(
         """
-        INSERT INTO items(hash, original_filename, file_extension, mime_type, size_bytes, date_added, source_url, source_url_norm, platform, source_artist, phash)
-        VALUES (?, ?, '.jpg', 'image/jpeg', 10, ?, '', '', 'local', ?, '')
+        INSERT INTO items(hash, storage_id, original_filename, file_extension, mime_type, size_bytes, date_added, source_url, source_url_norm, platform, source_artist, phash)
+        VALUES (?, ?, ?, '.jpg', 'image/jpeg', 10, ?, '', '', 'local', ?, '')
         """,
-        (item_hash, f"{item_hash}.jpg", date_added, artist),
+        (item_hash, storage_id, f"{item_hash}.jpg", date_added, artist),
     )
     conn.commit()
     return conn
 
 
+def storage_id_for(conn, item_hash: str) -> str:
+    row = conn.execute("SELECT storage_id FROM items WHERE hash = ?", (item_hash,)).fetchone()
+    assert row and row[0]
+    return row[0]
+
+
 def frontmatter_from_markdown(text: str) -> dict:
     return yaml.safe_load(text.split("---", 2)[1]) or {}
+
+
+def load_maintenance_tool(name: str):
+    tool_path = ROOT / "tools" / "maintenance" / f"{name}.py"
+    spec = importlib.util.spec_from_file_location(f"{name}_under_test", tool_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def write_compact_note(utils, conn, item_hash: str, text: str):
+    storage_id = storage_id_for(conn, item_hash)
+    note_path = utils.note_path_for(item_hash, storage_id)
+    note_path.parent.mkdir(parents=True, exist_ok=True)
+    note_path.write_text(text, encoding="utf-8")
+    return note_path
 
 
 def test_config_override_resolves_paths_inside_mock_vault(monkeypatch, tmp_path):
@@ -140,7 +163,8 @@ def test_generate_markdown_preserves_manual_fields_and_explicit_empty_wd(monkeyp
     utils, sqlite_operator, md_generator = fresh_backend(monkeypatch, tmp_path, "utils", "db.sqlite_operator", "md_generator")
     item_hash = "d" * 64
     conn = insert_mock_item(sqlite_operator, item_hash)
-    note_path = utils.note_path_for(item_hash)
+    storage_id = storage_id_for(conn, item_hash)
+    note_path = utils.note_path_for(item_hash, storage_id)
     note_path.parent.mkdir(parents=True, exist_ok=True)
     note_path.write_text(
         "---\n"
@@ -153,7 +177,7 @@ def test_generate_markdown_preserves_manual_fields_and_explicit_empty_wd(monkeyp
         "---\nbody\n",
         encoding="utf-8",
     )
-    cache_path = utils.wd_tag_cache_path_for(item_hash)
+    cache_path = utils.wd_tag_cache_path_for(item_hash, storage_id)
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     cache_path.write_text(
         json.dumps({"hash": item_hash, "status": "ok", "rating": {"label": "safe"}, "character_tags": [{"name": "cached_character"}], "tags": [{"name": "cached_tag"}]}),
@@ -175,7 +199,8 @@ def test_generate_markdown_seeds_missing_wd_fields_from_cache(monkeypatch, tmp_p
     utils, sqlite_operator, md_generator = fresh_backend(monkeypatch, tmp_path, "utils", "db.sqlite_operator", "md_generator")
     item_hash = "e" * 64
     conn = insert_mock_item(sqlite_operator, item_hash)
-    cache_path = utils.wd_tag_cache_path_for(item_hash)
+    storage_id = storage_id_for(conn, item_hash)
+    cache_path = utils.wd_tag_cache_path_for(item_hash, storage_id)
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     cache_path.write_text(
         json.dumps({"hash": item_hash, "status": "ok", "rating": {"label": "safe"}, "character_tags": [{"name": "cached_character", "display_name": "Cached Character"}], "tags": [{"name": "cached_tag", "display_name": "Cached Tag"}]}),
@@ -194,7 +219,8 @@ def test_reindex_syncs_markdown_artist_and_date_to_sqlite(monkeypatch, tmp_path)
     utils, sqlite_operator, metadata_index = fresh_backend(monkeypatch, tmp_path, "utils", "db.sqlite_operator", "metadata_index")
     item_hash = "f" * 64
     conn = insert_mock_item(sqlite_operator, item_hash, artist="DB Artist", date_added="2026-01-01 00:00:00")
-    note_path = utils.note_path_for(item_hash)
+    storage_id = storage_id_for(conn, item_hash)
+    note_path = utils.note_path_for(item_hash, storage_id)
     note_path.parent.mkdir(parents=True, exist_ok=True)
     note_path.write_text(
         "---\nartist: Manual Artist\ndate_added: '2020-01-01 01:02:03'\ntopics: []\n---\n",
@@ -213,8 +239,9 @@ def test_patch_rolls_back_db_when_markdown_write_fails(monkeypatch, tmp_path):
     utils, sqlite_operator, web_api = fresh_backend(monkeypatch, tmp_path, "utils", "db.sqlite_operator", "web_api")
     item_hash = "1" * 64
     conn = insert_mock_item(sqlite_operator, item_hash, artist="Original Artist")
-    utils.note_path_for(item_hash).parent.mkdir(parents=True, exist_ok=True)
-    utils.note_path_for(item_hash).write_text("---\nartist: Original Artist\ntopics: []\n---\n", encoding="utf-8")
+    storage_id = storage_id_for(conn, item_hash)
+    utils.note_path_for(item_hash, storage_id).parent.mkdir(parents=True, exist_ok=True)
+    utils.note_path_for(item_hash, storage_id).write_text("---\nartist: Original Artist\ntopics: []\n---\n", encoding="utf-8")
     conn.close()
 
     def fail_write(path, text, encoding="utf-8"):
@@ -263,20 +290,19 @@ def test_ingest_seeds_markdown_artist_from_metadata_and_reindexes(monkeypatch, t
 
     conn = sqlite_operator.init_database()
     row = conn.execute("SELECT source_artist, storage_id FROM items WHERE hash = ?", (item_hash,)).fetchone()
-    note_data = frontmatter_from_markdown(utils.note_path_for(item_hash).read_text(encoding="utf-8"))
+    note_data = frontmatter_from_markdown(utils.note_path_for(item_hash, row[1]).read_text(encoding="utf-8"))
 
     assert ok
     assert idx_data["file_hash"] == item_hash
     assert row[0] == "Ingest Artist"
     assert len(row[1]) == 12
     assert utils.storage_asset_path_for(item_hash, row[1], ".jpg", "image/jpeg").exists()
-    assert not utils.legacy_asset_path_for(item_hash, ".jpg", "image/jpeg").exists()
-    assert utils.note_path_for(item_hash).name == f"{row[1]}.md"
+    assert utils.note_path_for(item_hash, row[1]).name == f"{row[1]}.md"
     assert note_data["artist"] == "Ingest Artist"
     conn.close()
 
 
-def test_storage_id_backfill_and_legacy_asset_fallback(monkeypatch, tmp_path):
+def test_storage_id_backfill_and_compact_asset_path(monkeypatch, tmp_path):
     utils, sqlite_operator = fresh_backend(monkeypatch, tmp_path, "utils", "db.sqlite_operator")
     item_hash = "a1" * 32
     conn = insert_mock_item(sqlite_operator, item_hash)
@@ -284,54 +310,9 @@ def test_storage_id_backfill_and_legacy_asset_fallback(monkeypatch, tmp_path):
 
     conn = sqlite_operator.init_database()
     storage_id = conn.execute("SELECT storage_id FROM items WHERE hash = ?", (item_hash,)).fetchone()[0]
-    legacy_asset = utils.legacy_asset_path_for(item_hash, ".jpg", "image/jpeg")
-    legacy_asset.parent.mkdir(parents=True, exist_ok=True)
-    legacy_asset.write_bytes(b"legacy")
 
     assert len(storage_id) == 12
-    assert utils.asset_path_for(item_hash, ".jpg", "image/jpeg", conn=conn).name == f"{storage_id}.jpg"
-    assert utils.existing_asset_path_for(item_hash, ".jpg", "image/jpeg", conn=conn) == legacy_asset
-    conn.close()
-
-
-def test_compact_storage_migration_dry_run_and_apply(monkeypatch, tmp_path):
-    utils, sqlite_operator = fresh_backend(monkeypatch, tmp_path, "utils", "db.sqlite_operator")
-    item_hash = "ab" * 32
-    conn = insert_mock_item(sqlite_operator, item_hash)
-    legacy_asset = utils.legacy_asset_path_for(item_hash, ".jpg", "image/jpeg")
-    legacy_asset.parent.mkdir(parents=True, exist_ok=True)
-    legacy_asset.write_bytes(b"asset")
-    legacy_note = utils.legacy_sharded_note_path_for(item_hash)
-    legacy_note.parent.mkdir(parents=True, exist_ok=True)
-    legacy_note.write_text(
-        f"---\nhash: {item_hash}\n---\n\n![](../../assets/{item_hash[:2]}/{item_hash}.jpg)\n",
-        encoding="utf-8",
-    )
-    conn.execute("UPDATE items SET storage_id = NULL WHERE hash = ?", (item_hash,))
-    conn.commit()
-    conn.close()
-
-    tool_path = ROOT / "tools" / "maintenance" / "migrate_compact_storage_ids.py"
-    spec = importlib.util.spec_from_file_location("migrate_compact_storage_ids", tool_path)
-    migration = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(migration)
-
-    dry = migration.run(False, False)
-    conn = sqlite_operator.connect_database()
-    assert dry["ids_assigned"] == 1
-    assert conn.execute("SELECT storage_id FROM items WHERE hash = ?", (item_hash,)).fetchone()[0] is None
-    conn.close()
-
-    applied = migration.run(True, False)
-    conn = sqlite_operator.connect_database()
-    storage_id = conn.execute("SELECT storage_id FROM items WHERE hash = ?", (item_hash,)).fetchone()[0]
-    compact_note = utils.note_path_for(item_hash, storage_id=storage_id)
-
-    assert applied["ids_assigned"] == 1
-    assert utils.storage_asset_path_for(item_hash, storage_id, ".jpg", "image/jpeg").exists()
-    assert compact_note.exists()
-    assert f"../../assets/{item_hash[:2]}/{storage_id}.jpg" in compact_note.read_text(encoding="utf-8")
-    assert legacy_asset.exists()
+    assert utils.asset_path_for(item_hash, ".jpg", "image/jpeg", storage_id=storage_id).name == f"{storage_id}.jpg"
     conn.close()
 
 
@@ -370,8 +351,9 @@ def test_manual_metadata_migration_dry_run_and_apply(monkeypatch, tmp_path):
     spec.loader.exec_module(migration)
     item_hash = "2" * 64
     conn = insert_mock_item(sqlite_operator, item_hash, artist="DB Artist", date_added="2022-02-02 02:02:02")
+    storage_id = storage_id_for(conn, item_hash)
     conn.close()
-    note_path = utils.note_path_for(item_hash)
+    note_path = utils.note_path_for(item_hash, storage_id)
     note_path.parent.mkdir(parents=True, exist_ok=True)
     note_path.write_text("---\ntopics: []\n---\nbody\n", encoding="utf-8")
 
@@ -393,8 +375,9 @@ def test_review_replace_preserves_old_manual_metadata(monkeypatch, tmp_path):
     old_hash = "3" * 64
     new_hash = "4" * 64
     conn = insert_mock_item(sqlite_operator, old_hash, artist="Old DB Artist", date_added="2026-01-01 00:00:00")
+    old_storage_id = storage_id_for(conn, old_hash)
     conn.close()
-    old_note = utils.note_path_for(old_hash)
+    old_note = utils.note_path_for(old_hash, old_storage_id)
     old_note.parent.mkdir(parents=True, exist_ok=True)
     old_note.write_text(
         "---\nartist: Manual Old\ndate_added: '2020-01-01 00:00:00'\ntopics:\n  - preserved\nwd_tags: []\n---\n",
@@ -406,8 +389,9 @@ def test_review_replace_preserves_old_manual_metadata(monkeypatch, tmp_path):
 
     def fake_process_file(path, config, metadata=None, delete_source=False, skip_similarity=False, sync_index=True):
         conn = insert_mock_item(sqlite_operator, new_hash, artist="New Artist", date_added="2026-02-02 00:00:00")
+        new_storage_id = storage_id_for(conn, new_hash)
         md = web_api.generate_markdown(conn, new_hash)
-        note_path = utils.note_path_for(new_hash)
+        note_path = utils.note_path_for(new_hash, new_storage_id)
         note_path.parent.mkdir(parents=True, exist_ok=True)
         utils.atomic_write_text(note_path, md)
         conn.close()
@@ -419,7 +403,10 @@ def test_review_replace_preserves_old_manual_metadata(monkeypatch, tmp_path):
     monkeypatch.setattr(web_api, "_delete_item_after_replacement", lambda target_hash: {"hash": target_hash, "status": "deleted", "cleanup_errors": []})
 
     result = web_api._review_action_sync("replacement.jpg", "replace")
-    new_data = frontmatter_from_markdown(utils.note_path_for(new_hash).read_text(encoding="utf-8"))
+    conn = sqlite_operator.init_database()
+    new_storage_id = storage_id_for(conn, new_hash)
+    conn.close()
+    new_data = frontmatter_from_markdown(utils.note_path_for(new_hash, new_storage_id).read_text(encoding="utf-8"))
 
     assert result["status"] == "success"
     assert new_data["artist"] == "Manual Old"
@@ -460,13 +447,13 @@ def test_wd_tagger_reuses_cached_session(monkeypatch, tmp_path):
     monkeypatch.setattr(service.Image, "open", lambda path: types.SimpleNamespace(seek=lambda frame: None))
     monkeypatch.setattr(service, "_predict_image_tags", lambda *args, **kwargs: ({"label": "safe"}, [], [{"name": "tag"}]))
 
-    first = service.tag_media(source, item_hash="6" * 64, config={"tagging": {"device": "cpu"}})
-    second = service.tag_media(source, item_hash="7" * 64, config={"tagging": {"device": "cpu"}})
+    first = service.tag_media(source, item_hash="6" * 64, config={"tagging": {"device": "cpu"}}, storage_id="000000000001")
+    second = service.tag_media(source, item_hash="7" * 64, config={"tagging": {"device": "cpu"}}, storage_id="000000000002")
 
     assert first.status == "ok"
     assert second.status == "ok"
     assert calls["sessions"] == 1
-    assert utils.wd_tag_cache_path_for("6" * 64).exists()
+    assert utils.wd_tag_cache_path_for("6" * 64, "000000000001").exists()
 
 
 def test_wd_tagger_concurrent_calls_initialize_session_once(monkeypatch, tmp_path):
@@ -549,7 +536,7 @@ def test_stale_metadata_scan_streams_and_respects_limit(monkeypatch, tmp_path):
         def __iter__(self):
             for index in range(10):
                 seen["rows"] += 1
-                yield (str(index), None, "", 0, 0, "", 0, 0, "")
+                yield (str(index), f"{index:012}", None, "", "", 0, 0, "", 0, 0, "")
 
         def fetchall(self):
             raise AssertionError("fetchall must not be used")
@@ -576,8 +563,8 @@ def test_metadata_status_uses_streaming_stale_count(monkeypatch, tmp_path):
 
     class StaleCursor:
         def __iter__(self):
-            yield ("a", None, "", 0, 0, "", 0, 0, "")
-            yield ("b", "b", "", 0, 0, "", 0, 0, "ok")
+            yield ("a", "000000000001", None, "", "", 0, 0, "", 0, 0, "")
+            yield ("b", "000000000002", "b", "000000000002", "", 0, 0, "", 0, 0, "ok")
 
         def fetchall(self):
             raise AssertionError("fetchall must not be used")
@@ -597,13 +584,121 @@ def test_metadata_status_uses_streaming_stale_count(monkeypatch, tmp_path):
     assert status["stale"] == 1
 
 
-def test_topic_filter_not_ready_skips_legacy_disk_scan(monkeypatch, tmp_path):
+def test_rebuild_metadata_index_status_does_not_clear_rows(monkeypatch, tmp_path):
+    utils, sqlite_operator, metadata_index = fresh_backend(monkeypatch, tmp_path, "utils", "db.sqlite_operator", "metadata_index")
+    tool = load_maintenance_tool("rebuild_metadata_index")
+    item_hash = "aa" * 32
+    conn = insert_mock_item(sqlite_operator, item_hash)
+    write_compact_note(utils, conn, item_hash, "---\ntopics:\n  - keep-topic\n---\n")
+    metadata_index.reindex_item_metadata(conn, item_hash)
+    conn.commit()
+    before = conn.execute("SELECT COUNT(*) FROM item_topics").fetchone()[0]
+    conn.close()
+
+    report = tool.run("status")
+
+    conn = sqlite_operator.init_database()
+    after = conn.execute("SELECT COUNT(*) FROM item_topics").fetchone()[0]
+    conn.close()
+    assert report["action"] == "status"
+    assert before == 1
+    assert after == before
+
+
+def test_rebuild_metadata_index_fails_when_storage_id_missing(monkeypatch, tmp_path):
+    sqlite_operator, = fresh_backend(monkeypatch, tmp_path, "db.sqlite_operator")
+    tool = load_maintenance_tool("rebuild_metadata_index")
+    item_hash = "bb" * 32
+    conn = insert_mock_item(sqlite_operator, item_hash)
+    conn.execute("UPDATE items SET storage_id = '' WHERE hash = ?", (item_hash,))
+    conn.commit()
+    conn.close()
+
+    assert tool.main(["--stale"]) == 2
+
+
+def test_rebuild_metadata_index_stale_reindexes_compact_files(monkeypatch, tmp_path):
+    utils, sqlite_operator = fresh_backend(monkeypatch, tmp_path, "utils", "db.sqlite_operator")
+    tool = load_maintenance_tool("rebuild_metadata_index")
+    item_hash = "cc" * 32
+    conn = insert_mock_item(sqlite_operator, item_hash)
+    write_compact_note(utils, conn, item_hash, "---\ntopics:\n  - stale-topic\n---\n")
+    conn.close()
+
+    report = tool.run("stale")
+
+    conn = sqlite_operator.init_database()
+    topics = [row[0] for row in conn.execute("SELECT topic FROM item_topics WHERE item_hash = ?", (item_hash,))]
+    conn.close()
+    assert report["indexed"] == 1
+    assert topics == ["stale-topic"]
+
+
+def test_rebuild_metadata_index_full_clears_and_rebuilds(monkeypatch, tmp_path):
+    utils, sqlite_operator, metadata_index = fresh_backend(monkeypatch, tmp_path, "utils", "db.sqlite_operator", "metadata_index")
+    tool = load_maintenance_tool("rebuild_metadata_index")
+    item_hash = "dd" * 32
+    conn = insert_mock_item(sqlite_operator, item_hash)
+    write_compact_note(utils, conn, item_hash, "---\ntopics:\n  - rebuilt-topic\n---\n")
+    metadata_index.ensure_metadata_schema(conn)
+    conn.execute(
+        "INSERT OR IGNORE INTO item_topics(item_hash, topic, topic_norm) VALUES (?, 'old-topic', 'old-topic')",
+        (item_hash,),
+    )
+    conn.commit()
+    conn.close()
+
+    report = tool.run("full")
+
+    conn = sqlite_operator.init_database()
+    topics = [row[0] for row in conn.execute("SELECT topic FROM item_topics WHERE item_hash = ? ORDER BY topic", (item_hash,))]
+    ready = metadata_index.metadata_index_ready(conn)
+    conn.close()
+    assert report["indexed"] == 1
+    assert topics == ["rebuilt-topic"]
+    assert ready is True
+
+
+def test_rebuild_metadata_index_stale_limit_caps_work(monkeypatch, tmp_path):
+    utils, sqlite_operator = fresh_backend(monkeypatch, tmp_path, "utils", "db.sqlite_operator")
+    tool = load_maintenance_tool("rebuild_metadata_index")
+    hashes = ["ee" * 32, "ef" * 32]
+    conn = insert_mock_item(sqlite_operator, hashes[0])
+    write_compact_note(utils, conn, hashes[0], "---\ntopics:\n  - first-topic\n---\n")
+    conn.close()
+    conn = insert_mock_item(sqlite_operator, hashes[1])
+    write_compact_note(utils, conn, hashes[1], "---\ntopics:\n  - second-topic\n---\n")
+    conn.close()
+
+    report = tool.run("stale", limit=1)
+
+    conn = sqlite_operator.init_database()
+    indexed = conn.execute("SELECT COUNT(*) FROM item_metadata_files").fetchone()[0]
+    conn.close()
+    assert report["indexed"] == 1
+    assert indexed == 1
+    assert report["stale_after"] == 1
+
+
+def test_rebuild_metadata_index_json_output(monkeypatch, tmp_path, capsys):
+    sqlite_operator, = fresh_backend(monkeypatch, tmp_path, "db.sqlite_operator")
+    conn = sqlite_operator.init_database()
+    conn.close()
+    tool = load_maintenance_tool("rebuild_metadata_index")
+
+    assert tool.main(["--status", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+
+    assert payload["action"] == "status"
+    assert "items" in payload
+
+
+def test_topic_filter_not_ready_skips_disk_scan(monkeypatch, tmp_path):
     web_api, = fresh_backend(monkeypatch, tmp_path, "web_api")
     repair_calls = []
     monkeypatch.setattr(web_api, "metadata_index_ready", lambda conn: False)
     monkeypatch.setattr(web_api, "start_metadata_repair_worker", lambda full=False: repair_calls.append(full) or {"status": "started"})
-    monkeypatch.setattr(web_api, "load_note_topics", lambda item_hash: (_ for _ in ()).throw(AssertionError("legacy note scan called")))
-    monkeypatch.setattr(web_api, "_wd_names_for_hash", lambda item_hash: (_ for _ in ()).throw(AssertionError("legacy wd scan called")))
+    monkeypatch.setattr(web_api, "load_note_topics", lambda *args: (_ for _ in ()).throw(AssertionError("note scan called")))
 
     result = web_api._get_items_sync(None, None, "newest", "all", [], [], [], ["topic"], [], [], None, 25)
 
@@ -710,32 +805,35 @@ def test_thumbnail_repair_uses_shared_helper_and_skips_fresh(monkeypatch, tmp_pa
     fresh_hash = "a" * 64
     stale_hash = "b" * 64
     conn = insert_mock_item(sqlite_operator, fresh_hash)
+    fresh_storage_id = storage_id_for(conn, fresh_hash)
+    stale_storage_id = sqlite_operator.allocate_storage_id(conn)
     conn.execute(
         """
-        INSERT INTO items(hash, original_filename, file_extension, mime_type, size_bytes, date_added, source_url, source_url_norm, platform, source_artist, phash)
-        VALUES (?, ?, '.jpg', 'image/jpeg', 10, ?, '', '', 'local', ?, '')
+        INSERT INTO items(hash, storage_id, original_filename, file_extension, mime_type, size_bytes, date_added, source_url, source_url_norm, platform, source_artist, phash)
+        VALUES (?, ?, ?, '.jpg', 'image/jpeg', 10, ?, '', '', 'local', ?, '')
         """,
-        (stale_hash, f"{stale_hash}.jpg", "2026-01-03 00:00:00", "DB Artist"),
+        (stale_hash, stale_storage_id, f"{stale_hash}.jpg", "2026-01-03 00:00:00", "DB Artist"),
     )
     conn.commit()
     for item_hash in [fresh_hash, stale_hash]:
-        asset = utils.asset_path_for(item_hash, ".jpg", "image/jpeg")
+        storage_id = fresh_storage_id if item_hash == fresh_hash else stale_storage_id
+        asset = utils.asset_path_for(item_hash, ".jpg", "image/jpeg", storage_id=storage_id)
         asset.parent.mkdir(parents=True, exist_ok=True)
         asset.write_bytes(b"asset")
-    fresh_thumb = thumbnails.thumbnail_path_for(fresh_hash)
+    fresh_thumb = thumbnails.thumbnail_path_for(fresh_hash, fresh_storage_id)
     fresh_thumb.parent.mkdir(parents=True, exist_ok=True)
     fresh_thumb.write_bytes(b"thumb")
     calls = []
 
-    def fake_ensure(item_hash, extension, mime_type, wait=True):
-        calls.append((item_hash, extension, mime_type, wait))
-        return thumbnails.thumbnail_path_for(item_hash)
+    def fake_ensure(item_hash, extension, mime_type, wait=True, storage_id=None):
+        calls.append((item_hash, extension, mime_type, wait, storage_id))
+        return thumbnails.thumbnail_path_for(item_hash, storage_id)
 
     monkeypatch.setattr(thumbnails, "ensure_thumbnail", fake_ensure)
 
     result = thumbnails.repair_missing_thumbnails(conn, limit=10)
 
-    assert calls == [(stale_hash, ".jpg", "image/jpeg", True)]
+    assert calls == [(stale_hash, ".jpg", "image/jpeg", True, stale_storage_id)]
     assert result["generated"] == 1
     assert result["skipped"] == 1
     conn.close()

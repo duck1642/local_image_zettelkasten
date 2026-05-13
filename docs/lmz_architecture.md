@@ -4,7 +4,7 @@
 
 Local Media Zettelkasten (LMZ) is a local media archive and zettelkasten system for images, GIFs, and videos.
 
-It ingests local files and external URLs, validates media, stores original assets by SHA256 hash, indexes runtime metadata in SQLite, generates Obsidian-compatible markdown notes, keeps local WD tag reports in sharded JSON cache files, and exposes a Tauri/Svelte desktop UI through a local FastAPI backend.
+It ingests local files and external URLs, validates media, stores original assets under compact storage IDs while keeping SHA256 as item identity, indexes runtime metadata in SQLite, generates Obsidian-compatible markdown notes, keeps local WD tag reports in sharded JSON cache files, and exposes a Tauri/Svelte desktop UI through a local FastAPI backend.
 
 Runtime state stays outside source code under root-level `data/`, `logs/`, and `secrets/`.
 
@@ -104,8 +104,8 @@ backend/processor.py
         +--> SHA256 hash
         +--> duplicate checks
         +--> pHash / video signatures
+        +--> insert SQLite runtime metadata, including compact storage_id
         +--> copy original to sharded vault assets
-        +--> insert SQLite runtime metadata
         +--> generate sharded markdown note
         +--> optional local WD tagging
         |
@@ -115,23 +115,27 @@ data/vault/assets + data/vault/notes + data/db/lmz_main.db + data/wd-tags
 
 ## Storage Model
 
-Files are content-addressed:
+Items are identified by SHA256 `hash`; physical filenames use the DB-owned compact `storage_id`.
 
 ```text
-data/vault/assets/{hash[:2]}/{hash}.{ext}
-data/vault/notes/{hash[:2]}/{hash}.md
-data/wd-tags/{hash[:2]}/{hash}.json
+data/vault/assets/{hash[:2]}/{storage_id}.{ext}
+data/vault/notes/{hash[:2]}/{storage_id}.md
+data/wd-tags/{hash[:2]}/{storage_id}.json
+data/ui_cache/thumbnails/{hash[:2]}/{storage_id}.jpg
+data/ui_cache/thumbnails/{hash[:2]}/{storage_id}_video.jpg
 ```
 
 Markdown asset links are relative to sharded notes:
 
 ```text
-../../assets/{hash[:2]}/{hash}.{ext}
+../../assets/{hash[:2]}/{storage_id}.{ext}
 ```
 
 Metadata ownership:
 
 - SQLite: runtime asset/index metadata plus disposable derived topic/WD query indexes.
+- `items.hash`: permanent logical/API identity.
+- `items.storage_id`: internal physical filename identity.
 - Markdown frontmatter: source of truth for manual `topics`, distilled `wd_rating`, `wd_character_tags`, and `wd_tags`.
 - WD JSON cache: detailed local WD tag report, including scores and frame-level video tag data. Used as fallback only when YAML has no WD fields.
 
@@ -158,6 +162,7 @@ Derived SQLite metadata rows are rebuildable and are not the source of truth.
 | `visual_embedding` | Video visual embedding |
 | `width` | Media width |
 | `height` | Media height |
+| `storage_id` | Compact physical filename ID |
 
 ### `item_tiles`
 
@@ -175,7 +180,7 @@ Used for SQL-backed topic/WD filters, facets, and suggestions.
 
 | Table | Meaning |
 | --- | --- |
-| `item_metadata_files` | Note/WD file signatures and index status per item |
+| `item_metadata_files` | Storage-aware note/WD file signatures and index status per item |
 | `item_topics` | Derived topic rows |
 | `item_wd_tags` | Derived WD rating/character/general tag rows |
 
@@ -320,7 +325,7 @@ Facet counts:
 - Artist/platform counts come from SQLite.
 - Topic counts come from the SQLite metadata index after initial backfill.
 - WD tag counts come from the SQLite metadata index after initial backfill.
-- Before initial backfill completes, topic/WD counts fall back to the legacy YAML/cache scan.
+- Before initial backfill completes, topic/WD filters skip disk scans and start metadata repair.
 - `/api/facets` powers the Stats view and search dropdown counts.
 
 ## Media Focus
@@ -402,9 +407,9 @@ Local WD tagging lives under `backend/tagging/`.
 
 Behavior:
 
-- Public API: `tag_media(media_path, item_hash=None, config=None)`.
+- Public API: `tag_media(media_path, item_hash=None, config=None, storage_id=None)`.
 - Model files live under `data/models/`.
-- Detailed cache lives under `data/wd-tags/{hash[:2]}/{hash}.json`.
+- Detailed cache lives under `data/wd-tags/{hash[:2]}/{storage_id}.json`.
 - Markdown notes receive distilled WD fields.
 - Images are tagged directly.
 - Videos are tagged by sampling frames and merging results.
@@ -419,7 +424,7 @@ Current behavior:
 - Image thumbnails are static JPEGs.
 - Video thumbnails are generated via ffmpeg.
 - GIF thumbnails are static first-frame previews.
-- Full original assets remain in the sharded vault and are served to the frontend through backend asset routes.
+- Full original assets remain in compact sharded vault paths and are served to the frontend through backend asset routes.
 
 ## Logging
 
@@ -428,7 +433,7 @@ Logs live under root-level `logs/`.
 Current layout:
 
 - `logs/raw/`: terminal output and raw tracebacks.
-- `logs/structured/`: JSONL streams for system, frontend UI, ingestion, auth status, and ingestion-audit events.
+- `logs/structured/`: JSONL streams for system, frontend UI, local ingest, online ingest, auth status, review, and ingestion-audit events.
 
 Frontend logging is batched through `frontend/src/lib/logger.ts`.
 

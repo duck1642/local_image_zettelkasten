@@ -1,6 +1,4 @@
-import shutil
 import subprocess
-import sqlite3
 import sys
 from pathlib import Path
 
@@ -10,9 +8,7 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from db.sqlite_operator import init_database
-from utils import ASSETS_DIR, PROJECT_ROOT, DB_PATH, asset_path_for
-
-THUMBNAIL_DIR = PROJECT_ROOT / "data" / "ui_cache" / "thumbnails"
+from utils import asset_path_for
 
 def get_image_dimensions(path: Path):
     try:
@@ -40,14 +36,14 @@ def add_dimensions():
     conn = init_database()
     cursor = conn.cursor()
     try:
-        cursor.execute('SELECT hash, mime_type, file_extension FROM items WHERE width IS NULL OR height IS NULL OR width = 0 OR height = 0')
+        cursor.execute('SELECT hash, mime_type, file_extension, storage_id FROM items WHERE width IS NULL OR height IS NULL OR width = 0 OR height = 0')
         items = cursor.fetchall()
         total = len(items)
         print(f"Found {total} items missing dimensions in DB.")
         
         updated = 0
-        for i, (file_hash, mime_type, ext) in enumerate(items):
-            path = asset_path_for(file_hash, ext, mime_type)
+        for i, (file_hash, mime_type, ext, storage_id) in enumerate(items):
+            path = asset_path_for(file_hash, ext, mime_type, storage_id=storage_id)
             if not path.exists():
                 print(f"File missing on disk: {path}")
                 continue
@@ -73,36 +69,9 @@ def add_dimensions():
     finally:
         conn.close()
 
-def shard_thumbnails():
-    if not THUMBNAIL_DIR.exists():
-        print("[OK] No thumbnails directory to shard.")
-        return
-
-    moved = 0
-    for f in list(THUMBNAIL_DIR.iterdir()):
-        if not f.is_file():
-            continue
-        name = f.name
-        if len(name) < 2:
-            continue
-        prefix = name[:2]
-        if prefix == f.stem[:2] and len(f.stem) >= 64:
-            shard_dir = THUMBNAIL_DIR / prefix
-            shard_dir.mkdir(exist_ok=True)
-            dest = shard_dir / name
-            if not dest.exists():
-                shutil.move(str(f), str(dest))
-                moved += 1
-
-    print(f"[OK] Shard thumbnails: moved {moved} files into subdirectories")
-
-
 def main():
     print("--- Adding dimensions to database ---")
     add_dimensions()
-    print()
-    print("--- Sharding flat thumbnails ---")
-    shard_thumbnails()
 
 
 if __name__ == "__main__":

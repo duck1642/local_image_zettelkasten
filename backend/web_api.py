@@ -22,9 +22,7 @@ from pydantic import BaseModel
 from db.sqlite_operator import init_database, normalize_source_url
 from utils import (
     get_config, ASSETS_DIR, REVIEW_DIR, LOCAL_INGEST_DIR, note_path_for,
-    asset_path_for, calculate_file_hash, asset_url_for, existing_asset_path_for,
-    existing_note_path_for, existing_wd_tag_cache_path_for, legacy_asset_path_for,
-    legacy_note_path_for, legacy_sharded_note_path_for, legacy_wd_tag_cache_path_for
+    asset_path_for, calculate_file_hash, asset_url_for, wd_tag_cache_path_for
 )
 from processor import process_file
 from logger import log_auth, log_ingest_audit, log_ingest_local, log_review, log_svelte, log_system, RAW_LOGS_DIR, STRUCTURED_LOGS_DIR
@@ -291,7 +289,7 @@ def _ensure_review_sidecar_defaults(path: Path, sidecar: dict) -> tuple[dict, bo
         sidecar["original_name"] = _review_display_name(path, sidecar)
         changed = True
     if not sidecar.get("review_id"):
-        sidecar["review_id"] = f"legacy_{path.stem}"
+        sidecar["review_id"] = f"review_{path.stem}"
         changed = True
     if not sidecar.get("state"):
         sidecar["state"] = "pending"
@@ -400,7 +398,14 @@ def _review_db_has_hashes(hashes: list[str]) -> set[str]:
         conn.close()
 
 def _manual_frontmatter_for_hash(item_hash: str) -> dict:
-    frontmatter = load_note_frontmatter(item_hash)
+    conn = init_database()
+    try:
+        row = conn.execute("SELECT storage_id FROM items WHERE hash = ?", (item_hash,)).fetchone()
+        if not row or not row[0]:
+            return {}
+        frontmatter = load_note_frontmatter(item_hash, row[0])
+    finally:
+        conn.close()
     return {
         field: frontmatter[field]
         for field in MANUAL_FRONTMATTER_FIELDS
@@ -415,7 +420,10 @@ def _apply_manual_frontmatter_to_item(item_hash: str, manual_fields: dict):
         md_content = generate_markdown(conn, item_hash, manual_overrides=manual_fields)
         if not md_content:
             raise RuntimeError("replacement note generation returned empty content")
-        note_path = note_path_for(item_hash, conn=conn)
+        row = conn.execute("SELECT storage_id FROM items WHERE hash = ?", (item_hash,)).fetchone()
+        if not row or not row[0]:
+            raise RuntimeError(f"item {item_hash} is missing storage_id")
+        note_path = note_path_for(item_hash, row[0])
         note_path.parent.mkdir(parents=True, exist_ok=True)
         atomic_write_text(note_path, md_content)
         safe_reindex_item_metadata(conn, item_hash, "review_replace_preserve")
@@ -426,27 +434,14 @@ def _apply_manual_frontmatter_to_item(item_hash: str, manual_fields: dict):
     finally:
         conn.close()
 
-def _unique_existing_or_target_paths(paths: list[Path]) -> list[Path]:
-    seen = set()
-    unique = []
-    for path in paths:
-        key = str(path)
-        if key in seen:
-            continue
-        seen.add(key)
-        unique.append(path)
-    return unique
-
 def _item_file_paths(item_hash: str, extension: str, mime_type: str, storage_id: str | None, conn=None) -> list[Path]:
-    return _unique_existing_or_target_paths([
+    if not storage_id:
+        raise RuntimeError(f"item {item_hash} is missing storage_id")
+    return [
         asset_path_for(item_hash, extension, mime_type, storage_id=storage_id),
-        legacy_asset_path_for(item_hash, extension, mime_type),
-        note_path_for(item_hash, storage_id=storage_id, conn=conn),
-        legacy_sharded_note_path_for(item_hash),
-        legacy_note_path_for(item_hash),
-        existing_wd_tag_cache_path_for(item_hash, storage_id=storage_id, conn=conn),
-        legacy_wd_tag_cache_path_for(item_hash),
-    ])
+        note_path_for(item_hash, storage_id=storage_id),
+        wd_tag_cache_path_for(item_hash, storage_id=storage_id),
+    ]
 
 def _tail_lines(path: Path, count: int = 150) -> list[str]:
     if not path.exists():
@@ -673,7 +668,7 @@ def _get_facets_sync(kind: str, q: str = "", limit: int = 100):
             return {"kind": kind, "items": metadata_facets(conn, kind, needle.casefold(), limit)}
 
         start_metadata_repair_worker(full=False)
-        log_system("WARNING", "Metadata index not ready; skipping legacy facet scan and starting repair", kind=kind)
+        log_system("WARNING", "Metadata index not ready; skipping facet scan and starting repair", kind=kind)
         return {"kind": kind, "items": []}
     finally:
         conn.close()
@@ -794,32 +789,6 @@ def _append_text_terms(conditions, params, terms):
         conditions.append("(original_filename LIKE ? OR hash LIKE ? OR source_url LIKE ? OR source_artist LIKE ? OR platform LIKE ?)")
         params.extend([f"%{term}%"] * 5)
 
-def _wd_names_for_hash(item_hash: str) -> list[str]:
-    wd_data = load_note_wd_tags(item_hash)
-    if wd_data.get("status") != "ok":
-        cache_data = load_tag_cache(item_hash)
-        if cache_data.get("status") == "ok":
-            wd_data = {
-                "rating": cache_data.get("rating") or {},
-                "character_tags": cache_data.get("character_tags") or [],
-                "tags": cache_data.get("tags") or []
-            }
-    names = []
-    rating = wd_data.get("rating", {})
-    if rating:
-        names.append(rating.get("label", "") or rating.get("name", ""))
-    for tag in wd_data.get("character_tags", []):
-        if isinstance(tag, str):
-            names.append(tag)
-        elif isinstance(tag, dict):
-            names.append(tag.get("display_name", "") or tag.get("name", ""))
-    for tag in wd_data.get("tags", []):
-        if isinstance(tag, str):
-            names.append(tag)
-        elif isinstance(tag, dict):
-            names.append(tag.get("display_name", "") or tag.get("name", ""))
-    return [name for name in names if name]
-
 def _get_items_sync(field, value, sort, media_type, artist, platform, filename, topic, wd_tag, text, cursor, limit):
     limit = max(1, min(limit, 100))
     topic_filters = _clean_filter_values(topic)
@@ -933,10 +902,12 @@ def _get_item_details(h, row, conn=None):
             raise RuntimeError("metadata index connection unavailable")
     except Exception as exc:
         log_system("WARNING", "Metadata index detail fallback", hash=h, error=str(exc))
-        topics = load_note_topics(h)
-        wd_data = load_note_wd_tags(h)
+        if not storage_id:
+            raise RuntimeError(f"item {h} is missing storage_id")
+        topics = load_note_topics(h, storage_id)
+        wd_data = load_note_wd_tags(h, storage_id)
         if wd_data.get("status") != "ok":
-            cache_data = load_tag_cache(h)
+            cache_data = load_tag_cache(h, storage_id)
             if cache_data.get("status") == "ok":
                 wd_data = {
                     "status": "ok",
@@ -996,8 +967,7 @@ def _get_item_path_sync(item_hash: str):
         cursor.execute("SELECT file_extension, mime_type, storage_id FROM items WHERE hash = ?", (item_hash,))
         row = cursor.fetchone()
         if not row: raise HTTPException(status_code=404)
-        # Using utils instead of ui
-        path = existing_asset_path_for(item_hash, row[0] or "", row[1] or "", storage_id=row[2])
+        path = asset_path_for(item_hash, row[0] or "", row[1] or "", storage_id=row[2])
         return {"absolute_path": str(path.resolve())}
     finally:
         conn.close()
@@ -1010,10 +980,10 @@ def _get_item_note_path_sync(item_hash: str):
     conn = init_database()
     cursor = conn.cursor()
     try:
-        cursor.execute("SELECT hash FROM items WHERE hash = ?", (item_hash,))
+        cursor.execute("SELECT storage_id FROM items WHERE hash = ?", (item_hash,))
         row = cursor.fetchone()
         if not row: raise HTTPException(status_code=404)
-        path = existing_note_path_for(item_hash, conn=conn)
+        path = note_path_for(item_hash, row[0])
         return {"absolute_path": str(path.resolve())}
     finally:
         conn.close()
@@ -1030,7 +1000,7 @@ def _open_item_folder_sync(item_hash: str):
         row = cursor.fetchone()
         if not row:
             raise HTTPException(status_code=404)
-        path = existing_asset_path_for(item_hash, row[0] or "", row[1] or "", storage_id=row[2])
+        path = asset_path_for(item_hash, row[0] or "", row[1] or "", storage_id=row[2])
         if not path.exists():
             raise HTTPException(status_code=404, detail="Asset missing")
         if sys.platform == "win32":
@@ -1050,11 +1020,11 @@ def _open_item_note_sync(item_hash: str):
     conn = init_database()
     cursor = conn.cursor()
     try:
-        cursor.execute("SELECT hash FROM items WHERE hash = ?", (item_hash,))
+        cursor.execute("SELECT storage_id FROM items WHERE hash = ?", (item_hash,))
         row = cursor.fetchone()
         if not row:
             raise HTTPException(status_code=404)
-        path = existing_note_path_for(item_hash, conn=conn)
+        path = note_path_for(item_hash, row[0])
         if not path.exists():
             raise HTTPException(status_code=404, detail="Note missing")
         _open_path_external(path)
@@ -1095,7 +1065,10 @@ def _update_item_sync(item_hash: str, update: ItemUpdate):
         
         md_content = generate_markdown(conn, item_hash, topics_override=update.topics, manual_overrides=manual_overrides)
         if md_content:
-            note_path = note_path_for(item_hash, conn=conn)
+            row = cursor.execute("SELECT storage_id FROM items WHERE hash = ?", (item_hash,)).fetchone()
+            if not row or not row[0]:
+                raise RuntimeError(f"item {item_hash} is missing storage_id")
+            note_path = note_path_for(item_hash, row[0])
             note_path.parent.mkdir(parents=True, exist_ok=True)
             atomic_write_text(note_path, md_content)
             safe_reindex_item_metadata(conn, item_hash, "item_patch")
@@ -1252,7 +1225,7 @@ async def trigger_tagging(item_hash: str):
             if not row:
                 raise HTTPException(status_code=404)
             
-            asset_path = existing_asset_path_for(item_hash, row[0] or "", row[1] or "", storage_id=row[2])
+            asset_path = asset_path_for(item_hash, row[0] or "", row[1] or "", storage_id=row[2])
             if not asset_path.exists():
                 raise HTTPException(status_code=404, detail="Asset missing")
 

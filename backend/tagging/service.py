@@ -11,7 +11,7 @@ from PIL import Image
 
 from fingerprint import extract_sampled_video_frames
 from logger import log_system
-from utils import MODELS_DIR, atomic_write_text, calculate_file_hash, get_config, existing_wd_tag_cache_path_for, wd_tag_cache_path_for
+from utils import MODELS_DIR, atomic_write_text, calculate_file_hash, get_config, wd_tag_cache_path_for
 from validators import get_mime_type
 
 
@@ -167,7 +167,7 @@ def _result(item_hash: str, media_path: Path, model_repo: str, device: str, prov
 
 
 def _write_result(result: TagResult, storage_id: str = None):
-    if not result.hash:
+    if not result.hash or not storage_id:
         return
     target = wd_tag_cache_path_for(result.hash, storage_id=storage_id)
     atomic_write_text(target, json.dumps(result.to_dict(), indent=2, ensure_ascii=False))
@@ -344,8 +344,8 @@ def _merge_tag_group(sampled_frames: list[dict[str, Any]], key: str, max_tags: i
     return results[:max_tags]
 
 
-def load_tag_cache(item_hash: str) -> dict:
-    path = existing_wd_tag_cache_path_for(item_hash)
+def load_tag_cache(item_hash: str, storage_id: str) -> dict:
+    path = wd_tag_cache_path_for(item_hash, storage_id)
     if not path.exists():
         return {}
     try:
@@ -353,12 +353,12 @@ def load_tag_cache(item_hash: str) -> dict:
     except Exception:
         return {}
     if "hash" not in data and "item_hash" in data:
-        data = _legacy_cache_to_current(data)
+        data = _old_cache_to_current(data)
     return data
 
 
-def wd_frontmatter_fields(item_hash: str) -> dict:
-    data = load_tag_cache(item_hash)
+def wd_frontmatter_fields(item_hash: str, storage_id: str) -> dict:
+    data = load_tag_cache(item_hash, storage_id)
     if data.get("status") != "ok":
         return {"wd_rating": "", "wd_character_tags": [], "wd_tags": []}
     rating = data.get("rating") or {}
@@ -375,7 +375,7 @@ def _tag_name(tag: dict) -> str:
     return str(tag.get("display_name") or tag.get("name") or "").strip()
 
 
-def _legacy_cache_to_current(data: dict) -> dict:
+def _old_cache_to_current(data: dict) -> dict:
     rating = None
     characters = []
     tags = []

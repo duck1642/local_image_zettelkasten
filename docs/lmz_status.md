@@ -1,6 +1,6 @@
 # LMZ Current Status
 
-Last updated: 2026-05-12
+Last updated: 2026-05-13
 
 ## Current Status
 
@@ -26,9 +26,10 @@ lmz
 - Backend API: `backend/web_api.py`.
 - Ingestion CLI: `backend/core.py`, launched by `main.py` or `lmz`.
 - Runtime DB: `data/db/lmz_main.db`.
-- Vault assets: `data/vault/assets/{hash[:2]}/{hash}.{ext}`.
-- Vault notes: `data/vault/notes/{hash[:2]}/{hash}.md`.
-- WD tag cache: `data/wd-tags/{hash[:2]}/{hash}.json`.
+- Vault assets: `data/vault/assets/{hash[:2]}/{storage_id}.{ext}`.
+- Vault notes: `data/vault/notes/{hash[:2]}/{storage_id}.md`.
+- WD tag cache: `data/wd-tags/{hash[:2]}/{storage_id}.json`.
+- Thumbnails: `data/ui_cache/thumbnails/{hash[:2]}/{storage_id}.jpg`.
 - Review quarantine: `data/review/`.
 - Local ingest staging: `paths.local_ingest`, fallback `paths.input/local`.
 - Online ingest staging: `paths.online_ingest`, fallback `paths.input/online`.
@@ -40,7 +41,7 @@ lmz
 - Local image, GIF, and video ingestion.
 - External URL ingestion via gallery-dl and yt-dlp.
 - Batch-safe Pixiv, X/Twitter, Instagram, Pinterest, YouTube community ingestion.
-- SHA256 sharded vault storage.
+- SHA256 item identity with compact `storage_id` physical filenames.
 - Markdown note generation with frontmatter topics and distilled WD fields.
 - Local WD tagging for images and sampled video frames.
 - Virtualized masonry/grid vault UI.
@@ -264,6 +265,27 @@ VSCode-friendly test launchers:
   - The current maintenance scripts for capturing cookies (`backend/scripts/auth_cookies_builder.py`) and authenticating with Pixiv (`backend/scripts/auth_pixiv_auto.py`) only run in the CLI. These need to be connected to the Svelte UI so users can manage authentication directly from the desktop application without dropping into the terminal.
 
 ## Done But Needs Check
+
+- Compact storage ID runtime model:
+  - SHA256 `hash` remains the item/API identity.
+  - physical asset, note, WD cache, and thumbnail paths now use compact `storage_id` filenames under `hash[:2]` shard folders.
+  - runtime full-hash filename fallback helpers were removed.
+  - helper functions no longer open SQLite connections just to resolve storage paths.
+  - API routes, inspector path/open actions, copy-file path flow, thumbnails, delete/rollback cleanup, local/online ingest, Markdown generation, WD cache, and maintenance tools now pass `storage_id` explicitly.
+  - metadata index now records `storage_id` and watches compact filename stems through an in-memory `storage_id -> hash` map.
+  - compact-storage migration script and old pre-storage sharding tools were removed.
+  - backend pytest, AST, import, static grep, and diff whitespace checks pass.
+  - needs real-vault ingest/delete/review-replace/tag/thumbnail smoke after longer use.
+
+- Metadata index rebuild maintenance tool:
+  - added `tools/maintenance/rebuild_metadata_index.py`.
+  - supports `--status`, `--stale`, `--full`, `--limit`, and `--json`.
+  - default run is safe status-only mode.
+  - stale/full rebuilds fail fast if any item row is missing `storage_id`.
+  - rebuilds persistent metadata tables only; search/RAM indexes remain out of scope.
+  - status run on active vault reported `items=156`, `indexed=0`, `stale_before=156`, `stale_after=156`.
+  - backend pytest, AST, import, and diff whitespace checks pass.
+  - needs one real `--stale` or `--full` run when ready to populate metadata index.
 
 - Logging stream split and rename:
   - online ingestion lifecycle logs now write to `ingest_online.jsonl`.

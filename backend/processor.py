@@ -388,7 +388,7 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
         conn.commit()
 
         try:
-            ensure_thumbnail(file_hash, target_ext, mime_type, wait=True)
+            ensure_thumbnail(file_hash, target_ext, mime_type, wait=True, storage_id=storage_id)
         except Exception as thumb_exc:
             log_system("WARNING", "Ingest thumbnail pregeneration failed", hash=file_hash, error=str(thumb_exc))
 

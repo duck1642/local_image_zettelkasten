@@ -13,11 +13,12 @@ SRC_DIR = PROJECT_ROOT_PATH / "backend"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from utils import ASSETS_DIR, DB_PATH, NOTES_DIR, PROJECT_ROOT, existing_asset_path_for, existing_note_path_for
+from db.sqlite_operator import allocate_storage_id
+from utils import ASSETS_DIR, DB_PATH, NOTES_DIR, PROJECT_ROOT, asset_path_for, note_path_for
 
 
 def asset_path(file_hash: str, file_extension: str, mime_type: str = "", storage_id: str = "") -> Path:
-    return existing_asset_path_for(file_hash, file_extension, mime_type, storage_id=storage_id)
+    return asset_path_for(file_hash, file_extension, mime_type, storage_id=storage_id)
 
 
 def load_notes() -> dict:
@@ -170,12 +171,17 @@ def insert_note_row(conn: sqlite3.Connection, file_hash: str, note: dict):
     asset = note["asset"]
     meta = note["meta"]
     cursor = conn.cursor()
+    storage_id = str(note["path"].stem or "")
+    existing = cursor.execute("SELECT hash FROM items WHERE storage_id = ?", (storage_id,)).fetchone()
+    if not storage_id or (existing and existing[0] != file_hash):
+        storage_id = allocate_storage_id(conn)
     cursor.execute(
         "INSERT OR REPLACE INTO items "
-        "(hash, original_filename, file_extension, mime_type, size_bytes, date_added, source_url, platform, source_artist, phash, audio_hash, visual_embedding) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "(hash, storage_id, original_filename, file_extension, mime_type, size_bytes, date_added, source_url, platform, source_artist, phash, audio_hash, visual_embedding) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             file_hash,
+            storage_id,
             meta.get("filename", asset.name),
             asset.suffix.lower(),
             meta.get("file_format", ""),
@@ -197,7 +203,7 @@ def repair(conn: sqlite3.Connection, report: dict) -> dict:
     matched_orphans = set()
 
     for row in report["missing_db_assets"]:
-        note_path = existing_note_path_for(row["hash"], storage_id=row.get("storage_id"))
+        note_path = note_path_for(row["hash"], row.get("storage_id"))
         if note_path.exists():
             continue
 

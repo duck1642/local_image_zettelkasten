@@ -13,7 +13,7 @@ Build the input processor.
 
 ### Key Decisions
 
-- Use SHA256 hash values as filenames for unique identity
+- Use SHA256 hash values for unique item identity. Physical filenames later moved to compact `storage_id` values to avoid Windows path-length pressure.
 - Add MIME type and extension filter — check MIME type first, fall back to extension
 - Using SHA256 for now; can be swapped for other algorithms later
 
@@ -186,11 +186,13 @@ Build a practical desktop interface for vault management, add local AI tagging, 
 - Split logs into raw terminal output and structured JSONL streams.
 - Added readable and raw log display modes in the UI.
 - Added a reusable local WD tagging service with local model storage under `data/models/`.
-- Added detailed WD tag cache under `data/wd-tags/{hash[:2]}/{hash}.json`.
+- Added detailed WD tag cache, now stored under compact `data/wd-tags/{hash[:2]}/{storage_id}.json` paths.
 - Added distilled WD fields to markdown frontmatter.
 - Added image and video WD tagging; videos use sampled frame tagging and merged suggestions.
 - Kept manual topics separate from WD tags.
 - Added a disposable SQLite metadata index for topic/WD queries while keeping markdown/YAML as source of truth.
+- Added compact `storage_id` runtime storage paths while preserving SHA256 hashes as public/API identity.
+- Added a metadata index rebuild maintenance tool for status, stale repair, and full persistent metadata rebuilds.
 - Hardened local API mutating endpoints with a local session key and allowlisted origins.
 - Validated log, queue, and review paths to prevent traversal.
 - Fixed false-success API behavior for missing items.
@@ -221,7 +223,7 @@ Build a practical desktop interface for vault management, add local AI tagging, 
 - GIFs ingest and preserve originals, but vault/inspector previews are still static first-frame thumbnails and tagging/dedupe inspect only the first frame.
 - Search/index hydration still bulk-loads runtime signatures into RAM.
 - `get_config()` still reparses YAML often; caching needs explicit invalidation.
-- Video embedding still extracts five frames through separate ffmpeg calls.
+- Video frame sampling now uses one ffmpeg subprocess per sampled batch; embedding/tagging still depends on sampled original frames.
 - YouTube community posts still fail/retry if one expected image fails.
 - Existing `source_url_norm` values are backfilled lazily on DB init, not through a standalone migration tool.
 - Production sidecar packaging exists but still needs release-build validation.
@@ -245,9 +247,9 @@ Finish the active Tauri/Svelte vault experience, validate the virtual renderer p
 - Add deliberate config caching with safe invalidation when Settings writes `config.yaml`.
 - Add a proper source URL normalization maintenance tool for existing databases.
 - Reduce search hydration memory pressure with batching or a persistent index strategy.
-- Optimize video embedding frame extraction.
+- Further optimize video embedding/tagging around sampled frame reuse.
 - Decide and implement a video hover preview strategy: file-size cap, backend preview clip endpoint, or animated thumbnail.
-- Consolidate remaining duplicate helper logic.
+- Validate compact storage paths and metadata rebuild behavior on the real vault.
 - Validate production Tauri sidecar packaging on a clean machine.
 
 ---

@@ -8,8 +8,7 @@ import shutil
 import re
 
 from utils import (
-    get_config, QUEUES_DIR, existing_asset_path_for, existing_note_path_for,
-    existing_wd_tag_cache_path_for
+    get_config, QUEUES_DIR, asset_path_for, note_path_for, wd_tag_cache_path_for
 )
 from db.sqlite_operator import connect_database, normalize_source_url
 from db.search_manager import search_manager
@@ -433,7 +432,7 @@ class ExternalIngestor:
 
             missing_assets = []
             for file_hash, file_extension, mime_type, storage_id in rows:
-                asset_path = existing_asset_path_for(file_hash, file_extension, mime_type, storage_id=storage_id)
+                asset_path = asset_path_for(file_hash, file_extension, mime_type, storage_id=storage_id)
                 if not asset_path.exists():
                     missing_assets.append(file_hash)
 
@@ -462,7 +461,7 @@ class ExternalIngestor:
 
             missing_assets = []
             for file_hash, file_extension, mime_type, storage_id in rows:
-                asset_path = existing_asset_path_for(file_hash, file_extension, mime_type, storage_id=storage_id)
+                asset_path = asset_path_for(file_hash, file_extension, mime_type, storage_id=storage_id)
                 if not asset_path.exists():
                     missing_assets.append(file_hash)
 
@@ -498,16 +497,17 @@ class ExternalIngestor:
                 conn.execute('DELETE FROM items WHERE hash = ?', (file_hash,))
 
                 if file_extension:
-                    asset_path = existing_asset_path_for(file_hash, file_extension, mime_type, storage_id=storage_id)
+                    asset_path = asset_path_for(file_hash, file_extension, mime_type, storage_id=storage_id)
                     if asset_path.exists():
                         asset_path.unlink()
 
-                note_path = existing_note_path_for(file_hash, storage_id=storage_id)
-                if note_path.exists():
-                    note_path.unlink()
-                wd_path = existing_wd_tag_cache_path_for(file_hash, storage_id=storage_id)
-                if wd_path.exists():
-                    wd_path.unlink()
+                if storage_id:
+                    note_path = note_path_for(file_hash, storage_id=storage_id)
+                    if note_path.exists():
+                        note_path.unlink()
+                    wd_path = wd_tag_cache_path_for(file_hash, storage_id=storage_id)
+                    if wd_path.exists():
+                        wd_path.unlink()
 
                 rolled_back += 1
 

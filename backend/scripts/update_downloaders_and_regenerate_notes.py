@@ -1,8 +1,6 @@
 ﻿
 import subprocess
 import sys
-import sqlite3
-from pathlib import Path
 
 def update_tools():
 
@@ -41,7 +39,7 @@ def regenerate_markdowns():
 
     conn = init_database()
     cursor = conn.cursor()
-    cursor.execute("SELECT hash FROM items")
+    cursor.execute("SELECT hash, storage_id FROM items")
     rows = cursor.fetchall()
 
     print(f"[INFO] Found {len(rows)} items in database.")
@@ -50,10 +48,10 @@ def regenerate_markdowns():
     notes_dir.mkdir(parents=True, exist_ok=True)
 
     count = 0
-    for (file_hash,) in rows:
+    for file_hash, storage_id in rows:
         md_content = generate_markdown(conn, file_hash)
         if md_content:
-            md_path = note_path_for(file_hash, conn=conn)
+            md_path = note_path_for(file_hash, storage_id)
             md_path.parent.mkdir(parents=True, exist_ok=True)
             with open(md_path, 'w', encoding='utf-8') as f:
                 f.write(md_content)

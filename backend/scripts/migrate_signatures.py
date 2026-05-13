@@ -1,12 +1,9 @@
 ﻿
-import sqlite3
-import os
-from pathlib import Path
 from tqdm import tqdm
 
 from db.sqlite_operator import init_database
 from fingerprint import get_audio_fingerprint, get_visual_embedding
-from utils import DB_PATH, existing_asset_path_for
+from utils import DB_PATH, asset_path_for
 
 def migrate():
     print(f"[INFO] LMZ Signature Migration - Target: {DB_PATH}")
@@ -28,7 +25,7 @@ def migrate():
     errors = 0
 
     for f_hash, ext, mime, storage_id in tqdm(videos, desc="Migrating", unit="file"):
-        file_path = existing_asset_path_for(f_hash, ext, mime, storage_id=storage_id)
+        file_path = asset_path_for(f_hash, ext, mime, storage_id=storage_id)
 
         if not file_path.exists():
             print(f"[WARN] File missing in vault: {file_path.name}")
