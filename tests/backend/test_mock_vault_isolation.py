@@ -159,6 +159,108 @@ def test_local_ingest_expansion_is_streaming_not_sorted(monkeypatch, tmp_path):
     assert ".rglob(\"*\")" in source
 
 
+def test_local_drop_intake_accepts_supported_file_and_directory(monkeypatch, tmp_path):
+    (web_api,) = fresh_backend(monkeypatch, tmp_path, "web_api")
+    sample_file = tmp_path / "drop_ok.jpg"
+    sample_file.write_bytes(b"ok")
+    sample_dir = tmp_path / "drop_dir"
+    sample_dir.mkdir(parents=True, exist_ok=True)
+
+    payload = web_api.LocalIngestDropIntakeRequest(
+        session_id="s1",
+        source_tab="vault",
+        paths=[str(sample_file), str(sample_dir)],
+    )
+    result = web_api._local_drop_intake_sync(payload)
+
+    assert result["session_id"] == "s1"
+    assert result["summary"]["received"] == 2
+    assert result["summary"]["accepted"] == 2
+    assert result["summary"]["skipped"] == 0
+    assert str(sample_file.resolve()) in result["accepted_paths"]
+    assert str(sample_dir.resolve()) in result["accepted_paths"]
+
+
+def test_local_drop_intake_skips_unsupported_extension_and_missing(monkeypatch, tmp_path):
+    (web_api,) = fresh_backend(monkeypatch, tmp_path, "web_api")
+    bad_file = tmp_path / "drop_bad.txt"
+    bad_file.write_text("x", encoding="utf-8")
+    missing = tmp_path / "nope.jpg"
+
+    payload = web_api.LocalIngestDropIntakeRequest(
+        session_id="s2",
+        source_tab="vault",
+        paths=[str(bad_file), str(missing)],
+    )
+    result = web_api._local_drop_intake_sync(payload)
+    reasons = {entry["reason"] for entry in result["skipped"]}
+
+    assert result["summary"]["accepted"] == 0
+    assert result["summary"]["skipped"] == 2
+    assert "unsupported_extension" in reasons
+    assert "missing_path" in reasons
+
+
+def test_local_drop_intake_dedupes_paths(monkeypatch, tmp_path):
+    (web_api,) = fresh_backend(monkeypatch, tmp_path, "web_api")
+    sample_file = tmp_path / "dup_ok.jpg"
+    sample_file.write_bytes(b"dup")
+
+    payload = web_api.LocalIngestDropIntakeRequest(
+        session_id="s3",
+        source_tab="vault",
+        paths=[str(sample_file), str(sample_file)],
+    )
+    result = web_api._local_drop_intake_sync(payload)
+
+    assert result["summary"]["accepted"] == 1
+    assert result["summary"]["skipped"] == 1
+    assert result["skipped"][0]["reason"] == "duplicate_path"
+
+
+def test_local_drop_intake_blocks_when_local_ingest_running(monkeypatch, tmp_path):
+    (web_api,) = fresh_backend(monkeypatch, tmp_path, "web_api")
+    with web_api.LOCAL_INGEST_LOCK:
+        web_api.LOCAL_INGEST_STATE["running"] = True
+    try:
+        payload = web_api.LocalIngestDropIntakeRequest(session_id="s4", source_tab="vault", paths=["C:/tmp/a.jpg"])
+        with pytest.raises(HTTPException) as exc:
+            web_api._local_drop_intake_sync(payload)
+        assert exc.value.status_code == 409
+    finally:
+        with web_api.LOCAL_INGEST_LOCK:
+            web_api.LOCAL_INGEST_STATE["running"] = False
+
+
+def test_local_drop_intake_blocks_when_online_ingest_running(monkeypatch, tmp_path):
+    (web_api,) = fresh_backend(monkeypatch, tmp_path, "web_api")
+    acquired = web_api.INGESTION_LOCK.acquire(blocking=False)
+    assert acquired is True
+    try:
+        payload = web_api.LocalIngestDropIntakeRequest(session_id="s5", source_tab="vault", paths=["C:/tmp/a.jpg"])
+        with pytest.raises(HTTPException) as exc:
+            web_api._local_drop_intake_sync(payload)
+        assert exc.value.status_code == 409
+    finally:
+        if acquired:
+            web_api.INGESTION_LOCK.release()
+
+
+def test_mime_detection_falls_back_when_magic_returns_error_text(monkeypatch, tmp_path):
+    class FakeMagic:
+        @staticmethod
+        def from_file(path, mime=True):
+            return f"cannot open `{path}' (no such file or directory)"
+
+    monkeypatch.setitem(sys.modules, "magic", FakeMagic)
+    (validators,) = fresh_backend(monkeypatch, tmp_path, "validators")
+
+    sample = tmp_path / "WhatsApp Görsel 2024.jpg"
+    sample.write_bytes(b"not actually jpeg")
+
+    assert validators.get_mime_type(sample) == "image/jpeg"
+
+
 def test_generate_markdown_preserves_manual_fields_and_explicit_empty_wd(monkeypatch, tmp_path):
     utils, sqlite_operator, md_generator = fresh_backend(monkeypatch, tmp_path, "utils", "db.sqlite_operator", "md_generator")
     item_hash = "d" * 64

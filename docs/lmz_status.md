@@ -232,6 +232,15 @@ VSCode-friendly test launchers:
 - Custom context menu for vault tiles.
 - Interactive tag management in inspector.
 - Native drag-and-drop import.
+  - Scope: enabled only in Vault and Local Ingestion panels.
+  - UX: dim-background drop overlay with text feedback.
+  - Flow: drop switches to Local Ingestion panel; user reviews options and starts manually.
+  - Runtime guard: if local ingestion is already running, new drops are blocked.
+  - Folder drops: recurse subfolders.
+  - Filtering: prefilter by configured `firewall.allowed_extensions`; backend MIME/extension checks remain authoritative.
+  - Limits: no drop-size/drop-count cap in v1.
+  - Logging: route drop session events through local ingestion logs.
+  - Failure policy: partial success (accept valid paths, skip/report failures).
 - Animation-aware GIF handling beyond first-frame thumbnail/tag behavior.
 - Artist grouping.
 - In-memory facet cache for faster topic/WD counts.
@@ -296,6 +305,40 @@ VSCode-friendly test launchers:
   - obvious backend/tools CLI mojibake prefixes cleaned up.
   - targeted backend pytest, AST, import, static grep, and diff whitespace checks pass.
   - needs real UI verification in App Logs dropdown/live stream and real local/online ingest log smoke.
+
+- Native drag-and-drop intake (Vault + Local Ingestion):
+  - added native Tauri drop listener in `frontend/src/App.svelte` via `getCurrentWindow().onDragDropEvent(...)`.
+  - drop overlay is implemented (dim background + centered text).
+  - drop target gating is implemented:
+    - allowed in Vault panel.
+    - allowed in Ingestion panel only when mode is Local.
+    - disabled for Review/Stats/Settings/Logs.
+    - suppressed when hover target is `input`, `textarea`, or `contenteditable`.
+  - added backend preflight endpoint `POST /api/local-ingest/drop-intake`:
+    - request: `session_id`, `source_tab`, `paths`.
+    - blocks with `409` when online or local ingestion is running.
+    - resolves paths, accepts directories, filters files by `firewall.allowed_extensions`, dedupes by resolved absolute path.
+    - returns `accepted_paths`, `skipped` (with reason codes), and summary counts.
+    - logs intake summary to `ingest_local.jsonl` via `log_ingest_local(...)`.
+  - Ingestion integration is implemented:
+    - new `dropRequest` prop in `Ingestion.svelte`.
+    - mode sync event (`modechange`) from Ingestion to App.
+    - accepted drop paths switch to Ingestion Local mode and append+dedupe into staged list.
+    - local ingest does not auto-start; manual start remains required.
+    - local mode root now exposes `data-drop-zone="ingest-local"` for precise target checks.
+  - frontend UI summary logging for drop sessions is implemented.
+  - backend tests added and passing for drop intake:
+    - accept supported file.
+    - accept directory.
+    - skip unsupported extension.
+    - skip missing path.
+    - dedupe repeated path.
+    - block while local ingest running.
+    - block while online ingest running.
+  - frontend test coverage added:
+    - mock-vault Playwright tests for drop-request staging, local-mode switch, append+dedupe, and no auto-start.
+    - requires re-run confirmation in stable local Playwright runtime (test process hung in this environment during targeted run).
+  - frontend type/svelte checks pass.
 
 - Virtual renderer:
   - automated large-vault Playwright checks pass for 10k/100k masonry/grid and grouped mixed media.
@@ -413,7 +456,26 @@ VSCode-friendly test launchers:
 
 ## Current Issues
 
-- No active low-level backend inconsistency batch after P3.
+- Review/search-index regression found during native drag-drop real-vault smoke:
+  - Scenario:
+    - First local folder ingest correctly quarantined `9ypbteld4je61.webp` as a visual match against `9ypbteld4je61.png`.
+    - Backend restarted before the same folder was ingested again.
+    - Second local ingest skipped exact-hash duplicate PNG rows, but ingested the pending-review WebP as a new vault item.
+    - Review API reconciliation then marked the existing review sidecar `resolved_variant`, hiding it from the default Review panel while the media file and JSON sidecar remained in `data/review/`.
+  - Observed evidence:
+    - PNG hash `174de9316d4e535bec091219a0dcf23e10da8c10fa25ccc4afb596b5ffbb7bea`.
+    - WebP hash `863b9cace190c3922a62e87e11da76730391badc2bc3dcb1011f4d00501ce9f2`.
+    - Both DB rows now have identical pHash `deb02d123d1f218f`.
+    - Review sidecar state became `resolved_variant` with `last_action: reconciled`.
+  - Likely cause:
+    - `core.py` hydrates `search_manager`, but FastAPI startup in `backend/web_api.py` does not hydrate the RAM pHash/video/search indexes.
+    - After backend restart, local ingest can run with an empty/stale RAM similarity index.
+    - Exact duplicate skips do not repair/re-add existing DB pHashes to the RAM index.
+    - Ingest does not currently check pending review sidecars before processing a file hash.
+  - Desired fix direction:
+    - Hydrate `search_manager` on FastAPI startup.
+    - Add a pending-review hash guard before normal local ingest inserts/quarantines, returning an "already pending review" style result.
+    - Decide resolved-review UX: show resolved/cleanup state clearly or make cleanup explicit; avoid silently hiding files that still exist in `data/review/`.
 
 ## Issue Remediation Plan
 
@@ -425,6 +487,7 @@ VSCode-friendly test launchers:
 
 ### Recommended Fix Batches
 
-1. Architecture/status docs drift review.
-2. Real-vault corrupt-media/log smoke for P3.
-3. Real-vault validation of remaining P0/P1/P2 smoke items.
+1. Fix review/search-index regression from drag-drop real-vault smoke.
+2. Architecture/status docs drift review.
+3. Real-vault corrupt-media/log smoke for P3.
+4. Real-vault validation of remaining P0/P1/P2 smoke items.

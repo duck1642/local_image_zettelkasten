@@ -1457,6 +1457,11 @@ class LocalIngestStartRequest(BaseModel):
     defaults: LocalIngestDefaults | None = None
     skip_similarity: bool = False
 
+class LocalIngestDropIntakeRequest(BaseModel):
+    session_id: str | None = None
+    source_tab: str | None = None
+    paths: list[str]
+
 def _iter_local_ingest_paths(paths: list[str], stop_event: threading.Event | None = None):
     allowed_exts = {ext.lstrip(".").lower() for ext in get_config().get("firewall", {}).get("allowed_extensions", [])}
     seen = set()
@@ -1490,6 +1495,82 @@ def _iter_local_ingest_paths(paths: list[str], stop_event: threading.Event | Non
                 if key not in seen:
                     seen.add(key)
                     yield child.resolve()
+
+def _local_drop_intake_sync(body: LocalIngestDropIntakeRequest):
+    with LOCAL_INGEST_LOCK:
+        local_running = bool(LOCAL_INGEST_STATE.get("running"))
+    online_running = bool(INGESTION_LOCK.locked())
+    if local_running or online_running:
+        raise HTTPException(status_code=409, detail="Ingestion is already running")
+
+    raw_paths = [str(path or "").strip() for path in (body.paths or []) if str(path or "").strip()]
+    allowed_exts = {ext.lstrip(".").lower() for ext in get_config().get("firewall", {}).get("allowed_extensions", [])}
+    accepted: list[str] = []
+    skipped: list[dict] = []
+    seen: set[str] = set()
+
+    for raw in raw_paths:
+        try:
+            candidate = Path(raw).expanduser()
+            resolved = candidate.resolve() if candidate.is_absolute() else (LOCAL_INGEST_DIR / candidate).resolve()
+        except Exception:
+            skipped.append({"path": raw, "reason": "invalid_path"})
+            continue
+
+        if not resolved.exists():
+            skipped.append({"path": str(resolved), "reason": "missing_path"})
+            continue
+
+        if resolved.is_dir():
+            key = str(resolved)
+            if key in seen:
+                skipped.append({"path": key, "reason": "duplicate_path"})
+                continue
+            seen.add(key)
+            accepted.append(key)
+            continue
+
+        if not resolved.is_file():
+            skipped.append({"path": str(resolved), "reason": "unsupported_type"})
+            continue
+
+        ext = resolved.suffix.lstrip(".").lower()
+        if allowed_exts and ext not in allowed_exts:
+            skipped.append({"path": str(resolved), "reason": "unsupported_extension"})
+            continue
+
+        key = str(resolved)
+        if key in seen:
+            skipped.append({"path": key, "reason": "duplicate_path"})
+            continue
+        seen.add(key)
+        accepted.append(key)
+
+    reason_counts = dict(Counter(str(item.get("reason") or "unknown") for item in skipped))
+    session_id = str(body.session_id or "").strip() or _local_run_id()
+    source_tab = str(body.source_tab or "").strip() or "unknown"
+    summary = {
+        "received": len(raw_paths),
+        "accepted": len(accepted),
+        "skipped": len(skipped),
+    }
+
+    log_ingest_local(
+        "INFO",
+        "Local drop intake processed",
+        session_id=session_id,
+        source_tab=source_tab,
+        received=summary["received"],
+        accepted=summary["accepted"],
+        skipped=summary["skipped"],
+        skipped_reasons=reason_counts,
+    )
+    return {
+        "session_id": session_id,
+        "accepted_paths": accepted,
+        "skipped": skipped,
+        "summary": summary,
+    }
 
 def _snapshot_local_ingest_state() -> dict:
     with LOCAL_INGEST_LOCK:
@@ -1751,6 +1832,10 @@ async def local_ingest_start(body: LocalIngestStartRequest):
     _prepare_local_ingest_run(run_id, defaults, bool(body.skip_similarity), len(raw_paths))
     asyncio.get_running_loop().run_in_executor(None, _run_local_ingest_worker, raw_paths, defaults, bool(body.skip_similarity), run_id)
     return {"status": "success", "run_id": run_id, "phase": "scanning"}
+
+@app.post("/api/local-ingest/drop-intake")
+async def local_ingest_drop_intake(body: LocalIngestDropIntakeRequest):
+    return await asyncio.to_thread(_local_drop_intake_sync, body)
 
 @app.get("/api/local-ingest/status")
 async def local_ingest_status():

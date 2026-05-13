@@ -12,11 +12,26 @@
   import { apiFetch } from './lib/api';
 
   type AppTab = 'vault' | 'logs' | 'ingest' | 'review' | 'stats' | 'settings';
+  type IngestMode = 'online' | 'local';
+  type DropPoint = { x: number; y: number };
+  type DropRequest = {
+    id: string;
+    session_id: string;
+    accepted_paths: string[];
+    skipped: Array<{ path: string; reason: string }>;
+    summary: { received: number; accepted: number; skipped: number };
+    source_tab: string;
+  };
 
   let activeTab: AppTab = 'vault';
   let vaultStatus = { totalItems: 0, groups: 0, hasMore: false, layoutMode: 'masonry' };
   let forceClosing = false;
   let closeFlowRunning = false;
+  let ingestModeState: IngestMode = 'online';
+  let dragOverlayVisible = false;
+  let dragOverlayText = 'Drop files/folders to stage in Local Ingestion';
+  let pendingDropRequest: DropRequest | null = null;
+  let dragScaleFactor = 1;
 
   function handleVaultStatus(event: CustomEvent) {
     vaultStatus = event.detail;
@@ -34,6 +49,108 @@
     window.dispatchEvent(new CustomEvent('lmz:refresh', { detail: { tab: activeTab } }));
   }
 
+  function handleIngestModeChange(event: CustomEvent<{ mode: IngestMode }>) {
+    ingestModeState = event.detail?.mode === 'local' ? 'local' : 'online';
+  }
+
+  function cssDropPoint(point: DropPoint | null): DropPoint | null {
+    if (!point) return null;
+    const scale = Number.isFinite(dragScaleFactor) && dragScaleFactor > 0 ? dragScaleFactor : 1;
+    return { x: point.x / scale, y: point.y / scale };
+  }
+
+  function isEditableElementAt(point: DropPoint | null): boolean {
+    if (!point) return false;
+    const cssPoint = cssDropPoint(point);
+    if (!cssPoint) return false;
+    const target = document.elementFromPoint(cssPoint.x, cssPoint.y) as HTMLElement | null;
+    if (!target) return false;
+    if (target.closest('input, textarea, [contenteditable="true"], [contenteditable=""]')) return true;
+    return false;
+  }
+
+  function isDropTargetAllowed(point: DropPoint | null): boolean {
+    if (!point || isEditableElementAt(point)) return false;
+    const cssPoint = cssDropPoint(point);
+    if (!cssPoint) return false;
+    const target = document.elementFromPoint(cssPoint.x, cssPoint.y) as HTMLElement | null;
+    if (!target) return false;
+    if (activeTab === 'vault') return Boolean(target.closest('[data-drop-zone="vault"]'));
+    if (activeTab !== 'ingest') return false;
+    if (ingestModeState !== 'local') return false;
+    return Boolean(target.closest('[data-drop-zone="ingest-local"]'));
+  }
+
+  function hideDropOverlay() {
+    dragOverlayVisible = false;
+  }
+
+  function buildDropSessionId() {
+    return `${Date.now()}_${Math.random().toString(16).slice(2, 10)}`;
+  }
+
+  async function processDroppedPaths(paths: string[]) {
+    const cleanPaths = (paths || []).map((value) => String(value || '').trim()).filter(Boolean);
+    if (cleanPaths.length === 0) return;
+
+    const sourceTab = activeTab;
+    const sessionId = buildDropSessionId();
+    try {
+      const response = await apiFetch('/api/local-ingest/drop-intake', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: sessionId, source_tab: sourceTab, paths: cleanPaths }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (response.status === 409) {
+        const message = String(payload?.detail || 'Ingestion is already running. Drop blocked.');
+        uiLog('WARNING', 'Drop blocked while ingestion is running', { source_tab: sourceTab, dropped_count: cleanPaths.length });
+        alert(message);
+        return;
+      }
+      if (!response.ok) {
+        throw new Error(String(payload?.detail || `HTTP ${response.status}`));
+      }
+
+      const acceptedPaths = Array.isArray(payload?.accepted_paths)
+        ? payload.accepted_paths.map((value: unknown) => String(value || '')).filter(Boolean)
+        : [];
+      const skipped = Array.isArray(payload?.skipped) ? payload.skipped : [];
+      const summary = payload?.summary || {
+        received: cleanPaths.length,
+        accepted: acceptedPaths.length,
+        skipped: skipped.length,
+      };
+      if (acceptedPaths.length === 0) {
+        uiLog('INFO', 'Drop ignored: no supported files/folders', {
+          session_id: String(payload?.session_id || sessionId),
+          source_tab: sourceTab,
+          received: summary.received,
+          skipped: summary.skipped,
+        });
+        alert('No supported files/folders found in drop.');
+        return;
+      }
+
+      pendingDropRequest = {
+        id: `${String(payload?.session_id || sessionId)}:${Date.now()}`,
+        session_id: String(payload?.session_id || sessionId),
+        accepted_paths: acceptedPaths,
+        skipped,
+        summary: {
+          received: Number(summary.received || cleanPaths.length),
+          accepted: Number(summary.accepted || acceptedPaths.length),
+          skipped: Number(summary.skipped || skipped.length),
+        },
+        source_tab: String(payload?.source_tab || sourceTab),
+      };
+      activeTab = 'ingest';
+    } catch (error) {
+      uiLog('ERROR', 'Drop intake failed', { error: String(error), source_tab: sourceTab, dropped_count: cleanPaths.length });
+      alert(`Drop intake failed: ${String(error)}`);
+    }
+  }
+
   function ramStatusText(stats: any) {
     if (stats.error) return 'RAM: unavailable';
     if (stats.backendMb === null) return 'RAM: loading';
@@ -43,16 +160,46 @@
     return `RAM: backend ${stats.backendMb} MB`;
   }
 
+  function handleTestDropRequest(event: Event) {
+    const detail = (event as CustomEvent).detail || {};
+    const accepted = Array.isArray(detail.accepted_paths) ? detail.accepted_paths.map((value: unknown) => String(value || '')).filter(Boolean) : [];
+    if (accepted.length === 0) return;
+    const skipped = Array.isArray(detail.skipped) ? detail.skipped : [];
+    pendingDropRequest = {
+      id: String(detail.id || `test:${Date.now()}`),
+      session_id: String(detail.session_id || 'test-session'),
+      accepted_paths: accepted,
+      skipped,
+      summary: {
+        received: Number(detail.summary?.received || accepted.length + skipped.length),
+        accepted: Number(detail.summary?.accepted || accepted.length),
+        skipped: Number(detail.summary?.skipped || skipped.length),
+      },
+      source_tab: String(detail.source_tab || activeTab),
+    };
+    activeTab = 'ingest';
+  }
+
   onMount(() => {
     uiLog('INFO', 'Svelte UI initialized and mounted');
     const stopStats = startSharedStatsPolling();
     const stopRam = startRamTracker();
     let unlistenClose: (() => void) | null = null;
+    let unlistenDrop: (() => void) | null = null;
+    let unlistenScale: (() => void) | null = null;
 
     (async () => {
       try {
         const { getCurrentWindow } = await import('@tauri-apps/api/window');
         const appWindow = getCurrentWindow();
+        dragScaleFactor = await appWindow.scaleFactor().catch(() => 1);
+        try {
+          unlistenScale = await appWindow.onScaleChanged(({ payload }) => {
+            dragScaleFactor = payload?.scaleFactor || 1;
+          });
+        } catch {
+          // Older/nonstandard runtimes can still use the initial scale factor.
+        }
         unlistenClose = await appWindow.onCloseRequested(async (event) => {
           if (forceClosing) return;
           event.preventDefault();
@@ -107,15 +254,39 @@
             await closeNow();
           }
         });
+
+        try {
+          unlistenDrop = await appWindow.onDragDropEvent((event: any) => {
+            const payload = event?.payload || {};
+            if (payload.type === 'over') {
+              dragOverlayVisible = isDropTargetAllowed(payload.position ?? null);
+              return;
+            }
+            if (payload.type === 'drop') {
+              hideDropOverlay();
+              if (!isDropTargetAllowed(payload.position ?? null)) return;
+              const droppedPaths = Array.isArray(payload.paths) ? payload.paths : [];
+              void processDroppedPaths(droppedPaths);
+              return;
+            }
+            hideDropOverlay();
+          });
+        } catch (error) {
+          uiLog('WARNING', 'Native drag-drop listener unavailable', { error: String(error) });
+        }
       } catch {
         // non-tauri context
       }
     })();
+    window.addEventListener('lmz:test-drop-request', handleTestDropRequest);
 
     return () => {
       stopStats();
       stopRam();
+      window.removeEventListener('lmz:test-drop-request', handleTestDropRequest);
       if (unlistenClose) unlistenClose();
+      if (unlistenDrop) unlistenDrop();
+      if (unlistenScale) unlistenScale();
     };
   });
 </script>
@@ -123,6 +294,11 @@
 <svelte:window on:keydown={handleGlobalKeydown} />
 
 <div class="root-container">
+  {#if dragOverlayVisible}
+    <div class="drop-overlay">
+      <div class="drop-overlay-text">{dragOverlayText}</div>
+    </div>
+  {/if}
   <div class="app-container">
     <aside class="sidebar">
       <div class="nav-group">
@@ -143,13 +319,15 @@
       <!-- VaultView stays mounted across tab switches to preserve scroll position, selection, and loaded items.
            Its IntersectionObserver/ResizeObserver are idle when display:none, so the cost is negligible.
            Other tabs use {#if} since they can re-fetch on demand. -->
-      <div class:hidden={activeTab !== 'vault'} class="tab-panel">
+      <div class:hidden={activeTab !== 'vault'} class="tab-panel" data-drop-zone="vault">
         <VaultView on:status={handleVaultStatus} />
       </div>
       {#if activeTab === 'review'}
         <div class="view-shell"><ReviewView /></div>
       {:else if activeTab === 'ingest'}
-        <div class="view-shell"><Ingestion /></div>
+        <div class="view-shell">
+          <Ingestion dropRequest={pendingDropRequest} on:modechange={handleIngestModeChange} />
+        </div>
       {:else if activeTab === 'stats'}
         <div class="view-shell"><StatsView /></div>
       {:else if activeTab === 'settings'}
@@ -182,6 +360,8 @@
 
 <style>
   .root-container { display: flex; flex-direction: column; height: 100vh; width: 100vw; background: var(--bg-main); overflow: hidden; }
+  .drop-overlay { position: fixed; inset: 0; z-index: 1200; background: rgba(1, 4, 9, 0.62); display: flex; align-items: center; justify-content: center; pointer-events: none; }
+  .drop-overlay-text { color: #e6edf3; font-size: 20px; font-weight: 700; letter-spacing: 0; text-align: center; padding: 16px 22px; border: 1px solid rgba(255, 255, 255, 0.25); border-radius: 10px; background: rgba(0, 0, 0, 0.25); }
   .app-container { display: flex; flex-grow: 1; overflow: hidden; }
   .sidebar { width: 120px; background: var(--bg-main); border-right: 1px solid var(--border-dim); display: flex; flex-direction: column; padding: 15px 10px; flex-shrink: 0; }
   .nav-group { display: flex; flex-direction: column; gap: 10px; }

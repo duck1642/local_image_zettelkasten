@@ -35,9 +35,34 @@ async function fulfillJson(route: Route, body: unknown, status = 200) {
   await route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 }
 
-async function installMockVaultApi(page: Page, options: { memoryFails?: boolean; onReviewAction?: () => Promise<void> } = {}) {
+async function installMockVaultApi(
+  page: Page,
+  options: { memoryFails?: boolean; onReviewAction?: () => Promise<void>; onLocalIngestStart?: () => Promise<void> | void } = {}
+) {
   let items = cloneItems();
   const reviewItems = JSON.parse(JSON.stringify(manifest.review));
+  const queueContent: Record<string, string> = {
+    normal: manifest.queues.normal.join('\n'),
+    force: manifest.queues.force.join('\n'),
+    failed: manifest.queues.failed.join('\n')
+  };
+  const localStatus = {
+    running: false,
+    phase: 'idle',
+    run_id: null,
+    scanned: 0,
+    staged: 0,
+    queued: 0,
+    processed: 0,
+    summary: { ingested: 0, review: 0, failed: 0, duplicate: 0 },
+    results: [],
+    failed_paths: [],
+    last_defaults: {},
+    last_skip_similarity: false,
+    started_at: null,
+    finished_at: null,
+    stop_requested: false
+  };
   const appConfig = {
     ui: {
       vault_layout_mode: 'masonry',
@@ -75,6 +100,46 @@ async function installMockVaultApi(page: Page, options: { memoryFails?: boolean;
   await page.route('**/api/config', async (route) => fulfillJson(route, appConfig));
   await page.route('**/api/session-key', async (route) => fulfillJson(route, { key: 'mock-key' }));
   await page.route('**/api/stats', async (route) => fulfillJson(route, { total_items: items.length }));
+  await page.route('**/api/logs**', async (route) => {
+    await route.fulfill({ status: 200, contentType: 'text/event-stream', body: '' });
+  });
+  await page.route('**/api/queue/actions/retry-failed', async (route) => fulfillJson(route, {
+    status: 'success',
+    moved: 0,
+    counts: {
+      normal: manifest.queues.normal.length,
+      force: manifest.queues.force.length,
+      failed: manifest.queues.failed.length
+    }
+  }));
+  await page.route('**/api/queue/actions/clear-failed', async (route) => fulfillJson(route, {
+    status: 'success',
+    counts: {
+      normal: manifest.queues.normal.length,
+      force: manifest.queues.force.length,
+      failed: 0
+    }
+  }));
+  await page.route('**/api/queue/**', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const match = url.pathname.match(/\/api\/queue\/([^/]+)/);
+    if (!match) return fulfillJson(route, { detail: 'not found' }, 404);
+    const queueName = match[1];
+    if (!(queueName in queueContent)) return fulfillJson(route, { detail: 'invalid queue' }, 400);
+    if (request.method() === 'GET') {
+      const content = queueContent[queueName];
+      const count = content.split('\n').filter((line) => line.trim().startsWith('http')).length;
+      return fulfillJson(route, { content, count });
+    }
+    if (request.method() === 'POST') {
+      const payload = JSON.parse(request.postData() || '{}');
+      queueContent[queueName] = String(payload.content || '');
+      const count = queueContent[queueName].split('\n').filter((line) => line.trim().startsWith('http')).length;
+      return fulfillJson(route, { status: 'success', count });
+    }
+    return fulfillJson(route, { status: 'ok' });
+  });
   await page.route('**/api/queue-stats', async (route) => fulfillJson(route, {
     normal: manifest.queues.normal.length,
     force: manifest.queues.force.length,
@@ -96,6 +161,13 @@ async function installMockVaultApi(page: Page, options: { memoryFails?: boolean;
     if (options.memoryFails) return fulfillJson(route, { detail: 'unavailable' }, 500);
     return fulfillJson(route, { backend_mb: 42.5 });
   });
+  await page.route('**/api/local-ingest/status', async (route) => fulfillJson(route, localStatus));
+  await page.route('**/api/local-ingest/start', async (route) => {
+    await options.onLocalIngestStart?.();
+    return fulfillJson(route, { status: 'success', run_id: 'mock-run', phase: 'scanning' });
+  });
+  await page.route('**/api/local-ingest/retry-failed', async (route) => fulfillJson(route, { status: 'success', queued: 0, phase: 'idle' }));
+  await page.route('**/api/local-ingest/drop-intake', async (route) => fulfillJson(route, { detail: 'unused in browser mock' }, 404));
   await page.route('**/api/logs/ui', async (route) => fulfillJson(route, { status: 'ok' }));
   await page.route('**/mock-vault/assets/**', async (route) => {
     const assetName = new URL(route.request().url()).pathname.split('/').pop() || 'mock.svg';
@@ -117,7 +189,10 @@ async function installMockVaultApi(page: Page, options: { memoryFails?: boolean;
   });
 }
 
-async function openMockVault(page: Page, options: { memoryFails?: boolean; onReviewAction?: () => Promise<void> } = {}) {
+async function openMockVault(
+  page: Page,
+  options: { memoryFails?: boolean; onReviewAction?: () => Promise<void>; onLocalIngestStart?: () => Promise<void> | void } = {}
+) {
   await installMockVaultApi(page, options);
   await page.goto('/?lmz_test_page_size=100');
   await expect(page.getByTestId('vault-tile').first()).toBeVisible();
@@ -265,6 +340,61 @@ test('review destructive actions unmount media before posting', async ({ page })
   await page.getByRole('button', { name: 'Save Variant' }).click();
 
   await expect.poll(() => mediaUnmountedBeforePost).toBeTruthy();
+});
+
+test('drop request switches to local mode and appends deduped staged paths', async ({ page }) => {
+  let localStartCalls = 0;
+  await openMockVault(page, {
+    onLocalIngestStart: () => {
+      localStartCalls += 1;
+    }
+  });
+
+  await page.getByRole('button', { name: /Ingestion/ }).click();
+  await expect(page.getByRole('button', { name: 'Start Ingestion' })).toBeVisible();
+
+  await page.evaluate(() => {
+    window.dispatchEvent(new CustomEvent('lmz:test-drop-request', {
+      detail: {
+        id: 'drop-1',
+        session_id: 'session-1',
+        source_tab: 'vault',
+        accepted_paths: ['C:/drop/a.jpg', 'C:/drop/a.jpg', 'C:/drop/folder'],
+        skipped: [{ path: 'C:/drop/x.txt', reason: 'unsupported_extension' }],
+        summary: { received: 4, accepted: 3, skipped: 1 }
+      }
+    }));
+  });
+
+  await expect(page.getByRole('button', { name: 'Start Local Ingestion' })).toBeVisible();
+  await expect(page.locator('.local-item')).toHaveCount(2);
+  await expect(page.locator('.local-item')).toContainText(['C:/drop/a.jpg', 'C:/drop/folder']);
+  expect(localStartCalls).toBe(0);
+});
+
+test('drop request does not auto-start local ingestion', async ({ page }) => {
+  let localStartCalls = 0;
+  await openMockVault(page, {
+    onLocalIngestStart: () => {
+      localStartCalls += 1;
+    }
+  });
+
+  await page.evaluate(() => {
+    window.dispatchEvent(new CustomEvent('lmz:test-drop-request', {
+      detail: {
+        id: 'drop-2',
+        session_id: 'session-2',
+        source_tab: 'vault',
+        accepted_paths: ['C:/drop/b.jpg'],
+        skipped: [],
+        summary: { received: 1, accepted: 1, skipped: 0 }
+      }
+    }));
+  });
+
+  await expect(page.getByRole('button', { name: 'Start Local Ingestion' })).toBeVisible();
+  expect(localStartCalls).toBe(0);
 });
 
 test('ram footer handles available and unavailable states', async ({ page }) => {

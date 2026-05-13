@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, tick } from 'svelte';
+  import { createEventDispatcher, onMount, tick } from 'svelte';
   import { open as openDialog } from '@tauri-apps/plugin-dialog';
   import { log as uiLog } from './logger';
   import { apiFetch, apiUrl } from './api';
@@ -7,8 +7,21 @@
 
   type IngestMode = 'online' | 'local';
   type QueueName = 'normal' | 'force' | 'failed';
+  type DropRequest = {
+    id: string;
+    session_id: string;
+    accepted_paths: string[];
+    skipped: Array<{ path: string; reason: string }>;
+    summary: { received: number; accepted: number; skipped: number };
+    source_tab: string;
+  };
+
+  export let dropRequest: DropRequest | null = null;
+  const dispatch = createEventDispatcher<{ modechange: { mode: IngestMode } }>();
 
   let ingestMode: IngestMode = 'online';
+  let lastModeEmitted: IngestMode | null = null;
+  let lastDropRequestId = '';
 
   let currentQueue: QueueName = 'normal';
   let queueContent = '';
@@ -247,12 +260,17 @@
 
   function addLocalPaths(paths: string[]) {
     const existing = new Set(localPaths);
+    const next = [...localPaths];
+    let added = 0;
     for (const path of paths) {
       const value = String(path || '').trim();
       if (!value || existing.has(value)) continue;
       existing.add(value);
-      localPaths = [...localPaths, value];
+      next.push(value);
+      added += 1;
     }
+    if (added > 0) localPaths = next;
+    return added;
   }
 
   async function pickLocalFiles() {
@@ -370,6 +388,25 @@
     refreshLocalStatus();
   }
 
+  $: if (ingestMode !== lastModeEmitted) {
+    lastModeEmitted = ingestMode;
+    dispatch('modechange', { mode: ingestMode });
+  }
+
+  $: if (dropRequest && dropRequest.id !== lastDropRequestId) {
+    lastDropRequestId = dropRequest.id;
+    ingestMode = 'local';
+    const added = addLocalPaths(dropRequest.accepted_paths || []);
+    uiLog('INFO', 'Drop staged for local ingestion', {
+      session_id: dropRequest.session_id,
+      source_tab: dropRequest.source_tab,
+      accepted: dropRequest.summary?.accepted ?? dropRequest.accepted_paths.length,
+      skipped: dropRequest.summary?.skipped ?? (dropRequest.skipped || []).length,
+      added,
+      staged_total: localPaths.length,
+    });
+  }
+
   onMount(() => {
     window.addEventListener('lmz:refresh', handleGlobalRefresh);
     loadQueue('normal');
@@ -444,69 +481,71 @@
       <button on:click={clearFailed} disabled={running || counts.failed === 0}>Clear Failed</button>
     </div>
   {:else}
-    <div class="local-toolbar">
-      <div class="action-group">
-        <button on:click={pickLocalFiles} disabled={localStatus.running}>Add Files</button>
-        <button on:click={pickLocalFolders} disabled={localStatus.running}>Add Folder</button>
-        <button on:click={() => localPaths = []} disabled={localStatus.running || localPaths.length === 0}>Clear List</button>
+    <div class="local-mode" data-drop-zone="ingest-local">
+      <div class="local-toolbar">
+        <div class="action-group">
+          <button on:click={pickLocalFiles} disabled={localStatus.running}>Add Files</button>
+          <button on:click={pickLocalFolders} disabled={localStatus.running}>Add Folder</button>
+          <button on:click={() => localPaths = []} disabled={localStatus.running || localPaths.length === 0}>Clear List</button>
+        </div>
+        <div class="action-group">
+          <button class="primary" on:click={startLocalIngestion} disabled={localStatus.running || localPaths.length === 0}>
+            {localStatus.running ? 'Local Ingest Running...' : 'Start Local Ingestion'}
+          </button>
+        </div>
       </div>
-      <div class="action-group">
-        <button class="primary" on:click={startLocalIngestion} disabled={localStatus.running || localPaths.length === 0}>
-          {localStatus.running ? 'Local Ingest Running...' : 'Start Local Ingestion'}
-        </button>
+
+      <div class="local-defaults">
+        <label>Artist <input bind:value={localDefaults.artist} placeholder="Optional default artist" /></label>
+        <label>Platform <input bind:value={localDefaults.platform} placeholder="Local" /></label>
+        <label>Source URL <input bind:value={localDefaults.source_url} placeholder="Optional default source url" /></label>
       </div>
-    </div>
 
-    <div class="local-defaults">
-      <label>Artist <input bind:value={localDefaults.artist} placeholder="Optional default artist" /></label>
-      <label>Platform <input bind:value={localDefaults.platform} placeholder="Local" /></label>
-      <label>Source URL <input bind:value={localDefaults.source_url} placeholder="Optional default source url" /></label>
-    </div>
+      <div class="local-staging">
+        <div class="monitor-header">Staged Paths ({localPaths.length})</div>
+        <div class="local-list">
+          {#if localPaths.length === 0}
+            <div class="empty-monitor">No files/folders selected yet.</div>
+          {:else}
+            {#each localPaths as path, index}
+              <div class="local-item">
+                <span class="local-path">{path}</span>
+                <button on:click={() => removeLocalPath(index)} disabled={localStatus.running}>Remove</button>
+              </div>
+            {/each}
+          {/if}
+        </div>
+      </div>
 
-    <div class="local-staging">
-      <div class="monitor-header">Staged Paths ({localPaths.length})</div>
-      <div class="local-list">
-        {#if localPaths.length === 0}
-          <div class="empty-monitor">No files/folders selected yet.</div>
-        {:else}
-          {#each localPaths as path, index}
-            <div class="local-item">
-              <span class="local-path">{path}</span>
-              <button on:click={() => removeLocalPath(index)} disabled={localStatus.running}>Remove</button>
+      <div class="local-status">
+        <div class="monitor-header">Local Run Status</div>
+        <div class="status-grid">
+          <span>Phase: {localStatus.phase}</span>
+          <span>Scanned: {localStatus.scanned}</span>
+          <span>Staged: {localStatus.staged}</span>
+          <span>Queued: {localStatus.queued}</span>
+          <span>Processed: {localStatus.processed}</span>
+          <span>Ingested: {localStatus.summary.ingested}</span>
+          <span>Review: {localStatus.summary.review}</span>
+          <span>Failed: {localStatus.summary.failed}</span>
+          <span>Duplicate: {localStatus.summary.duplicate}</span>
+        </div>
+        <div class="footer-btns">
+          <button on:click={refreshLocalStatus}>Refresh</button>
+          <button on:click={retryLocalFailed} disabled={localStatus.running || localStatus.failed_paths.length === 0}>Retry Failed Session</button>
+        </div>
+        <div class="local-results">
+          {#each localStatus.results.slice(-120).reverse() as result}
+            <div class="result-line">
+              <span class="result-status {result.status}">{result.status}</span>
+              <span class="result-name">{result.name}</span>
+              <span class="result-message">{result.message}</span>
             </div>
           {/each}
-        {/if}
-      </div>
-    </div>
-
-    <div class="local-status">
-      <div class="monitor-header">Local Run Status</div>
-      <div class="status-grid">
-        <span>Phase: {localStatus.phase}</span>
-        <span>Scanned: {localStatus.scanned}</span>
-        <span>Staged: {localStatus.staged}</span>
-        <span>Queued: {localStatus.queued}</span>
-        <span>Processed: {localStatus.processed}</span>
-        <span>Ingested: {localStatus.summary.ingested}</span>
-        <span>Review: {localStatus.summary.review}</span>
-        <span>Failed: {localStatus.summary.failed}</span>
-        <span>Duplicate: {localStatus.summary.duplicate}</span>
-      </div>
-      <div class="footer-btns">
-        <button on:click={refreshLocalStatus}>Refresh</button>
-        <button on:click={retryLocalFailed} disabled={localStatus.running || localStatus.failed_paths.length === 0}>Retry Failed Session</button>
-      </div>
-      <div class="local-results">
-        {#each localStatus.results.slice(-120).reverse() as result}
-          <div class="result-line">
-            <span class="result-status {result.status}">{result.status}</span>
-            <span class="result-name">{result.name}</span>
-            <span class="result-message">{result.message}</span>
-          </div>
-        {/each}
-        {#if localStatus.results.length === 0}
-          <div class="empty-monitor">No local ingestion run yet.</div>
-        {/if}
+          {#if localStatus.results.length === 0}
+            <div class="empty-monitor">No local ingestion run yet.</div>
+          {/if}
+        </div>
       </div>
     </div>
   {/if}
@@ -547,6 +586,14 @@
     justify-content: space-between;
     align-items: center;
     flex-shrink: 0;
+  }
+
+  .local-mode {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
+    gap: 10px;
   }
 
   .queue-tabs {
