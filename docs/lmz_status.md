@@ -234,7 +234,6 @@ VSCode-friendly test launchers:
 - Native drag-and-drop import.
 - Animation-aware GIF handling beyond first-frame thumbnail/tag behavior.
 - Artist grouping.
-- Context-aware search suggestions.
 - In-memory facet cache for faster topic/WD counts.
 - Persistent search index/facet tables beyond current derived metadata index.
 - Search chips.
@@ -252,8 +251,9 @@ VSCode-friendly test launchers:
 - YouTube community partial policy:
   - one failed expected image can still keep the post retryable.
 - Source URL normalization migration:
+  - normalization is active in runtime paths (`source_url_norm` is written on ingest/update).
   - existing rows are backfilled lazily by `init_database()`.
-  - no standalone migration tool yet.
+  - no standalone migration/maintenance tool exists yet.
 - Timestamp consistency:
   - local Python timestamps and SQLite UTC defaults still coexist.
 - Thumbnail helper cleanup:
