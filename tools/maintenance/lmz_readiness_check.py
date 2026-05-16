@@ -153,8 +153,6 @@ def main():
         "SentenceTransformers": "sentence-transformers",
         "Playwright": "playwright",
         "Numpy": "numpy",
-        "Flet": "flet",
-        "Flet Desktop": "flet-desktop",
         "Watchdog": "watchdog",
     }
 

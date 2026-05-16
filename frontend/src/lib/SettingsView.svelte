@@ -3,6 +3,19 @@
   import { TILE_MIN_WIDTH_CEILING, TILE_MIN_WIDTH_FLOOR } from './layout';
   import { config, configDirty, configLoading, configSaving, loadConfig, saveCurrentConfig, updateConfig } from './configStore';
   import { log as uiLog } from './logger';
+  import { apiFetch } from './api';
+
+  type MaintenanceAction = 'auth' | 'metadata' | 'review';
+  let maintenanceBusy: Record<MaintenanceAction, boolean> = {
+    auth: false,
+    metadata: false,
+    review: false
+  };
+  let maintenanceResult: Record<MaintenanceAction, string> = {
+    auth: '',
+    metadata: '',
+    review: ''
+  };
 
   function setConfig(mutator: (draft: any) => void) {
     updateConfig(mutator, false);
@@ -33,6 +46,51 @@
     loadConfig();
     return () => window.removeEventListener('lmz:refresh', handleGlobalRefresh);
   });
+
+  function setMaintenanceBusy(action: MaintenanceAction, busy: boolean) {
+    maintenanceBusy = { ...maintenanceBusy, [action]: busy };
+  }
+
+  function setMaintenanceResult(action: MaintenanceAction, message: string) {
+    maintenanceResult = { ...maintenanceResult, [action]: message };
+  }
+
+  async function runMaintenance(action: MaintenanceAction) {
+    if (maintenanceBusy[action]) return;
+    setMaintenanceResult(action, '');
+    setMaintenanceBusy(action, true);
+    try {
+      if (action === 'auth') {
+        const response = await apiFetch('/api/auth/scan', { method: 'POST' });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload?.detail || `HTTP ${response.status}`);
+        const cookies = String(payload?.auth?.cookies || 'unknown');
+        setMaintenanceResult(action, `OK (${cookies})`);
+        uiLog('INFO', 'Maintenance action completed', { action: 'auth_scan', cookies });
+      } else if (action === 'metadata') {
+        const response = await apiFetch('/api/metadata-index/rebuild', { method: 'POST' });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload?.detail || `HTTP ${response.status}`);
+        const status = String(payload?.status || 'started');
+        setMaintenanceResult(action, status);
+        uiLog('INFO', 'Maintenance action completed', { action: 'metadata_rebuild', status });
+      } else {
+        const response = await apiFetch('/api/review/cleanup', { method: 'POST' });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload?.detail || `HTTP ${response.status}`);
+        const cleaned = Number(payload?.cleaned || 0);
+        const failed = Number(payload?.failed || 0);
+        setMaintenanceResult(action, `cleaned ${cleaned}, failed ${failed}`);
+        uiLog('INFO', 'Maintenance action completed', { action: 'review_cleanup', cleaned, failed });
+      }
+    } catch (error) {
+      const text = String(error);
+      setMaintenanceResult(action, `error: ${text}`);
+      uiLog('ERROR', 'Maintenance action failed', { action, error: text });
+    } finally {
+      setMaintenanceBusy(action, false);
+    }
+  }
 </script>
 
 <div class="settings-container">
@@ -97,6 +155,24 @@
       <button class="save-large" class:primary={$configDirty} on:click={saveCurrentConfig} disabled={!$configDirty || $configSaving}>
         {$configSaving ? 'Saving...' : 'Save Settings'}
       </button>
+    </div>
+
+    <div class="maintenance-panel">
+      <h4>Maintenance</h4>
+      <div class="maintenance-grid">
+        <button on:click={() => runMaintenance('auth')} disabled={maintenanceBusy.auth}>
+          {maintenanceBusy.auth ? 'Running...' : 'Auth Scan'}
+        </button>
+        <span class="maintenance-status">{maintenanceResult.auth}</span>
+        <button on:click={() => runMaintenance('metadata')} disabled={maintenanceBusy.metadata}>
+          {maintenanceBusy.metadata ? 'Running...' : 'Rebuild Metadata Index'}
+        </button>
+        <span class="maintenance-status">{maintenanceResult.metadata}</span>
+        <button on:click={() => runMaintenance('review')} disabled={maintenanceBusy.review}>
+          {maintenanceBusy.review ? 'Running...' : 'Cleanup Review'}
+        </button>
+        <span class="maintenance-status">{maintenanceResult.review}</span>
+      </div>
     </div>
 
     <div class="shortcuts-guide">
@@ -287,6 +363,37 @@
     padding-top: 25px;
     border-top: 1px solid var(--border-dim);
     max-width: 600px;
+  }
+
+  .maintenance-panel {
+    margin-top: 26px;
+    max-width: 600px;
+    border-top: 1px solid var(--border-dim);
+    padding-top: 18px;
+  }
+
+  .maintenance-panel h4 {
+    margin: 0 0 12px 0;
+    color: var(--text-bright);
+    font-size: 14px;
+  }
+
+  .maintenance-grid {
+    display: grid;
+    grid-template-columns: 210px 1fr;
+    gap: 8px 12px;
+    align-items: center;
+    background: var(--bg-panel);
+    border: 1px solid var(--border-dim);
+    border-radius: 8px;
+    padding: 12px;
+  }
+
+  .maintenance-status {
+    color: var(--text-muted);
+    font-size: 12px;
+    min-height: 18px;
+    overflow-wrap: anywhere;
   }
 
   .shortcuts-guide h4 {

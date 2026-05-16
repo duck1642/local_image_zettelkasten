@@ -1,11 +1,14 @@
 
 import sys
+import copy
 import hashlib
 import yaml
 import os
 import shutil
 import tempfile
+import threading
 from pathlib import Path
+from datetime import datetime, timezone
 from typing import Optional
 
 
@@ -58,6 +61,10 @@ NOTES_DIR = OUTPUT_DIR / "notes"
 DB_PATH = _resolve_path('db', "data/db/lmz_main.db")
 
 LOGS_DIR = _resolve_path('logs', "logs")
+
+_CONFIG_CACHE_LOCK = threading.Lock()
+_CONFIG_CACHE_DATA: dict | None = None
+_CONFIG_CACHE_MTIMES: tuple[float | None, float | None] | None = None
 
 EXT_MAP = {
     "image/jpeg": ".jpg",
@@ -176,59 +183,93 @@ def load_secrets() -> dict:
     except Exception:
         return {}
 
-def get_config() -> dict:
+def _default_config() -> dict:
+    return {
+        'paths': {
+            'vault': str(VAULT_DIR),
+            'db': str(DB_PATH),
+            'logs': str(LOGS_DIR),
+            'queues': str(QUEUES_DIR),
+            'batches': str(BATCHES_DIR),
+            'secrets': str(SECRETS_DIR),
+            'models': str(MODELS_DIR),
+            'wd_tags': str(WD_TAGS_DIR),
+        },
+        'ui': {
+            'vault_layout_mode': 'masonry',
+            'vault_tile_min_width': 190,
+        },
+        'firewall': {
+            'allowed_extensions': ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.jfif', '.mp4', '.webm', '.ogv'],
+            'allowed_mimes': list(DEFAULT_ALLOWED_MIMES)
+        },
+        'hash_algorithm': 'sha256',
+        'tagging': {
+            'enabled': True,
+            'model_repo': 'SmilingWolf/wd-vit-tagger-v3',
+            'device': 'auto',
+            'display_source': 'yaml',
+            'threshold': 0.35,
+            'max_tags': 30,
+            'fail_ingestion_on_error': False,
+            'video': {
+                'enabled': True,
+                'frame_count': 5,
+                'merge_min_frames': 2,
+                'merge_high_confidence': 0.75
+            }
+        }
+    }
 
+def _secrets_path() -> Path:
+    return SECRETS_DIR / ".secrets.yaml"
+
+def _config_mtimes() -> tuple[float | None, float | None]:
+    config_mtime = CONFIG_PATH.stat().st_mtime if CONFIG_PATH.exists() else None
+    secrets_path = _secrets_path()
+    secrets_mtime = secrets_path.stat().st_mtime if secrets_path.exists() else None
+    return config_mtime, secrets_mtime
+
+def invalidate_config_cache():
+    global _CONFIG_CACHE_DATA, _CONFIG_CACHE_MTIMES
+    with _CONFIG_CACHE_LOCK:
+        _CONFIG_CACHE_DATA = None
+        _CONFIG_CACHE_MTIMES = None
+
+def _load_config_uncached() -> dict:
     try:
         with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
             config = yaml.safe_load(f)
             validate_config_schema(config)
-
 
             secrets = load_secrets()
             if secrets:
                 if 'external_tools' not in config:
                     config['external_tools'] = {}
                 config['external_tools'].update(secrets)
-
             return config
-
     except FileNotFoundError:
-        return {
-            'paths': {
-                'vault': str(VAULT_DIR),
-                'db': str(DB_PATH),
-                'logs': str(LOGS_DIR),
-                'queues': str(QUEUES_DIR),
-                'batches': str(BATCHES_DIR),
-                'secrets': str(SECRETS_DIR),
-                'models': str(MODELS_DIR),
-                'wd_tags': str(WD_TAGS_DIR),
-            },
-            'ui': {
-                'vault_layout_mode': 'masonry',
-                'vault_tile_min_width': 190,
-            },
-            'firewall': {
-                'allowed_extensions': ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.jfif', '.mp4', '.webm', '.ogv'],
-                'allowed_mimes': list(DEFAULT_ALLOWED_MIMES)
-            },
-            'hash_algorithm': 'sha256',
-            'tagging': {
-                'enabled': True,
-                'model_repo': 'SmilingWolf/wd-vit-tagger-v3',
-                'device': 'auto',
-                'display_source': 'yaml',
-                'threshold': 0.35,
-                'max_tags': 30,
-                'fail_ingestion_on_error': False,
-                'video': {
-                    'enabled': True,
-                    'frame_count': 5,
-                    'merge_min_frames': 2,
-                    'merge_high_confidence': 0.75
-                }
-            }
-        }
+        return _default_config()
+
+def get_config() -> dict:
+    global _CONFIG_CACHE_DATA, _CONFIG_CACHE_MTIMES
+    mtimes = _config_mtimes()
+    with _CONFIG_CACHE_LOCK:
+        if _CONFIG_CACHE_DATA is not None and _CONFIG_CACHE_MTIMES == mtimes:
+            return copy.deepcopy(_CONFIG_CACHE_DATA)
+
+    config = _load_config_uncached()
+    refreshed_mtimes = _config_mtimes()
+    with _CONFIG_CACHE_LOCK:
+        _CONFIG_CACHE_DATA = config
+        _CONFIG_CACHE_MTIMES = refreshed_mtimes
+    return copy.deepcopy(config)
+
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+def utc_now_str() -> str:
+    return utc_now().strftime("%Y-%m-%d %H:%M:%S")
 
 def atomic_write_text(path: Path, text: str, encoding: str = "utf-8"):
 

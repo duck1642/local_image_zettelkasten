@@ -21,8 +21,11 @@
   let currentMode: 'Normal' | 'Full' = 'Normal';
   let eventSource: EventSource | null = null;
   let reconnectTimer: number | null = null;
+  let reconnectAttempts = 0;
   let logContainer: HTMLElement;
   let searchText = '';
+  const RECONNECT_BASE_MS = 800;
+  const RECONNECT_MAX_MS = 8000;
 
   // Level filter: all on except DEBUG by default
   let levelFilters: Record<string, boolean> = {
@@ -94,6 +97,21 @@
     return html;
   }
 
+  function nextReconnectDelayMs() {
+    const exponential = Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * Math.pow(2, reconnectAttempts));
+    const jitter = Math.floor(Math.random() * 300);
+    reconnectAttempts += 1;
+    return Math.min(RECONNECT_MAX_MS, exponential + jitter);
+  }
+
+  function scheduleReconnect() {
+    if (reconnectTimer !== null) return;
+    reconnectTimer = window.setTimeout(() => {
+      reconnectTimer = null;
+      connectToLogs();
+    }, nextReconnectDelayMs());
+  }
+
   function connectToLogs() {
     if (reconnectTimer !== null) {
         clearTimeout(reconnectTimer);
@@ -104,6 +122,7 @@
 
     eventSource = new EventSource(apiUrl(`/api/logs?filename=${currentFile}`));
     eventSource.onmessage = (e) => {
+      reconnectAttempts = 0;
       try {
         const raw = e.data;
         const parsed = JSON.parse(raw);
@@ -134,10 +153,7 @@
     };
     eventSource.onerror = () => {
         eventSource?.close();
-        reconnectTimer = window.setTimeout(() => {
-            reconnectTimer = null;
-            connectToLogs();
-        }, 2000);
+        scheduleReconnect();
     };
   }
 

@@ -10,7 +10,6 @@ import secrets
 import threading
 import copy
 import shutil
-from datetime import datetime
 from collections import Counter
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, Query, Request
@@ -39,7 +38,10 @@ from metadata_index import (
 )
 from tagging import load_tag_cache, tag_media
 from thumbnails import ThumbnailBusyError, get_or_generate_thumbnail
-from utils import SECRETS_DIR, WD_TAGS_DIR, atomic_write_text, get_cookie_auth_status
+from utils import (
+    SECRETS_DIR, WD_TAGS_DIR, atomic_write_text, get_cookie_auth_status,
+    invalidate_config_cache, utc_now, utc_now_str
+)
 from ingest_control import ONLINE_STOP_AFTER_CURRENT, LOCAL_STOP_AFTER_CURRENT
 
 class TerminalLogger:
@@ -343,7 +345,7 @@ def _set_review_state(
     state = _normalize_review_state(state)
     sidecar["state"] = state
     if state in REVIEW_RESOLVED_STATES:
-        sidecar["resolved_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        sidecar["resolved_at"] = utc_now_str()
     if action:
         sidecar["last_action"] = action
     if target_hash:
@@ -469,6 +471,13 @@ def _tail_lines(path: Path, count: int = 150) -> list[str]:
             handle.seek(position)
             data = handle.read(read_size) + data
         return data.decode("utf-8", errors="replace").splitlines()[-count:]
+
+def _log_file_signature(path: Path) -> tuple[int, int, int] | None:
+    try:
+        stat = path.stat()
+        return int(stat.st_dev), int(stat.st_ino), int(stat.st_ctime_ns)
+    except OSError:
+        return None
 
 @app.middleware("http")
 async def local_api_guard(request: Request, call_next):
@@ -1276,18 +1285,53 @@ async def stream_logs(filename: str = Query("system.jsonl")):
     async def log_generator():
         for line in _tail_lines(log_file, 150):
             yield f"data: {line}\n\n"
+        position = log_file.stat().st_size if log_file.exists() else 0
+        file_signature = _log_file_signature(log_file)
+        heartbeat_seconds = 15.0
+        poll_seconds = 0.5
+        last_emit = time.monotonic()
 
-        try:
-            with open(log_file, "r", encoding="utf-8", errors="replace") as f:
-                f.seek(0, os.SEEK_END)
-                while True:
-                    line = f.readline()
-                    if not line:
-                        await asyncio.sleep(0.5)
-                        continue
-                    yield f"data: {line}\n\n"
-        except Exception:
-            pass
+        while True:
+            try:
+                if not log_file.exists():
+                    log_file.parent.mkdir(parents=True, exist_ok=True)
+                    log_file.touch()
+
+                current_signature = _log_file_signature(log_file)
+                if file_signature is not None and current_signature != file_signature:
+                    position = 0
+                file_signature = current_signature
+
+                size = log_file.stat().st_size
+                if size < position:
+                    position = 0
+                elif position > 0 and size > 0:
+                    try:
+                        with open(log_file, "rb") as probe:
+                            probe.seek(position - 1, os.SEEK_SET)
+                            if probe.read(1) != b"\n":
+                                position = 0
+                    except OSError:
+                        position = 0
+
+                emitted = False
+                with open(log_file, "rb") as f:
+                    f.seek(position, os.SEEK_SET)
+                    for line in f:
+                        text = line.decode("utf-8", errors="replace").rstrip("\r\n")
+                        yield f"data: {text}\n\n"
+                        emitted = True
+                    position = f.tell()
+
+                if emitted:
+                    last_emit = time.monotonic()
+                elif (time.monotonic() - last_emit) >= heartbeat_seconds:
+                    yield ": keep-alive\n\n"
+                    last_emit = time.monotonic()
+            except Exception:
+                yield ": keep-alive\n\n"
+                last_emit = time.monotonic()
+            await asyncio.sleep(poll_seconds)
     return StreamingResponse(log_generator(), media_type="text/event-stream")
 
 @app.post("/api/auth/scan")
@@ -1609,7 +1653,7 @@ def _set_local_ingest_state(**kwargs):
             LOCAL_INGEST_STATE[key] = value
 
 def _local_run_id() -> str:
-    return f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{secrets.token_hex(4)}"
+    return f"{utc_now().strftime('%Y%m%d_%H%M%S')}_{secrets.token_hex(4)}"
 
 def _safe_staged_filename(index: int, source_path: Path) -> str:
     invalid = '<>:"/\\|?*'
@@ -1629,7 +1673,7 @@ def _append_local_ingest_result(result: dict):
         del LOCAL_INGEST_STATE["results"][:overflow]
 
 def _prepare_local_ingest_run(run_id: str, defaults: dict, skip_similarity: bool, path_count: int = 0):
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now = utc_now_str()
     with LOCAL_INGEST_LOCK:
         if LOCAL_INGEST_STATE["running"]:
             raise HTTPException(status_code=409, detail="Local ingestion already running")
@@ -1808,7 +1852,7 @@ def _run_local_ingest_worker(raw_paths: list[str], defaults: dict, skip_similari
             elif LOCAL_INGEST_STATE.get("phase") == "stopping":
                 LOCAL_INGEST_STATE["phase"] = "finished"
             LOCAL_INGEST_STATE["running"] = False
-            LOCAL_INGEST_STATE["finished_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            LOCAL_INGEST_STATE["finished_at"] = utc_now_str()
             LOCAL_INGEST_STATE["stop_requested"] = False
             summary = dict(LOCAL_INGEST_STATE.get("summary") or {})
             phase = str(LOCAL_INGEST_STATE.get("phase") or "")
@@ -2231,6 +2275,7 @@ def _update_app_config_sync(new_config: dict):
     import yaml
     safe_config = _strip_config_secrets(new_config)
     atomic_write_text(CONFIG_PATH, yaml.dump(safe_config, default_flow_style=False, allow_unicode=True))
+    invalidate_config_cache()
     return {"status": "success"}
 
 @app.get("/")

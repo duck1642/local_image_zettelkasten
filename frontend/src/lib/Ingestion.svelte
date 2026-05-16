@@ -35,7 +35,10 @@
   let monitorLogs: any[] = [];
   let logSource: EventSource | null = null;
   let logReconnectTimer: number | null = null;
+  let logReconnectAttempts = 0;
   let monitorContainer: HTMLElement;
+  const LOG_RECONNECT_BASE_MS = 800;
+  const LOG_RECONNECT_MAX_MS = 8000;
 
   type LocalStatus = {
     running: boolean;
@@ -76,6 +79,21 @@
   $: counts = $queueStats;
   $: readyCount = (counts.normal || 0) + (counts.force || 0);
 
+  function nextLogReconnectDelayMs() {
+    const exponential = Math.min(LOG_RECONNECT_MAX_MS, LOG_RECONNECT_BASE_MS * Math.pow(2, logReconnectAttempts));
+    const jitter = Math.floor(Math.random() * 300);
+    logReconnectAttempts += 1;
+    return Math.min(LOG_RECONNECT_MAX_MS, exponential + jitter);
+  }
+
+  function scheduleMonitorReconnect() {
+    if (logReconnectTimer !== null) return;
+    logReconnectTimer = window.setTimeout(() => {
+      logReconnectTimer = null;
+      connectMonitor();
+    }, nextLogReconnectDelayMs());
+  }
+
   function connectMonitor() {
     if (logReconnectTimer !== null) {
       clearTimeout(logReconnectTimer);
@@ -84,6 +102,7 @@
     if (logSource) logSource.close();
     logSource = new EventSource(apiUrl('/api/logs?filename=ingest_online.jsonl'));
     logSource.onmessage = (e) => {
+      logReconnectAttempts = 0;
       try {
         const entry = JSON.parse(e.data);
         appendMonitorLog(entry);
@@ -98,10 +117,7 @@
     };
     logSource.onerror = () => {
       logSource?.close();
-      logReconnectTimer = window.setTimeout(() => {
-        logReconnectTimer = null;
-        connectMonitor();
-      }, 2000);
+      scheduleMonitorReconnect();
     };
   }
 

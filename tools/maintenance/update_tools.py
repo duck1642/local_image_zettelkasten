@@ -1,5 +1,14 @@
+import sys
+from pathlib import Path
 
-from scripts.maintenance import update_tools
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from maintenance_cli import main
+
 
 if __name__ == "__main__":
-    update_tools()
+    args = sys.argv[1:] or ["update-downloaders"]
+    raise SystemExit(main(args))

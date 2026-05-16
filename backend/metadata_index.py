@@ -2,7 +2,6 @@ import json
 import sqlite3
 import threading
 import time
-from datetime import datetime
 from pathlib import Path
 from typing import Iterable
 
@@ -11,7 +10,7 @@ import yaml
 from logger import log_system
 from md_generator import normalize_topic_list
 from tagging import load_tag_cache
-from utils import NOTES_DIR, WD_TAGS_DIR, note_path_for, wd_tag_cache_path_for
+from utils import NOTES_DIR, WD_TAGS_DIR, note_path_for, wd_tag_cache_path_for, utc_now_str
 
 
 READY_KEY = "initial_backfill_complete"
@@ -106,7 +105,7 @@ def _norm(value: str) -> str:
 
 
 def _now() -> str:
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    return utc_now_str()
 
 
 def _file_sig(path: Path) -> tuple[str, int | None, int | None]:

@@ -2,7 +2,6 @@ import csv
 import json
 import threading
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -11,7 +10,7 @@ from PIL import Image
 
 from fingerprint import extract_sampled_video_frames
 from logger import log_system
-from utils import MODELS_DIR, atomic_write_text, calculate_file_hash, get_config, wd_tag_cache_path_for
+from utils import MODELS_DIR, atomic_write_text, calculate_file_hash, get_config, utc_now_str, wd_tag_cache_path_for
 from validators import get_mime_type
 
 
@@ -152,7 +151,7 @@ def _result(item_hash: str, media_path: Path, model_repo: str, device: str, prov
         status=status,
         model=model_repo,
         threshold=threshold,
-        created_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        created_at=utc_now_str(),
         rating=rating,
         character_tags=character_tags or [],
         tags=tags or [],

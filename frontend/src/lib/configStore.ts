@@ -21,10 +21,18 @@ function cloneConfig(value: any) {
 function normalizeConfig(value: any) {
   const next = cloneConfig(value);
   if (!next.ui) next.ui = {};
+  if (!next.processing) next.processing = {};
+  if (!next.tagging) next.tagging = {};
   next.ui.vault_layout_mode = normalizeLayoutMode(next);
   next.ui.vault_tile_min_width = normalizeTileMinWidth(next.ui.vault_tile_min_width);
   next.ui.ram_track_enabled = Boolean(next.ui.ram_track_enabled);
   next.ui.inspector_width = normalizeInspectorWidth(next.ui.inspector_width);
+  next.processing.flatten_transparency = Boolean(next.processing.flatten_transparency);
+  next.tagging.enabled = next.tagging.enabled !== false;
+  next.tagging.model_repo = String(next.tagging.model_repo || 'SmilingWolf/wd-vit-tagger-v3');
+  next.tagging.device = String(next.tagging.device || 'auto');
+  next.tagging.threshold = Number.isFinite(Number(next.tagging.threshold)) ? Number(next.tagging.threshold) : 0.35;
+  next.tagging.max_tags = Number.isFinite(Number(next.tagging.max_tags)) ? Number(next.tagging.max_tags) : 30;
   return next;
 }
 

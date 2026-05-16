@@ -8,7 +8,7 @@ import shutil
 import re
 
 from utils import (
-    get_config, QUEUES_DIR, asset_path_for, note_path_for, wd_tag_cache_path_for
+    get_config, QUEUES_DIR, asset_path_for, note_path_for, utc_now_str, wd_tag_cache_path_for
 )
 from db.sqlite_operator import connect_database, normalize_source_url
 from db.search_manager import search_manager
@@ -523,7 +523,7 @@ class ExternalIngestor:
     def _log_failure(self, url: str, reason: str):
 
         failure_file = QUEUES_DIR / "failed_links.md"
-        timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        timestamp = utc_now_str()
 
 
         with self.fail_log_lock:

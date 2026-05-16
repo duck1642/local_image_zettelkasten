@@ -37,7 +37,12 @@ async function fulfillJson(route: Route, body: unknown, status = 200) {
 
 async function installMockVaultApi(
   page: Page,
-  options: { memoryFails?: boolean; onReviewAction?: () => Promise<void>; onLocalIngestStart?: () => Promise<void> | void } = {}
+  options: {
+    memoryFails?: boolean;
+    onReviewAction?: () => Promise<void>;
+    onLocalIngestStart?: () => Promise<void> | void;
+    onMaintenanceAction?: (action: 'auth' | 'metadata' | 'review') => Promise<void> | void;
+  } = {}
 ) {
   let items = cloneItems();
   const reviewItems = JSON.parse(JSON.stringify(manifest.review));
@@ -146,7 +151,14 @@ async function installMockVaultApi(
     failed: manifest.queues.failed.length
   }));
   await page.route('**/api/review/count', async (route) => fulfillJson(route, { count: reviewItems.length, pending: 1, cleanup: 1 }));
-  await page.route('**/api/review/cleanup', async (route) => fulfillJson(route, { status: 'success', cleaned: 0, failed: 0, cleaned_orphans: 0, failed_orphans: 0 }));
+  await page.route('**/api/review/cleanup', async (route) => {
+    await options.onMaintenanceAction?.('review');
+    return fulfillJson(route, { status: 'success', cleaned: 0, failed: 0, cleaned_orphans: 0, failed_orphans: 0 });
+  });
+  await page.route('**/api/metadata-index/rebuild', async (route) => {
+    await options.onMaintenanceAction?.('metadata');
+    return fulfillJson(route, { status: 'started' });
+  });
   await page.route('**/api/review/*/action**', async (route) => {
     await options.onReviewAction?.();
     return fulfillJson(route, { status: 'success', action: 'keep', message: 'mock action ok' });
@@ -160,6 +172,10 @@ async function installMockVaultApi(
   await page.route('**/api/system/memory', async (route) => {
     if (options.memoryFails) return fulfillJson(route, { detail: 'unavailable' }, 500);
     return fulfillJson(route, { backend_mb: 42.5 });
+  });
+  await page.route('**/api/auth/scan', async (route) => {
+    await options.onMaintenanceAction?.('auth');
+    return fulfillJson(route, { status: 'ok', auth: { cookies: 'available' } });
   });
   await page.route('**/api/local-ingest/status', async (route) => fulfillJson(route, localStatus));
   await page.route('**/api/local-ingest/start', async (route) => {
@@ -191,7 +207,12 @@ async function installMockVaultApi(
 
 async function openMockVault(
   page: Page,
-  options: { memoryFails?: boolean; onReviewAction?: () => Promise<void>; onLocalIngestStart?: () => Promise<void> | void } = {}
+  options: {
+    memoryFails?: boolean;
+    onReviewAction?: () => Promise<void>;
+    onLocalIngestStart?: () => Promise<void> | void;
+    onMaintenanceAction?: (action: 'auth' | 'metadata' | 'review') => Promise<void> | void;
+  } = {}
 ) {
   await installMockVaultApi(page, options);
   await page.goto('/?lmz_test_page_size=100');
@@ -405,4 +426,21 @@ test('ram footer handles available and unavailable states', async ({ page }) => 
   await openMockVault(failingPage, { memoryFails: true });
   await expect(failingPage.locator('.ram-status')).toContainText('RAM: unavailable');
   await failingPage.close();
+});
+
+test('settings maintenance actions call existing endpoints and show compact statuses', async ({ page }) => {
+  const calls: Array<'auth' | 'metadata' | 'review'> = [];
+  await openMockVault(page, {
+    onMaintenanceAction: (action) => {
+      calls.push(action);
+    }
+  });
+
+  await page.getByRole('button', { name: /Settings/ }).click();
+  await page.getByRole('button', { name: 'Auth Scan' }).click();
+  await page.getByRole('button', { name: 'Rebuild Metadata Index' }).click();
+  await page.getByRole('button', { name: 'Cleanup Review' }).click();
+
+  await expect(page.locator('.maintenance-status')).toContainText(['OK (available)', 'started', 'cleaned 0, failed 0']);
+  expect(calls).toEqual(['auth', 'metadata', 'review']);
 });

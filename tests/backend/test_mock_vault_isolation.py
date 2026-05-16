@@ -5,6 +5,9 @@ import inspect
 import io
 import json
 import logging
+import os
+import re
+import runpy
 import shutil
 import sys
 import threading
@@ -83,6 +86,69 @@ def test_config_override_resolves_paths_inside_mock_vault(monkeypatch, tmp_path)
     assert utils.LOCAL_INGEST_DIR == tmp_path / "mock-vault" / "data" / "local_ingest"
     assert utils.ONLINE_INGEST_DIR == tmp_path / "mock-vault" / "data" / "online_ingest"
     assert str(ROOT / "data") not in str(utils.VAULT_DIR)
+
+
+def test_get_config_cache_hits_and_returns_defensive_copy(monkeypatch, tmp_path):
+    (utils,) = fresh_backend(monkeypatch, tmp_path, "utils")
+    calls = []
+    original_loader = utils._load_config_uncached
+
+    def wrapped_loader():
+        calls.append("load")
+        return original_loader()
+
+    monkeypatch.setattr(utils, "_load_config_uncached", wrapped_loader)
+    utils.invalidate_config_cache()
+
+    first = utils.get_config()
+    first["ui"]["vault_layout_mode"] = "grid"
+    second = utils.get_config()
+
+    assert len(calls) == 1
+    assert second["ui"]["vault_layout_mode"] != "grid"
+
+
+def test_get_config_cache_refreshes_when_config_mtime_changes(monkeypatch, tmp_path):
+    (utils,) = fresh_backend(monkeypatch, tmp_path, "utils")
+    calls = []
+    original_loader = utils._load_config_uncached
+
+    def wrapped_loader():
+        calls.append("load")
+        return original_loader()
+
+    monkeypatch.setattr(utils, "_load_config_uncached", wrapped_loader)
+    utils.invalidate_config_cache()
+    utils.get_config()
+    assert len(calls) == 1
+
+    current = utils.CONFIG_PATH.stat().st_mtime
+    os.utime(utils.CONFIG_PATH, (current + 3, current + 3))
+    utils.get_config()
+    assert len(calls) == 2
+
+
+def test_public_config_strip_removes_secret_token(monkeypatch, tmp_path):
+    web_api, utils = fresh_backend(monkeypatch, tmp_path, "web_api", "utils")
+    secrets_path = utils.SECRETS_DIR / ".secrets.yaml"
+    secrets_path.parent.mkdir(parents=True, exist_ok=True)
+    secrets_path.write_text('pixiv_token: "secret-token"\ncookies_path: "secrets/cookies.txt"\n', encoding="utf-8")
+    utils.invalidate_config_cache()
+
+    payload = web_api._load_public_config_sync()
+
+    ext = payload.get("external_tools", {})
+    assert "pixiv_token" not in ext
+
+
+def test_update_app_config_invalidates_config_cache(monkeypatch, tmp_path):
+    web_api, utils = fresh_backend(monkeypatch, tmp_path, "web_api", "utils")
+    called = []
+
+    monkeypatch.setattr(web_api, "invalidate_config_cache", lambda: called.append("invalidated"))
+    web_api._update_app_config_sync({"paths": {"vault": "data/vault", "db": "data/db/lmz_mock.db", "logs": "data/logs", "queues": "data/queues", "batches": "data/batches", "secrets": "data/secrets"}, "firewall": {"allowed_extensions": [".jpg"], "allowed_mimes": ["image/jpeg"]}, "hash_algorithm": "sha256"})
+
+    assert called == ["invalidated"]
 
 
 def test_queue_service_uses_mock_vault_queues(monkeypatch, tmp_path):
@@ -899,6 +965,128 @@ def test_rebuild_metadata_index_json_output(monkeypatch, tmp_path, capsys):
 
     assert payload["action"] == "status"
     assert "items" in payload
+
+
+def test_maintenance_cli_default_and_alias_run_update_downloaders(monkeypatch, tmp_path):
+    tool = load_maintenance_tool("maintenance_cli")
+    calls = []
+    monkeypatch.setattr(tool, "update_downloaders", lambda: calls.append("update") or 0)
+
+    assert tool.main([]) == 0
+    assert tool.main(["update-tools"]) == 0
+    assert tool.main(["update"]) == 0
+    assert calls == ["update", "update", "update"]
+
+
+def test_maintenance_cli_check_invokes_readiness_script(monkeypatch, tmp_path):
+    tool = load_maintenance_tool("maintenance_cli")
+    commands = []
+
+    def fake_run(cmd, text=True, **kwargs):
+        commands.append(cmd)
+        return types.SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(tool.subprocess, "run", fake_run)
+
+    assert tool.main(["check"]) == 0
+    assert commands
+    assert commands[0][0] == sys.executable
+    assert commands[0][-1] == "--non-interactive"
+    assert "lmz_readiness_check.py" in commands[0][1]
+
+
+def test_maintenance_cli_install_playwright_browser(monkeypatch, tmp_path):
+    tool = load_maintenance_tool("maintenance_cli")
+    commands = []
+
+    def fake_run(cmd, text=True, **kwargs):
+        commands.append(cmd)
+        return types.SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(tool.subprocess, "run", fake_run)
+
+    assert tool.main(["install-playwright-browser"]) == 0
+    assert commands == [[sys.executable, "-m", "playwright", "install", "chromium"]]
+
+
+def test_update_tools_wrapper_runs_update_downloaders(monkeypatch, tmp_path):
+    captured = []
+    fake_cli = types.SimpleNamespace(main=lambda argv: captured.append(argv) or 0)
+    monkeypatch.setitem(sys.modules, "maintenance_cli", fake_cli)
+    monkeypatch.setattr(sys, "argv", ["update_tools.py"])
+
+    with pytest.raises(SystemExit) as exc:
+        runpy.run_path(str(ROOT / "tools" / "maintenance" / "update_tools.py"), run_name="__main__")
+
+    assert exc.value.code == 0
+    assert captured == [["update-downloaders"]]
+
+
+def test_insert_to_database_default_timestamp_is_utc_format(monkeypatch, tmp_path):
+    sqlite_operator, = fresh_backend(monkeypatch, tmp_path, "db.sqlite_operator")
+    sample = tmp_path / "utc-check.jpg"
+    sample.write_bytes(b"utc")
+    file_hash = "ab" * 32
+    conn = sqlite_operator.init_database()
+    sqlite_operator.insert_to_database(
+        conn,
+        sample,
+        file_hash,
+        "image/jpeg",
+        ".jpg",
+        metadata={},
+        file_size=sample.stat().st_size,
+    )
+    conn.commit()
+    row = conn.execute("SELECT date_added FROM items WHERE hash = ?", (file_hash,)).fetchone()
+    conn.close()
+    assert row and re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}", str(row[0]))
+
+
+def test_review_state_timestamp_uses_standard_format(monkeypatch, tmp_path):
+    web_api, = fresh_backend(monkeypatch, tmp_path, "web_api")
+    updated = web_api._set_review_state({}, "resolved_delete")
+    value = str(updated.get("resolved_at") or "")
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}", value)
+
+
+def test_stream_logs_tail_then_heartbeat_and_truncate_recovery(monkeypatch, tmp_path):
+    web_api, = fresh_backend(monkeypatch, tmp_path, "web_api")
+    log_file = web_api.LOG_FILES["system.jsonl"]
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+    log_file.write_text('{"message":"tail"}\n', encoding="utf-8")
+
+    monotonic_counter = {"value": 0.0}
+
+    def fake_monotonic():
+        monotonic_counter["value"] += 20.0
+        return monotonic_counter["value"]
+
+    async def fake_sleep(_seconds):
+        return None
+
+    monkeypatch.setattr(web_api.time, "monotonic", fake_monotonic)
+    monkeypatch.setattr(web_api.asyncio, "sleep", fake_sleep)
+
+    async def _run():
+        response = await web_api.stream_logs("system.jsonl")
+        gen = response.body_iterator
+        first = await gen.__anext__()
+        second = await gen.__anext__()
+        log_file.write_text("", encoding="utf-8")
+        log_file.write_text('{"message":"after-clear"}\n', encoding="utf-8")
+        third = await gen.__anext__()
+        await gen.aclose()
+        return first, second, third
+
+    first, second, third = asyncio.run(_run())
+    first_text = first.decode() if isinstance(first, bytes) else str(first)
+    second_text = second.decode() if isinstance(second, bytes) else str(second)
+    third_text = third.decode() if isinstance(third, bytes) else str(third)
+
+    assert "tail" in first_text
+    assert "keep-alive" in second_text
+    assert "after-clear" in third_text
 
 
 def test_topic_filter_not_ready_skips_disk_scan(monkeypatch, tmp_path):

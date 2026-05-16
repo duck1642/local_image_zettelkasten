@@ -3,7 +3,7 @@ from logging.handlers import RotatingFileHandler
 import json
 import datetime
 from pathlib import Path
-from utils import OUTPUT_DIR, LOGS_DIR
+from utils import OUTPUT_DIR, LOGS_DIR, utc_now_str
 
 STRUCTURED_LOGS_DIR = LOGS_DIR / "structured"
 STRUCTURED_LOGS_DIR.mkdir(parents=True, exist_ok=True)
@@ -15,7 +15,7 @@ class JSONFormatter(logging.Formatter):
     def format(self, record):
         module_name = record.name.replace('lmz_', '') if record.name.startswith('lmz_') else record.name
         log_record = {
-            "timestamp": datetime.datetime.fromtimestamp(record.created).strftime("%Y-%m-%d %H:%M:%S"),
+            "timestamp": datetime.datetime.fromtimestamp(record.created, datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
             "level": record.levelname,
             "module": module_name,
             "message": record.getMessage()
@@ -126,7 +126,7 @@ def log_activity(
     run_id="",
     status="success",
 ):
-    if timestamp_str is None: timestamp_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    if timestamp_str is None: timestamp_str = utc_now_str()
     extra = {
         "original_name": original_name,
         "vault_id": vault_id,

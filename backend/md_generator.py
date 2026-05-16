@@ -4,7 +4,7 @@ import yaml
 from datetime import datetime
 
 from tagging import wd_frontmatter_fields
-from utils import note_path_for, require_storage_id, storage_shard_for_hash
+from utils import note_path_for, require_storage_id, storage_shard_for_hash, utc_now_str
 
 MANUAL_FRONTMATTER_FIELDS = (
     "title",
@@ -20,7 +20,7 @@ WD_FRONTMATTER_FIELDS = ("wd_rating", "wd_character_tags", "wd_tags")
 
 def _format_date_added(date_added) -> str:
     if not date_added:
-        return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        return utc_now_str()
     if isinstance(date_added, datetime):
         return date_added.strftime('%Y-%m-%d %H:%M:%S')
     if isinstance(date_added, str):

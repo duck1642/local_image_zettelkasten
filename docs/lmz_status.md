@@ -262,6 +262,26 @@ VSCode-friendly test launchers:
     - frontend `@tauri-apps/api` is pinned to `2.10.1` to match Rust `tauri 2.10.x`.
     - full Tauri stack upgrade to `2.11.x` is deferred.
 
+#### Phase A Implementation Batches
+
+- Batch 1 - Quick wins / low risk:
+  - fix stale `update_tools` wrapper.
+  - unify CLI dependency maintenance flow.
+  - expose existing maintenance actions in UI (`auth scan`, metadata rebuild, review cleanup).
+  - small thumbnail/helper cleanup.
+- Batch 2 - Runtime correctness layer:
+  - implement `get_config()` cache + safe invalidation.
+  - establish timestamp consistency policy (Python vs SQLite UTC).
+  - harden log stream stability (predictable streaming/reconnect/noise behavior).
+- Batch 3 - Testability + scale simulation:
+  - build deterministic big-vault generator.
+  - generate isolated config/DB/assets/notes/thumbnails/review fixtures.
+  - support configurable composition and strict `LMZ_CONFIG_PATH` isolation.
+- Batch 4 - Cross-layer runtime/ops hardening:
+  - implement dynamic sidecar port coordination (startup handshake/API base/CSP/lifecycle).
+  - add packaging-time security checks.
+  - run clean-machine release validation.
+
 ### Phase B - Knowledge Tools
 
 - Artist database:

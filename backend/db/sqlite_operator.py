@@ -4,7 +4,7 @@ import threading
 from pathlib import Path
 from datetime import datetime
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
-from utils import DB_PATH
+from utils import DB_PATH, utc_now_str
 
 _SCHEMA_READY = False
 _SCHEMA_LOCK = threading.Lock()
@@ -291,7 +291,11 @@ def insert_to_database(conn: sqlite3.Connection, filepath: Path, file_hash: str,
         file_size = filepath.stat().st_size
 
     if timestamp is None:
-        timestamp = datetime.now()
+        timestamp_value = utc_now_str()
+    elif isinstance(timestamp, datetime):
+        timestamp_value = timestamp.strftime("%Y-%m-%d %H:%M:%S")
+    else:
+        timestamp_value = str(timestamp)
 
     cursor = conn.cursor()
     existing_storage = storage_id_for_hash(conn, file_hash)
@@ -322,7 +326,7 @@ def insert_to_database(conn: sqlite3.Connection, filepath: Path, file_hash: str,
         target_ext,
         mime_type,
         file_size,
-        timestamp,
+        timestamp_value,
         source_url,
         source_url_norm,
         platform,

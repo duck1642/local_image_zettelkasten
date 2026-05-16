@@ -5,11 +5,10 @@ import time
 import secrets
 from pathlib import Path
 from typing import Tuple, Optional
-from datetime import datetime
 from utils import (
     ASSETS_DIR, REVIEW_DIR, calculate_file_hash, calculate_phash,
     atomic_write_text, flatten_image, get_normalization_color, note_path_for,
-    storage_asset_path_for, storage_shard_for_hash
+    storage_asset_path_for, storage_shard_for_hash, utc_now, utc_now_str
 )
 from fingerprint import (
     get_audio_fingerprint, get_visual_embedding,
@@ -53,7 +52,7 @@ def _move_to_review(filepath: Path, file_hash: str, metadata: dict, sidecar_fiel
     original_name = _review_original_name(filepath, metadata)
     safe_original_name = _safe_review_name(original_name)
     for _ in range(20):
-        review_id = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{secrets.token_hex(4)}"
+        review_id = f"{utc_now().strftime('%Y%m%d_%H%M%S')}_{secrets.token_hex(4)}"
         storage_name = f"{review_id}_{file_hash[:8]}_{safe_original_name}"
         dest_path = REVIEW_DIR / storage_name
         sidecar_path = dest_path.with_suffix(dest_path.suffix + ".json")
@@ -72,7 +71,7 @@ def _move_to_review(filepath: Path, file_hash: str, metadata: dict, sidecar_fiel
         "source_path": source_path,
         "staged_from": staged_from,
         "state": "pending",
-        "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        "timestamp": utc_now_str(),
         "metadata": metadata,
         "file_hash": file_hash,
         **sidecar_fields,
@@ -361,7 +360,7 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
     if orig_ext in ['.jfif', '.jpeg']:
         target_ext = '.jpg'
 
-    master_timestamp = datetime.now()
+    master_timestamp = utc_now()
     master_timestamp_str = master_timestamp.strftime('%Y-%m-%d %H:%M:%S')
 
     vault_path = None
