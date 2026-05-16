@@ -8,6 +8,143 @@ It ingests local files and external URLs, validates media, stores original asset
 
 Runtime state stays outside source code under root-level `data/`, `logs/`, and `secrets/`.
 
+## Product Domains
+
+LMZ should be reasoned about by product/runtime domains first, and by file tree second.
+
+```text
+LMZ
+  Vault Core
+  Ingestion
+  Duplicate / Review
+  Metadata / Knowledge
+  Search / Browse
+  Media Presentation
+  Operations / Maintenance
+  Runtime / Packaging
+  Capture / External Inputs
+  Quality / Testing
+```
+
+### Vault Core
+
+The archive truth layer.
+
+- Asset storage under `data/vault/assets/`.
+- Markdown note generation under `data/vault/notes/`.
+- SQLite item rows and compact `storage_id` ownership.
+- Item update/delete behavior.
+- Metadata ownership rules between SQLite, Markdown/YAML, and WD JSON caches.
+- Backup, migration, import/export, and vault health concerns.
+
+### Ingestion
+
+Everything that gets media into the vault.
+
+- Local ingest.
+- Native drag/drop staging.
+- Markdown URL queues.
+- External downloaders through gallery-dl and yt-dlp.
+- Batch-safe ingestion for multi-media posts.
+- Retry/failed queue behavior.
+- Source URL provenance and platform metadata.
+
+### Duplicate / Review
+
+The data-quality gate before or around vault insertion.
+
+- SHA256 exact duplicate checks.
+- Source URL duplicate checks.
+- pHash, tile pHash, audio signatures, and video embeddings.
+- RAM search indexes used by duplicate checks.
+- Review quarantine files and sidecars.
+- Review decisions: keep, delete, variant, replace.
+- Pending cleanup and restart-safe review state.
+
+### Metadata / Knowledge
+
+The knowledge layer built on top of stored media.
+
+- Manual topics.
+- WD rating, character tags, and general WD tags.
+- Tag counts and facet data.
+- Tag maintenance: rename, delete, hide/ignore, merge.
+- Promote WD tag to manual topic.
+- Artist database, aliases, platform handles, source links, and artist counts.
+- Metadata index rebuild and repair.
+
+### Search / Browse
+
+How users find and scan vault contents.
+
+- Structured search parsing and commands.
+- Artist/platform/topic/WD tag filters.
+- Facets and suggestions.
+- Sorting and media-type filters.
+- Vault grouping by source URL.
+- Virtual masonry/grid browsing.
+- Stats view.
+
+### Media Presentation
+
+How media is rendered and inspected.
+
+- Thumbnail generation and serving.
+- Vault tile media behavior.
+- Inspector previews.
+- Wide/fullscreen focus view.
+- Filmstrip, zoom, and pan.
+- GIF animation policy.
+- Video preview policy.
+- Future fullscreen board view.
+
+### Operations / Maintenance
+
+The control plane for keeping LMZ healthy.
+
+- Structured/raw logs and App Logs UI.
+- Authentication scans and auth maintenance tools.
+- Dependency check/update tools.
+- Metadata index rebuild.
+- Thumbnail repair.
+- Review cleanup.
+- Vault health checks.
+- Generated test-vault tooling.
+
+### Runtime / Packaging
+
+How the app starts, runs, and ships.
+
+- FastAPI startup services.
+- Search/index hydration.
+- Tauri sidecar lifecycle.
+- API key and local-only CORS/origin behavior.
+- Config and secrets paths.
+- Multiple vault selection/switching.
+- Production sidecar and Tauri packaging.
+- Port binding and runtime coordination.
+
+### Capture / External Inputs
+
+Sources outside the desktop app that submit work to LMZ.
+
+- Browser extension capture.
+- Future clipboard/watch-folder/API integrations.
+- Active page URL/media capture.
+- Queue/API handoff into ingestion.
+
+### Quality / Testing
+
+Repeatable validation across the other domains.
+
+- Backend pytest.
+- Frontend Playwright tests.
+- Mock vault fixtures.
+- Generated large-vault fixtures.
+- Real-vault smoke checklists.
+- Performance baselines.
+- Regression scenarios for review, ingest, search, and packaging.
+
 ## Project Shape
 
 ```text
@@ -23,7 +160,9 @@ local_media_zettelkasten/
     web_api.py
     external_ingestion.py
     fingerprint.py
+    ingest_control.py
     md_generator.py
+    metadata_index.py
     processor.py
     queue_service.py
     thumbnails.py
@@ -48,6 +187,17 @@ local_media_zettelkasten/
         StatsView.svelte
         LogsView.svelte
         SettingsView.svelte
+        api.ts
+        configStore.ts
+        layout.ts
+        logger.ts
+        media.ts
+        observers.ts
+        ramStore.ts
+        search.ts
+        selection.ts
+        statsStore.ts
+        types.ts
         renderers/
           masonry/
           grid/
@@ -55,8 +205,16 @@ local_media_zettelkasten/
     src-tauri/
   tools/
     maintenance/
+  tests/
+    backend/
+    frontend/
+    fixtures/
+      mock-vault/
+    *.bat
   data/
     input/
+    local_ingest/
+    online_ingest/
     review/
     queues/
     batches/
@@ -67,6 +225,7 @@ local_media_zettelkasten/
     models/
     wd-tags/
     ui_cache/
+      thumbnails/
   logs/
     raw/
     structured/
@@ -88,7 +247,7 @@ The old Flet and PySide/PyQt UI paths are no longer active.
 ## Runtime Data Flow
 
 ```text
-local files / markdown URL queues / Tauri UI actions
+local files / native drag-drop / markdown URL queues / Tauri UI actions
         |
         v
 backend/core.py / backend/queue_service.py / backend/web_api.py
@@ -102,7 +261,7 @@ backend/processor.py
         |
         +--> MIME/extension validation
         +--> SHA256 hash
-        +--> duplicate checks
+        +--> duplicate checks, including pending review sidecars
         +--> pHash / video signatures
         +--> insert SQLite runtime metadata, including compact storage_id
         +--> copy original to sharded vault assets
@@ -112,6 +271,8 @@ backend/processor.py
         v
 data/vault/assets + data/vault/notes + data/db/lmz_main.db + data/wd-tags
 ```
+
+FastAPI startup hydrates the RAM search indexes from SQLite so UI-driven local ingest and review flows have the same duplicate-search baseline as CLI ingestion.
 
 ## Storage Model
 
@@ -198,7 +359,9 @@ Core API areas:
 - Logs: SSE streaming, log open, log clear, frontend UI log ingest.
 - Auth status: `/api/auth/scan` writes credential availability checks to `auth.jsonl`.
 - Queue ingestion: queue read/write/parse/open/retry/clear/start.
+- Local ingestion: local start/status/retry plus drag-drop preflight through `/api/local-ingest/drop-intake`.
 - Review workflow: review count, review item list, review actions.
+- Review cleanup: `/api/review/cleanup`.
 - Config: `/api/config`.
 
 Security and runtime constraints:
@@ -207,6 +370,7 @@ Security and runtime constraints:
 - The session key is stored under `secrets/.api_key`.
 - CORS is limited to local/Tauri origins.
 - Queue/log/review path inputs are allowlisted or root-checked.
+- Local drag-drop paths are preflighted by the backend before they are staged into Local Ingestion.
 - Blocking filesystem/SQLite work is routed through thread helpers on main API paths.
 - Static vault/review assets are served from local runtime folders.
 - Frontend API calls go through `frontend/src/lib/api.ts`.
@@ -225,7 +389,7 @@ Top-level structure:
 - `VaultGroupTile.svelte`: shared visual tile for grouped and single media.
 - `Inspector.svelte`: metadata, topics, WD tags, grouped navigation, tag/open/copy/save actions.
 - `MediaFocus.svelte`: wide/fullscreen media view, grouped navigation, filmstrip, fullscreen zoom/pan.
-- `Ingestion.svelte`: markdown queue editor and queue runner.
+- `Ingestion.svelte`: markdown queue editor, queue runner, local ingest staging, and drag-drop intake target.
 - `ReviewView.svelte`: duplicate/review workflow.
 - `StatsView.svelte`: facet-count browsing.
 - `LogsView.svelte`: structured/raw log viewer.
@@ -287,6 +451,7 @@ Vault commands:
 - `/toggle-inspector`
 - `/ram-track`
 - `/scan-auth`
+- `/cleanup-review`
 
 ## Vault Grouping
 
@@ -350,6 +515,8 @@ Refinement still expected:
 
 External ingestion is platform-aware and batch-safe for multi-media posts.
 
+Local ingestion stages files under `data/local_ingest/{run_id}/` before processing. Native drag/drop first calls the backend drop-intake preflight endpoint, then switches the UI to Local Ingestion with accepted paths staged for manual start. Re-dropping a file already pending in Review is guarded by the review sidecar hash and is reported as already pending instead of inserting or creating another review copy.
+
 Protected batch platforms:
 
 - Pixiv
@@ -367,6 +534,27 @@ Platform specifics:
 - Pinterest: count-only metadata; source URL identity remains exact.
 - X/Twitter: no metadata prefetch; original URL is preserved while gallery-dl receives its supported URL form.
 - YouTube community: extracts community image attachments and records per-image download failures.
+
+## Review Workflow
+
+Review quarantine stores the media file under `data/review/` plus a sidecar JSON file next to it.
+
+Sidecar responsibilities:
+
+- Preserve the original display name and source path.
+- Store pending/deferred/cleanup/resolved state.
+- Store duplicate evidence such as best match, pHash, distance, and conflict count.
+- Store `file_hash` so future ingests can detect files already pending review.
+
+Review list/count refresh is read-oriented and must not silently resolve pending sidecars just because a matching hash appears in SQLite. Resolved states are produced by explicit review actions or cleanup/reconciliation workflows, not by passive listing.
+
+Review actions:
+
+- `keep`: defer the item without DB ingest.
+- `delete`: remove review media and sidecar.
+- `variant`: ingest the review file as a new item and remove review source.
+- `replace`: ingest the review file, preserve manual metadata from the old target, then delete the old target.
+- cleanup retry: remove resolved/pending-cleanup review files and orphan sidecars where possible.
 
 ## External Authentication
 
