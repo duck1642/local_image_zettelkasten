@@ -214,6 +214,12 @@ VSCode-friendly test launchers:
   - batch launchers live under `tests/` for VSCode terminal use.
   - `source_url` and platform are read-only in Inspector; artist remains editable.
   - mock-vault tests cover artist edit refresh, source/platform read-only behavior, masonry stale-data prevention, fullscreen pan/backdrop behavior, review filename encoding, video path rendering, and RAM unavailable state.
+- Generated test-vault harness:
+  - deterministic generator lives under `tests/generators/`.
+  - generated vaults default to ignored `tests/generated/NNN-name/` folders.
+  - generated config, DB rows, notes, assets, thumbnails, review fixtures, logs, and manifest stay isolated.
+  - backend smoke tests validate generated vault consistency and `LMZ_CONFIG_PATH` isolation.
+  - Playwright generated-scale test covers generated manifest API mocks, filtering, layout switching, and synthetic video handling.
 
 ## Deferred / Will Do Later
 

@@ -85,6 +85,7 @@ def test_config_override_resolves_paths_inside_mock_vault(monkeypatch, tmp_path)
     assert utils.DB_PATH == tmp_path / "mock-vault" / "data" / "db" / "lmz_mock.db"
     assert utils.LOCAL_INGEST_DIR == tmp_path / "mock-vault" / "data" / "local_ingest"
     assert utils.ONLINE_INGEST_DIR == tmp_path / "mock-vault" / "data" / "online_ingest"
+    assert utils.THUMBNAILS_DIR == tmp_path / "mock-vault" / "data" / "ui_cache" / "thumbnails"
     assert str(ROOT / "data") not in str(utils.VAULT_DIR)
 
 

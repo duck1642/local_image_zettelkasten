@@ -1,0 +1,426 @@
+import argparse
+import hashlib
+import importlib
+import json
+import os
+import random
+import shutil
+import sqlite3
+import sys
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+import yaml
+
+
+ROOT = Path(__file__).resolve().parents[2]
+BACKEND = ROOT / "backend"
+DEFAULT_ROOT = ROOT / "tests" / "generated"
+FORBIDDEN_OUTPUTS = {
+    ROOT / "data",
+    ROOT / "config",
+    ROOT / "logs",
+    ROOT / "secrets",
+}
+LOG_FILES = [
+    "system.jsonl",
+    "auth.jsonl",
+    "review.jsonl",
+    "ingest_local.jsonl",
+    "ingest_online.jsonl",
+    "ingestion_audit.jsonl",
+]
+
+
+def _resolve(path: Path) -> Path:
+    return path.expanduser().resolve()
+
+
+def _slug(value: str) -> str:
+    cleaned = "".join(ch.lower() if ch.isalnum() else "-" for ch in value.strip())
+    return "-".join(part for part in cleaned.split("-") if part) or "vault"
+
+
+def _next_numbered_output(root: Path, name: str) -> Path:
+    root.mkdir(parents=True, exist_ok=True)
+    highest = 0
+    for child in root.iterdir():
+        if child.is_dir() and len(child.name) >= 3 and child.name[:3].isdigit():
+            highest = max(highest, int(child.name[:3]))
+    return root / f"{highest + 1:03d}-{_slug(name)}"
+
+
+def _is_relative_to(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        return False
+
+
+def _guard_output(output: Path, generated_root: Path, allow_outside_generated: bool):
+    output = _resolve(output)
+    generated_root = _resolve(generated_root)
+    forbidden = {_resolve(path) for path in FORBIDDEN_OUTPUTS}
+    if output == _resolve(ROOT):
+        raise SystemExit(f"Refusing dangerous output path: {output}")
+    if output in forbidden:
+        raise SystemExit(f"Refusing dangerous output path: {output}")
+    for path in forbidden:
+        if _is_relative_to(output, path):
+            raise SystemExit(f"Refusing output inside runtime path: {output}")
+    if not allow_outside_generated and not _is_relative_to(output, generated_root):
+        raise SystemExit(f"Output must be inside {generated_root}")
+
+
+def _write_yaml(path: Path, data: dict):
+    path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+
+def _hash_for(seed: int, index: int) -> str:
+    return hashlib.sha256(f"lmz-test-vault:{seed}:{index}".encode("utf-8")).hexdigest()
+
+
+def _storage_id(index: int) -> str:
+    return f"lmz{index:06d}"
+
+
+def _timestamp(index: int) -> str:
+    base = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    return (base + timedelta(seconds=index)).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _shard(item_hash: str) -> str:
+    return item_hash[:2]
+
+
+def _svg_bytes(label: str, width: int, height: int) -> bytes:
+    text = label[:24]
+    svg = (
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}">'
+        f'<rect width="100%" height="100%" fill="#1f2937"/>'
+        f'<rect x="16" y="16" width="{max(1, width - 32)}" height="{max(1, height - 32)}" fill="#334155"/>'
+        f'<text x="24" y="{max(40, height // 2)}" fill="#f8fafc" font-family="monospace" font-size="18">{text}</text>'
+        "</svg>"
+    )
+    return svg.encode("utf-8")
+
+
+def _frontmatter(item: dict, topics: list[str]) -> str:
+    data = {
+        "title": item["original_filename"],
+        "hash": item["hash"],
+        "storage_id": item["storage_id"],
+        "date_added": item["date_added"],
+        "platform": item["platform"],
+        "source_artist": item["artist"],
+        "source_url": item["source_url"],
+        "topics": topics,
+    }
+    return f"---\n{yaml.safe_dump(data, sort_keys=False)}---\n\nSynthetic test vault item.\n"
+
+
+def _config() -> dict:
+    return {
+        "external_tools": {
+            "cookies_path": "data/secrets/cookies.txt",
+            "proxy": "",
+            "user_agent": "LMZ generated test vault",
+        },
+        "firewall": {
+            "allowed_extensions": [".jpg", ".jpeg", ".png", ".gif", ".webp", ".jfif", ".mp4", ".webm", ".ogv"],
+            "allowed_mimes": ["image/jpeg", "image/png", "image/gif", "image/webp", "video/mp4", "video/webm", "video/ogg"],
+        },
+        "hash_algorithm": "sha256",
+        "ingestion_concurrency": {
+            "global_max_workers": 2,
+            "platforms": {"default": {"workers": 1, "jitter_range": [0, 0]}},
+        },
+        "log_level": "INFO",
+        "paths": {
+            "batches": "data/batches",
+            "db": "data/db/lmz_main.db",
+            "input": "data/input",
+            "local_ingest": "data/local_ingest",
+            "logs": "data/logs",
+            "models": "data/models",
+            "online_ingest": "data/online_ingest",
+            "queues": "data/queues",
+            "review": "data/review",
+            "secrets": "data/secrets",
+            "thumbnails": "data/ui_cache/thumbnails",
+            "vault": "data/vault",
+            "wd_tags": "data/wd-tags",
+        },
+        "processing": {
+            "background_preset": "white",
+            "custom_color": [255, 255, 255],
+            "flatten_transparency": True,
+        },
+        "tagging": {
+            "device": "cpu",
+            "display_source": "yaml",
+            "enabled": False,
+            "fail_ingestion_on_error": False,
+            "max_tags": 5,
+            "model_repo": "mock/model",
+            "threshold": 0.35,
+            "video": {
+                "enabled": False,
+                "frame_count": 1,
+                "merge_high_confidence": 0.75,
+                "merge_min_frames": 1,
+            },
+        },
+        "ui": {
+            "inspector_visible": True,
+            "inspector_width": 360,
+            "ram_track_enabled": False,
+            "vault_layout_mode": "masonry",
+            "vault_tile_min_width": 190,
+        },
+    }
+
+
+def _reset_backend_modules():
+    for name in list(sys.modules):
+        if name in {"utils", "metadata_index", "md_generator", "thumbnails"} or name.startswith(("db.", "logger", "tagging")):
+            del sys.modules[name]
+
+
+def _init_database(config_path: Path):
+    os.environ["LMZ_CONFIG_PATH"] = str(config_path)
+    if str(BACKEND) not in sys.path:
+        sys.path.insert(0, str(BACKEND))
+    _reset_backend_modules()
+    sqlite_operator = importlib.import_module("db.sqlite_operator")
+    conn = sqlite_operator.init_database()
+    conn.close()
+
+
+def _insert_rows(db_path: Path, rows: list[dict]):
+    conn = sqlite3.connect(db_path)
+    conn.executemany(
+        """
+        INSERT INTO items(
+            hash, original_filename, file_extension, mime_type, size_bytes,
+            date_added, source_url, source_url_norm, platform, source_artist,
+            phash, audio_hash, visual_embedding, width, height, storage_id
+        )
+        VALUES (
+            :hash, :original_filename, :file_extension, :mime_type, :size_bytes,
+            :date_added, :source_url, :source_url_norm, :platform, :artist,
+            :phash, NULL, NULL, :width, :height, :storage_id
+        )
+        """,
+        rows,
+    )
+    conn.execute(
+        """
+        INSERT INTO storage_id_counter(id, next_value)
+        VALUES (1, ?)
+        ON CONFLICT(id) DO UPDATE SET next_value = excluded.next_value
+        """,
+        (len(rows) + 1,),
+    )
+    conn.commit()
+    conn.close()
+
+
+def _write_review_fixture(output: Path, index: int, item: dict):
+    review_dir = output / "data" / "review"
+    review_dir.mkdir(parents=True, exist_ok=True)
+    suffix = ".mp4" if item["mime_type"].startswith("video/") else ".jpg"
+    media_name = f"review_{index:04d}{suffix}"
+    media_path = review_dir / media_name
+    media_path.write_bytes(b"lmz synthetic review video" if suffix == ".mp4" else _svg_bytes(media_name, 320, 240))
+    sidecar = {
+        "status": "pending",
+        "reason": "synthetic_review",
+        "original_path": str(media_path),
+        "file_hash": item["hash"],
+        "storage_id": item["storage_id"],
+        "metadata": {
+            "source_url": item["source_url"],
+            "platform": item["platform"],
+            "source_artist": item["artist"],
+        },
+    }
+    (review_dir / f"{media_name}.json").write_text(json.dumps(sidecar, indent=2), encoding="utf-8")
+
+
+def generate_vault(args: argparse.Namespace) -> Path:
+    generated_root = _resolve(args.generated_root)
+    output = _resolve(args.output) if args.output else _next_numbered_output(generated_root, args.name)
+    _guard_output(output, generated_root, args.allow_outside_generated)
+    if output.exists():
+        if not args.force:
+            raise SystemExit(f"Output exists; pass --force to overwrite: {output}")
+        shutil.rmtree(output)
+    output.mkdir(parents=True)
+
+    config_path = output / "config.yaml"
+    _write_yaml(config_path, _config())
+
+    data_dir = output / "data"
+    assets_dir = data_dir / "vault" / "assets"
+    notes_dir = data_dir / "vault" / "notes"
+    thumbs_dir = data_dir / "ui_cache" / "thumbnails"
+    logs_dir = data_dir / "logs"
+    for directory in [
+        data_dir / "db",
+        assets_dir,
+        notes_dir,
+        thumbs_dir,
+        data_dir / "review",
+        logs_dir / "raw",
+        logs_dir / "structured",
+        data_dir / "queues",
+        data_dir / "input",
+        data_dir / "local_ingest",
+        data_dir / "online_ingest",
+        data_dir / "secrets",
+        data_dir / "wd-tags",
+    ]:
+        directory.mkdir(parents=True, exist_ok=True)
+
+    _init_database(config_path)
+
+    for filename in LOG_FILES:
+        (logs_dir / "structured" / filename).touch()
+    (logs_dir / "raw" / "terminal.log").touch()
+
+    rng = random.Random(args.seed)
+    platforms = [value.strip() for value in args.platforms.split(",") if value.strip()]
+    platform_count = max(1, len(platforms))
+    topic_count = max(1, args.topics)
+    artist_count = max(1, args.artists)
+    group_count = max(1, args.groups)
+    rows = []
+    items = []
+
+    for index in range(args.items):
+        ordinal = index + 1
+        item_hash = _hash_for(args.seed, ordinal)
+        storage_id = _storage_id(ordinal)
+        is_video = rng.random() < args.video_ratio
+        ext = ".mp4" if is_video else ".jpg"
+        mime_type = "video/mp4" if is_video else "image/jpeg"
+        width = 640 + (index % 5) * 80
+        height = 360 + (index % 7) * 40
+        group_id = index % group_count
+        platform = platforms[index % platform_count]
+        artist = f"artist-{index % artist_count:03d}"
+        topics = [f"topic-{(index + offset) % topic_count:03d}" for offset in range(1 + (index % min(3, topic_count)))]
+        source_url = f"https://synthetic.local/group/{group_id:06d}"
+        original_filename = f"{storage_id}{ext}"
+        date_added = _timestamp(index)
+        row = {
+            "hash": item_hash,
+            "storage_id": storage_id,
+            "original_filename": original_filename,
+            "file_extension": ext,
+            "mime_type": mime_type,
+            "size_bytes": 24 if is_video else len(_svg_bytes(storage_id, width, height)),
+            "date_added": date_added,
+            "source_url": source_url,
+            "source_url_norm": source_url.rstrip("/").lower(),
+            "platform": platform,
+            "artist": artist,
+            "phash": f"{index:016x}"[-16:],
+            "width": width,
+            "height": height,
+        }
+        rows.append(row)
+
+        shard = _shard(item_hash)
+        asset_path = assets_dir / shard / original_filename
+        note_path = notes_dir / shard / f"{storage_id}.md"
+        thumb_path = thumbs_dir / shard / f"{storage_id}{'_video' if is_video else ''}.jpg"
+        asset_path.parent.mkdir(parents=True, exist_ok=True)
+        note_path.parent.mkdir(parents=True, exist_ok=True)
+        thumb_path.parent.mkdir(parents=True, exist_ok=True)
+        asset_path.write_bytes(b"lmz synthetic video placeholder" if is_video else _svg_bytes(storage_id, width, height))
+        note_path.write_text(_frontmatter(row, topics), encoding="utf-8")
+        thumb_path.write_bytes(_svg_bytes(f"thumb-{storage_id}", 320, 240))
+
+        items.append({
+            "hash": item_hash,
+            "storage_id": storage_id,
+            "artist": artist,
+            "platform": platform,
+            "source_url": source_url,
+            "date_added": date_added,
+            "mime_type": mime_type,
+            "extension": ext,
+            "original_filename": original_filename,
+            "width": width,
+            "height": height,
+            "topics": topics,
+            "url": f"/vault/{shard}/{original_filename}",
+            "thumbnail_url": f"/api/thumbnails/{item_hash}",
+        })
+
+    _insert_rows(output / "data" / "db" / "lmz_main.db", rows)
+
+    for index, item in enumerate(items[: max(0, args.review)], start=1):
+        _write_review_fixture(output, index, item)
+
+    manifest = {
+        "generator": "generate_test_vault.py",
+        "version": 1,
+        "seed": args.seed,
+        "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+        "config_path": "config.yaml",
+        "db_path": "data/db/lmz_main.db",
+        "counts": {
+            "items": args.items,
+            "videos": sum(1 for item in items if item["mime_type"].startswith("video/")),
+            "images": sum(1 for item in items if item["mime_type"].startswith("image/")),
+            "review": max(0, args.review),
+            "groups": group_count,
+            "artists": artist_count,
+            "topics": topic_count,
+        },
+        "items": items,
+    }
+    (output / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    return output
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Generate an isolated LMZ synthetic test vault")
+    parser.add_argument("--name", default="vault", help="Name suffix for auto-numbered output")
+    parser.add_argument("--output", type=Path, help="Explicit output path")
+    parser.add_argument("--generated-root", type=Path, default=DEFAULT_ROOT, help="Generated vault root")
+    parser.add_argument("--items", type=int, default=1000)
+    parser.add_argument("--groups", type=int, default=100)
+    parser.add_argument("--review", type=int, default=10)
+    parser.add_argument("--video-ratio", type=float, default=0.1)
+    parser.add_argument("--artists", type=int, default=50)
+    parser.add_argument("--platforms", default="pixiv,x,instagram,local")
+    parser.add_argument("--topics", type=int, default=25)
+    parser.add_argument("--seed", type=int, default=123)
+    parser.add_argument("--force", action="store_true")
+    parser.add_argument("--allow-outside-generated", action="store_true")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if args.items < 1 or args.items > 100_000:
+        parser.error("--items must be between 1 and 100000")
+    if args.groups < 1:
+        parser.error("--groups must be at least 1")
+    if args.review < 0:
+        parser.error("--review must be non-negative")
+    if args.video_ratio < 0 or args.video_ratio > 1:
+        parser.error("--video-ratio must be between 0 and 1")
+    output = generate_vault(args)
+    print(output)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -53,6 +53,7 @@ BATCHES_DIR = _resolve_path('batches', "data/batches")
 SECRETS_DIR = _resolve_path('secrets', "secrets")
 MODELS_DIR = _resolve_path('models', "data/models")
 WD_TAGS_DIR = _resolve_path('wd_tags', "data/wd-tags")
+THUMBNAILS_DIR = _resolve_path('thumbnails', "data/ui_cache/thumbnails")
 
 OUTPUT_DIR = VAULT_DIR
 ASSETS_DIR = OUTPUT_DIR / "assets"
@@ -121,6 +122,7 @@ def setup_directories():
         BATCHES_DIR,
         MODELS_DIR,
         WD_TAGS_DIR,
+        THUMBNAILS_DIR,
         OUTPUT_DIR,
         ASSETS_DIR,
         NOTES_DIR,
@@ -194,6 +196,7 @@ def _default_config() -> dict:
             'secrets': str(SECRETS_DIR),
             'models': str(MODELS_DIR),
             'wd_tags': str(WD_TAGS_DIR),
+            'thumbnails': str(THUMBNAILS_DIR),
         },
         'ui': {
             'vault_layout_mode': 'masonry',

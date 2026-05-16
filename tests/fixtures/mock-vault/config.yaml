@@ -40,6 +40,7 @@ paths:
   queues: data/queues
   review: data/review
   secrets: data/secrets
+  thumbnails: data/ui_cache/thumbnails
   vault: data/vault
   wd_tags: data/wd-tags
 processing:

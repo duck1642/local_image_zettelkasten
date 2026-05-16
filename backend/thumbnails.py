@@ -4,9 +4,9 @@ from pathlib import Path
 
 from PIL import Image
 from logger import log_system
-from utils import PROJECT_ROOT, asset_path_for, require_storage_id, storage_shard_for_hash
+from utils import THUMBNAILS_DIR, asset_path_for, require_storage_id, storage_shard_for_hash
 
-THUMBNAIL_DIR = PROJECT_ROOT / "data" / "ui_cache" / "thumbnails"
+THUMBNAIL_DIR = THUMBNAILS_DIR
 TARGET_WIDTH = 600
 MAX_HEIGHT = 800
 JPEG_QUALITY = 80
