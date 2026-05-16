@@ -74,11 +74,41 @@ def _move_to_review(filepath: Path, file_hash: str, metadata: dict, sidecar_fiel
         "state": "pending",
         "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         "metadata": metadata,
+        "file_hash": file_hash,
         **sidecar_fields,
     }
     with open(sidecar_path, 'w', encoding='utf-8') as f:
         json.dump(sidecar, f, indent=4, ensure_ascii=False)
     return dest_path
+
+def _pending_review_match(file_hash: str) -> dict | None:
+    if not file_hash or not REVIEW_DIR.exists():
+        return None
+    pending_states = {"", "pending", "deferred"}
+    for sidecar_path in REVIEW_DIR.glob("*.json"):
+        try:
+            sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if not isinstance(sidecar, dict):
+            continue
+        state = str(sidecar.get("state") or "pending").strip().lower()
+        if state not in pending_states:
+            continue
+        review_hash = str(sidecar.get("file_hash") or "").strip()
+        media_path = sidecar_path.with_suffix("")
+        if not review_hash and media_path.exists():
+            try:
+                review_hash = calculate_file_hash(media_path)
+            except Exception:
+                review_hash = ""
+        if review_hash == file_hash:
+            return {
+                "filename": sidecar.get("storage_name") or media_path.name,
+                "original_name": sidecar.get("original_name") or media_path.name,
+                "state": state or "pending",
+            }
+    return None
 
 def calculate_tiles(filepath: Path, ratio_threshold: float = 3.0) -> list:
 
@@ -229,6 +259,17 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
         return False, f"Invalid extension: {filepath.suffix}", None
 
     file_hash = calculate_file_hash(filepath)
+    pending_review = _pending_review_match(file_hash)
+    if pending_review:
+        log_system(
+            "INFO",
+            "Skipped: Already pending review",
+            hash=file_hash,
+            file=filepath.name,
+            review_file=pending_review.get("filename") or "",
+        )
+        return False, f"Already pending review: {file_hash[:8]}...", None
+
     conn = connect_database()
     if check_duplicate_hash(conn, file_hash):
         conn.close()

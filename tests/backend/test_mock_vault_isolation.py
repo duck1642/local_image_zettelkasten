@@ -108,6 +108,48 @@ def test_review_cleanup_state_and_orphan_sidecar(monkeypatch, tmp_path):
     assert not orphan.exists()
 
 
+def test_web_api_startup_hydrates_search_manager(monkeypatch, tmp_path):
+    (web_api,) = fresh_backend(monkeypatch, tmp_path, "web_api")
+    calls = []
+
+    class FakeConnection:
+        def close(self):
+            calls.append("close")
+
+    class FakeSearchManager:
+        def hydrate(self, conn):
+            calls.append(("hydrate", conn))
+
+    fake_conn = FakeConnection()
+    monkeypatch.setattr(web_api, "init_database", lambda: fake_conn)
+    monkeypatch.setattr(web_api, "search_manager", FakeSearchManager())
+
+    asyncio.run(web_api.startup_search_index())
+
+    assert calls == [("hydrate", fake_conn), "close"]
+
+
+def test_review_listing_does_not_auto_resolve_pending_db_hash(monkeypatch, tmp_path):
+    web_api, utils, sqlite_operator = fresh_backend(monkeypatch, tmp_path, "web_api", "utils", "db.sqlite_operator")
+    item_hash = "1" * 64
+    conn = insert_mock_item(sqlite_operator, item_hash)
+    conn.close()
+
+    review_file = utils.REVIEW_DIR / "pending_same_hash.jpg"
+    review_file.parent.mkdir(parents=True, exist_ok=True)
+    review_file.write_bytes(b"review")
+    sidecar = review_file.with_suffix(".jpg.json")
+    sidecar.write_text(json.dumps({"state": "pending", "file_hash": item_hash, "original_name": "pending_same_hash.jpg"}), encoding="utf-8")
+
+    items = web_api._get_review_items_sync()
+    saved = json.loads(sidecar.read_text(encoding="utf-8"))
+    target = next(item for item in items if item["filename"] == review_file.name)
+
+    assert target["state"] == "pending"
+    assert saved["state"] == "pending"
+    assert "last_action" not in saved
+
+
 def test_local_ingest_state_guards_and_result_cap(monkeypatch, tmp_path):
     (web_api,) = fresh_backend(monkeypatch, tmp_path, "web_api")
 
@@ -367,6 +409,69 @@ def test_processor_uses_atomic_markdown_writes(monkeypatch, tmp_path):
     assert "with open(md_path" not in source
 
 
+def test_processor_skips_file_already_pending_review(monkeypatch, tmp_path):
+    utils, processor = fresh_backend(monkeypatch, tmp_path, "utils", "processor")
+    source = tmp_path / "pending.webp"
+    source.write_bytes(b"pending review bytes")
+    file_hash = utils.calculate_file_hash(source)
+    review_file = utils.REVIEW_DIR / "queued.webp"
+    review_file.parent.mkdir(parents=True, exist_ok=True)
+    review_file.write_bytes(b"existing review bytes")
+    review_file.with_suffix(".webp.json").write_text(
+        json.dumps({"state": "pending", "file_hash": file_hash, "original_name": "pending.webp"}),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(processor, "get_mime_type", lambda path: "image/webp")
+
+    ok, message, idx_data = processor.process_file(
+        source,
+        {"firewall": {"allowed_mimes": ["image/webp"], "allowed_extensions": ["webp"]}},
+    )
+
+    assert not ok
+    assert message.startswith("Already pending review")
+    assert idx_data is None
+
+
+def test_pending_review_guard_blocks_reingest_after_restart(monkeypatch, tmp_path):
+    utils, sqlite_operator, processor = fresh_backend(monkeypatch, tmp_path, "utils", "db.sqlite_operator", "processor")
+    existing_hash = "2" * 64
+    reingest_source = tmp_path / "9ypbteld4je61.webp"
+    reingest_source.write_bytes(b"same webp bytes")
+    review_hash = utils.calculate_file_hash(reingest_source)
+    conn = insert_mock_item(sqlite_operator, existing_hash)
+    conn.close()
+
+    review_file = utils.REVIEW_DIR / "pending_9ypbteld4je61.webp"
+    review_file.parent.mkdir(parents=True, exist_ok=True)
+    review_file.write_bytes(b"same webp bytes")
+    review_file.with_suffix(".webp.json").write_text(
+        json.dumps({
+            "state": "pending",
+            "file_hash": review_hash,
+            "phash": "deb02d123d1f218f",
+            "best_match": existing_hash,
+        }),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(processor, "get_mime_type", lambda path: "image/webp")
+
+    ok, message, _ = processor.process_file(
+        reingest_source,
+        {"firewall": {"allowed_mimes": ["image/webp"], "allowed_extensions": ["webp"]}},
+    )
+
+    conn = sqlite_operator.init_database()
+    row = conn.execute("SELECT 1 FROM items WHERE hash = ?", (review_hash,)).fetchone()
+    conn.close()
+
+    assert not ok
+    assert message.startswith("Already pending review")
+    assert row is None
+
+
 def test_ingest_seeds_markdown_artist_from_metadata_and_reindexes(monkeypatch, tmp_path):
     utils, sqlite_operator, processor = fresh_backend(monkeypatch, tmp_path, "utils", "db.sqlite_operator", "processor")
     item_hash = "5" * 64
@@ -382,6 +487,7 @@ def test_ingest_seeds_markdown_artist_from_metadata_and_reindexes(monkeypatch, t
     monkeypatch.setattr(processor, "calculate_phash", lambda path: None)
     monkeypatch.setattr(processor, "calculate_tiles", lambda path: [])
     monkeypatch.setattr(processor, "tag_media", lambda *args, **kwargs: TagResult())
+    monkeypatch.setattr(processor, "_pending_review_match", lambda file_hash: None)
 
     ok, _, idx_data = processor.process_file(
         source,

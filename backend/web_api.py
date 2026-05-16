@@ -20,6 +20,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from db.sqlite_operator import init_database, normalize_source_url
+from db.search_manager import search_manager
 from utils import (
     get_config, ASSETS_DIR, REVIEW_DIR, LOCAL_INGEST_DIR, note_path_for,
     asset_path_for, calculate_file_hash, asset_url_for, wd_tag_cache_path_for
@@ -189,6 +190,16 @@ async def startup_metadata_index():
         except Exception as exc:
             log_system("WARNING", "Metadata index repair startup failed", error=str(exc))
     await asyncio.to_thread(start_services)
+
+@app.on_event("startup")
+async def startup_search_index():
+    def hydrate_search_index():
+        conn = init_database()
+        try:
+            search_manager.hydrate(conn)
+        finally:
+            conn.close()
+    await asyncio.to_thread(hydrate_search_index)
 
 def _api_key_path() -> Path:
     return SECRETS_DIR / ".api_key"
@@ -1716,6 +1727,8 @@ def _run_local_ingest_worker(raw_paths: list[str], defaults: dict, skip_similari
                     status = "ingested"
                 elif "moved to review" in message.lower():
                     status = "review"
+                elif message.lower().startswith("already pending review"):
+                    status = "duplicate"
                 elif message.lower().startswith("duplicate ignored"):
                     status = "duplicate"
                 else:
@@ -1905,17 +1918,8 @@ def _resolve_review_entries() -> list[dict]:
             }
         )
 
-    present_hashes = _review_db_has_hashes(
-        [str(entry["sidecar"].get("file_hash") or "") for entry in entries]
-    )
-
     for entry in entries:
         sidecar = entry["sidecar"]
-        file_hash = str(sidecar.get("file_hash") or "")
-        if file_hash and file_hash in present_hashes and entry["state"] in REVIEW_PENDING_STATES:
-            _set_review_state(sidecar, "resolved_variant", action=sidecar.get("last_action") or "reconciled")
-            entry["state"] = "resolved_variant"
-            entry["changed"] = True
         if entry["changed"]:
             try:
                 _write_review_sidecar(entry["path"], sidecar)

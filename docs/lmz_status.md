@@ -217,61 +217,111 @@ VSCode-friendly test launchers:
 
 ## Deferred / Will Do Later
 
-- Set 6 security hardening:
+### Phase A - Stability V1
+
+- Big-vault mock testing:
+  - deterministic generated test-vault tool.
+  - generate isolated config, SQLite DB, assets, notes, thumbnails, and review fixtures.
+  - support configurable size/composition: item count, source URL groups, image/video mix, review count, duplicate/similar pairs, metadata facets.
+  - write only to explicit test/temp output paths and use `LMZ_CONFIG_PATH`; never mutate the real vault by default.
+  - initial version can use lightweight placeholder media; expand later for large-vault/performance scenarios.
+- Logging stability:
+  - verify App Logs dropdown/live stream for system, auth, review, local ingest, online ingest, and audit streams.
+  - keep log streams predictable and avoid silent failures or spam loops.
+- Dependency maintenance:
+  - add a simple check/update path for `gallery-dl`, `yt-dlp`, Playwright browsers, and other critical runtime dependencies.
+  - prefer CLI/maintenance tool first; UI wiring can follow.
+- Critical maintenance tools UI:
+  - wire auth cookies builder/status and Pixiv auth scripts into the UI.
+  - current CLI-only scripts:
+    - `backend/scripts/auth_cookies_builder.py`.
+    - `backend/scripts/auth_pixiv_auto.py`.
+  - goal: manage authentication directly from the desktop application without dropping into the terminal.
+  - expose metadata index rebuild, thumbnail repair, review cleanup, and dependency check/update where practical.
+- Security hardening:
   - local API auth/origin/path review.
   - mutating endpoint protection pass.
   - secrets/runtime exposure review.
   - packaging-time security checks.
-- Set 7 Tauri/runtime stabilization:
+- Tauri/runtime stabilization:
   - sidecar startup/shutdown lifecycle.
   - dynamic port/runtime coordination.
   - production path/config validation.
   - clean-machine package validation.
   - full Tauri stack alignment pass.
-- Dynamic sidecar port binding; current port remains `8000`.
-- Custom context menu for vault tiles.
-- Interactive tag management in inspector.
-- Native drag-and-drop import.
-  - Scope: enabled only in Vault and Local Ingestion panels.
-  - UX: dim-background drop overlay with text feedback.
-  - Flow: drop switches to Local Ingestion panel; user reviews options and starts manually.
-  - Runtime guard: if local ingestion is already running, new drops are blocked.
-  - Folder drops: recurse subfolders.
-  - Filtering: prefilter by configured `firewall.allowed_extensions`; backend MIME/extension checks remain authoritative.
-  - Limits: no drop-size/drop-count cap in v1.
-  - Logging: route drop session events through local ingestion logs.
-  - Failure policy: partial success (accept valid paths, skip/report failures).
-- Animation-aware GIF handling beyond first-frame thumbnail/tag behavior.
-- Artist grouping.
-- In-memory facet cache for faster topic/WD counts.
-- Persistent search index/facet tables beyond current derived metadata index.
-- Search chips.
-- Search/index scaling:
-  - RAM hydration still bulk-loads pHash, tile, URL, and video signatures.
-- Config caching:
-  - `get_config()` still reparses YAML often.
-  - safe invalidation is needed before broad caching.
-- Video embedding performance:
-  - sampled frame extraction now uses one FFmpeg subprocess per batch.
-  - embedding/tagging still depends on extracting sampled original video frames.
-- Video hover preview strategy:
-  - current hover preview can download original video.
-  - options: file-size cap, backend preview clip endpoint, animated WebP thumbnail.
-- YouTube community partial policy:
-  - one failed expected image can still keep the post retryable.
-- Source URL normalization migration:
+  - dynamic sidecar port binding; current port remains `8000`.
+- Runtime cleanup:
+  - Config caching:
+    - `get_config()` still reparses YAML often.
+    - safe invalidation is needed before broad caching.
+  - Timestamp consistency:
+    - local Python timestamps and SQLite UTC defaults still coexist.
+  - Thumbnail helper cleanup:
+    - small asset-path helper duplication remains.
+  - Tauri package alignment:
+    - frontend `@tauri-apps/api` is pinned to `2.10.1` to match Rust `tauri 2.10.x`.
+    - full Tauri stack upgrade to `2.11.x` is deferred.
+
+### Phase B - Knowledge Tools
+
+- Artist database:
+  - artist grouping.
+  - artist aliases/platform handles/source links/counts.
+  - workflows that make artist maintenance easier during normal vault use.
+- Tag/topic workflows:
+  - fast and trustworthy WD tag counts and topic counts.
+  - in-memory facet cache or equivalent faster count path if current index is not enough.
+  - promote WD tag to manual topic.
+  - WD tag maintenance: delete, rename, hide/ignore, and later merge.
+  - interactive tag management in Inspector.
+- Search/index improvements:
+  - persistent search/facet tables beyond current derived metadata index if needed for scale.
+  - search chips.
+  - Search/index scaling:
+    - RAM hydration still bulk-loads pHash, tile, URL, and video signatures.
+- Source metadata maintenance:
+  - source URL normalization migration tool.
   - normalization is active in runtime paths (`source_url_norm` is written on ingest/update).
   - existing rows are backfilled lazily by `init_database()`.
   - no standalone migration/maintenance tool exists yet.
-- Timestamp consistency:
-  - local Python timestamps and SQLite UTC defaults still coexist.
-- Thumbnail helper cleanup:
-  - small asset-path helper duplication remains.
-- Tauri package alignment:
-  - frontend `@tauri-apps/api` is pinned to `2.10.1` to match Rust `tauri 2.10.x`.
-  - full Tauri stack upgrade to `2.11.x` is deferred.
-- Maintenance Tools UI Integration 
-  - The current maintenance scripts for capturing cookies (`backend/scripts/auth_cookies_builder.py`) and authenticating with Pixiv (`backend/scripts/auth_pixiv_auto.py`) only run in the CLI. These need to be connected to the Svelte UI so users can manage authentication directly from the desktop application without dropping into the terminal.
+
+### Phase C - Vault Ops
+
+- Multiple vault support:
+  - support switching/selecting vault configs for testing and normal usage.
+  - keep vaults isolated through config/runtime roots.
+  - merge/split/separate vault operations are useful later but should not be rushed.
+- Vault health/maintenance:
+  - orphan/ghost checks.
+  - backup/export/import flows.
+  - periodic SHA256 re-verification.
+
+### Phase D - UI Polish
+
+- Review panel design refinement.
+- Fullscreen board/view refinements.
+- Inspector polish and better tag workflows.
+- Custom context menu for vault tiles.
+- Animation-aware GIF handling beyond first-frame thumbnail/tag behavior.
+- Video hover preview strategy:
+  - current hover preview can download original video.
+  - options: file-size cap, backend preview clip endpoint, animated WebP thumbnail.
+- Video embedding performance:
+  - sampled frame extraction now uses one FFmpeg subprocess per batch.
+  - embedding/tagging still depends on extracting sampled original video frames.
+
+### Phase E - Browser Extension
+
+- Browser extension integration:
+  - Chromium-based browsers first: Edge/Chrome.
+  - Firefox after the Chromium flow is stable.
+  - capture URLs/media from the active page and send them to the LMZ queue/API.
+  - handle API/session auth and local backend targeting carefully.
+
+### Longer-Term Platform Gaps
+
+- YouTube community partial policy:
+  - one failed expected image can still keep the post retryable.
 
 ## Done But Needs Check
 
@@ -368,6 +418,23 @@ VSCode-friendly test launchers:
   - `variant` ingests once and removes review source.
   - variant failure returns non-2xx and keeps item pending.
   - real image/video review pairs render in both panes.
+- Review/search-index regression fix:
+  - FastAPI startup hydrates `search_manager` from SQLite, matching CLI startup behavior.
+  - pending/deferred review sidecars guard against re-ingesting the same file hash.
+  - new review sidecars store `file_hash` immediately.
+  - Review list/count refresh no longer auto-marks pending items as `resolved_variant` just because their hash appears in DB.
+  - no automatic repair was performed for the existing accidental WebP vault row or resolved sidecar.
+  - validation passed:
+    - backend mock-vault pytest: `54 passed`.
+    - frontend type/Svelte check passes.
+    - backend AST/import checks pass.
+    - `git diff --check` passes.
+  - needs real-vault drag-drop/restart/re-ingest smoke:
+    - restart backend/Tauri after a pending review item exists.
+    - re-drop the same folder.
+    - confirm existing DB duplicates are skipped.
+    - confirm the pending-review file reports as already pending review.
+    - confirm Review panel does not silently mark it `resolved_variant`.
 - Review Windows file-lock edge case:
   - cleanup failures should remain visible as `pending_cleanup`.
   - Cleanup section should retry them.
@@ -456,26 +523,7 @@ VSCode-friendly test launchers:
 
 ## Current Issues
 
-- Review/search-index regression found during native drag-drop real-vault smoke:
-  - Scenario:
-    - First local folder ingest correctly quarantined `9ypbteld4je61.webp` as a visual match against `9ypbteld4je61.png`.
-    - Backend restarted before the same folder was ingested again.
-    - Second local ingest skipped exact-hash duplicate PNG rows, but ingested the pending-review WebP as a new vault item.
-    - Review API reconciliation then marked the existing review sidecar `resolved_variant`, hiding it from the default Review panel while the media file and JSON sidecar remained in `data/review/`.
-  - Observed evidence:
-    - PNG hash `174de9316d4e535bec091219a0dcf23e10da8c10fa25ccc4afb596b5ffbb7bea`.
-    - WebP hash `863b9cace190c3922a62e87e11da76730391badc2bc3dcb1011f4d00501ce9f2`.
-    - Both DB rows now have identical pHash `deb02d123d1f218f`.
-    - Review sidecar state became `resolved_variant` with `last_action: reconciled`.
-  - Likely cause:
-    - `core.py` hydrates `search_manager`, but FastAPI startup in `backend/web_api.py` does not hydrate the RAM pHash/video/search indexes.
-    - After backend restart, local ingest can run with an empty/stale RAM similarity index.
-    - Exact duplicate skips do not repair/re-add existing DB pHashes to the RAM index.
-    - Ingest does not currently check pending review sidecars before processing a file hash.
-  - Desired fix direction:
-    - Hydrate `search_manager` on FastAPI startup.
-    - Add a pending-review hash guard before normal local ingest inserts/quarantines, returning an "already pending review" style result.
-    - Decide resolved-review UX: show resolved/cleanup state clearly or make cleanup explicit; avoid silently hiding files that still exist in `data/review/`.
+- No active low-level backend inconsistency batch after review/search-index regression fix.
 
 ## Issue Remediation Plan
 
@@ -487,7 +535,7 @@ VSCode-friendly test launchers:
 
 ### Recommended Fix Batches
 
-1. Fix review/search-index regression from drag-drop real-vault smoke.
+1. Real-vault drag-drop/restart/re-ingest smoke for review/search-index regression fix.
 2. Architecture/status docs drift review.
 3. Real-vault corrupt-media/log smoke for P3.
 4. Real-vault validation of remaining P0/P1/P2 smoke items.
