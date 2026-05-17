@@ -1,4 +1,4 @@
-# LMZ Current Status
+  # LMZ Current Status
 
 Last updated: 2026-05-13
 
@@ -221,72 +221,55 @@ VSCode-friendly test launchers:
   - backend smoke tests validate generated vault consistency and `LMZ_CONFIG_PATH` isolation.
   - Playwright generated-scale test covers generated manifest API mocks, filtering, layout switching, and synthetic video handling.
 
+## Current Test Results
+
+### Phase A Generated-Vault Performance Findings
+
+- Completed real generated-vault runs:
+  - `800`: backend/index/API plus headed Tauri WebView scrolling.
+  - `10k`: backend/index/API plus headed Tauri WebView scrolling.
+  - `50k`: backend/index/API plus headed Tauri WebView scrolling.
+  - `100k`: skipped for now because `50k` exposed the scale costs clearly.
+- Frontend scrolling / virtualization:
+  - headed Tauri scroll tests passed at `10k` and `50k`.
+  - visible tile counts stayed bounded (`50-54` masonry, `36` grid).
+  - mounted video counts stayed bounded (`7` at `10k`, `2` at `50k` in sampled scroll/filter paths).
+  - frontend heap stayed low (`~9.4 MB` at `10k`, `~7.4 MB` at `50k` after video filter).
+  - current evidence points away from scrolling as the primary bottleneck.
+- Backend/API scale:
+  - normal `10k` endpoint p50s were mostly `31-50ms`.
+  - normal `50k` endpoint p50s were mostly `129-252ms`.
+  - topic/facet-heavy paths are the slowest normal API paths.
+- RAM:
+  - backend memory remained stable enough for these profiles (`~76 MB` at `800`, `~85 MB` at `10k`, `~125 MB` during `50k` Tauri run).
+  - no RAM explosion observed.
+- Primary bottlenecks:
+  - full metadata index rebuild scales linearly and is expensive (`~5s` at `800`, `~78s` at `10k`, `~388s` at `50k`).
+  - `/api/metadata-index/status` is too expensive at scale (`~95ms` p50 at `800`, `~1.2s` at `10k`, `~6.7s` at `50k`).
+- Next optimization targets:
+  - inspect/optimize metadata index rebuild loop.
+  - make metadata index status cheap or cached.
+  - profile topic/facet query paths.
+  - rerun `100k` only after the above improvements.
+
 ## Deferred / Will Do Later
 
 ### Phase A - Stability V1
 
-- Big-vault mock testing:
-  - deterministic generated test-vault tool.
-  - generate isolated config, SQLite DB, assets, notes, thumbnails, and review fixtures.
-  - support configurable size/composition: item count, source URL groups, image/video mix, review count, duplicate/similar pairs, metadata facets.
-  - write only to explicit test/temp output paths and use `LMZ_CONFIG_PATH`; never mutate the real vault by default.
-  - initial version can use lightweight placeholder media; expand later for large-vault/performance scenarios.
-- Logging stability:
-  - verify App Logs dropdown/live stream for system, auth, review, local ingest, online ingest, and audit streams.
-  - keep log streams predictable and avoid silent failures or spam loops.
-- Dependency maintenance:
-  - add a simple check/update path for `gallery-dl`, `yt-dlp`, Playwright browsers, and other critical runtime dependencies.
-  - prefer CLI/maintenance tool first; UI wiring can follow.
-- Critical maintenance tools UI:
-  - wire auth cookies builder/status and Pixiv auth scripts into the UI.
-  - current CLI-only scripts:
-    - `backend/scripts/auth_cookies_builder.py`.
-    - `backend/scripts/auth_pixiv_auto.py`.
-  - goal: manage authentication directly from the desktop application without dropping into the terminal.
-  - expose metadata index rebuild, thumbnail repair, review cleanup, and dependency check/update where practical.
-- Security hardening:
-  - local API auth/origin/path review.
-  - mutating endpoint protection pass.
-  - secrets/runtime exposure review.
-  - packaging-time security checks.
-- Tauri/runtime stabilization:
-  - sidecar startup/shutdown lifecycle.
-  - dynamic port/runtime coordination.
-  - production path/config validation.
-  - clean-machine package validation.
-  - full Tauri stack alignment pass.
-  - dynamic sidecar port binding; current port remains `8000`.
-- Runtime cleanup:
-  - Config caching:
-    - `get_config()` still reparses YAML often.
-    - safe invalidation is needed before broad caching.
-  - Timestamp consistency:
-    - local Python timestamps and SQLite UTC defaults still coexist.
-  - Thumbnail helper cleanup:
-    - small asset-path helper duplication remains.
-  - Tauri package alignment:
-    - frontend `@tauri-apps/api` is pinned to `2.10.1` to match Rust `tauri 2.10.x`.
-    - full Tauri stack upgrade to `2.11.x` is deferred.
+- Current focus is scale performance from generated-vault testing:
+  - frontend scrolling/virtualization passed at `10k` and `50k`.
+  - backend RAM stayed stable through `50k`.
+  - metadata index rebuild and metadata index status are the measured bottlenecks.
+  - topic/facet-heavy query paths need profiling after index/status fixes.
 
 #### Phase A Implementation Batches
 
-- Batch 1 - Quick wins / low risk:
-  - fix stale `update_tools` wrapper.
-  - unify CLI dependency maintenance flow.
-  - expose existing maintenance actions in UI (`auth scan`, metadata rebuild, review cleanup).
-  - small thumbnail/helper cleanup.
-- Batch 2 - Runtime correctness layer:
-  - implement `get_config()` cache + safe invalidation.
-  - establish timestamp consistency policy (Python vs SQLite UTC).
-  - harden log stream stability (predictable streaming/reconnect/noise behavior).
-- Batch 3 - Testability + scale simulation:
-  - build deterministic big-vault generator.
-  - generate isolated config/DB/assets/notes/thumbnails/review fixtures.
-  - support configurable composition and strict `LMZ_CONFIG_PATH` isolation.
-- Batch 4 - Cross-layer runtime/ops hardening:
-  - implement dynamic sidecar port coordination (startup handshake/API base/CSP/lifecycle).
-  - add packaging-time security checks.
-  - run clean-machine release validation.
+- Batch 4 - Scale performance fixes:
+  - make `/api/metadata-index/status` cheap or cached.
+  - inspect and optimize full metadata index rebuild.
+  - profile topic/facet query paths at `10k` and `50k`.
+  - add practical perf regression comparisons/budgets after baseline improvements.
+  - rerun `100k` only after index/status costs are improved.
 
 ### Phase B - Knowledge Tools
 
@@ -344,12 +327,42 @@ VSCode-friendly test launchers:
   - capture URLs/media from the active page and send them to the LMZ queue/API.
   - handle API/session auth and local backend targeting carefully.
 
+### Final Phase - Runtime / Packaging Hardening
+
+- Dynamic sidecar port coordination:
+  - startup handshake/API base/CSP/lifecycle.
+- Packaging-time security checks.
+- Clean-machine release validation.
+
 ### Longer-Term Platform Gaps
 
 - YouTube community partial policy:
   - one failed expected image can still keep the post retryable.
 
 ## Done But Needs Check
+
+- Phase A Batch 1 - Maintenance quick wins:
+  - stale `update_tools` wrapper replaced with a working maintenance entrypoint.
+  - dependency maintenance flow covers checks, downloader updates, and Playwright Chromium install.
+  - Settings includes maintenance actions for auth scan, metadata index rebuild, and review cleanup.
+  - maintenance actions use per-action loading/status text and frontend logging.
+  - thumbnail path usage was consolidated through helper-backed paths.
+  - needs longer real-vault smoke for UI maintenance actions.
+
+- Phase A Batch 2 - Runtime correctness:
+  - `get_config()` now uses an mtime-keyed cache with explicit invalidation after config writes.
+  - config reads return defensive copies while preserving secret merge/schema validation behavior.
+  - new timestamp writes use the shared UTC `YYYY-MM-DD HH:MM:SS` helper.
+  - log streaming was hardened with idle heartbeats, truncate/rotation handling, tail-on-connect, and bounded frontend reconnects.
+  - targeted tests passed; needs longer real app log-stream/config-edit smoke.
+
+- Phase A Batch 3 - Generated test vaults and performance harness:
+  - deterministic generated-vault tool lives under `tests/generators/`.
+  - generated vaults stay under ignored `tests/generated/NNN-name/` folders with isolated config, DB, notes, assets, thumbnails, review fixtures, logs, and manifest.
+  - generated configs use isolated log and thumbnail paths.
+  - Playwright generated-scale coverage and headed Tauri WebView performance harness were added.
+  - perf commands write structured JSON results under ignored `tests/perf-results/`.
+  - real generated-vault runs passed at `800`, `10k`, and `50k`; `100k` is deferred until index/status costs improve.
 
 - Compact storage ID runtime model:
   - SHA256 `hash` remains the item/API identity.
