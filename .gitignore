@@ -48,7 +48,11 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 tests/.pytest-tmp/
+tests/.npm-cache/
+tests/.drivers/
 tests/generated/
+tests/perf-results/
+tests/perf/tauri_webview_perf/node_modules/
 pytest-cache-files-*/
 cover/
 
