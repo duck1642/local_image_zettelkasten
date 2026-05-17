@@ -18,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
-from db.sqlite_operator import init_database, normalize_source_url
+from db.sqlite_operator import connect_database, init_database, normalize_source_url
 from db.search_manager import search_manager
 from utils import (
     get_config, ASSETS_DIR, REVIEW_DIR, LOCAL_INGEST_DIR, note_path_for,
@@ -401,7 +401,7 @@ def _review_db_has_hashes(hashes: list[str]) -> set[str]:
     clean = sorted({str(h or "").strip() for h in hashes if str(h or "").strip()})
     if not clean:
         return set()
-    conn = init_database()
+    conn = connect_database()
     try:
         placeholders = ",".join("?" for _ in clean)
         cursor = conn.cursor()
@@ -411,7 +411,7 @@ def _review_db_has_hashes(hashes: list[str]) -> set[str]:
         conn.close()
 
 def _manual_frontmatter_for_hash(item_hash: str) -> dict:
-    conn = init_database()
+    conn = connect_database()
     try:
         row = conn.execute("SELECT storage_id FROM items WHERE hash = ?", (item_hash,)).fetchone()
         if not row or not row[0]:
@@ -509,7 +509,7 @@ async def get_metadata_index_status():
     return await asyncio.to_thread(_get_metadata_index_status_sync)
 
 def _get_metadata_index_status_sync():
-    conn = init_database()
+    conn = connect_database()
     try:
         return metadata_index_status(conn)
     finally:
@@ -520,7 +520,7 @@ async def rebuild_metadata_index():
     return await asyncio.to_thread(start_metadata_repair_worker, True)
 
 def _get_stats_sync():
-    conn = init_database()
+    conn = connect_database()
     cursor = conn.cursor()
     try:
         cursor.execute("SELECT COUNT(*) FROM items")
@@ -666,7 +666,7 @@ def _get_facets_sync(kind: str, q: str = "", limit: int = 100):
     if kind not in {"artist", "platform", "topic", "wd_tag"}:
         raise HTTPException(status_code=400, detail="Invalid facet kind")
 
-    conn = init_database()
+    conn = connect_database()
     cursor = conn.cursor()
     try:
         if kind in {"artist", "platform"}:
@@ -698,7 +698,7 @@ async def get_thumbnail(item_hash: str):
     return await asyncio.to_thread(_get_thumbnail_sync, item_hash)
 
 def _get_thumbnail_sync(item_hash: str):
-    conn = init_database()
+    conn = connect_database()
     cursor = conn.cursor()
     try:
         cursor.execute("SELECT file_extension, mime_type, storage_id FROM items WHERE hash = ?", (item_hash,))
@@ -813,7 +813,7 @@ def _get_items_sync(field, value, sort, media_type, artist, platform, filename, 
     limit = max(1, min(limit, 100))
     topic_filters = _clean_filter_values(topic)
     wd_tag_filters = _clean_filter_values(wd_tag)
-    conn = init_database()
+    conn = connect_database()
     cursor_obj = conn.cursor()
     try:
         base_query = "SELECT hash, file_extension, mime_type, original_filename, source_url, date_added, platform, source_artist, width, height, storage_id FROM items"
@@ -966,7 +966,7 @@ async def get_item(item_hash: str):
     return await asyncio.to_thread(_get_item_sync, item_hash)
 
 def _get_item_sync(item_hash: str):
-    conn = init_database()
+    conn = connect_database()
     cursor = conn.cursor()
     try:
         cursor.execute("SELECT hash, file_extension, mime_type, original_filename, source_url, date_added, platform, source_artist, width, height, storage_id FROM items WHERE hash = ?", (item_hash,))
@@ -981,7 +981,7 @@ async def get_item_path(item_hash: str):
     return await asyncio.to_thread(_get_item_path_sync, item_hash)
 
 def _get_item_path_sync(item_hash: str):
-    conn = init_database()
+    conn = connect_database()
     cursor = conn.cursor()
     try:
         cursor.execute("SELECT file_extension, mime_type, storage_id FROM items WHERE hash = ?", (item_hash,))
@@ -997,7 +997,7 @@ async def get_item_note_path(item_hash: str):
     return await asyncio.to_thread(_get_item_note_path_sync, item_hash)
 
 def _get_item_note_path_sync(item_hash: str):
-    conn = init_database()
+    conn = connect_database()
     cursor = conn.cursor()
     try:
         cursor.execute("SELECT storage_id FROM items WHERE hash = ?", (item_hash,))
@@ -1013,7 +1013,7 @@ async def open_item_folder(item_hash: str):
     return await asyncio.to_thread(_open_item_folder_sync, item_hash)
 
 def _open_item_folder_sync(item_hash: str):
-    conn = init_database()
+    conn = connect_database()
     cursor = conn.cursor()
     try:
         cursor.execute("SELECT file_extension, mime_type, storage_id FROM items WHERE hash = ?", (item_hash,))
@@ -1037,7 +1037,7 @@ async def open_item_note(item_hash: str):
     return await asyncio.to_thread(_open_item_note_sync, item_hash)
 
 def _open_item_note_sync(item_hash: str):
-    conn = init_database()
+    conn = connect_database()
     cursor = conn.cursor()
     try:
         cursor.execute("SELECT storage_id FROM items WHERE hash = ?", (item_hash,))
@@ -2003,7 +2003,7 @@ def _get_review_items_sync(include_resolved: bool = False):
     )
     match_map = {}
     if best_hashes:
-        conn = init_database()
+        conn = connect_database()
         try:
             placeholders = ",".join("?" for _ in best_hashes)
             cursor = conn.cursor()
@@ -2101,7 +2101,7 @@ def _review_action_sync(filename: str, action: str):
             message = "Replace target is missing. Item kept pending."
             log_review("WARNING", "Review replace warning", action=action, filename=filename, display_name=display_name, detail=message)
             return {"status": "warning", "action": action, "message": message}
-        conn = init_database()
+        conn = connect_database()
         try:
             target_exists = bool(conn.execute("SELECT 1 FROM items WHERE hash = ?", (target_hash,)).fetchone())
         finally:
