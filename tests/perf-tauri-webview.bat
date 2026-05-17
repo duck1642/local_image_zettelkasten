@@ -10,7 +10,7 @@ if errorlevel 1 exit /b %ERRORLEVEL%
 set "LMZ_PERF_CONFIG_PATH=%~f1"
 set "LMZ_SKIP_SIDECAR=1"
 cd /d "%~dp0perf\tauri_webview_perf"
-if not exist "node_modules\@wdio\cli" (
+if not exist "node_modules\webdriverio" (
   echo WebdriverIO dependencies are missing. Run: npm install --prefix tests\perf\tauri_webview_perf
   exit /b 1
 )

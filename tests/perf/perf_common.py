@@ -29,6 +29,40 @@ def ms_since(start: float) -> float:
     return round((time.perf_counter() - start) * 1000, 2)
 
 
+def percentile(values: list[float], pct: float) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    if len(ordered) == 1:
+        return round(ordered[0], 2)
+    rank = (len(ordered) - 1) * pct
+    lower = int(rank)
+    upper = min(lower + 1, len(ordered) - 1)
+    weight = rank - lower
+    return round(ordered[lower] * (1 - weight) + ordered[upper] * weight, 2)
+
+
+def summarize_durations(samples: list[float]) -> dict:
+    values = [float(value) for value in samples if value is not None]
+    if not values:
+        return {
+            "samples": 0,
+            "min_ms": None,
+            "p50_ms": None,
+            "p95_ms": None,
+            "max_ms": None,
+            "mean_ms": None,
+        }
+    return {
+        "samples": len(values),
+        "min_ms": round(min(values), 2),
+        "p50_ms": percentile(values, 0.50),
+        "p95_ms": percentile(values, 0.95),
+        "max_ms": round(max(values), 2),
+        "mean_ms": round(sum(values) / len(values), 2),
+    }
+
+
 def resolve_config_path(value: str | Path) -> Path:
     path = Path(value).expanduser()
     if not path.is_absolute():
@@ -113,17 +147,48 @@ def wait_for_backend(base_url: str, timeout_s: float = 45.0) -> float:
     raise TimeoutError(f"backend did not become ready at {base_url}: {last_error}")
 
 
-def start_backend(config_path: Path, base_url: str = DEFAULT_BACKEND_URL) -> tuple[subprocess.Popen, float]:
+def backend_memory_snapshot(base_url: str, label: str) -> dict:
+    try:
+        status, payload = http_json(f"{base_url.rstrip('/')}/api/system/memory", timeout=10.0)
+        backend_mb = None
+        if isinstance(payload, dict):
+            backend_mb = payload.get("backend_mb")
+        return {
+            "label": label,
+            "ok": 200 <= status < 300,
+            "backend_mb": backend_mb if isinstance(backend_mb, (int, float)) else None,
+            "status": status,
+        }
+    except Exception as exc:
+        return {
+            "label": label,
+            "ok": False,
+            "backend_mb": None,
+            "error": str(exc),
+        }
+
+
+def start_backend(config_path: Path, base_url: str = DEFAULT_BACKEND_URL, log_path: Path | None = None) -> tuple[subprocess.Popen, float]:
     env = env_for_config(config_path)
     started = time.perf_counter()
+    log_file = None
+    stdout = subprocess.DEVNULL
+    stderr = subprocess.DEVNULL
+    if log_path:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_file = log_path.open("a", encoding="utf-8", errors="replace")
+        stdout = log_file
+        stderr = subprocess.STDOUT
     process = subprocess.Popen(
         [python_executable(), str(BACKEND_DIR / "web_api.py")],
         cwd=str(BACKEND_DIR),
         env=env,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=stdout,
+        stderr=stderr,
         creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
     )
+    if log_file:
+        log_file.close()
     try:
         ready_ms = wait_for_backend(base_url)
     except Exception:

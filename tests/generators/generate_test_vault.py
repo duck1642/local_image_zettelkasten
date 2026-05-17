@@ -403,6 +403,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--seed", type=int, default=123)
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--allow-outside-generated", action="store_true")
+    parser.add_argument("--json", action="store_true", help="Print generated vault paths as JSON")
     return parser
 
 
@@ -418,6 +419,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.video_ratio < 0 or args.video_ratio > 1:
         parser.error("--video-ratio must be between 0 and 1")
     output = generate_vault(args)
+    if args.json:
+        payload = {
+            "output": str(output),
+            "config_path": str(output / "config.yaml"),
+            "manifest_path": str(output / "manifest.json"),
+        }
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0
     print(output)
     return 0
 
