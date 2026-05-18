@@ -862,6 +862,14 @@ def _metadata_file_row(item_hash: str, storage_id: str, payload: dict) -> tuple:
 def rebuild_all_metadata(conn: sqlite3.Connection, batch_size: int = REPAIR_BATCH_SIZE, context: str = "full") -> dict:
     ensure_metadata_schema(conn)
     started = time.perf_counter()
+    stages: dict[str, float] = {
+        "item_fetch": 0.0,
+        "metadata_read_parse": 0.0,
+        "row_building": 0.0,
+        "db_flushes": 0.0,
+        "facet_rebuild": 0.0,
+        "counter_refresh": 0.0,
+    }
     _set_metadata_index_ready(conn, False)
     conn.execute("DELETE FROM item_topics")
     conn.execute("DELETE FROM item_wd_tags")
@@ -872,7 +880,9 @@ def rebuild_all_metadata(conn: sqlite3.Connection, batch_size: int = REPAIR_BATC
         _set_counter(conn, name, 0)
     _set_state(conn, COUNTERS_READY_KEY, "1")
 
+    stage_started = time.perf_counter()
     rows = conn.execute("SELECT hash, storage_id FROM items ORDER BY date_added DESC, hash DESC").fetchall()
+    stages["item_fetch"] += (time.perf_counter() - stage_started) * 1000
     indexed = 0
     errors = 0
     item_updates: list[tuple[str, str]] = []
@@ -882,6 +892,7 @@ def rebuild_all_metadata(conn: sqlite3.Connection, batch_size: int = REPAIR_BATC
     wd_rows: list[tuple] = []
 
     def flush():
+        flush_started = time.perf_counter()
         if item_updates:
             conn.executemany("UPDATE items SET source_artist = ? WHERE hash = ?", item_updates)
             item_updates.clear()
@@ -915,13 +926,17 @@ def rebuild_all_metadata(conn: sqlite3.Connection, batch_size: int = REPAIR_BATC
                 wd_rows,
             )
             wd_rows.clear()
+        stages["db_flushes"] += (time.perf_counter() - flush_started) * 1000
 
     for index, (item_hash, storage_id) in enumerate(rows, start=1):
         if not storage_id:
             errors += 1
             log_system("WARNING", "Metadata full rebuild skipped item missing storage_id", hash=item_hash, context=context)
             continue
+        stage_started = time.perf_counter()
         payload = _metadata_payload(conn, item_hash, storage_id)
+        stages["metadata_read_parse"] += (time.perf_counter() - stage_started) * 1000
+        stage_started = time.perf_counter()
         frontmatter = payload["frontmatter"]
         if not payload["error"]:
             if "artist" in frontmatter:
@@ -942,16 +957,24 @@ def rebuild_all_metadata(conn: sqlite3.Connection, batch_size: int = REPAIR_BATC
             log_system("WARNING", "Metadata index parse failed", hash=item_hash, error=payload["error"])
         else:
             indexed += 1
+        stages["row_building"] += (time.perf_counter() - stage_started) * 1000
         if index % batch_size == 0:
             flush()
+            commit_started = time.perf_counter()
             conn.commit()
+            stages["db_flushes"] += (time.perf_counter() - commit_started) * 1000
 
     flush()
+    stage_started = time.perf_counter()
     rebuild_metadata_facet_counts(conn)
+    stages["facet_rebuild"] += (time.perf_counter() - stage_started) * 1000
     _set_metadata_index_ready(conn, True)
+    stage_started = time.perf_counter()
     counters = refresh_metadata_index_counters(conn)
+    stages["counter_refresh"] += (time.perf_counter() - stage_started) * 1000
     duration_ms = round((time.perf_counter() - started) * 1000, 2)
-    return {"indexed": indexed, "errors": errors, "duration_ms": duration_ms, **counters}
+    stages_ms = {key: round(value, 2) for key, value in stages.items()}
+    return {"indexed": indexed, "errors": errors, "duration_ms": duration_ms, "stages_ms": stages_ms, **counters}
 
 
 def _repair_worker(full: bool = False):
@@ -1098,6 +1121,10 @@ def start_metadata_watchdog() -> dict:
 
 def metadata_facets(conn: sqlite3.Connection, kind: str, needle: str, limit: int) -> list[dict]:
     ensure_metadata_schema(conn)
+    count_rows_built = conn.execute(
+        "SELECT 1 FROM metadata_facet_counts WHERE kind = ? LIMIT 1",
+        (kind,),
+    ).fetchone() is not None
     params: list = [kind]
     where_sql = "WHERE kind = ?"
     if needle:
@@ -1118,6 +1145,8 @@ def metadata_facets(conn: sqlite3.Connection, kind: str, needle: str, limit: int
     ).fetchall()
     if rows:
         return [{"value": row[0], "count": row[1]} for row in rows if row[0]]
+    if count_rows_built:
+        return []
 
     if kind in {"artist", "platform"}:
         value_column = "source_artist" if kind == "artist" else "platform"

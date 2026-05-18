@@ -1024,6 +1024,61 @@ def test_rebuild_metadata_index_full_clears_and_rebuilds(monkeypatch, tmp_path):
     assert status["indexed"] == 1
     assert status["topics"] == 1
     assert status["facet_counts"] == 3
+    assert set(report["stages_ms"]) >= {
+        "item_fetch",
+        "metadata_read_parse",
+        "row_building",
+        "db_flushes",
+        "facet_rebuild",
+        "counter_refresh",
+    }
+
+
+def test_rebuild_metadata_index_full_skips_deep_validation_by_default(monkeypatch, tmp_path):
+    utils, sqlite_operator = fresh_backend(monkeypatch, tmp_path, "utils", "db.sqlite_operator")
+    tool = load_maintenance_tool("rebuild_metadata_index")
+    item_hash = "de" * 32
+    conn = insert_mock_item(sqlite_operator, item_hash)
+    write_compact_note(utils, conn, item_hash, "---\ntopics:\n  - fast-full\n---\n")
+    conn.close()
+
+    monkeypatch.setattr(
+        tool,
+        "stale_metadata_count",
+        lambda conn: (_ for _ in ()).throw(AssertionError("deep stale scan should not run")),
+    )
+
+    report = tool.run("full")
+
+    assert report["indexed"] == 1
+    assert report["stale_before"] is None
+    assert report["stale_after"] is None
+    assert report["status"]["stale_deep"] is False
+
+
+def test_rebuild_metadata_index_full_deep_validate_preserves_stale_scan(monkeypatch, tmp_path):
+    utils, sqlite_operator, metadata_index = fresh_backend(monkeypatch, tmp_path, "utils", "db.sqlite_operator", "metadata_index")
+    tool = load_maintenance_tool("rebuild_metadata_index")
+    item_hash = "df" * 32
+    conn = insert_mock_item(sqlite_operator, item_hash)
+    write_compact_note(utils, conn, item_hash, "---\ntopics:\n  - deep-full\n---\n")
+    conn.close()
+
+    calls = {"count": 0}
+    original = metadata_index.stale_metadata_count
+
+    def counted(conn):
+        calls["count"] += 1
+        return original(conn)
+
+    monkeypatch.setattr(metadata_index, "stale_metadata_count", counted)
+    monkeypatch.setattr(tool, "stale_metadata_count", counted)
+
+    report = tool.run("full", deep_validate=True)
+
+    assert report["indexed"] == 1
+    assert report["status"]["stale_deep"] is True
+    assert calls["count"] >= 2
 
 
 def test_rebuild_metadata_index_stale_limit_caps_work(monkeypatch, tmp_path):
@@ -1044,7 +1099,7 @@ def test_rebuild_metadata_index_stale_limit_caps_work(monkeypatch, tmp_path):
     conn.close()
     assert report["indexed"] == 1
     assert indexed == 1
-    assert report["stale_after"] == 1
+    assert report["stale_after"] is None
 
 
 def test_rebuild_metadata_index_json_output(monkeypatch, tmp_path, capsys):
@@ -1256,6 +1311,34 @@ def test_metadata_facet_counts_refresh_and_fallback(monkeypatch, tmp_path):
 
     facet = web_api._get_facets_sync("wd_tag", "", 10)
     assert facet == {"kind": "wd_tag", "items": [{"value": "New Tag", "count": 1}]}
+
+
+def test_metadata_facets_no_match_uses_built_count_table_without_scan(monkeypatch, tmp_path):
+    metadata_index, = fresh_backend(monkeypatch, tmp_path, "metadata_index")
+
+    class Cursor:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def fetchone(self):
+            return self.rows[0] if self.rows else None
+
+        def fetchall(self):
+            return self.rows
+
+    class Conn:
+        def execute(self, sql, params=()):
+            if "SELECT 1 FROM metadata_facet_counts" in sql:
+                return Cursor([(1,)])
+            if "FROM metadata_facet_counts" in sql:
+                return Cursor([])
+            if "FROM item_wd_tags" in sql:
+                raise AssertionError("built count table should not fall back to scan")
+            return Cursor([])
+
+    monkeypatch.setattr(metadata_index, "ensure_metadata_schema", lambda conn: None)
+
+    assert metadata_index.metadata_facets(Conn(), "wd_tag", "missing", 10) == []
 
 
 def test_metadata_filters_use_exact_when_available_and_partial_when_needed(monkeypatch, tmp_path):

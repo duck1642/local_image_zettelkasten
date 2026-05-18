@@ -1,6 +1,6 @@
   # LMZ Current Status
 
-Last updated: 2026-05-13
+Last updated: 2026-05-18
 
 ## Current Status
 
@@ -147,6 +147,10 @@ VSCode-friendly test launchers:
   - batched/log-gated summaries.
   - safer media MIME helpers.
   - cleanup for timers/SSE/fetches.
+- Virtual renderer validation:
+  - automated large-vault Playwright checks cover `10k` and `100k` masonry/grid.
+  - generated-vault tests cover masonry/grid scrolling, cursor pagination, grouped media controls, mixed image/video handling, and overlap checks.
+  - headed Tauri perf runs cover bounded mounted tile/video counts during scroll at `10k` and `50k`.
 - Backend hardening:
   - session key for mutating API calls.
   - local-only CORS restrictions.
@@ -220,6 +224,20 @@ VSCode-friendly test launchers:
   - generated config, DB rows, notes, assets, thumbnails, review fixtures, logs, and manifest stay isolated.
   - backend smoke tests validate generated vault consistency and `LMZ_CONFIG_PATH` isolation.
   - Playwright generated-scale test covers generated manifest API mocks, filtering, layout switching, and synthetic video handling.
+- Phase A generated-vault/performance harness:
+  - generated configs use isolated log and thumbnail paths.
+  - headed Tauri WebView performance harness and split perf commands were added.
+  - perf commands write structured JSON results under ignored `tests/perf-results/`.
+  - generated-vault runs passed at `800`, `10k`, and `50k`; `100k` remains deferred until needed.
+- Metadata/search optimization:
+  - metadata status uses cached counters instead of live counts over large metadata tables.
+  - `metadata_dirty_queue` lets stale repair process known changed items before fallback stale scans.
+  - full metadata rebuild has a bulk path for metadata rows, topic rows, WD rows, and facet counts.
+  - generated vault indexing and maintenance full rebuild use the bulk path.
+  - artist/platform facets use `metadata_facet_counts`.
+  - artist/platform filters use exact-first normalized matching, then partial fallback.
+  - normalized and normalized/date indexes support artist/platform filter paging.
+  - artist/platform facet counts refresh after item metadata updates and full rebuilds.
 
 ## Current Test Results
 
@@ -229,6 +247,7 @@ VSCode-friendly test launchers:
   - Initial `800`, `10k`, and `50k`: backend/index/API plus headed Tauri WebView scrolling.
   - WD-scale reruns: `800`, `10k`, and `50k` with realistic WD pressure (`1` rating, `1` character tag, `20` general WD tags per item).
   - Facet-count optimization reruns: `800`, `10k`, and `50k` after adding precomputed topic/WD facet counts.
+  - Metadata internals and artist/platform optimization reruns: `10k` and `50k` after Pass 1/2.
   - `100k`: skipped for now because `50k` exposed the scale costs clearly.
 - Frontend scrolling / virtualization:
   - headed Tauri scroll tests passed at `10k` and `50k`.
@@ -238,7 +257,7 @@ VSCode-friendly test launchers:
   - current evidence points away from scrolling as the primary bottleneck.
 - Backend/API scale:
   - read-path DB connection cleanup reduced normal `50k` item-list/filter p50s from roughly `129-252ms` to mostly single/tens of ms.
-  - cheap metadata status reduced `/api/metadata-index/status` from about `6.7s` p50 at `50k` to tens/hundreds of ms depending on table sizes.
+  - cached metadata counters reduced `/api/metadata-index/status` from about `228ms` p50 at `50k` with `1.1M` WD rows to low/tens of ms.
   - exact topic/WD filters use indexed metadata lookups when exact values exist.
   - WD exact filter stayed fast under realistic scale: `50k` / `1.1M` WD rows, `items-filter-wd-tag` p50 `~17ms`.
 - WD/topic facets and suggestions:
@@ -249,38 +268,44 @@ VSCode-friendly test launchers:
     - `800`: `17.6k` WD rows, `928` facet-count rows, `facets-wd-tag` p50 `~4ms`.
     - `10k`: `220k` WD rows, `9103` facet-count rows, `facets-wd-tag` p50 `~18ms`, WD suggestions p50 `~16ms`.
     - `50k`: `1.1M` WD rows, `30253` facet-count rows, `facets-wd-tag` p50 `~19ms`, WD suggestions p50 `~32ms`.
+- Artist/platform facets and filters:
+  - artist/platform facets now use the same facet-count path as topic/WD counters.
+  - `50k` Pass 2 backend API rerun:
+    - `items-filter-artist` p50 `~9ms`.
+    - `items-filter-platform` p50 `~19ms`.
+    - `facets-artist` p50 `~7ms`.
+    - `facets-platform` p50 `~6ms`.
+    - `search-suggestions-artist` p50 `~17ms`.
 - RAM:
   - backend memory remained stable enough for these profiles (`~75 MB` at `800`, `~82-85 MB` at `10k`, `~120 MB` at `50k` after WD/facet-count runs).
   - no RAM explosion observed.
 - Primary bottlenecks:
   - full metadata index rebuild remains the largest backend cost.
-    - realistic WD `10k`: `~34s`.
-    - realistic WD `50k`: `~198-201s`.
-  - `/api/metadata-index/status` is improved but still not ideal at `50k` with `1.1M` WD rows: p50 `~228ms`.
-  - artist/platform filters and facets still use scan/LIKE paths and should be profiled separately.
+    - realistic WD `10k`: `~30-31s` after Pass 1/2.
+    - realistic WD `50k`: `~190-193s` after Pass 1/2.
+  - topic/WD filtered item queries still sometimes land in tens of ms at `50k`.
+  - broad text search still uses `LIKE '%term%'` paths.
 - Next optimization targets:
-  - inspect/optimize full metadata index rebuild loop and stale repair scanning.
-  - make metadata index status cheaper for large metadata tables.
-  - profile artist/platform scan paths.
-  - add dirty queue/change tracking later to avoid scan-all stale detection.
+  - further inspect full metadata rebuild cost.
+  - profile topic/WD filtered item paging.
+  - evaluate FTS5 for broad text discovery.
+  - rerun headed Tauri/WebView scroll tests after backend changes if needed.
   - rerun `100k` only after the above improvements.
 
-### Next Optimization Sequence
+### Remaining Optimization Sequence
 
-- Pass 1 - metadata internals:
-  - make metadata index status cheaper by avoiding live large-table counts where possible.
-  - add dirty queue/change tracking so stale repair does not scan the whole vault to find changed items.
-  - optimize full metadata rebuild loop after status/dirty tracking are stable.
-  - validate with `10k`, then `50k` if clean.
-- Pass 2 - artist/platform query paths:
-  - add artist/platform facet count fast path, similar to topic/WD facet counts.
-  - add artist/platform exact-filter fast path for selected suggestions/chips.
-  - switch autocomplete/search paths to prefix/range matching where UX remains clear.
-  - validate with `10k`, then `50k` if clean.
-- Later:
-  - evaluate FTS5 for broad text discovery.
-  - remove remaining low-value hot-path schema checks.
-  - consider parallel rebuild only after simpler rebuild optimizations are exhausted.
+- Pass 3 - remaining metadata/query scale:
+  - Pass 3A - low-risk cleanup and measurements:
+    - make facet fallback scan only when the count table is missing or unbuilt, not when a query simply has zero matches.
+    - inspect `EXPLAIN QUERY PLAN` for exact topic/WD filters, topic/WD plus newest paging, and media plus topic/WD filters.
+    - add stage timing around full metadata rebuild: item fetch, file stat/signature, frontmatter read/parse, WD extraction, row building, DB flushes, facet rebuild, and post-rebuild validation.
+    - make post-full deep stale validation optional for normal perf runs so a successful rebuild does not immediately re-scan the whole vault.
+    - validate with `10k`, then `50k`.
+  - Pass 3B - measured optimization:
+    - add or adjust composite indexes for topic/WD filtered paging only if query plans show they help.
+    - optimize the measured full-rebuild hotspot before considering parallel rebuild.
+    - evaluate FTS5 for broad text discovery only after exact filters and rebuild measurement are stable.
+  - defer `100k` until Pass 3A/3B results are clean.
 
 ## Deferred / Will Do Later
 
@@ -289,15 +314,15 @@ VSCode-friendly test launchers:
 - Current focus is scale performance from generated-vault testing:
   - frontend scrolling/virtualization passed at `10k` and `50k`.
   - backend RAM stayed stable through `50k`.
-  - metadata index rebuild and metadata index status are the measured bottlenecks.
-  - topic/facet-heavy query paths need profiling after index/status fixes.
+  - metadata index rebuild remains the main measured backend bottleneck.
+  - metadata status, dirty-queue repair, topic/WD facets, and artist/platform facets/filters have been optimized and need real-vault checking.
 
 #### Phase A Implementation Batches
 
 - Batch 4 - Scale performance fixes:
-  - make `/api/metadata-index/status` cheap or cached.
-  - inspect and optimize full metadata index rebuild.
-  - profile topic/facet query paths at `10k` and `50k`.
+  - further inspect and optimize full metadata index rebuild.
+  - profile topic/WD filtered item paging at `10k` and `50k`.
+  - evaluate broad text search / FTS5.
   - add practical perf regression comparisons/budgets after baseline improvements.
   - rerun `100k` only after index/status costs are improved.
 
@@ -386,14 +411,6 @@ VSCode-friendly test launchers:
   - log streaming was hardened with idle heartbeats, truncate/rotation handling, tail-on-connect, and bounded frontend reconnects.
   - targeted tests passed; needs longer real app log-stream/config-edit smoke.
 
-- Phase A Batch 3 - Generated test vaults and performance harness:
-  - deterministic generated-vault tool lives under `tests/generators/`.
-  - generated vaults stay under ignored `tests/generated/NNN-name/` folders with isolated config, DB, notes, assets, thumbnails, review fixtures, logs, and manifest.
-  - generated configs use isolated log and thumbnail paths.
-  - Playwright generated-scale coverage and headed Tauri WebView performance harness were added.
-  - perf commands write structured JSON results under ignored `tests/perf-results/`.
-  - real generated-vault runs passed at `800`, `10k`, and `50k`; `100k` is deferred until index/status costs improve.
-
 - Compact storage ID runtime model:
   - SHA256 `hash` remains the item/API identity.
   - physical asset, note, WD cache, and thumbnail paths now use compact `storage_id` filenames under `hash[:2]` shard folders.
@@ -459,11 +476,6 @@ VSCode-friendly test launchers:
     - requires re-run confirmation in stable local Playwright runtime (test process hung in this environment during targeted run).
   - frontend type/svelte checks pass.
 
-- Virtual renderer:
-  - automated large-vault Playwright checks pass for 10k/100k masonry/grid and grouped mixed media.
-  - needs real-vault smoke for offscreen video unmount behavior.
-  - needs grouped media active-index smoke after scroll out/in.
-  - needs narrow/wide zoom stability smoke.
 - Resizable inspector:
   - verify separator renders as one clean line.
   - verify hover handle alignment.

@@ -86,13 +86,13 @@ def run_status(conn) -> dict:
     return _base_report("status", conn, deep=True)
 
 
-def run_stale(conn, limit: int | None = None) -> dict:
+def run_stale(conn, limit: int | None = None, deep_validate: bool = False) -> dict:
     _require_storage_integrity(conn)
-    report = _base_report("stale", conn, deep=True)
+    report = _base_report("stale", conn, deep=deep_validate)
     started = time.perf_counter()
     remaining = max(0, int(limit)) if limit is not None else None
 
-    log_system("INFO", "Metadata index maintenance rebuild started", mode="stale", limit=limit or 0)
+    log_system("INFO", "Metadata index maintenance rebuild started", mode="stale", limit=limit or 0, deep_validate=deep_validate)
     while True:
         if remaining is not None and remaining <= 0:
             break
@@ -109,40 +109,43 @@ def run_stale(conn, limit: int | None = None) -> dict:
         if queued < batch_limit:
             break
 
-    report["stale_after"] = stale_metadata_count(conn)
-    report["status"] = metadata_index_status(conn, deep=True)
+    if deep_validate:
+        report["stale_after"] = stale_metadata_count(conn)
+    report["status"] = metadata_index_status(conn, deep=deep_validate)
     report["duration_ms"] = round((time.perf_counter() - started) * 1000, 2)
     log_system("INFO", "Metadata index maintenance rebuild finished", **report)
     return report
 
 
-def run_full(conn) -> dict:
+def run_full(conn, deep_validate: bool = False) -> dict:
     _require_storage_integrity(conn)
-    report = _base_report("full", conn, deep=True)
+    report = _base_report("full", conn, deep=deep_validate)
     started = time.perf_counter()
 
-    log_system("INFO", "Metadata index maintenance rebuild started", mode="full")
+    log_system("INFO", "Metadata index maintenance rebuild started", mode="full", deep_validate=deep_validate)
     ensure_metadata_schema(conn)
     result = rebuild_all_metadata(conn, BATCH_SIZE, "maintenance_full")
     conn.commit()
     report["indexed"] = int(result.get("indexed") or 0)
     report["errors"] = int(result.get("errors") or 0)
-    report["stale_after"] = stale_metadata_count(conn)
-    report["status"] = metadata_index_status(conn, deep=True)
+    report["stages_ms"] = result.get("stages_ms", {})
+    if deep_validate:
+        report["stale_after"] = stale_metadata_count(conn)
+    report["status"] = metadata_index_status(conn, deep=deep_validate)
     report["duration_ms"] = round((time.perf_counter() - started) * 1000, 2)
     log_system("INFO", "Metadata index maintenance rebuild finished", **report)
     return report
 
 
-def run(mode: str = "status", limit: int | None = None) -> dict:
+def run(mode: str = "status", limit: int | None = None, deep_validate: bool = False) -> dict:
     conn = open_database()
     try:
         if mode == "status":
             return run_status(conn)
         if mode == "stale":
-            return run_stale(conn, limit)
+            return run_stale(conn, limit, deep_validate=deep_validate)
         if mode == "full":
-            return run_full(conn)
+            return run_full(conn, deep_validate=deep_validate)
         raise ValueError(f"unknown mode: {mode}")
     finally:
         conn.close()
@@ -167,6 +170,7 @@ def parse_args(argv=None):
     group.add_argument("--stale", action="store_true", help="Rebuild stale or missing metadata index rows.")
     group.add_argument("--full", action="store_true", help="Clear and rebuild all metadata index rows.")
     parser.add_argument("--limit", type=int, default=None, help="Maximum stale rows to rebuild with --stale.")
+    parser.add_argument("--deep-validate", action="store_true", help="Run expensive stale scans before/after --stale or --full.")
     parser.add_argument("--json", action="store_true", help="Print JSON summary.")
     return parser.parse_args(argv)
 
@@ -175,7 +179,7 @@ def main(argv=None) -> int:
     args = parse_args(argv)
     mode = "full" if args.full else "stale" if args.stale else "status"
     try:
-        report = run(mode, args.limit)
+        report = run(mode, args.limit, deep_validate=args.deep_validate)
     except StorageIntegrityError as exc:
         payload = {
             "action": mode,
