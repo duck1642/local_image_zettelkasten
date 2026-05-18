@@ -76,6 +76,10 @@ def _endpoint_defs(manifest: dict, first_page_payload) -> list[tuple[str, str, o
     platform = item.get("platform") or "pixiv"
     topics = item.get("topics") if isinstance(item.get("topics"), list) else []
     topic = topics[0] if topics else "topic-000"
+    wd_payload = item.get("wd_tags") if isinstance(item.get("wd_tags"), dict) else {}
+    general_wd_tags = wd_payload.get("general") if isinstance(wd_payload.get("general"), list) else []
+    character_wd_tags = wd_payload.get("characters") if isinstance(wd_payload.get("characters"), list) else []
+    wd_tag = (general_wd_tags or character_wd_tags or ["wd-tag-000000"])[0]
     endpoints = [
         ("session-key", "/api/session-key", None),
         ("items-first-page", "/api/items", {"limit": 50}),
@@ -87,12 +91,15 @@ def _endpoint_defs(manifest: dict, first_page_payload) -> list[tuple[str, str, o
         ("items-filter-artist", "/api/items", [("limit", 100), ("artist", artist)]),
         ("items-filter-platform", "/api/items", [("limit", 100), ("platform", platform)]),
         ("items-filter-topic", "/api/items", [("limit", 100), ("topic", topic)]),
+        ("items-filter-wd-tag", "/api/items", [("limit", 100), ("wd_tag", wd_tag)]),
         ("items-filter-image", "/api/items", {"limit": 100, "media_type": "image"}),
         ("items-filter-video", "/api/items", {"limit": 100, "media_type": "video"}),
         ("facets-artist", "/api/facets", {"kind": "artist", "limit": 50}),
         ("facets-platform", "/api/facets", {"kind": "platform", "limit": 50}),
         ("facets-topic", "/api/facets", {"kind": "topic", "limit": 50}),
+        ("facets-wd-tag", "/api/facets", {"kind": "wd_tag", "limit": 50}),
         ("search-suggestions-artist", "/api/search/suggestions", {"kind": "artist", "q": str(artist)[:8], "limit": 10}),
+        ("search-suggestions-wd-tag", "/api/search/suggestions", {"kind": "wd_tag", "q": str(wd_tag)[:8], "limit": 10}),
         ("metadata-index-status", "/api/metadata-index/status", None),
     ])
     return endpoints

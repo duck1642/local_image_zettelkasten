@@ -17,6 +17,7 @@ from metadata_index import (
     _set_metadata_index_ready,
     ensure_metadata_schema,
     metadata_index_status,
+    rebuild_metadata_facet_counts,
     reindex_stale_metadata_batch,
     safe_reindex_item_metadata,
     stale_metadata_count,
@@ -51,8 +52,8 @@ def _missing_storage_ids(conn) -> list[str]:
     return [row[0] for row in rows]
 
 
-def _base_report(action: str, conn) -> dict:
-    status = metadata_index_status(conn)
+def _base_report(action: str, conn, deep: bool = False) -> dict:
+    status = metadata_index_status(conn, deep=deep)
     return {
         "action": action,
         "items": status["items"],
@@ -84,12 +85,12 @@ class StorageIntegrityError(RuntimeError):
 
 
 def run_status(conn) -> dict:
-    return _base_report("status", conn)
+    return _base_report("status", conn, deep=True)
 
 
 def run_stale(conn, limit: int | None = None) -> dict:
     _require_storage_integrity(conn)
-    report = _base_report("stale", conn)
+    report = _base_report("stale", conn, deep=True)
     started = time.perf_counter()
     remaining = max(0, int(limit)) if limit is not None else None
 
@@ -109,7 +110,7 @@ def run_stale(conn, limit: int | None = None) -> dict:
             break
 
     report["stale_after"] = stale_metadata_count(conn)
-    report["status"] = metadata_index_status(conn)
+    report["status"] = metadata_index_status(conn, deep=True)
     report["duration_ms"] = round((time.perf_counter() - started) * 1000, 2)
     log_system("INFO", "Metadata index maintenance rebuild finished", **report)
     return report
@@ -117,7 +118,7 @@ def run_stale(conn, limit: int | None = None) -> dict:
 
 def run_full(conn) -> dict:
     _require_storage_integrity(conn)
-    report = _base_report("full", conn)
+    report = _base_report("full", conn, deep=True)
     started = time.perf_counter()
 
     log_system("INFO", "Metadata index maintenance rebuild started", mode="full")
@@ -126,11 +127,12 @@ def run_full(conn) -> dict:
     conn.execute("DELETE FROM item_topics")
     conn.execute("DELETE FROM item_wd_tags")
     conn.execute("DELETE FROM item_metadata_files")
+    conn.execute("DELETE FROM metadata_facet_counts")
     conn.commit()
 
     rows = conn.execute("SELECT hash FROM items ORDER BY date_added DESC, hash DESC").fetchall()
     for index, (item_hash,) in enumerate(rows, start=1):
-        result = safe_reindex_item_metadata(conn, item_hash, "maintenance_full")
+        result = safe_reindex_item_metadata(conn, item_hash, "maintenance_full", update_facets=False)
         if result.get("status") == "error":
             report["errors"] += 1
         elif result.get("status") != "missing_item":
@@ -139,9 +141,10 @@ def run_full(conn) -> dict:
             conn.commit()
 
     _set_metadata_index_ready(conn, True)
+    rebuild_metadata_facet_counts(conn)
     conn.commit()
     report["stale_after"] = stale_metadata_count(conn)
-    report["status"] = metadata_index_status(conn)
+    report["status"] = metadata_index_status(conn, deep=True)
     report["duration_ms"] = round((time.perf_counter() - started) * 1000, 2)
     log_system("INFO", "Metadata index maintenance rebuild finished", **report)
     return report

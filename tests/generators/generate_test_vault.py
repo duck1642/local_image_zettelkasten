@@ -30,6 +30,7 @@ LOG_FILES = [
     "ingest_online.jsonl",
     "ingestion_audit.jsonl",
 ]
+WD_RATINGS = ("safe", "questionable", "explicit")
 
 
 def _resolve(path: Path) -> Path:
@@ -106,7 +107,30 @@ def _svg_bytes(label: str, width: int, height: int) -> bytes:
     return svg.encode("utf-8")
 
 
-def _frontmatter(item: dict, topics: list[str]) -> str:
+def _wd_values(index: int, args: argparse.Namespace) -> dict:
+    wd_tag_count = max(0, int(args.wd_tags or 0))
+    wd_character_count = max(0, int(args.wd_character_tags or 0))
+    general_per_item = max(0, int(args.wd_tags_per_item or 0))
+    characters_per_item = max(0, int(args.wd_character_tags_per_item or 0))
+    enabled = wd_tag_count > 0 or wd_character_count > 0
+    if not enabled:
+        return {"rating": "", "characters": [], "general": []}
+    characters = [
+        f"character-{(index + offset) % wd_character_count:06d}"
+        for offset in range(min(characters_per_item, wd_character_count))
+    ] if wd_character_count else []
+    general = [
+        f"wd-tag-{(index * max(1, general_per_item) + offset) % wd_tag_count:06d}"
+        for offset in range(min(general_per_item, wd_tag_count))
+    ] if wd_tag_count else []
+    return {
+        "rating": WD_RATINGS[index % len(WD_RATINGS)],
+        "characters": characters,
+        "general": general,
+    }
+
+
+def _frontmatter(item: dict, topics: list[str], wd_tags: dict) -> str:
     data = {
         "title": item["original_filename"],
         "hash": item["hash"],
@@ -117,6 +141,12 @@ def _frontmatter(item: dict, topics: list[str]) -> str:
         "source_url": item["source_url"],
         "topics": topics,
     }
+    if wd_tags.get("rating"):
+        data["wd_rating"] = wd_tags["rating"]
+    if wd_tags.get("characters"):
+        data["wd_character_tags"] = wd_tags["characters"]
+    if wd_tags.get("general"):
+        data["wd_tags"] = wd_tags["general"]
     return f"---\n{yaml.safe_dump(data, sort_keys=False)}---\n\nSynthetic test vault item.\n"
 
 
@@ -196,6 +226,48 @@ def _init_database(config_path: Path):
     sqlite_operator = importlib.import_module("db.sqlite_operator")
     conn = sqlite_operator.init_database()
     conn.close()
+
+
+def _rebuild_metadata_index(config_path: Path) -> dict:
+    os.environ["LMZ_CONFIG_PATH"] = str(config_path)
+    if str(BACKEND) not in sys.path:
+        sys.path.insert(0, str(BACKEND))
+    _reset_backend_modules()
+    sqlite_operator = importlib.import_module("db.sqlite_operator")
+    metadata_index = importlib.import_module("metadata_index")
+    conn = sqlite_operator.init_database()
+    try:
+        metadata_index.ensure_metadata_schema(conn)
+        metadata_index._set_metadata_index_ready(conn, False)
+        conn.execute("DELETE FROM item_topics")
+        conn.execute("DELETE FROM item_wd_tags")
+        conn.execute("DELETE FROM item_metadata_files")
+        conn.execute("DELETE FROM metadata_facet_counts")
+        conn.commit()
+        rows = conn.execute("SELECT hash FROM items ORDER BY date_added DESC, hash DESC").fetchall()
+        indexed = 0
+        errors = 0
+        for index, (item_hash,) in enumerate(rows, start=1):
+            result = metadata_index.safe_reindex_item_metadata(conn, item_hash, "generated_vault", update_facets=False)
+            if result.get("status") == "error":
+                errors += 1
+            elif result.get("status") != "missing_item":
+                indexed += 1
+            if index % 500 == 0:
+                conn.commit()
+        metadata_index._set_metadata_index_ready(conn, True)
+        metadata_index.rebuild_metadata_facet_counts(conn)
+        conn.commit()
+        status = metadata_index.metadata_index_status(conn, deep=False)
+        return {
+            "indexed": indexed,
+            "errors": errors,
+            "topics": status["topics"],
+            "wd_tags": status["wd_tags"],
+            "facet_counts": status["facet_counts"],
+        }
+    finally:
+        conn.close()
 
 
 def _insert_rows(db_path: Path, rows: list[dict]):
@@ -312,6 +384,7 @@ def generate_vault(args: argparse.Namespace) -> Path:
         platform = platforms[index % platform_count]
         artist = f"artist-{index % artist_count:03d}"
         topics = [f"topic-{(index + offset) % topic_count:03d}" for offset in range(1 + (index % min(3, topic_count)))]
+        wd_tags = _wd_values(index, args)
         source_url = f"https://synthetic.local/group/{group_id:06d}"
         original_filename = f"{storage_id}{ext}"
         date_added = _timestamp(index)
@@ -341,7 +414,7 @@ def generate_vault(args: argparse.Namespace) -> Path:
         note_path.parent.mkdir(parents=True, exist_ok=True)
         thumb_path.parent.mkdir(parents=True, exist_ok=True)
         asset_path.write_bytes(b"lmz synthetic video placeholder" if is_video else _svg_bytes(storage_id, width, height))
-        note_path.write_text(_frontmatter(row, topics), encoding="utf-8")
+        note_path.write_text(_frontmatter(row, topics, wd_tags), encoding="utf-8")
         thumb_path.write_bytes(_svg_bytes(f"thumb-{storage_id}", 320, 240))
 
         items.append({
@@ -357,11 +430,13 @@ def generate_vault(args: argparse.Namespace) -> Path:
             "width": width,
             "height": height,
             "topics": topics,
+            "wd_tags": wd_tags,
             "url": f"/vault/{shard}/{original_filename}",
             "thumbnail_url": f"/api/thumbnails/{item_hash}",
         })
 
     _insert_rows(output / "data" / "db" / "lmz_main.db", rows)
+    metadata_report = _rebuild_metadata_index(config_path)
 
     for index, item in enumerate(items[: max(0, args.review)], start=1):
         _write_review_fixture(output, index, item)
@@ -381,6 +456,17 @@ def generate_vault(args: argparse.Namespace) -> Path:
             "groups": group_count,
             "artists": artist_count,
             "topics": topic_count,
+            "wd_tag_pool": max(0, args.wd_tags),
+            "wd_character_tag_pool": max(0, args.wd_character_tags),
+            "wd_rows_estimated": sum(
+                (1 if item["wd_tags"].get("rating") else 0)
+                + len(item["wd_tags"].get("characters") or [])
+                + len(item["wd_tags"].get("general") or [])
+                for item in items
+            ),
+            "metadata_index_topics": metadata_report["topics"],
+            "metadata_index_wd_tags": metadata_report["wd_tags"],
+            "metadata_index_facet_counts": metadata_report["facet_counts"],
         },
         "items": items,
     }
@@ -400,6 +486,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--artists", type=int, default=50)
     parser.add_argument("--platforms", default="pixiv,x,instagram,local")
     parser.add_argument("--topics", type=int, default=25)
+    parser.add_argument("--wd-tags", type=int, default=0, help="Unique general WD tag pool size")
+    parser.add_argument("--wd-character-tags", type=int, default=0, help="Unique WD character tag pool size")
+    parser.add_argument("--wd-tags-per-item", type=int, default=20)
+    parser.add_argument("--wd-character-tags-per-item", type=int, default=1)
     parser.add_argument("--seed", type=int, default=123)
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--allow-outside-generated", action="store_true")
@@ -418,6 +508,14 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--review must be non-negative")
     if args.video_ratio < 0 or args.video_ratio > 1:
         parser.error("--video-ratio must be between 0 and 1")
+    if args.wd_tags < 0:
+        parser.error("--wd-tags must be non-negative")
+    if args.wd_character_tags < 0:
+        parser.error("--wd-character-tags must be non-negative")
+    if args.wd_tags_per_item < 0:
+        parser.error("--wd-tags-per-item must be non-negative")
+    if args.wd_character_tags_per_item < 0:
+        parser.error("--wd-character-tags-per-item must be non-negative")
     output = generate_vault(args)
     if args.json:
         payload = {

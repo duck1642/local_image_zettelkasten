@@ -809,6 +809,24 @@ def _append_text_terms(conditions, params, terms):
         conditions.append("(original_filename LIKE ? OR hash LIKE ? OR source_url LIKE ? OR source_artist LIKE ? OR platform LIKE ?)")
         params.extend([f"%{term}%"] * 5)
 
+def _metadata_filter_has_exact(conn, table: str, norm_column: str, value: str) -> bool:
+    exact_row = conn.execute(
+        f"SELECT 1 FROM {table} WHERE {norm_column} = ? LIMIT 1",
+        (value,),
+    ).fetchone()
+    return exact_row is not None
+
+def _append_metadata_filter(conn, conditions, params, table: str, alias: str, norm_column: str, value: str):
+    norm_value = value.casefold()
+    if _metadata_filter_has_exact(conn, table, norm_column, norm_value):
+        conditions.append(f"hash IN (SELECT item_hash FROM {table} WHERE {norm_column} = ?)")
+        params.append(norm_value)
+        return
+    conditions.append(
+        f"EXISTS (SELECT 1 FROM {table} {alias} WHERE {alias}.item_hash = items.hash AND {alias}.{norm_column} LIKE ?)"
+    )
+    params.append(f"%{norm_value}%")
+
 def _get_items_sync(field, value, sort, media_type, artist, platform, filename, topic, wd_tag, text, cursor, limit):
     limit = max(1, min(limit, 100))
     topic_filters = _clean_filter_values(topic)
@@ -839,11 +857,9 @@ def _get_items_sync(field, value, sort, media_type, artist, platform, filename, 
 
         if use_metadata_index:
             for topic_value in topic_filters:
-                conditions.append("EXISTS (SELECT 1 FROM item_topics mt WHERE mt.item_hash = items.hash AND mt.topic_norm LIKE ?)")
-                params.append(f"%{topic_value.casefold()}%")
+                _append_metadata_filter(conn, conditions, params, "item_topics", "mt", "topic_norm", topic_value)
             for wd_value in wd_tag_filters:
-                conditions.append("EXISTS (SELECT 1 FROM item_wd_tags mw WHERE mw.item_hash = items.hash AND mw.tag_norm LIKE ?)")
-                params.append(f"%{wd_value.casefold()}%")
+                _append_metadata_filter(conn, conditions, params, "item_wd_tags", "mw", "tag_norm", wd_value)
 
         has_frontmatter_filter = bool(topic_filters or wd_tag_filters)
         if has_frontmatter_filter and not use_metadata_index:

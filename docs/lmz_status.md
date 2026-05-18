@@ -226,9 +226,9 @@ VSCode-friendly test launchers:
 ### Phase A Generated-Vault Performance Findings
 
 - Completed real generated-vault runs:
-  - `800`: backend/index/API plus headed Tauri WebView scrolling.
-  - `10k`: backend/index/API plus headed Tauri WebView scrolling.
-  - `50k`: backend/index/API plus headed Tauri WebView scrolling.
+  - Initial `800`, `10k`, and `50k`: backend/index/API plus headed Tauri WebView scrolling.
+  - WD-scale reruns: `800`, `10k`, and `50k` with realistic WD pressure (`1` rating, `1` character tag, `20` general WD tags per item).
+  - Facet-count optimization reruns: `800`, `10k`, and `50k` after adding precomputed topic/WD facet counts.
   - `100k`: skipped for now because `50k` exposed the scale costs clearly.
 - Frontend scrolling / virtualization:
   - headed Tauri scroll tests passed at `10k` and `50k`.
@@ -237,19 +237,32 @@ VSCode-friendly test launchers:
   - frontend heap stayed low (`~9.4 MB` at `10k`, `~7.4 MB` at `50k` after video filter).
   - current evidence points away from scrolling as the primary bottleneck.
 - Backend/API scale:
-  - normal `10k` endpoint p50s were mostly `31-50ms`.
-  - normal `50k` endpoint p50s were mostly `129-252ms`.
-  - topic/facet-heavy paths are the slowest normal API paths.
+  - read-path DB connection cleanup reduced normal `50k` item-list/filter p50s from roughly `129-252ms` to mostly single/tens of ms.
+  - cheap metadata status reduced `/api/metadata-index/status` from about `6.7s` p50 at `50k` to tens/hundreds of ms depending on table sizes.
+  - exact topic/WD filters use indexed metadata lookups when exact values exist.
+  - WD exact filter stayed fast under realistic scale: `50k` / `1.1M` WD rows, `items-filter-wd-tag` p50 `~17ms`.
+- WD/topic facets and suggestions:
+  - realistic `50k` WD run before facet counts exposed the bottleneck:
+    - `facets-wd-tag` p50 `~1201ms`, p95 `~2332ms`.
+    - `search-suggestions-wd-tag` p50 `~831ms`.
+  - precomputed facet-count table fixed the interactive counter path:
+    - `800`: `17.6k` WD rows, `928` facet-count rows, `facets-wd-tag` p50 `~4ms`.
+    - `10k`: `220k` WD rows, `9103` facet-count rows, `facets-wd-tag` p50 `~18ms`, WD suggestions p50 `~16ms`.
+    - `50k`: `1.1M` WD rows, `30253` facet-count rows, `facets-wd-tag` p50 `~19ms`, WD suggestions p50 `~32ms`.
 - RAM:
-  - backend memory remained stable enough for these profiles (`~76 MB` at `800`, `~85 MB` at `10k`, `~125 MB` during `50k` Tauri run).
+  - backend memory remained stable enough for these profiles (`~75 MB` at `800`, `~82-85 MB` at `10k`, `~120 MB` at `50k` after WD/facet-count runs).
   - no RAM explosion observed.
 - Primary bottlenecks:
-  - full metadata index rebuild scales linearly and is expensive (`~5s` at `800`, `~78s` at `10k`, `~388s` at `50k`).
-  - `/api/metadata-index/status` is too expensive at scale (`~95ms` p50 at `800`, `~1.2s` at `10k`, `~6.7s` at `50k`).
+  - full metadata index rebuild remains the largest backend cost.
+    - realistic WD `10k`: `~34s`.
+    - realistic WD `50k`: `~198-201s`.
+  - `/api/metadata-index/status` is improved but still not ideal at `50k` with `1.1M` WD rows: p50 `~228ms`.
+  - artist/platform filters and facets still use scan/LIKE paths and should be profiled separately.
 - Next optimization targets:
-  - inspect/optimize metadata index rebuild loop.
-  - make metadata index status cheap or cached.
-  - profile topic/facet query paths.
+  - inspect/optimize full metadata index rebuild loop and stale repair scanning.
+  - make metadata index status cheaper for large metadata tables.
+  - profile artist/platform scan paths.
+  - add dirty queue/change tracking later to avoid scan-all stale detection.
   - rerun `100k` only after the above improvements.
 
 ## Deferred / Will Do Later

@@ -826,7 +826,40 @@ def test_stale_metadata_scan_streams_and_respects_limit(monkeypatch, tmp_path):
     assert seen["rows"] == 3
 
 
-def test_metadata_status_uses_streaming_stale_count(monkeypatch, tmp_path):
+def test_metadata_status_fast_path_skips_stale_count(monkeypatch, tmp_path):
+    metadata_index, = fresh_backend(monkeypatch, tmp_path, "metadata_index")
+
+    class ScalarCursor:
+        def __init__(self, value):
+            self.value = value
+
+        def fetchone(self):
+            return (self.value,)
+
+    class StaleCursor:
+        def __iter__(self):
+            yield ("a", "000000000001", None, "", "", 0, 0, "", 0, 0, "")
+            yield ("b", "000000000002", "b", "000000000002", "", 0, 0, "", 0, 0, "ok")
+
+        def fetchall(self):
+            raise AssertionError("fetchall must not be used")
+
+    class Conn:
+        def execute(self, sql, *args):
+            if "FROM items" in sql and "LEFT JOIN item_metadata_files" in sql:
+                raise AssertionError("fast status must not scan stale rows")
+            return ScalarCursor(0)
+
+    monkeypatch.setattr(metadata_index, "ensure_metadata_schema", lambda conn: None)
+    monkeypatch.setattr(metadata_index, "metadata_index_ready", lambda conn: False)
+
+    status = metadata_index.metadata_index_status(Conn())
+
+    assert status["stale"] is None
+    assert status["stale_deep"] is False
+
+
+def test_metadata_status_deep_uses_streaming_stale_count(monkeypatch, tmp_path):
     metadata_index, = fresh_backend(monkeypatch, tmp_path, "metadata_index")
 
     class ScalarCursor:
@@ -854,9 +887,10 @@ def test_metadata_status_uses_streaming_stale_count(monkeypatch, tmp_path):
     monkeypatch.setattr(metadata_index, "metadata_index_ready", lambda conn: False)
     monkeypatch.setattr(metadata_index, "_row_stale", lambda row: row[0] == "a")
 
-    status = metadata_index.metadata_index_status(Conn())
+    status = metadata_index.metadata_index_status(Conn(), deep=True)
 
     assert status["stale"] == 1
+    assert status["stale_deep"] is True
 
 
 def test_rebuild_metadata_index_status_does_not_clear_rows(monkeypatch, tmp_path):
@@ -1106,6 +1140,109 @@ def test_topic_filter_not_ready_skips_disk_scan(monkeypatch, tmp_path):
 
     assert facet == {"kind": "topic", "items": []}
     assert repair_calls == [False, False]
+
+
+def test_metadata_facets_keep_counts_correct(monkeypatch, tmp_path):
+    sqlite_operator, metadata_index = fresh_backend(monkeypatch, tmp_path, "db.sqlite_operator", "metadata_index")
+    item_a = "aa" * 32
+    item_b = "bb" * 32
+    conn = insert_mock_item(sqlite_operator, item_a)
+    conn.close()
+    conn = insert_mock_item(sqlite_operator, item_b)
+    metadata_index.ensure_metadata_schema(conn)
+    conn.execute("INSERT OR IGNORE INTO item_topics(item_hash, topic, topic_norm) VALUES (?, 'Alpha', 'alpha')", (item_a,))
+    conn.execute("INSERT OR IGNORE INTO item_topics(item_hash, topic, topic_norm) VALUES (?, 'Alpha', 'alpha')", (item_b,))
+    conn.execute("INSERT OR IGNORE INTO item_wd_tags(item_hash, tag, tag_norm, tag_type) VALUES (?, 'Shared', 'shared', 'general')", (item_a,))
+    conn.execute("INSERT OR IGNORE INTO item_wd_tags(item_hash, tag, tag_norm, tag_type) VALUES (?, 'Shared', 'shared', 'character')", (item_a,))
+    conn.commit()
+
+    topics = metadata_index.metadata_facets(conn, "topic", "", 10)
+    wd_tags = metadata_index.metadata_facets(conn, "wd_tag", "", 10)
+
+    conn.close()
+    assert topics == [{"value": "Alpha", "count": 2}]
+    assert wd_tags == [{"value": "Shared", "count": 1}]
+
+
+def test_metadata_facet_counts_refresh_and_fallback(monkeypatch, tmp_path):
+    utils, sqlite_operator, metadata_index, web_api = fresh_backend(
+        monkeypatch,
+        tmp_path,
+        "utils",
+        "db.sqlite_operator",
+        "metadata_index",
+        "web_api",
+    )
+    item_hash = "41" * 32
+    conn = insert_mock_item(sqlite_operator, item_hash)
+    write_compact_note(utils, conn, item_hash, "---\ntopics:\n  - Alpha\nwd_tags:\n  - Shared\n---\n")
+    metadata_index.reindex_item_metadata(conn, item_hash)
+    metadata_index._set_metadata_index_ready(conn, True)
+    conn.commit()
+
+    count_row = conn.execute(
+        "SELECT value, count FROM metadata_facet_counts WHERE kind = 'wd_tag' AND value_norm = 'shared'"
+    ).fetchone()
+    assert count_row == ("Shared", 1)
+
+    conn.execute("DELETE FROM metadata_facet_counts")
+    conn.commit()
+    fallback = metadata_index.metadata_facets(conn, "wd_tag", "share", 10)
+    assert fallback == [{"value": "Shared", "count": 1}]
+
+    write_compact_note(utils, conn, item_hash, "---\ntopics:\n  - Beta\nwd_tags:\n  - New Tag\n---\n")
+    metadata_index.reindex_item_metadata(conn, item_hash)
+    metadata_index._set_metadata_index_ready(conn, True)
+    conn.commit()
+    conn.close()
+
+    facet = web_api._get_facets_sync("wd_tag", "", 10)
+    assert facet == {"kind": "wd_tag", "items": [{"value": "New Tag", "count": 1}]}
+
+
+def test_metadata_filters_use_exact_when_available_and_partial_when_needed(monkeypatch, tmp_path):
+    utils, sqlite_operator, metadata_index, web_api = fresh_backend(
+        monkeypatch,
+        tmp_path,
+        "utils",
+        "db.sqlite_operator",
+        "metadata_index",
+        "web_api",
+    )
+
+    def add_item(item_hash: str, frontmatter: str, date_added: str):
+        conn = insert_mock_item(sqlite_operator, item_hash, date_added=date_added)
+        write_compact_note(utils, conn, item_hash, frontmatter)
+        metadata_index.reindex_item_metadata(conn, item_hash)
+        conn.commit()
+        conn.close()
+
+    alpha_hash = "10" * 32
+    alpha_extra_hash = "20" * 32
+    beta_hash = "30" * 32
+    wd_hash = "40" * 32
+    add_item(alpha_hash, "---\ntopics:\n  - alpha\n---\n", "2026-01-01 00:00:01")
+    add_item(alpha_extra_hash, "---\ntopics:\n  - alpha-extra\n---\n", "2026-01-01 00:00:02")
+    add_item(beta_hash, "---\ntopics:\n  - beta\n---\n", "2026-01-01 00:00:03")
+    add_item(wd_hash, "---\ntopics: []\nwd_tags:\n  - wd-one\n---\n", "2026-01-01 00:00:04")
+
+    conn = sqlite_operator.init_database()
+    metadata_index._set_metadata_index_ready(conn, True)
+    assert web_api._metadata_filter_has_exact(conn, "item_topics", "topic_norm", "alpha") is True
+    assert web_api._metadata_filter_has_exact(conn, "item_topics", "topic_norm", "alph") is False
+    assert web_api._metadata_filter_has_exact(conn, "item_wd_tags", "tag_norm", "wd-one") is True
+    conn.commit()
+    conn.close()
+
+    exact_topic = web_api._get_items_sync(None, None, "newest", "all", [], [], [], ["alpha"], [], [], None, 25)
+    partial = web_api._get_items_sync(None, None, "newest", "all", [], [], [], ["alph"], [], [], None, 25)
+    exact = web_api._get_items_sync(None, None, "newest", "all", [], [], [], ["beta"], [], [], None, 25)
+    wd_exact = web_api._get_items_sync(None, None, "newest", "all", [], [], [], [], ["wd-one"], [], None, 25)
+
+    assert [item["hash"] for item in exact_topic["items"]] == [alpha_hash]
+    assert [item["hash"] for item in partial["items"]] == [alpha_extra_hash, alpha_hash]
+    assert [item["hash"] for item in exact["items"]] == [beta_hash]
+    assert [item["hash"] for item in wd_exact["items"]] == [wd_hash]
 
 
 def test_search_manager_query_sees_pending_during_vp_rebuild(monkeypatch, tmp_path):

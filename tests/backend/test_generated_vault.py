@@ -44,6 +44,8 @@ def test_generated_vault_smoke_and_isolation(tmp_path, monkeypatch):
         "--video-ratio", "0.2",
         "--artists", "8",
         "--topics", "9",
+        "--wd-tags", "30",
+        "--wd-character-tags", "6",
         "--seed", "7",
     ])
 
@@ -58,6 +60,9 @@ def test_generated_vault_smoke_and_isolation(tmp_path, monkeypatch):
     assert manifest["counts"]["items"] == 100
     assert manifest["counts"]["review"] == 4
     assert manifest["counts"]["videos"] > 0
+    assert manifest["counts"]["wd_tag_pool"] == 30
+    assert manifest["counts"]["wd_character_tag_pool"] == 6
+    assert manifest["counts"]["wd_rows_estimated"] == 2200
 
     config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     for value in config["paths"].values():
@@ -66,6 +71,8 @@ def test_generated_vault_smoke_and_isolation(tmp_path, monkeypatch):
     conn = sqlite3.connect(db_path)
     try:
         assert conn.execute("SELECT COUNT(*) FROM items").fetchone()[0] == 100
+        assert conn.execute("SELECT COUNT(*) FROM item_wd_tags").fetchone()[0] == manifest["counts"]["wd_rows_estimated"]
+        assert conn.execute("SELECT COUNT(*) FROM metadata_facet_counts").fetchone()[0] == manifest["counts"]["metadata_index_facet_counts"]
     finally:
         conn.close()
 
@@ -110,6 +117,8 @@ def test_generated_vault_rows_notes_and_media_are_consistent(tmp_path):
         "--groups", "5",
         "--review", "2",
         "--video-ratio", "0.35",
+        "--wd-tags", "30",
+        "--wd-character-tags", "5",
         "--seed", "11",
     ])
 
@@ -147,8 +156,28 @@ def test_generated_vault_rows_notes_and_media_are_consistent(tmp_path):
             assert frontmatter["platform"] == item["platform"]
             assert frontmatter["source_artist"] == item["artist"]
             assert frontmatter["topics"] == item["topics"]
+            assert frontmatter["wd_rating"] == item["wd_tags"]["rating"]
+            assert frontmatter["wd_character_tags"] == item["wd_tags"]["characters"]
+            assert frontmatter["wd_tags"] == item["wd_tags"]["general"]
+
+        assert conn.execute("SELECT COUNT(*) FROM item_wd_tags").fetchone()[0] == manifest["counts"]["wd_rows_estimated"]
+        assert conn.execute("SELECT COUNT(*) FROM metadata_facet_counts").fetchone()[0] == manifest["counts"]["metadata_index_facet_counts"]
     finally:
         conn.close()
+
+    sample_wd_tag = manifest["items"][0]["wd_tags"]["general"][0]
+    os.environ["LMZ_CONFIG_PATH"] = str(output / "config.yaml")
+    if str(BACKEND) not in sys.path:
+        sys.path.insert(0, str(BACKEND))
+    reset_backend_modules()
+    web_api = importlib.import_module("web_api")
+
+    filtered = web_api._get_items_sync(None, None, "newest", "all", [], [], [], [], [sample_wd_tag], [], None, 25)
+    facets = web_api._get_facets_sync("wd_tag", sample_wd_tag, 25)
+
+    assert filtered["items"]
+    assert all(item["hash"] for item in filtered["items"])
+    assert any(item["value"] == sample_wd_tag for item in facets["items"])
 
 
 def test_generated_vault_refuses_runtime_paths(tmp_path):

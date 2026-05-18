@@ -73,6 +73,16 @@ def ensure_metadata_schema(conn: sqlite3.Connection):
             FOREIGN KEY(item_hash) REFERENCES items(hash) ON DELETE CASCADE
         )
     """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS metadata_facet_counts (
+            kind TEXT NOT NULL,
+            value_norm TEXT NOT NULL,
+            value TEXT NOT NULL,
+            count INTEGER NOT NULL,
+            PRIMARY KEY(kind, value_norm)
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_metadata_facet_counts_kind_count ON metadata_facet_counts(kind, count DESC, value_norm)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_item_topics_norm ON item_topics(topic_norm)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_item_topics_hash ON item_topics(item_hash)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_item_wd_tags_norm ON item_wd_tags(tag_norm)")
@@ -245,7 +255,70 @@ def _remember_watchdog_storage(item_hash: str, storage_id: str):
         _watchdog_storage_map[storage_id] = item_hash
 
 
-def reindex_item_metadata(conn: sqlite3.Connection, item_hash: str) -> dict:
+def rebuild_metadata_facet_counts(conn: sqlite3.Connection):
+    ensure_metadata_schema(conn)
+    conn.execute("DELETE FROM metadata_facet_counts")
+    conn.execute("""
+        INSERT INTO metadata_facet_counts(kind, value_norm, value, count)
+        SELECT 'topic', topic_norm, MIN(topic), COUNT(*)
+        FROM item_topics
+        GROUP BY topic_norm
+    """)
+    conn.execute("""
+        INSERT INTO metadata_facet_counts(kind, value_norm, value, count)
+        SELECT 'wd_tag', tag_norm, MIN(tag), COUNT(DISTINCT item_hash)
+        FROM item_wd_tags
+        GROUP BY tag_norm
+    """)
+
+
+def refresh_metadata_facet_counts_for_values(conn: sqlite3.Connection, values: Iterable[tuple[str, str]]):
+    ensure_metadata_schema(conn)
+    cleaned = sorted({(str(kind or "").strip(), _norm(value)) for kind, value in values if _norm(value)})
+    for kind, value_norm in cleaned:
+        if kind == "topic":
+            row = conn.execute(
+                "SELECT MIN(topic), COUNT(*) FROM item_topics WHERE topic_norm = ?",
+                (value_norm,),
+            ).fetchone()
+        elif kind == "wd_tag":
+            row = conn.execute(
+                "SELECT MIN(tag), COUNT(DISTINCT item_hash) FROM item_wd_tags WHERE tag_norm = ?",
+                (value_norm,),
+            ).fetchone()
+        else:
+            continue
+        count = int(row[1] or 0) if row else 0
+        if count <= 0:
+            conn.execute(
+                "DELETE FROM metadata_facet_counts WHERE kind = ? AND value_norm = ?",
+                (kind, value_norm),
+            )
+            continue
+        conn.execute(
+            """
+            INSERT INTO metadata_facet_counts(kind, value_norm, value, count)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(kind, value_norm) DO UPDATE SET
+                value = excluded.value,
+                count = excluded.count
+            """,
+            (kind, value_norm, str(row[0] or value_norm), count),
+        )
+
+
+def _item_facet_values(conn: sqlite3.Connection, item_hash: str) -> set[tuple[str, str]]:
+    values: set[tuple[str, str]] = set()
+    for (topic_norm,) in conn.execute("SELECT topic_norm FROM item_topics WHERE item_hash = ?", (item_hash,)).fetchall():
+        if topic_norm:
+            values.add(("topic", topic_norm))
+    for (tag_norm,) in conn.execute("SELECT tag_norm FROM item_wd_tags WHERE item_hash = ?", (item_hash,)).fetchall():
+        if tag_norm:
+            values.add(("wd_tag", tag_norm))
+    return values
+
+
+def reindex_item_metadata(conn: sqlite3.Connection, item_hash: str, update_facets: bool = True) -> dict:
     ensure_metadata_schema(conn)
     storage_id = _item_storage_id(conn, item_hash)
     if storage_id is None:
@@ -267,25 +340,34 @@ def reindex_item_metadata(conn: sqlite3.Connection, item_hash: str) -> dict:
         if "date_added" in frontmatter and str(frontmatter.get("date_added") or "").strip():
             conn.execute("UPDATE items SET date_added = ? WHERE hash = ?", (str(frontmatter.get("date_added")).strip(), item_hash))
 
+    previous_facet_values = _item_facet_values(conn, item_hash) if update_facets else set()
     conn.execute("DELETE FROM item_topics WHERE item_hash = ?", (item_hash,))
     conn.execute("DELETE FROM item_wd_tags WHERE item_hash = ?", (item_hash,))
+    topic_rows = []
     for topic in topics:
         topic_norm = _norm(topic)
         if topic_norm:
-            conn.execute(
-                "INSERT OR IGNORE INTO item_topics(item_hash, topic, topic_norm) VALUES (?, ?, ?)",
-                (item_hash, topic, topic_norm),
-            )
+            topic_rows.append((item_hash, topic, topic_norm))
+    conn.executemany(
+        "INSERT OR IGNORE INTO item_topics(item_hash, topic, topic_norm) VALUES (?, ?, ?)",
+        topic_rows,
+    )
+    wd_insert_rows = []
     for tag_type, tag in wd_rows:
         tag_norm = _norm(tag)
         if tag_norm:
-            conn.execute(
-                """
-                INSERT OR IGNORE INTO item_wd_tags(item_hash, tag, tag_norm, tag_type)
-                VALUES (?, ?, ?, ?)
-                """,
-                (item_hash, tag, tag_norm, tag_type),
-            )
+            wd_insert_rows.append((item_hash, tag, tag_norm, tag_type))
+    conn.executemany(
+        """
+        INSERT OR IGNORE INTO item_wd_tags(item_hash, tag, tag_norm, tag_type)
+        VALUES (?, ?, ?, ?)
+        """,
+        wd_insert_rows,
+    )
+    if update_facets:
+        current_facet_values = {("topic", row[2]) for row in topic_rows}
+        current_facet_values.update(("wd_tag", row[2]) for row in wd_insert_rows)
+        refresh_metadata_facet_counts_for_values(conn, previous_facet_values | current_facet_values)
 
     conn.execute(
         """
@@ -375,9 +457,9 @@ def mark_metadata_index_error(conn: sqlite3.Connection, item_hash: str, error: s
     )
 
 
-def safe_reindex_item_metadata(conn: sqlite3.Connection, item_hash: str, context: str = "") -> dict:
+def safe_reindex_item_metadata(conn: sqlite3.Connection, item_hash: str, context: str = "", update_facets: bool = True) -> dict:
     try:
-        return reindex_item_metadata(conn, item_hash)
+        return reindex_item_metadata(conn, item_hash, update_facets=update_facets)
     except Exception as exc:
         try:
             mark_metadata_index_error(conn, item_hash, str(exc))
@@ -488,23 +570,26 @@ def reindex_stale_metadata_batch(conn: sqlite3.Connection, limit: int = REPAIR_B
     return {"queued": len(hashes), "indexed": ok, "errors": errors, "duration_ms": duration_ms}
 
 
-def metadata_index_status(conn: sqlite3.Connection) -> dict:
+def metadata_index_status(conn: sqlite3.Connection, deep: bool = False) -> dict:
     ensure_metadata_schema(conn)
     item_count = conn.execute("SELECT COUNT(*) FROM items").fetchone()[0]
     indexed_count = conn.execute("SELECT COUNT(*) FROM item_metadata_files").fetchone()[0]
     error_count = conn.execute("SELECT COUNT(*) FROM item_metadata_files WHERE status = 'error'").fetchone()[0]
     topic_count = conn.execute("SELECT COUNT(*) FROM item_topics").fetchone()[0]
     wd_count = conn.execute("SELECT COUNT(*) FROM item_wd_tags").fetchone()[0]
-    stale_count = stale_metadata_count(conn)
+    facet_count = conn.execute("SELECT COUNT(*) FROM metadata_facet_counts").fetchone()[0]
+    stale_count = stale_metadata_count(conn) if deep else None
     return {
         "ready": metadata_index_ready(conn),
         "repair_running": _repair_running,
         "items": item_count,
         "indexed": indexed_count,
         "stale": stale_count,
+        "stale_deep": bool(deep),
         "errors": error_count,
         "topics": topic_count,
         "wd_tags": wd_count,
+        "facet_counts": facet_count,
     }
 
 
@@ -521,6 +606,7 @@ def _repair_worker(full: bool = False):
                 conn.execute("DELETE FROM item_topics")
                 conn.execute("DELETE FROM item_wd_tags")
                 conn.execute("DELETE FROM item_metadata_files")
+                conn.execute("DELETE FROM metadata_facet_counts")
                 conn.commit()
             log_system("INFO", "Metadata index repair started", full=full)
             while True:
@@ -528,6 +614,9 @@ def _repair_worker(full: bool = False):
                 conn.commit()
                 if result["queued"] < REPAIR_BATCH_SIZE:
                     break
+            if full:
+                rebuild_metadata_facet_counts(conn)
+                conn.commit()
             log_system("INFO", "Metadata index repair finished", full=full)
         finally:
             conn.close()
@@ -652,16 +741,40 @@ def start_metadata_watchdog() -> dict:
 
 def metadata_facets(conn: sqlite3.Connection, kind: str, needle: str, limit: int) -> list[dict]:
     ensure_metadata_schema(conn)
+    params: list = [kind]
+    where_sql = "WHERE kind = ?"
+    if needle:
+        where_sql += " AND value_norm LIKE ?"
+        params.append(f"%{needle}%")
+    rows = conn.execute(
+        f"""
+        SELECT value, count
+        FROM metadata_facet_counts
+        {where_sql}
+        ORDER BY
+            CASE WHEN ? != '' AND value_norm LIKE ? THEN 0 ELSE 1 END,
+            count DESC,
+            value_norm ASC
+        LIMIT ?
+        """,
+        (*params, needle, f"{needle}%", limit),
+    ).fetchall()
+    if rows:
+        return [{"value": row[0], "count": row[1]} for row in rows if row[0]]
+
     table = "item_topics" if kind == "topic" else "item_wd_tags"
     value_column = "topic" if kind == "topic" else "tag"
     norm_column = "topic_norm" if kind == "topic" else "tag_norm"
+    count_expr = "COUNT(*)" if kind == "topic" else "COUNT(DISTINCT item_hash)"
+    where_sql = f" WHERE {norm_column} LIKE ?" if needle else ""
+    params = (f"%{needle}%",) if needle else ()
     sql = f"""
-        SELECT MIN({value_column}) AS value, COUNT(DISTINCT item_hash) AS count
+        SELECT MIN({value_column}) AS value, {count_expr} AS count
         FROM {table}
-        WHERE (? = '' OR {norm_column} LIKE ?)
+        {where_sql}
         GROUP BY {norm_column}
     """
-    rows = conn.execute(sql, (needle, f"%{needle}%")).fetchall()
+    rows = conn.execute(sql, params).fetchall()
     items = [{"value": row[0], "count": row[1]} for row in rows if row[0]]
     items.sort(
         key=lambda item: (

@@ -8,10 +8,10 @@ from perf_common import ROOT, result_dir_for_config, resolve_config_path, write_
 
 
 PROFILES = {
-    "800": {"items": 800, "groups": 80, "review": 8, "video_ratio": 0.15, "artists": 50, "platforms": "pixiv,x,instagram,local", "topics": 25, "tauri": True},
-    "10k": {"items": 10_000, "groups": 1_000, "review": 20, "video_ratio": 0.15, "artists": 250, "platforms": "pixiv,x,instagram,local", "topics": 100, "tauri": False},
-    "50k": {"items": 50_000, "groups": 5_000, "review": 30, "video_ratio": 0.15, "artists": 750, "platforms": "pixiv,x,instagram,local", "topics": 250, "tauri": False},
-    "100k": {"items": 100_000, "groups": 10_000, "review": 50, "video_ratio": 0.15, "artists": 1_000, "platforms": "pixiv,x,instagram,local", "topics": 500, "tauri": False},
+    "800": {"items": 800, "groups": 80, "review": 8, "video_ratio": 0.15, "artists": 50, "platforms": "pixiv,x,instagram,local", "topics": 25, "wd_tags": 800, "wd_character_tags": 100, "tauri": True},
+    "10k": {"items": 10_000, "groups": 1_000, "review": 20, "video_ratio": 0.15, "artists": 250, "platforms": "pixiv,x,instagram,local", "topics": 100, "wd_tags": 8_000, "wd_character_tags": 1_000, "tauri": False},
+    "50k": {"items": 50_000, "groups": 5_000, "review": 30, "video_ratio": 0.15, "artists": 750, "platforms": "pixiv,x,instagram,local", "topics": 250, "wd_tags": 25_000, "wd_character_tags": 5_000, "tauri": False},
+    "100k": {"items": 100_000, "groups": 10_000, "review": 50, "video_ratio": 0.15, "artists": 1_000, "platforms": "pixiv,x,instagram,local", "topics": 500, "wd_tags": 50_000, "wd_character_tags": 10_000, "tauri": False},
 }
 
 
@@ -48,6 +48,10 @@ def main(argv=None) -> int:
     parser.add_argument("--artists", type=int)
     parser.add_argument("--platforms")
     parser.add_argument("--topics", type=int)
+    parser.add_argument("--wd-tags", type=int)
+    parser.add_argument("--wd-character-tags", type=int)
+    parser.add_argument("--wd-tags-per-item", type=int, default=20)
+    parser.add_argument("--wd-character-tags-per-item", type=int, default=1)
     parser.add_argument("--seed", type=int, default=123)
     parser.add_argument("--iterations", type=int, default=7)
     parser.add_argument("--force", action="store_true")
@@ -55,7 +59,7 @@ def main(argv=None) -> int:
     parser.add_argument("--include-tauri", action="store_true", help="Run Tauri even when the selected profile skips it by default.")
     args = parser.parse_args(argv)
     profile = dict(PROFILES[args.profile])
-    for key in ["items", "groups", "review", "artists", "platforms", "topics"]:
+    for key in ["items", "groups", "review", "artists", "platforms", "topics", "wd_tags", "wd_character_tags"]:
         value = getattr(args, key)
         if value is not None:
             profile[key] = value
@@ -84,6 +88,14 @@ def main(argv=None) -> int:
         str(profile["platforms"]),
         "--topics",
         str(profile["topics"]),
+        "--wd-tags",
+        str(profile["wd_tags"]),
+        "--wd-character-tags",
+        str(profile["wd_character_tags"]),
+        "--wd-tags-per-item",
+        str(args.wd_tags_per_item),
+        "--wd-character-tags-per-item",
+        str(args.wd_character_tags_per_item),
         "--seed",
         str(args.seed),
         "--json",
