@@ -968,6 +968,45 @@ def test_rebuild_metadata_index_status_does_not_clear_rows(monkeypatch, tmp_path
     assert after == before
 
 
+def test_simple_frontmatter_parser_matches_yaml_for_common_fields(monkeypatch, tmp_path):
+    metadata_index, = fresh_backend(monkeypatch, tmp_path, "metadata_index")
+    yaml_text = """hash: abc
+title: lmz000001.jpg
+storage_id: lmz000001
+source_url: https://example.test/item
+platform: pixiv
+source_artist: artist-001
+artist: artist-001
+date_added: '2026-01-01 00:00:00'
+topics:
+- topic-a
+- topic-b
+wd_rating: safe
+wd_character_tags:
+- character-a
+wd_tags:
+- tag-a
+- tag-b
+"""
+
+    parsed = metadata_index._parse_simple_frontmatter(yaml_text)
+    expected = yaml.safe_load(yaml_text)
+
+    assert parsed is not None
+    assert str(parsed.pop("date_added")) == str(expected.pop("date_added"))
+    assert parsed == expected
+
+
+def test_simple_frontmatter_parser_falls_back_for_complex_yaml(monkeypatch, tmp_path):
+    metadata_index, = fresh_backend(monkeypatch, tmp_path, "metadata_index")
+    yaml_text = """topics: [topic-a, topic-b]
+manual:
+  nested: true
+"""
+
+    assert metadata_index._parse_simple_frontmatter(yaml_text) is None
+
+
 def test_rebuild_metadata_index_fails_when_storage_id_missing(monkeypatch, tmp_path):
     sqlite_operator, = fresh_backend(monkeypatch, tmp_path, "db.sqlite_operator")
     tool = load_maintenance_tool("rebuild_metadata_index")

@@ -233,19 +233,102 @@ def _current_sigs(item_hash: str, storage_id: str) -> dict:
     }
 
 
-def _load_frontmatter(item_hash: str, storage_id: str) -> tuple[dict, str]:
+_SIMPLE_FRONTMATTER_KEYS = {
+    "title",
+    "hash",
+    "storage_id",
+    "source_url",
+    "platform",
+    "source_artist",
+    "artist",
+    "date_added",
+    "topics",
+    "wd_rating",
+    "wd_character_tags",
+    "wd_tags",
+}
+
+
+def _simple_scalar(value: str) -> str | None:
+    text = value.strip()
+    if not text:
+        return ""
+    if text[0] in {"[", "{", "|", ">", "&", "*", "!"}:
+        return None
+    if " #" in text or "\t" in text:
+        return None
+    if text[0] in {"'", '"'}:
+        quote = text[0]
+        if len(text) < 2 or text[-1] != quote or text.count(quote) != 2:
+            return None
+        return text[1:-1]
+    return text
+
+
+def _parse_simple_frontmatter(yaml_text: str) -> dict | None:
+    data: dict[str, object] = {}
+    current_key = None
+    current_list: list[str] | None = None
+    for raw_line in yaml_text.splitlines():
+        if not raw_line.strip():
+            continue
+        if raw_line.lstrip() != raw_line:
+            stripped = raw_line.strip()
+            if current_list is None or not stripped.startswith("- "):
+                return None
+            value = _simple_scalar(stripped[2:])
+            if value is None:
+                return None
+            current_list.append(value)
+            continue
+        if raw_line.startswith("- "):
+            if current_list is None:
+                return None
+            value = _simple_scalar(raw_line[2:])
+            if value is None:
+                return None
+            current_list.append(value)
+            continue
+        if ":" not in raw_line:
+            return None
+        key, value = raw_line.split(":", 1)
+        key = key.strip()
+        if not key or key not in _SIMPLE_FRONTMATTER_KEYS:
+            return None
+        value = value.strip()
+        current_key = key
+        if not value:
+            current_list = []
+            data[key] = current_list
+            continue
+        scalar = _simple_scalar(value)
+        if scalar is None:
+            return None
+        current_list = None
+        data[current_key] = scalar
+    return data
+
+
+def _load_frontmatter(item_hash: str, storage_id: str, stages: dict[str, float] | None = None) -> tuple[dict, str]:
     path = note_path_for(item_hash, storage_id)
+    stage_started = time.perf_counter()
     if not path.exists():
+        _add_stage(stages, "frontmatter_read", stage_started)
         return {}, ""
     try:
         text = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
+        _add_stage(stages, "frontmatter_read", stage_started)
         return {}, str(exc)
+    _add_stage(stages, "frontmatter_read", stage_started)
+    stage_started = time.perf_counter()
     text = text.lstrip("\ufeff")
     if not text.startswith("---"):
+        _add_stage(stages, "frontmatter_extract", stage_started)
         return {}, ""
     lines = text.splitlines()
     if not lines or lines[0].strip() != "---":
+        _add_stage(stages, "frontmatter_extract", stage_started)
         return {}, ""
     end_index = None
     for index, line in enumerate(lines[1:], start=1):
@@ -253,12 +336,22 @@ def _load_frontmatter(item_hash: str, storage_id: str) -> tuple[dict, str]:
             end_index = index
             break
     if end_index is None:
+        _add_stage(stages, "frontmatter_extract", stage_started)
         return {}, "frontmatter terminator missing"
     yaml_text = "\n".join(lines[1:end_index])
+    _add_stage(stages, "frontmatter_extract", stage_started)
+    stage_started = time.perf_counter()
+    simple = _parse_simple_frontmatter(yaml_text)
+    _add_stage(stages, "frontmatter_fast_parse", stage_started)
+    if simple is not None:
+        return simple, ""
+    stage_started = time.perf_counter()
     try:
         data = yaml.safe_load(yaml_text) or {}
     except yaml.YAMLError as exc:
+        _add_stage(stages, "frontmatter_yaml_parse", stage_started)
         return {}, str(exc)
+    _add_stage(stages, "frontmatter_yaml_parse", stage_started)
     return (data if isinstance(data, dict) else {}), ""
 
 
@@ -840,13 +933,28 @@ def metadata_index_status(conn: sqlite3.Connection, deep: bool = False) -> dict:
     }
 
 
-def _metadata_payload(conn: sqlite3.Connection, item_hash: str, storage_id: str) -> dict:
+def _add_stage(stages: dict[str, float] | None, key: str, started: float):
+    if stages is not None:
+        stages[key] += (time.perf_counter() - started) * 1000
+
+
+def _metadata_payload(conn: sqlite3.Connection, item_hash: str, storage_id: str, stages: dict[str, float] | None = None) -> dict:
     _remember_watchdog_storage(item_hash, storage_id)
+    stage_started = time.perf_counter()
     sigs = _current_sigs(item_hash, storage_id)
-    frontmatter, error = _load_frontmatter(item_hash, storage_id)
+    _add_stage(stages, "metadata_sigs", stage_started)
+    stage_started = time.perf_counter()
+    frontmatter, error = _load_frontmatter(item_hash, storage_id, stages=stages)
+    _add_stage(stages, "frontmatter_load_parse", stage_started)
+    stage_started = time.perf_counter()
     topics = normalize_topic_list(frontmatter.get("topics")) if not error else []
+    _add_stage(stages, "topic_normalize", stage_started)
+    stage_started = time.perf_counter()
     wd_payload = _wd_payload(item_hash, storage_id, frontmatter) if not error else {"status": "missing"}
+    _add_stage(stages, "wd_payload", stage_started)
+    stage_started = time.perf_counter()
     wd_rows = _wd_rows(wd_payload)
+    _add_stage(stages, "wd_rows", stage_started)
     return {
         "sigs": sigs,
         "frontmatter": frontmatter,
@@ -880,6 +988,15 @@ def rebuild_all_metadata(conn: sqlite3.Connection, batch_size: int = FULL_REBUIL
     stages: dict[str, float] = {
         "item_fetch": 0.0,
         "metadata_read_parse": 0.0,
+        "metadata_sigs": 0.0,
+        "frontmatter_load_parse": 0.0,
+        "frontmatter_read": 0.0,
+        "frontmatter_extract": 0.0,
+        "frontmatter_fast_parse": 0.0,
+        "frontmatter_yaml_parse": 0.0,
+        "topic_normalize": 0.0,
+        "wd_payload": 0.0,
+        "wd_rows": 0.0,
         "row_building": 0.0,
         "db_flushes": 0.0,
         "item_updates": 0.0,
@@ -972,7 +1089,7 @@ def rebuild_all_metadata(conn: sqlite3.Connection, batch_size: int = FULL_REBUIL
                 log_system("WARNING", "Metadata full rebuild skipped item missing storage_id", hash=item_hash, context=context)
                 continue
             stage_started = time.perf_counter()
-            payload = _metadata_payload(conn, item_hash, storage_id)
+            payload = _metadata_payload(conn, item_hash, storage_id, stages=stages)
             stages["metadata_read_parse"] += (time.perf_counter() - stage_started) * 1000
             stage_started = time.perf_counter()
             frontmatter = payload["frontmatter"]
