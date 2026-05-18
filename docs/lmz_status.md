@@ -265,6 +265,23 @@ VSCode-friendly test launchers:
   - add dirty queue/change tracking later to avoid scan-all stale detection.
   - rerun `100k` only after the above improvements.
 
+### Next Optimization Sequence
+
+- Pass 1 - metadata internals:
+  - make metadata index status cheaper by avoiding live large-table counts where possible.
+  - add dirty queue/change tracking so stale repair does not scan the whole vault to find changed items.
+  - optimize full metadata rebuild loop after status/dirty tracking are stable.
+  - validate with `10k`, then `50k` if clean.
+- Pass 2 - artist/platform query paths:
+  - add artist/platform facet count fast path, similar to topic/WD facet counts.
+  - add artist/platform exact-filter fast path for selected suggestions/chips.
+  - switch autocomplete/search paths to prefix/range matching where UX remains clear.
+  - validate with `10k`, then `50k` if clean.
+- Later:
+  - evaluate FTS5 for broad text discovery.
+  - remove remaining low-value hot-path schema checks.
+  - consider parallel rebuild only after simpler rebuild optimizations are exhausted.
+
 ## Deferred / Will Do Later
 
 ### Phase A - Stability V1

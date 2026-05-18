@@ -238,30 +238,12 @@ def _rebuild_metadata_index(config_path: Path) -> dict:
     conn = sqlite_operator.init_database()
     try:
         metadata_index.ensure_metadata_schema(conn)
-        metadata_index._set_metadata_index_ready(conn, False)
-        conn.execute("DELETE FROM item_topics")
-        conn.execute("DELETE FROM item_wd_tags")
-        conn.execute("DELETE FROM item_metadata_files")
-        conn.execute("DELETE FROM metadata_facet_counts")
-        conn.commit()
-        rows = conn.execute("SELECT hash FROM items ORDER BY date_added DESC, hash DESC").fetchall()
-        indexed = 0
-        errors = 0
-        for index, (item_hash,) in enumerate(rows, start=1):
-            result = metadata_index.safe_reindex_item_metadata(conn, item_hash, "generated_vault", update_facets=False)
-            if result.get("status") == "error":
-                errors += 1
-            elif result.get("status") != "missing_item":
-                indexed += 1
-            if index % 500 == 0:
-                conn.commit()
-        metadata_index._set_metadata_index_ready(conn, True)
-        metadata_index.rebuild_metadata_facet_counts(conn)
+        result = metadata_index.rebuild_all_metadata(conn, batch_size=500, context="generated_vault")
         conn.commit()
         status = metadata_index.metadata_index_status(conn, deep=False)
         return {
-            "indexed": indexed,
-            "errors": errors,
+            "indexed": result["indexed"],
+            "errors": result["errors"],
             "topics": status["topics"],
             "wd_tags": status["wd_tags"],
             "facet_counts": status["facet_counts"],

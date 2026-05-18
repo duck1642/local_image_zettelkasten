@@ -105,6 +105,10 @@ def init_database():
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_items_artist_date ON items(COALESCE(source_artist, '') COLLATE NOCASE ASC, date_added DESC, hash DESC)")
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_items_platform ON items(platform)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_items_source_artist ON items(source_artist)')
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_items_source_artist_norm ON items(LOWER(TRIM(source_artist)))")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_items_platform_norm ON items(LOWER(TRIM(platform)))")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_items_source_artist_norm_date ON items(LOWER(TRIM(source_artist)), date_added DESC, hash DESC)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_items_platform_norm_date ON items(LOWER(TRIM(platform)), date_added DESC, hash DESC)")
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_items_mime_date ON items(mime_type, date_added DESC, hash DESC)')
 
 
@@ -257,6 +261,8 @@ def reset_database():
         cursor = conn.cursor()
         cursor.execute('PRAGMA foreign_keys = ON;')
         cursor.execute('BEGIN IMMEDIATE')
+        cursor.execute('DROP TABLE IF EXISTS metadata_dirty_queue')
+        cursor.execute('DROP TABLE IF EXISTS metadata_facet_counts')
         cursor.execute('DROP TABLE IF EXISTS item_wd_tags')
         cursor.execute('DROP TABLE IF EXISTS item_topics')
         cursor.execute('DROP TABLE IF EXISTS item_metadata_files')

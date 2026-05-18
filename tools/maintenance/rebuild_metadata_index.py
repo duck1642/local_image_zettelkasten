@@ -14,12 +14,10 @@ if str(SRC_DIR) not in sys.path:
 from logger import log_system
 from metadata_index import (
     REPAIR_BATCH_SIZE,
-    _set_metadata_index_ready,
     ensure_metadata_schema,
     metadata_index_status,
-    rebuild_metadata_facet_counts,
+    rebuild_all_metadata,
     reindex_stale_metadata_batch,
-    safe_reindex_item_metadata,
     stale_metadata_count,
 )
 from utils import DB_PATH
@@ -106,6 +104,8 @@ def run_stale(conn, limit: int | None = None) -> dict:
         queued = int(result.get("queued") or 0)
         if remaining is not None:
             remaining -= queued
+        if result.get("source") == "dirty_queue" and not result.get("dirty_remaining"):
+            continue
         if queued < batch_limit:
             break
 
@@ -123,26 +123,10 @@ def run_full(conn) -> dict:
 
     log_system("INFO", "Metadata index maintenance rebuild started", mode="full")
     ensure_metadata_schema(conn)
-    _set_metadata_index_ready(conn, False)
-    conn.execute("DELETE FROM item_topics")
-    conn.execute("DELETE FROM item_wd_tags")
-    conn.execute("DELETE FROM item_metadata_files")
-    conn.execute("DELETE FROM metadata_facet_counts")
+    result = rebuild_all_metadata(conn, BATCH_SIZE, "maintenance_full")
     conn.commit()
-
-    rows = conn.execute("SELECT hash FROM items ORDER BY date_added DESC, hash DESC").fetchall()
-    for index, (item_hash,) in enumerate(rows, start=1):
-        result = safe_reindex_item_metadata(conn, item_hash, "maintenance_full", update_facets=False)
-        if result.get("status") == "error":
-            report["errors"] += 1
-        elif result.get("status") != "missing_item":
-            report["indexed"] += 1
-        if index % BATCH_SIZE == 0:
-            conn.commit()
-
-    _set_metadata_index_ready(conn, True)
-    rebuild_metadata_facet_counts(conn)
-    conn.commit()
+    report["indexed"] = int(result.get("indexed") or 0)
+    report["errors"] = int(result.get("errors") or 0)
     report["stale_after"] = stale_metadata_count(conn)
     report["status"] = metadata_index_status(conn, deep=True)
     report["duration_ms"] = round((time.perf_counter() - started) * 1000, 2)

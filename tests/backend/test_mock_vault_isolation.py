@@ -826,6 +826,60 @@ def test_stale_metadata_scan_streams_and_respects_limit(monkeypatch, tmp_path):
     assert seen["rows"] == 3
 
 
+def test_metadata_dirty_queue_created_and_drained_before_scan(monkeypatch, tmp_path):
+    utils, sqlite_operator, metadata_index = fresh_backend(monkeypatch, tmp_path, "utils", "db.sqlite_operator", "metadata_index")
+    item_hash = "ab" * 32
+    conn = insert_mock_item(sqlite_operator, item_hash)
+    write_compact_note(utils, conn, item_hash, "---\ntopics:\n  - queued-topic\n---\n")
+    metadata_index.enqueue_metadata_dirty(conn, item_hash, "test")
+    conn.commit()
+
+    monkeypatch.setattr(
+        metadata_index,
+        "stale_metadata_hashes",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("stale scan should not run while dirty queue has work")),
+    )
+
+    result = metadata_index.reindex_stale_metadata_batch(conn, limit=10)
+    topics = [row[0] for row in conn.execute("SELECT topic FROM item_topics WHERE item_hash = ?", (item_hash,))]
+    queued = conn.execute("SELECT COUNT(*) FROM metadata_dirty_queue").fetchone()[0]
+    conn.close()
+
+    assert result["source"] == "dirty_queue"
+    assert result["indexed"] == 1
+    assert result["dirty_remaining"] is False
+    assert topics == ["queued-topic"]
+    assert queued == 0
+
+
+def test_metadata_cached_counters_update_after_reindex(monkeypatch, tmp_path):
+    utils, sqlite_operator, metadata_index = fresh_backend(monkeypatch, tmp_path, "utils", "db.sqlite_operator", "metadata_index")
+    item_hash = "ac" * 32
+    conn = insert_mock_item(sqlite_operator, item_hash)
+    write_compact_note(
+        utils,
+        conn,
+        item_hash,
+        "---\ntopics:\n  - one\n  - two\nwd_rating: safe\nwd_tags:\n  - shared\n---\n",
+    )
+    metadata_index.reindex_item_metadata(conn, item_hash)
+    first = metadata_index.metadata_index_status(conn)
+
+    write_compact_note(utils, conn, item_hash, "---\ntopics:\n  - one\nwd_rating: explicit\n---\n")
+    metadata_index.reindex_item_metadata(conn, item_hash)
+    second = metadata_index.metadata_index_status(conn)
+    conn.close()
+
+    assert first["indexed"] == 1
+    assert first["topics"] == 2
+    assert first["wd_tags"] == 2
+    assert first["facet_counts"] == 6
+    assert second["indexed"] == 1
+    assert second["topics"] == 1
+    assert second["wd_tags"] == 1
+    assert second["dirty"] == 0
+
+
 def test_metadata_status_fast_path_skips_stale_count(monkeypatch, tmp_path):
     metadata_index, = fresh_backend(monkeypatch, tmp_path, "metadata_index")
 
@@ -962,10 +1016,14 @@ def test_rebuild_metadata_index_full_clears_and_rebuilds(monkeypatch, tmp_path):
     conn = sqlite_operator.init_database()
     topics = [row[0] for row in conn.execute("SELECT topic FROM item_topics WHERE item_hash = ? ORDER BY topic", (item_hash,))]
     ready = metadata_index.metadata_index_ready(conn)
+    status = metadata_index.metadata_index_status(conn)
     conn.close()
     assert report["indexed"] == 1
     assert topics == ["rebuilt-topic"]
     assert ready is True
+    assert status["indexed"] == 1
+    assert status["topics"] == 1
+    assert status["facet_counts"] == 3
 
 
 def test_rebuild_metadata_index_stale_limit_caps_work(monkeypatch, tmp_path):
@@ -1243,6 +1301,45 @@ def test_metadata_filters_use_exact_when_available_and_partial_when_needed(monke
     assert [item["hash"] for item in partial["items"]] == [alpha_extra_hash, alpha_hash]
     assert [item["hash"] for item in exact["items"]] == [beta_hash]
     assert [item["hash"] for item in wd_exact["items"]] == [wd_hash]
+
+
+def test_artist_platform_facets_and_filters_use_exact_first(monkeypatch, tmp_path):
+    utils, sqlite_operator, metadata_index, web_api = fresh_backend(
+        monkeypatch,
+        tmp_path,
+        "utils",
+        "db.sqlite_operator",
+        "metadata_index",
+        "web_api",
+    )
+
+    def add_item(item_hash: str, artist: str, platform: str, date_added: str):
+        conn = insert_mock_item(sqlite_operator, item_hash, artist=artist, date_added=date_added)
+        conn.execute("UPDATE items SET platform = ? WHERE hash = ?", (platform, item_hash))
+        write_compact_note(utils, conn, item_hash, "---\ntopics: []\n---\n")
+        metadata_index.reindex_item_metadata(conn, item_hash)
+        metadata_index._set_metadata_index_ready(conn, True)
+        conn.commit()
+        conn.close()
+
+    artist_one_hash = "51" * 32
+    artist_extra_hash = "52" * 32
+    platform_hash = "53" * 32
+    add_item(artist_one_hash, "artist1", "site1", "2026-01-01 00:00:01")
+    add_item(artist_extra_hash, "artist11", "site11", "2026-01-01 00:00:02")
+    add_item(platform_hash, "other", "site1", "2026-01-01 00:00:03")
+
+    artist_facets = web_api._get_facets_sync("artist", "artist", 10)
+    platform_facets = web_api._get_facets_sync("platform", "site", 10)
+    exact_artist = web_api._get_items_sync(None, None, "newest", "all", ["artist1"], [], [], [], [], [], None, 25)
+    partial_artist = web_api._get_items_sync(None, None, "newest", "all", ["artist"], [], [], [], [], [], None, 25)
+    exact_platform = web_api._get_items_sync(None, None, "newest", "all", [], ["site1"], [], [], [], [], None, 25)
+
+    assert artist_facets["items"][0] == {"value": "artist1", "count": 1}
+    assert {item["value"] for item in platform_facets["items"]} >= {"site1", "site11"}
+    assert [item["hash"] for item in exact_artist["items"]] == [artist_one_hash]
+    assert [item["hash"] for item in partial_artist["items"]] == [artist_extra_hash, artist_one_hash]
+    assert [item["hash"] for item in exact_platform["items"]] == [platform_hash, artist_one_hash]
 
 
 def test_search_manager_query_sees_pending_during_vp_rebuild(monkeypatch, tmp_path):

@@ -28,10 +28,12 @@ from processor import process_file
 from logger import log_auth, log_ingest_audit, log_ingest_local, log_review, log_svelte, log_system, RAW_LOGS_DIR, STRUCTURED_LOGS_DIR
 from md_generator import MANUAL_FRONTMATTER_FIELDS, load_note_frontmatter, load_note_topics, load_note_wd_tags, generate_markdown
 from metadata_index import (
+    item_core_facet_values,
     indexed_item_metadata,
     metadata_facets,
     metadata_index_ready,
     metadata_index_status,
+    refresh_metadata_facet_counts_for_values,
     safe_reindex_item_metadata,
     start_metadata_repair_worker,
     start_metadata_watchdog,
@@ -667,22 +669,9 @@ def _get_facets_sync(kind: str, q: str = "", limit: int = 100):
         raise HTTPException(status_code=400, detail="Invalid facet kind")
 
     conn = connect_database()
-    cursor = conn.cursor()
     try:
         if kind in {"artist", "platform"}:
-            column = "source_artist" if kind == "artist" else "platform"
-            conditions = [f"{column} IS NOT NULL", f"TRIM({column}) != ''"]
-            params = []
-            if needle:
-                conditions.append(f"{column} LIKE ?")
-                params.append(f"%{needle}%")
-            where_clause = " AND ".join(conditions)
-            cursor.execute(
-                f"SELECT {column}, COUNT(*) FROM items WHERE {where_clause} GROUP BY {column}",
-                tuple(params)
-            )
-            items = [{"value": row[0], "count": row[1]} for row in cursor.fetchall() if row[0]]
-            return {"kind": kind, "items": _sort_facets(items, needle, limit)}
+            return {"kind": kind, "items": metadata_facets(conn, kind, needle.casefold(), limit)}
 
         if metadata_index_ready(conn):
             return {"kind": kind, "items": metadata_facets(conn, kind, needle.casefold(), limit)}
@@ -804,6 +793,31 @@ def _append_or_like(conditions, params, column, values):
     conditions.append("(" + " OR ".join([f"{column} LIKE ?"] * len(values)) + ")")
     params.extend([f"%{value}%" for value in values])
 
+def _core_norm_expr(column: str) -> str:
+    return f"LOWER(TRIM({column}))"
+
+def _core_filter_has_exact(conn, column: str, value: str) -> bool:
+    row = conn.execute(
+        f"SELECT 1 FROM items WHERE {_core_norm_expr(column)} = ? LIMIT 1",
+        (value.casefold(),),
+    ).fetchone()
+    return row is not None
+
+def _append_core_filter(conn, conditions, params, column, values):
+    values = _clean_filter_values(values)
+    if not values:
+        return
+    clauses = []
+    for value in values:
+        norm_value = value.casefold()
+        if _core_filter_has_exact(conn, column, norm_value):
+            clauses.append(f"{_core_norm_expr(column)} = ?")
+            params.append(norm_value)
+        else:
+            clauses.append(f"{_core_norm_expr(column)} LIKE ?")
+            params.append(f"%{norm_value}%")
+    conditions.append("(" + " OR ".join(clauses) + ")")
+
 def _append_text_terms(conditions, params, terms):
     for term in _clean_filter_values(terms):
         conditions.append("(original_filename LIKE ? OR hash LIKE ? OR source_url LIKE ? OR source_artist LIKE ? OR platform LIKE ?)")
@@ -842,11 +856,14 @@ def _get_items_sync(field, value, sort, media_type, artist, platform, filename, 
         if field and value:
             allowed = {"source_artist", "platform", "original_filename"}
             if field in allowed:
-                conditions.append(f"{field} LIKE ?")
-                params.append(f"%{value}%")
+                if field in {"source_artist", "platform"}:
+                    _append_core_filter(conn, conditions, params, field, [value])
+                else:
+                    conditions.append(f"{field} LIKE ?")
+                    params.append(f"%{value}%")
 
-        _append_or_like(conditions, params, "source_artist", artist)
-        _append_or_like(conditions, params, "platform", platform)
+        _append_core_filter(conn, conditions, params, "source_artist", artist)
+        _append_core_filter(conn, conditions, params, "platform", platform)
         _append_or_like(conditions, params, "original_filename", filename)
         _append_text_terms(conditions, params, text)
 
@@ -1088,6 +1105,7 @@ def _update_item_sync(item_hash: str, update: ItemUpdate):
         cursor.execute("SELECT 1 FROM items WHERE hash = ?", (item_hash,))
         if not cursor.fetchone():
             raise HTTPException(status_code=404)
+        previous_core_facets = item_core_facet_values(conn, item_hash)
         manual_overrides = {}
         if update.artist is not None:
             cursor.execute("UPDATE items SET source_artist = ? WHERE hash = ?", (update.artist, item_hash))
@@ -1108,6 +1126,8 @@ def _update_item_sync(item_hash: str, update: ItemUpdate):
             note_path.parent.mkdir(parents=True, exist_ok=True)
             atomic_write_text(note_path, md_content)
             safe_reindex_item_metadata(conn, item_hash, "item_patch")
+            current_core_facets = item_core_facet_values(conn, item_hash)
+            refresh_metadata_facet_counts_for_values(conn, previous_core_facets | current_core_facets)
             conn.commit()
             
         return {"status": "success"}
