@@ -1015,6 +1015,12 @@ def test_rebuild_metadata_index_full_clears_and_rebuilds(monkeypatch, tmp_path):
 
     conn = sqlite_operator.init_database()
     topics = [row[0] for row in conn.execute("SELECT topic FROM item_topics WHERE item_hash = ? ORDER BY topic", (item_hash,))]
+    index_names = {
+        row[0]
+        for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'idx_item_%'"
+        ).fetchall()
+    }
     ready = metadata_index.metadata_index_ready(conn)
     status = metadata_index.metadata_index_status(conn)
     conn.close()
@@ -1024,11 +1030,19 @@ def test_rebuild_metadata_index_full_clears_and_rebuilds(monkeypatch, tmp_path):
     assert status["indexed"] == 1
     assert status["topics"] == 1
     assert status["facet_counts"] == 3
+    assert set(metadata_index.METADATA_SECONDARY_INDEXES).issubset(index_names)
     assert set(report["stages_ms"]) >= {
         "item_fetch",
         "metadata_read_parse",
         "row_building",
         "db_flushes",
+        "item_updates",
+        "metadata_file_inserts",
+        "topic_inserts",
+        "wd_tag_inserts",
+        "commits",
+        "secondary_index_drop",
+        "secondary_index_rebuild",
         "facet_rebuild",
         "counter_refresh",
     }
@@ -1079,6 +1093,38 @@ def test_rebuild_metadata_index_full_deep_validate_preserves_stale_scan(monkeypa
     assert report["indexed"] == 1
     assert report["status"]["stale_deep"] is True
     assert calls["count"] >= 2
+
+
+def test_rebuild_metadata_index_failure_recreates_secondary_indexes(monkeypatch, tmp_path):
+    utils, sqlite_operator, metadata_index = fresh_backend(monkeypatch, tmp_path, "utils", "db.sqlite_operator", "metadata_index")
+    item_hash = "d9" * 32
+    conn = insert_mock_item(sqlite_operator, item_hash)
+    write_compact_note(utils, conn, item_hash, "---\ntopics:\n  - fail-full\n---\n")
+    metadata_index.ensure_metadata_schema(conn)
+    conn.commit()
+
+    def fail_payload(*args, **kwargs):
+        raise RuntimeError("forced rebuild failure")
+
+    monkeypatch.setattr(metadata_index, "_metadata_payload", fail_payload)
+
+    with pytest.raises(RuntimeError, match="forced rebuild failure"):
+        metadata_index.rebuild_all_metadata(conn)
+
+    index_names = {
+        row[0]
+        for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'index'"
+        ).fetchall()
+    }
+    ready_row = conn.execute(
+        "SELECT value FROM metadata_index_state WHERE key = ?",
+        (metadata_index.READY_KEY,),
+    ).fetchone()
+    conn.close()
+
+    assert set(metadata_index.METADATA_SECONDARY_INDEXES).issubset(index_names)
+    assert ready_row == ("0",)
 
 
 def test_rebuild_metadata_index_stale_limit_caps_work(monkeypatch, tmp_path):

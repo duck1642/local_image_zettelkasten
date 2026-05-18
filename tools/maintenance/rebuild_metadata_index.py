@@ -13,6 +13,7 @@ if str(SRC_DIR) not in sys.path:
 
 from logger import log_system
 from metadata_index import (
+    FULL_REBUILD_BATCH_SIZE,
     REPAIR_BATCH_SIZE,
     ensure_metadata_schema,
     metadata_index_status,
@@ -23,7 +24,7 @@ from metadata_index import (
 from utils import DB_PATH
 
 
-BATCH_SIZE = 500
+BATCH_SIZE = FULL_REBUILD_BATCH_SIZE
 
 
 def open_database():

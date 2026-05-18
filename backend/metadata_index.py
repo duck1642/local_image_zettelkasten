@@ -24,7 +24,15 @@ COUNTER_KEYS = {
     "dirty": "counter:dirty",
 }
 REPAIR_BATCH_SIZE = 500
+FULL_REBUILD_BATCH_SIZE = 2500
 WD_FRONTMATTER_FIELDS = ("wd_rating", "wd_character_tags", "wd_tags")
+METADATA_SECONDARY_INDEXES = {
+    "idx_item_topics_norm": "CREATE INDEX IF NOT EXISTS idx_item_topics_norm ON item_topics(topic_norm)",
+    "idx_item_topics_hash": "CREATE INDEX IF NOT EXISTS idx_item_topics_hash ON item_topics(item_hash)",
+    "idx_item_wd_tags_norm": "CREATE INDEX IF NOT EXISTS idx_item_wd_tags_norm ON item_wd_tags(tag_norm)",
+    "idx_item_wd_tags_hash": "CREATE INDEX IF NOT EXISTS idx_item_wd_tags_hash ON item_wd_tags(item_hash)",
+    "idx_item_metadata_status": "CREATE INDEX IF NOT EXISTS idx_item_metadata_status ON item_metadata_files(status)",
+}
 
 _repair_lock = threading.Lock()
 _repair_running = False
@@ -100,12 +108,18 @@ def ensure_metadata_schema(conn: sqlite3.Connection):
         )
     """)
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_metadata_facet_counts_kind_count ON metadata_facet_counts(kind, count DESC, value_norm)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_item_topics_norm ON item_topics(topic_norm)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_item_topics_hash ON item_topics(item_hash)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_item_wd_tags_norm ON item_wd_tags(tag_norm)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_item_wd_tags_hash ON item_wd_tags(item_hash)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_item_metadata_status ON item_metadata_files(status)")
+    _create_metadata_secondary_indexes(conn)
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_metadata_dirty_queue_queued_at ON metadata_dirty_queue(queued_at)")
+
+
+def _create_metadata_secondary_indexes(conn: sqlite3.Connection):
+    for sql in METADATA_SECONDARY_INDEXES.values():
+        conn.execute(sql)
+
+
+def _drop_metadata_secondary_indexes(conn: sqlite3.Connection):
+    for name in METADATA_SECONDARY_INDEXES:
+        conn.execute(f"DROP INDEX IF EXISTS {name}")
 
 
 def metadata_index_ready(conn: sqlite3.Connection) -> bool:
@@ -333,8 +347,9 @@ def _remember_watchdog_storage(item_hash: str, storage_id: str):
         _watchdog_storage_map[storage_id] = item_hash
 
 
-def rebuild_metadata_facet_counts(conn: sqlite3.Connection):
-    ensure_metadata_schema(conn)
+def rebuild_metadata_facet_counts(conn: sqlite3.Connection, ensure_schema: bool = True):
+    if ensure_schema:
+        ensure_metadata_schema(conn)
     conn.execute("DELETE FROM metadata_facet_counts")
     conn.execute("""
         INSERT INTO metadata_facet_counts(kind, value_norm, value, count)
@@ -859,7 +874,7 @@ def _metadata_file_row(item_hash: str, storage_id: str, payload: dict) -> tuple:
     )
 
 
-def rebuild_all_metadata(conn: sqlite3.Connection, batch_size: int = REPAIR_BATCH_SIZE, context: str = "full") -> dict:
+def rebuild_all_metadata(conn: sqlite3.Connection, batch_size: int = FULL_REBUILD_BATCH_SIZE, context: str = "full") -> dict:
     ensure_metadata_schema(conn)
     started = time.perf_counter()
     stages: dict[str, float] = {
@@ -867,114 +882,154 @@ def rebuild_all_metadata(conn: sqlite3.Connection, batch_size: int = REPAIR_BATC
         "metadata_read_parse": 0.0,
         "row_building": 0.0,
         "db_flushes": 0.0,
+        "item_updates": 0.0,
+        "metadata_file_inserts": 0.0,
+        "topic_inserts": 0.0,
+        "wd_tag_inserts": 0.0,
+        "commits": 0.0,
+        "secondary_index_drop": 0.0,
+        "secondary_index_rebuild": 0.0,
         "facet_rebuild": 0.0,
         "counter_refresh": 0.0,
     }
     _set_metadata_index_ready(conn, False)
-    conn.execute("DELETE FROM item_topics")
-    conn.execute("DELETE FROM item_wd_tags")
-    conn.execute("DELETE FROM item_metadata_files")
-    conn.execute("DELETE FROM metadata_facet_counts")
-    conn.execute("DELETE FROM metadata_dirty_queue")
-    for name in COUNTER_KEYS:
-        _set_counter(conn, name, 0)
-    _set_state(conn, COUNTERS_READY_KEY, "1")
+    success = False
+    try:
+        stage_started = time.perf_counter()
+        _drop_metadata_secondary_indexes(conn)
+        stages["secondary_index_drop"] += (time.perf_counter() - stage_started) * 1000
 
-    stage_started = time.perf_counter()
-    rows = conn.execute("SELECT hash, storage_id FROM items ORDER BY date_added DESC, hash DESC").fetchall()
-    stages["item_fetch"] += (time.perf_counter() - stage_started) * 1000
-    indexed = 0
-    errors = 0
-    item_updates: list[tuple[str, str]] = []
-    date_updates: list[tuple[str, str]] = []
-    metadata_rows: list[tuple] = []
-    topic_rows: list[tuple] = []
-    wd_rows: list[tuple] = []
+        conn.execute("DELETE FROM item_topics")
+        conn.execute("DELETE FROM item_wd_tags")
+        conn.execute("DELETE FROM item_metadata_files")
+        conn.execute("DELETE FROM metadata_facet_counts")
+        conn.execute("DELETE FROM metadata_dirty_queue")
+        for name in COUNTER_KEYS:
+            _set_counter(conn, name, 0)
+        _set_state(conn, COUNTERS_READY_KEY, "1")
 
-    def flush():
-        flush_started = time.perf_counter()
-        if item_updates:
-            conn.executemany("UPDATE items SET source_artist = ? WHERE hash = ?", item_updates)
-            item_updates.clear()
-        if date_updates:
-            conn.executemany("UPDATE items SET date_added = ? WHERE hash = ?", date_updates)
-            date_updates.clear()
-        if metadata_rows:
-            conn.executemany(
-                """
-                INSERT INTO item_metadata_files(
-                    item_hash, storage_id, note_path, note_mtime_ns, note_size,
-                    wd_path, wd_mtime_ns, wd_size, indexed_at, status, error
+        stage_started = time.perf_counter()
+        rows = conn.execute("SELECT hash, storage_id FROM items ORDER BY date_added DESC, hash DESC").fetchall()
+        stages["item_fetch"] += (time.perf_counter() - stage_started) * 1000
+        indexed = 0
+        errors = 0
+        item_updates: list[tuple[str, str]] = []
+        date_updates: list[tuple[str, str]] = []
+        metadata_rows: list[tuple] = []
+        topic_rows: list[tuple] = []
+        wd_rows: list[tuple] = []
+
+        def flush():
+            flush_started = time.perf_counter()
+            if item_updates:
+                sub_started = time.perf_counter()
+                conn.executemany("UPDATE items SET source_artist = ? WHERE hash = ?", item_updates)
+                stages["item_updates"] += (time.perf_counter() - sub_started) * 1000
+                item_updates.clear()
+            if date_updates:
+                sub_started = time.perf_counter()
+                conn.executemany("UPDATE items SET date_added = ? WHERE hash = ?", date_updates)
+                stages["item_updates"] += (time.perf_counter() - sub_started) * 1000
+                date_updates.clear()
+            if metadata_rows:
+                sub_started = time.perf_counter()
+                conn.executemany(
+                    """
+                    INSERT INTO item_metadata_files(
+                        item_hash, storage_id, note_path, note_mtime_ns, note_size,
+                        wd_path, wd_mtime_ns, wd_size, indexed_at, status, error
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    metadata_rows,
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                metadata_rows,
-            )
-            metadata_rows.clear()
-        if topic_rows:
-            conn.executemany(
-                "INSERT OR IGNORE INTO item_topics(item_hash, topic, topic_norm) VALUES (?, ?, ?)",
-                topic_rows,
-            )
-            topic_rows.clear()
-        if wd_rows:
-            conn.executemany(
-                """
-                INSERT OR IGNORE INTO item_wd_tags(item_hash, tag, tag_norm, tag_type)
-                VALUES (?, ?, ?, ?)
-                """,
-                wd_rows,
-            )
-            wd_rows.clear()
-        stages["db_flushes"] += (time.perf_counter() - flush_started) * 1000
+                stages["metadata_file_inserts"] += (time.perf_counter() - sub_started) * 1000
+                metadata_rows.clear()
+            if topic_rows:
+                sub_started = time.perf_counter()
+                conn.executemany(
+                    "INSERT INTO item_topics(item_hash, topic, topic_norm) VALUES (?, ?, ?)",
+                    topic_rows,
+                )
+                stages["topic_inserts"] += (time.perf_counter() - sub_started) * 1000
+                topic_rows.clear()
+            if wd_rows:
+                sub_started = time.perf_counter()
+                conn.executemany(
+                    """
+                    INSERT INTO item_wd_tags(item_hash, tag, tag_norm, tag_type)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    wd_rows,
+                )
+                stages["wd_tag_inserts"] += (time.perf_counter() - sub_started) * 1000
+                wd_rows.clear()
+            stages["db_flushes"] += (time.perf_counter() - flush_started) * 1000
 
-    for index, (item_hash, storage_id) in enumerate(rows, start=1):
-        if not storage_id:
-            errors += 1
-            log_system("WARNING", "Metadata full rebuild skipped item missing storage_id", hash=item_hash, context=context)
-            continue
-        stage_started = time.perf_counter()
-        payload = _metadata_payload(conn, item_hash, storage_id)
-        stages["metadata_read_parse"] += (time.perf_counter() - stage_started) * 1000
-        stage_started = time.perf_counter()
-        frontmatter = payload["frontmatter"]
-        if not payload["error"]:
-            if "artist" in frontmatter:
-                item_updates.append((str(frontmatter.get("artist") or ""), item_hash))
-            if "date_added" in frontmatter and str(frontmatter.get("date_added") or "").strip():
-                date_updates.append((str(frontmatter.get("date_added")).strip(), item_hash))
-        for topic in payload["topics"]:
-            topic_norm = _norm(topic)
-            if topic_norm:
-                topic_rows.append((item_hash, topic, topic_norm))
-        for tag_type, tag in payload["wd_rows"]:
-            tag_norm = _norm(tag)
-            if tag_norm:
-                wd_rows.append((item_hash, tag, tag_norm, tag_type))
-        metadata_rows.append(_metadata_file_row(item_hash, storage_id, payload))
-        if payload["status"] == "error":
-            errors += 1
-            log_system("WARNING", "Metadata index parse failed", hash=item_hash, error=payload["error"])
-        else:
-            indexed += 1
-        stages["row_building"] += (time.perf_counter() - stage_started) * 1000
-        if index % batch_size == 0:
-            flush()
-            commit_started = time.perf_counter()
-            conn.commit()
-            stages["db_flushes"] += (time.perf_counter() - commit_started) * 1000
+        for index, (item_hash, storage_id) in enumerate(rows, start=1):
+            if not storage_id:
+                errors += 1
+                log_system("WARNING", "Metadata full rebuild skipped item missing storage_id", hash=item_hash, context=context)
+                continue
+            stage_started = time.perf_counter()
+            payload = _metadata_payload(conn, item_hash, storage_id)
+            stages["metadata_read_parse"] += (time.perf_counter() - stage_started) * 1000
+            stage_started = time.perf_counter()
+            frontmatter = payload["frontmatter"]
+            if not payload["error"]:
+                if "artist" in frontmatter:
+                    item_updates.append((str(frontmatter.get("artist") or ""), item_hash))
+                if "date_added" in frontmatter and str(frontmatter.get("date_added") or "").strip():
+                    date_updates.append((str(frontmatter.get("date_added")).strip(), item_hash))
+            seen_topics: set[str] = set()
+            for topic in payload["topics"]:
+                topic_norm = _norm(topic)
+                if topic_norm and topic_norm not in seen_topics:
+                    seen_topics.add(topic_norm)
+                    topic_rows.append((item_hash, topic, topic_norm))
+            seen_wd: set[tuple[str, str]] = set()
+            for tag_type, tag in payload["wd_rows"]:
+                tag_norm = _norm(tag)
+                tag_key = (tag_norm, tag_type)
+                if tag_norm and tag_key not in seen_wd:
+                    seen_wd.add(tag_key)
+                    wd_rows.append((item_hash, tag, tag_norm, tag_type))
+            metadata_rows.append(_metadata_file_row(item_hash, storage_id, payload))
+            if payload["status"] == "error":
+                errors += 1
+                log_system("WARNING", "Metadata index parse failed", hash=item_hash, error=payload["error"])
+            else:
+                indexed += 1
+            stages["row_building"] += (time.perf_counter() - stage_started) * 1000
+            if index % batch_size == 0:
+                flush()
+                commit_started = time.perf_counter()
+                conn.commit()
+                commit_ms = (time.perf_counter() - commit_started) * 1000
+                stages["commits"] += commit_ms
+                stages["db_flushes"] += commit_ms
 
-    flush()
-    stage_started = time.perf_counter()
-    rebuild_metadata_facet_counts(conn)
-    stages["facet_rebuild"] += (time.perf_counter() - stage_started) * 1000
-    _set_metadata_index_ready(conn, True)
-    stage_started = time.perf_counter()
-    counters = refresh_metadata_index_counters(conn)
-    stages["counter_refresh"] += (time.perf_counter() - stage_started) * 1000
-    duration_ms = round((time.perf_counter() - started) * 1000, 2)
-    stages_ms = {key: round(value, 2) for key, value in stages.items()}
-    return {"indexed": indexed, "errors": errors, "duration_ms": duration_ms, "stages_ms": stages_ms, **counters}
+        flush()
+        stage_started = time.perf_counter()
+        rebuild_metadata_facet_counts(conn, ensure_schema=False)
+        stages["facet_rebuild"] += (time.perf_counter() - stage_started) * 1000
+        stage_started = time.perf_counter()
+        _create_metadata_secondary_indexes(conn)
+        stages["secondary_index_rebuild"] += (time.perf_counter() - stage_started) * 1000
+        _set_metadata_index_ready(conn, True)
+        stage_started = time.perf_counter()
+        counters = refresh_metadata_index_counters(conn)
+        stages["counter_refresh"] += (time.perf_counter() - stage_started) * 1000
+        duration_ms = round((time.perf_counter() - started) * 1000, 2)
+        stages_ms = {key: round(value, 2) for key, value in stages.items()}
+        success = True
+        return {"indexed": indexed, "errors": errors, "duration_ms": duration_ms, "stages_ms": stages_ms, **counters}
+    finally:
+        if not success:
+            _set_metadata_index_ready(conn, False)
+            stage_started = time.perf_counter()
+            _create_metadata_secondary_indexes(conn)
+            stages["secondary_index_rebuild"] += (time.perf_counter() - stage_started) * 1000
 
 
 def _repair_worker(full: bool = False):
@@ -987,7 +1042,7 @@ def _repair_worker(full: bool = False):
             ensure_metadata_schema(conn)
             log_system("INFO", "Metadata index repair started", full=full)
             if full:
-                rebuild_all_metadata(conn, REPAIR_BATCH_SIZE, "repair_full")
+                rebuild_all_metadata(conn, FULL_REBUILD_BATCH_SIZE, "repair_full")
                 conn.commit()
             else:
                 while True:
