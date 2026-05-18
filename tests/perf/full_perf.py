@@ -40,6 +40,7 @@ def _generated_config_path(stdout: str) -> str:
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="Generate a vault and run the split performance harness.")
     parser.add_argument("--profile", choices=sorted(PROFILES), default="800")
+    parser.add_argument("--reuse", help="Reuse an existing generated vault config.yaml and skip generation.")
     parser.add_argument("--items", type=int)
     parser.add_argument("--name")
     parser.add_argument("--groups", type=int)
@@ -68,54 +69,64 @@ def main(argv=None) -> int:
     run_name = args.name or f"perf-{args.profile}"
     run_tauri = (args.include_tauri or bool(profile["tauri"])) and not args.skip_tauri
 
-    generator_command = [
-        "cmd",
-        "/c",
-        str(ROOT / "tests" / "perf-generate-vault.bat"),
-        "--items",
-        str(profile["items"]),
-        "--name",
-        run_name,
-        "--groups",
-        str(profile["groups"]),
-        "--review",
-        str(profile["review"]),
-        "--video-ratio",
-        str(profile["video_ratio"]),
-        "--artists",
-        str(profile["artists"]),
-        "--platforms",
-        str(profile["platforms"]),
-        "--topics",
-        str(profile["topics"]),
-        "--wd-tags",
-        str(profile["wd_tags"]),
-        "--wd-character-tags",
-        str(profile["wd_character_tags"]),
-        "--wd-tags-per-item",
-        str(args.wd_tags_per_item),
-        "--wd-character-tags-per-item",
-        str(args.wd_character_tags_per_item),
-        "--seed",
-        str(args.seed),
-        "--json",
-    ]
-    if args.force:
-        generator_command.append("--force")
-    generated = _run(generator_command)
-    if generated.returncode != 0:
-        print(generated.stdout)
-        print(generated.stderr, file=sys.stderr)
-        return generated.returncode
-
-    config_path = resolve_config_path(_generated_config_path(generated.stdout))
-    steps = {
-        "generated_vault": {
-            "exit_code": generated.returncode,
-            "stdout_tail": generated.stdout[-2000:],
-            "stderr_tail": generated.stderr[-2000:],
+    if args.reuse:
+        config_path = resolve_config_path(args.reuse)
+        steps = {
+            "reuse_vault": {
+                "exit_code": 0,
+                "stdout_tail": f"Reusing {config_path}",
+                "stderr_tail": "",
+            }
         }
-    }
+    else:
+        generator_command = [
+            "cmd",
+            "/c",
+            str(ROOT / "tests" / "perf-generate-vault.bat"),
+            "--items",
+            str(profile["items"]),
+            "--name",
+            run_name,
+            "--groups",
+            str(profile["groups"]),
+            "--review",
+            str(profile["review"]),
+            "--video-ratio",
+            str(profile["video_ratio"]),
+            "--artists",
+            str(profile["artists"]),
+            "--platforms",
+            str(profile["platforms"]),
+            "--topics",
+            str(profile["topics"]),
+            "--wd-tags",
+            str(profile["wd_tags"]),
+            "--wd-character-tags",
+            str(profile["wd_character_tags"]),
+            "--wd-tags-per-item",
+            str(args.wd_tags_per_item),
+            "--wd-character-tags-per-item",
+            str(args.wd_character_tags_per_item),
+            "--seed",
+            str(args.seed),
+            "--json",
+        ]
+        if args.force:
+            generator_command.append("--force")
+        generated = _run(generator_command)
+        if generated.returncode != 0:
+            print(generated.stdout)
+            print(generated.stderr, file=sys.stderr)
+            return generated.returncode
+
+        config_path = resolve_config_path(_generated_config_path(generated.stdout))
+        steps = {
+            "generated_vault": {
+                "exit_code": generated.returncode,
+                "stdout_tail": generated.stdout[-2000:],
+                "stderr_tail": generated.stderr[-2000:],
+            }
+        }
 
     for step_name, script in [
         ("index", ROOT / "tests" / "perf-index.bat"),
@@ -148,7 +159,14 @@ def main(argv=None) -> int:
         "config_path": str(config_path),
         "started_at": utc_now(),
         "profile": args.profile,
-        "parameters": {**profile, "name": run_name, "seed": args.seed, "iterations": args.iterations, "run_tauri": run_tauri},
+        "parameters": {
+            **profile,
+            "name": run_name,
+            "seed": args.seed,
+            "iterations": args.iterations,
+            "run_tauri": run_tauri,
+            "reuse": bool(args.reuse),
+        },
         "ok": ok,
         "steps": steps,
     }
