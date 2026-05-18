@@ -309,23 +309,6 @@ VSCode-friendly test launchers:
 
 ## Deferred / Will Do Later
 
-### Phase A - Stability V1
-
-- Current focus is scale performance from generated-vault testing:
-  - frontend scrolling/virtualization passed at `10k` and `50k`.
-  - backend RAM stayed stable through `50k`.
-  - metadata index rebuild remains the main measured backend bottleneck.
-  - metadata status, dirty-queue repair, topic/WD facets, and artist/platform facets/filters have been optimized and need real-vault checking.
-
-#### Phase A Implementation Batches
-
-- Batch 4 - Scale performance fixes:
-  - further inspect and optimize full metadata index rebuild.
-  - profile topic/WD filtered item paging at `10k` and `50k`.
-  - evaluate broad text search / FTS5.
-  - add practical perf regression comparisons/budgets after baseline improvements.
-  - rerun `100k` only after index/status costs are improved.
-
 ### Phase B - Knowledge Tools
 
 - Artist database:
@@ -395,6 +378,14 @@ VSCode-friendly test launchers:
   - one failed expected image can still keep the post retryable.
 
 ## Done But Needs Check
+
+- Phase A - Stability V1:
+  - implementation is considered finished.
+  - Batch 1 maintenance quick wins, Batch 2 runtime correctness, generated test vaults, perf harnesses, WD-scale data, metadata indexing optimizations, fast frontmatter parsing, incremental dirty-queue repair, and Settings rebuild progress are implemented.
+  - generated-vault validation covered `800`, `10k`, `50k`, and targeted `100k` backend/index/API paths.
+  - frontend scrolling/virtualization passed at `10k` and `50k`; backend RAM stayed stable in generated-vault runs.
+  - normal incremental indexing is fast enough for personal use; full rebuild remains a maintenance/recovery path.
+  - needs real-vault smoke over normal use: drag-drop ingest with WD tags, watchdog note edits, Settings rebuild progress, config edit/save, log stream, thumbnails, review replace/preserve, and one image/video ingest.
 
 - Phase A Batch 1 - Maintenance quick wins:
   - stale `update_tools` wrapper replaced with a working maintenance entrypoint.

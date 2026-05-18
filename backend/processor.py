@@ -403,11 +403,17 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
             "url": source_url,
             "tiles": tiles,
             "audio_hash": audio_hash,
-            "visual_embedding": visual_embedding
+            "visual_embedding": visual_embedding,
+            "tagging_status": "not_run",
+            "tagging_error": "",
+            "tagging_tag_count": 0,
         }
 
         try:
             tag_result = tag_media(vault_path, item_hash=file_hash, config=config, storage_id=storage_id)
+            index_data["tagging_status"] = tag_result.status
+            index_data["tagging_error"] = tag_result.error or ""
+            index_data["tagging_tag_count"] = len(tag_result.tags or [])
             if tag_result.status != "ok":
                 log_system("WARNING", "Tagging enrichment did not complete", hash=file_hash, status=tag_result.status, error=tag_result.error)
                 if config.get('tagging', {}).get('fail_ingestion_on_error', False):
@@ -419,6 +425,8 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
                     md_path.parent.mkdir(parents=True, exist_ok=True)
                     atomic_write_text(md_path, md_content)
         except Exception as tag_exc:
+            index_data["tagging_status"] = "error"
+            index_data["tagging_error"] = str(tag_exc)
             log_system("WARNING", "Tagging enrichment crashed", hash=file_hash, error=str(tag_exc))
             if config.get('tagging', {}).get('fail_ingestion_on_error', False):
                 raise

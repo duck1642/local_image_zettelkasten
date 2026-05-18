@@ -42,6 +42,8 @@ async function installMockVaultApi(
     onReviewAction?: () => Promise<void>;
     onLocalIngestStart?: () => Promise<void> | void;
     onMaintenanceAction?: (action: 'auth' | 'metadata' | 'review') => Promise<void> | void;
+    metadataRebuildResponse?: unknown;
+    metadataStatusSequence?: unknown[];
   } = {}
 ) {
   let items = cloneItems();
@@ -68,6 +70,7 @@ async function installMockVaultApi(
     finished_at: null,
     stop_requested: false
   };
+  let metadataStatusIndex = 0;
   const appConfig = {
     ui: {
       vault_layout_mode: 'masonry',
@@ -157,7 +160,21 @@ async function installMockVaultApi(
   });
   await page.route('**/api/metadata-index/rebuild', async (route) => {
     await options.onMaintenanceAction?.('metadata');
-    return fulfillJson(route, { status: 'started' });
+    return fulfillJson(route, options.metadataRebuildResponse || { status: 'started' });
+  });
+  await page.route('**/api/metadata-index/status', async (route) => {
+    const sequence = options.metadataStatusSequence || [];
+    const body = sequence[Math.min(metadataStatusIndex, Math.max(0, sequence.length - 1))] || {
+      ready: true,
+      repair_running: false,
+      items: items.length,
+      indexed: items.length,
+      errors: 0,
+      dirty: 0,
+      maintenance_rebuild: { running: false, status: 'idle' }
+    };
+    metadataStatusIndex += 1;
+    return fulfillJson(route, body);
   });
   await page.route('**/api/review/*/action**', async (route) => {
     await options.onReviewAction?.();
@@ -443,4 +460,65 @@ test('settings maintenance actions call existing endpoints and show compact stat
 
   await expect(page.locator('.maintenance-status')).toContainText(['OK (available)', 'started', 'cleaned 0, failed 0']);
   expect(calls).toEqual(['auth', 'metadata', 'review']);
+});
+
+test('settings metadata rebuild shows progress only for maintenance job', async ({ page }) => {
+  await openMockVault(page, {
+    metadataRebuildResponse: {
+      status: 'started',
+      maintenance_rebuild: {
+        running: true,
+        status: 'running',
+        stage: 'starting',
+        items_total: 100,
+        items_done: 0,
+        errors: 0
+      }
+    },
+    metadataStatusSequence: [
+      {
+        ready: false,
+        repair_running: true,
+        items: 100,
+        indexed: 0,
+        errors: 0,
+        dirty: 0,
+        maintenance_rebuild: {
+          running: true,
+          status: 'running',
+          stage: 'reading metadata',
+          items_total: 100,
+          items_done: 40,
+          errors: 0
+        }
+      },
+      {
+        ready: true,
+        repair_running: false,
+        items: 100,
+        indexed: 100,
+        errors: 0,
+        dirty: 0,
+        maintenance_rebuild: {
+          running: false,
+          status: 'completed',
+          stage: 'completed',
+          items_total: 100,
+          items_done: 100,
+          errors: 0,
+          duration_ms: 1200
+        }
+      }
+    ]
+  });
+
+  await page.getByRole('button', { name: /Settings/ }).click();
+  await expect(page.getByLabel('Metadata rebuild progress')).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Rebuild Metadata Index' }).click();
+  await expect(page.getByLabel('Metadata rebuild progress')).toBeVisible();
+  await expect(page.locator('.maintenance-status').nth(1)).toContainText('40 / 100');
+  await expect(page.locator('.metadata-progress-fill')).toHaveAttribute('style', /40%/);
+  await expect(page.locator('.maintenance-status').nth(1)).toContainText('completed', { timeout: 3000 });
+  await expect(page.getByLabel('Metadata rebuild progress')).toHaveCount(0);
 });

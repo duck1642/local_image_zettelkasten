@@ -36,6 +36,20 @@ METADATA_SECONDARY_INDEXES = {
 
 _repair_lock = threading.Lock()
 _repair_running = False
+_maintenance_rebuild_lock = threading.Lock()
+_maintenance_rebuild_job = {
+    "running": False,
+    "status": "idle",
+    "mode": "",
+    "stage": "",
+    "items_total": 0,
+    "items_done": 0,
+    "errors": 0,
+    "started_at": "",
+    "finished_at": "",
+    "duration_ms": 0.0,
+    "message": "",
+}
 _watchdog_lock = threading.Lock()
 _watchdog_observer = None
 _watchdog_pending: set[str] = set()
@@ -930,7 +944,57 @@ def metadata_index_status(conn: sqlite3.Connection, deep: bool = False) -> dict:
         "wd_tags": wd_count or 0,
         "facet_counts": facet_count or 0,
         "dirty": dirty_count or 0,
+        "maintenance_rebuild": maintenance_rebuild_status(),
     }
+
+
+def maintenance_rebuild_status() -> dict:
+    with _maintenance_rebuild_lock:
+        return dict(_maintenance_rebuild_job)
+
+
+def _reset_maintenance_rebuild_job(mode: str):
+    now = _now()
+    with _maintenance_rebuild_lock:
+        _maintenance_rebuild_job.update({
+            "running": True,
+            "status": "running",
+            "mode": mode,
+            "stage": "starting",
+            "items_total": 0,
+            "items_done": 0,
+            "errors": 0,
+            "started_at": now,
+            "finished_at": "",
+            "duration_ms": 0.0,
+            "message": "",
+        })
+
+
+def _update_maintenance_rebuild_job(**updates):
+    with _maintenance_rebuild_lock:
+        _maintenance_rebuild_job.update(updates)
+
+
+def _finish_maintenance_rebuild_job(status: str, message: str = "", **updates):
+    finished_at = _now()
+    with _maintenance_rebuild_lock:
+        started_at = _maintenance_rebuild_job.get("started_at") or finished_at
+        try:
+            started = time.strptime(str(started_at), "%Y-%m-%d %H:%M:%S")
+            finished = time.strptime(finished_at, "%Y-%m-%d %H:%M:%S")
+            duration_ms = max(0.0, (time.mktime(finished) - time.mktime(started)) * 1000)
+        except Exception:
+            duration_ms = float(_maintenance_rebuild_job.get("duration_ms") or 0.0)
+        _maintenance_rebuild_job.update({
+            "running": False,
+            "status": status,
+            "stage": status,
+            "finished_at": finished_at,
+            "duration_ms": round(duration_ms, 2),
+            "message": message,
+            **updates,
+        })
 
 
 def _add_stage(stages: dict[str, float] | None, key: str, started: float):
@@ -982,7 +1046,12 @@ def _metadata_file_row(item_hash: str, storage_id: str, payload: dict) -> tuple:
     )
 
 
-def rebuild_all_metadata(conn: sqlite3.Connection, batch_size: int = FULL_REBUILD_BATCH_SIZE, context: str = "full") -> dict:
+def rebuild_all_metadata(
+    conn: sqlite3.Connection,
+    batch_size: int = FULL_REBUILD_BATCH_SIZE,
+    context: str = "full",
+    progress_callback=None,
+) -> dict:
     ensure_metadata_schema(conn)
     started = time.perf_counter()
     stages: dict[str, float] = {
@@ -1028,6 +1097,8 @@ def rebuild_all_metadata(conn: sqlite3.Connection, batch_size: int = FULL_REBUIL
         stage_started = time.perf_counter()
         rows = conn.execute("SELECT hash, storage_id FROM items ORDER BY date_added DESC, hash DESC").fetchall()
         stages["item_fetch"] += (time.perf_counter() - stage_started) * 1000
+        if progress_callback:
+            progress_callback(stage="reading metadata", items_total=len(rows), items_done=0, errors=0)
         indexed = 0
         errors = 0
         item_updates: list[tuple[str, str]] = []
@@ -1086,6 +1157,8 @@ def rebuild_all_metadata(conn: sqlite3.Connection, batch_size: int = FULL_REBUIL
         for index, (item_hash, storage_id) in enumerate(rows, start=1):
             if not storage_id:
                 errors += 1
+                if progress_callback and (index == 1 or index % 100 == 0 or index == len(rows)):
+                    progress_callback(items_done=index, errors=errors)
                 log_system("WARNING", "Metadata full rebuild skipped item missing storage_id", hash=item_hash, context=context)
                 continue
             stage_started = time.perf_counter()
@@ -1118,7 +1191,11 @@ def rebuild_all_metadata(conn: sqlite3.Connection, batch_size: int = FULL_REBUIL
             else:
                 indexed += 1
             stages["row_building"] += (time.perf_counter() - stage_started) * 1000
+            if progress_callback and (index == 1 or index % 100 == 0 or index == len(rows)):
+                progress_callback(items_done=index, errors=errors)
             if index % batch_size == 0:
+                if progress_callback:
+                    progress_callback(stage="writing metadata", items_done=index, errors=errors)
                 flush()
                 commit_started = time.perf_counter()
                 conn.commit()
@@ -1127,13 +1204,19 @@ def rebuild_all_metadata(conn: sqlite3.Connection, batch_size: int = FULL_REBUIL
                 stages["db_flushes"] += commit_ms
 
         flush()
+        if progress_callback:
+            progress_callback(stage="rebuilding facets", items_done=len(rows), errors=errors)
         stage_started = time.perf_counter()
         rebuild_metadata_facet_counts(conn, ensure_schema=False)
         stages["facet_rebuild"] += (time.perf_counter() - stage_started) * 1000
+        if progress_callback:
+            progress_callback(stage="rebuilding indexes", items_done=len(rows), errors=errors)
         stage_started = time.perf_counter()
         _create_metadata_secondary_indexes(conn)
         stages["secondary_index_rebuild"] += (time.perf_counter() - stage_started) * 1000
         _set_metadata_index_ready(conn, True)
+        if progress_callback:
+            progress_callback(stage="refreshing counters", items_done=len(rows), errors=errors)
         stage_started = time.perf_counter()
         counters = refresh_metadata_index_counters(conn)
         stages["counter_refresh"] += (time.perf_counter() - stage_started) * 1000
@@ -1149,7 +1232,7 @@ def rebuild_all_metadata(conn: sqlite3.Connection, batch_size: int = FULL_REBUIL
             stages["secondary_index_rebuild"] += (time.perf_counter() - stage_started) * 1000
 
 
-def _repair_worker(full: bool = False):
+def _repair_worker(full: bool = False, maintenance: bool = False):
     global _repair_running
     try:
         from db.sqlite_operator import init_database
@@ -1159,8 +1242,22 @@ def _repair_worker(full: bool = False):
             ensure_metadata_schema(conn)
             log_system("INFO", "Metadata index repair started", full=full)
             if full:
-                rebuild_all_metadata(conn, FULL_REBUILD_BATCH_SIZE, "repair_full")
+                if maintenance:
+                    _reset_maintenance_rebuild_job("full")
+                result = rebuild_all_metadata(
+                    conn,
+                    FULL_REBUILD_BATCH_SIZE,
+                    "repair_full",
+                    _update_maintenance_rebuild_job if maintenance else None,
+                )
                 conn.commit()
+                if maintenance:
+                    _finish_maintenance_rebuild_job(
+                        "completed",
+                        indexed=result.get("indexed", 0),
+                        errors=result.get("errors", 0),
+                        items_done=result.get("indexed", 0) + result.get("errors", 0),
+                    )
             else:
                 while True:
                     result = reindex_stale_metadata_batch(conn, REPAIR_BATCH_SIZE)
@@ -1173,21 +1270,31 @@ def _repair_worker(full: bool = False):
         finally:
             conn.close()
     except Exception as exc:
+        if maintenance:
+            _finish_maintenance_rebuild_job("error", str(exc))
         log_system("WARNING", "Metadata index repair failed", full=full, error=str(exc))
     finally:
         with _repair_lock:
             _repair_running = False
 
 
-def start_metadata_repair_worker(full: bool = False) -> dict:
+def start_metadata_repair_worker(full: bool = False, maintenance: bool = False) -> dict:
     global _repair_running
     with _repair_lock:
         if _repair_running:
-            return {"status": "already_running"}
+            payload = {"status": "already_running"}
+            if maintenance:
+                payload["maintenance_rebuild"] = maintenance_rebuild_status()
+            return payload
         _repair_running = True
-        thread = threading.Thread(target=_repair_worker, args=(full,), name="lmz-metadata-index-repair", daemon=True)
+        if maintenance:
+            _reset_maintenance_rebuild_job("full" if full else "stale")
+        thread = threading.Thread(target=_repair_worker, args=(full, maintenance), name="lmz-metadata-index-repair", daemon=True)
         thread.start()
-    return {"status": "started", "full": full}
+    payload = {"status": "started", "full": full}
+    if maintenance:
+        payload["maintenance_rebuild"] = maintenance_rebuild_status()
+    return payload
 
 
 def _load_watchdog_storage_map():

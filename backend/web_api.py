@@ -519,7 +519,7 @@ def _get_metadata_index_status_sync():
 
 @app.post("/api/metadata-index/rebuild")
 async def rebuild_metadata_index():
-    return await asyncio.to_thread(start_metadata_repair_worker, True)
+    return await asyncio.to_thread(start_metadata_repair_worker, True, True)
 
 def _get_stats_sync():
     conn = connect_database()
@@ -1802,7 +1802,17 @@ def _run_local_ingest_worker(raw_paths: list[str], defaults: dict, skip_similari
             with LOCAL_INGEST_LOCK:
                 LOCAL_INGEST_STATE["phase"] = "running"
             try:
-                ok, message, _ = process_file(staged_path, cfg, metadata=metadata, delete_source=True, skip_similarity=skip_similarity)
+                ok, message, index_data = process_file(staged_path, cfg, metadata=metadata, delete_source=True, skip_similarity=skip_similarity)
+                tag_status = str((index_data or {}).get("tagging_status") or "").strip()
+                tag_count = int((index_data or {}).get("tagging_tag_count") or 0)
+                tag_error = str((index_data or {}).get("tagging_error") or "").strip()
+                if ok and tag_status:
+                    if tag_status == "ok":
+                        message = f"{message} | WD tags: ok ({tag_count})"
+                    elif tag_error:
+                        message = f"{message} | WD tags: {tag_status} ({tag_error})"
+                    else:
+                        message = f"{message} | WD tags: {tag_status}"
                 if ok:
                     status = "ingested"
                 elif "moved to review" in message.lower():

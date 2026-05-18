@@ -16,6 +16,19 @@
     metadata: '',
     review: ''
   };
+  type MetadataRebuildJob = {
+    running?: boolean;
+    status?: string;
+    mode?: string;
+    stage?: string;
+    items_total?: number;
+    items_done?: number;
+    errors?: number;
+    duration_ms?: number;
+    message?: string;
+  };
+  let metadataRebuildJob: MetadataRebuildJob | null = null;
+  let metadataRebuildPollTimer: number | null = null;
 
   function setConfig(mutator: (draft: any) => void) {
     updateConfig(mutator, false);
@@ -44,7 +57,10 @@
   onMount(() => {
     window.addEventListener('lmz:refresh', handleGlobalRefresh);
     loadConfig();
-    return () => window.removeEventListener('lmz:refresh', handleGlobalRefresh);
+    return () => {
+      window.removeEventListener('lmz:refresh', handleGlobalRefresh);
+      stopMetadataRebuildPolling();
+    };
   });
 
   function setMaintenanceBusy(action: MaintenanceAction, busy: boolean) {
@@ -53,6 +69,68 @@
 
   function setMaintenanceResult(action: MaintenanceAction, message: string) {
     maintenanceResult = { ...maintenanceResult, [action]: message };
+  }
+
+  function metadataProgressPercent(job: MetadataRebuildJob | null) {
+    const total = Number(job?.items_total || 0);
+    if (!total) return 0;
+    return Math.max(0, Math.min(100, Math.round((Number(job?.items_done || 0) / total) * 100)));
+  }
+
+  function metadataProgressText(job: MetadataRebuildJob | null) {
+    if (!job) return '';
+    const total = Number(job.items_total || 0);
+    const done = Number(job.items_done || 0);
+    const stage = String(job.stage || job.status || 'running');
+    if (total > 0) return `${stage}: ${done.toLocaleString()} / ${total.toLocaleString()}`;
+    return stage;
+  }
+
+  function stopMetadataRebuildPolling() {
+    if (metadataRebuildPollTimer !== null) {
+      window.clearTimeout(metadataRebuildPollTimer);
+      metadataRebuildPollTimer = null;
+    }
+  }
+
+  async function pollMetadataRebuildStatus() {
+    try {
+      const response = await apiFetch('/api/metadata-index/status');
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload?.detail || `HTTP ${response.status}`);
+      metadataRebuildJob = payload?.maintenance_rebuild || null;
+      if (metadataRebuildJob?.running) {
+        setMaintenanceBusy('metadata', true);
+        setMaintenanceResult('metadata', metadataProgressText(metadataRebuildJob));
+        stopMetadataRebuildPolling();
+        metadataRebuildPollTimer = window.setTimeout(pollMetadataRebuildStatus, 1200);
+      } else {
+        stopMetadataRebuildPolling();
+        setMaintenanceBusy('metadata', false);
+        if (metadataRebuildJob?.status === 'completed') {
+          setMaintenanceResult('metadata', 'completed');
+          uiLog('INFO', 'Maintenance metadata rebuild completed', {
+            errors: metadataRebuildJob.errors || 0,
+            duration_ms: metadataRebuildJob.duration_ms || 0
+          });
+        } else if (metadataRebuildJob?.status === 'error') {
+          const message = String(metadataRebuildJob.message || 'metadata rebuild failed');
+          setMaintenanceResult('metadata', `error: ${message}`);
+          uiLog('ERROR', 'Maintenance metadata rebuild failed', { error: message });
+        }
+      }
+    } catch (error) {
+      stopMetadataRebuildPolling();
+      setMaintenanceBusy('metadata', false);
+      const text = String(error);
+      setMaintenanceResult('metadata', `error: ${text}`);
+      uiLog('ERROR', 'Maintenance metadata rebuild status failed', { error: text });
+    }
+  }
+
+  function startMetadataRebuildPolling() {
+    stopMetadataRebuildPolling();
+    metadataRebuildPollTimer = window.setTimeout(pollMetadataRebuildStatus, 500);
   }
 
   async function runMaintenance(action: MaintenanceAction) {
@@ -72,8 +150,13 @@
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(payload?.detail || `HTTP ${response.status}`);
         const status = String(payload?.status || 'started');
-        setMaintenanceResult(action, status);
+        metadataRebuildJob = payload?.maintenance_rebuild || null;
+        setMaintenanceResult(action, metadataProgressText(metadataRebuildJob) || status);
         uiLog('INFO', 'Maintenance action completed', { action: 'metadata_rebuild', status });
+        if (status === 'started' || metadataRebuildJob?.running) {
+          startMetadataRebuildPolling();
+          return;
+        }
       } else {
         const response = await apiFetch('/api/review/cleanup', { method: 'POST' });
         const payload = await response.json().catch(() => ({}));
@@ -88,7 +171,9 @@
       setMaintenanceResult(action, `error: ${text}`);
       uiLog('ERROR', 'Maintenance action failed', { action, error: text });
     } finally {
-      setMaintenanceBusy(action, false);
+      if (action !== 'metadata' || !metadataRebuildJob?.running) {
+        setMaintenanceBusy(action, false);
+      }
     }
   }
 </script>
@@ -167,7 +252,14 @@
         <button on:click={() => runMaintenance('metadata')} disabled={maintenanceBusy.metadata}>
           {maintenanceBusy.metadata ? 'Running...' : 'Rebuild Metadata Index'}
         </button>
-        <span class="maintenance-status">{maintenanceResult.metadata}</span>
+        <div class="maintenance-status metadata-progress-cell">
+          <span>{maintenanceResult.metadata}</span>
+          {#if metadataRebuildJob?.running}
+            <div class="metadata-progress" aria-label="Metadata rebuild progress">
+              <div class="metadata-progress-fill" style={`width: ${metadataProgressPercent(metadataRebuildJob)}%`}></div>
+            </div>
+          {/if}
+        </div>
         <button on:click={() => runMaintenance('review')} disabled={maintenanceBusy.review}>
           {maintenanceBusy.review ? 'Running...' : 'Cleanup Review'}
         </button>
@@ -394,6 +486,28 @@
     font-size: 12px;
     min-height: 18px;
     overflow-wrap: anywhere;
+  }
+
+  .metadata-progress-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .metadata-progress {
+    height: 6px;
+    width: 100%;
+    overflow: hidden;
+    border-radius: 999px;
+    background: var(--bg-main);
+    border: 1px solid var(--border-dim);
+  }
+
+  .metadata-progress-fill {
+    height: 100%;
+    min-width: 2px;
+    background: var(--accent-primary);
+    transition: width 180ms ease;
   }
 
   .shortcuts-guide h4 {

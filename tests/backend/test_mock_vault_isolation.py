@@ -260,6 +260,33 @@ def test_local_retry_preserves_defaults_and_skip_similarity(monkeypatch, tmp_pat
     assert calls[0][2] is True
 
 
+def test_local_worker_reports_wd_tagging_status_for_started_paths(monkeypatch, tmp_path):
+    (web_api,) = fresh_backend(monkeypatch, tmp_path, "web_api")
+    source = tmp_path / "drop_ok.jpg"
+    source.write_bytes(b"fake image")
+
+    def fake_process_file(path, config, metadata=None, delete_source=False, skip_similarity=False):
+        if delete_source:
+            Path(path).unlink()
+        return True, "Success: drop_ok.jpg -> item.jpg", {
+            "file_hash": "7" * 64,
+            "tagging_status": "ok",
+            "tagging_tag_count": 12,
+            "tagging_error": "",
+        }
+
+    monkeypatch.setattr(web_api, "process_file", fake_process_file)
+    monkeypatch.setattr(web_api, "get_config", lambda: {"firewall": {"allowed_extensions": ["jpg"]}})
+
+    web_api._prepare_local_ingest_run("run-tags", {}, False, 1)
+    web_api._run_local_ingest_worker([str(source)], {}, False, "run-tags")
+
+    result = web_api._snapshot_local_ingest_state()["results"][-1]
+
+    assert result["status"] == "ingested"
+    assert "WD tags: ok (12)" in result["message"]
+
+
 def test_local_ingest_expansion_is_streaming_not_sorted(monkeypatch, tmp_path):
     (web_api,) = fresh_backend(monkeypatch, tmp_path, "web_api")
     source = inspect.getsource(web_api._iter_local_ingest_paths)
@@ -575,6 +602,41 @@ def test_ingest_seeds_markdown_artist_from_metadata_and_reindexes(monkeypatch, t
     assert utils.note_path_for(item_hash, row[1]).name == f"{row[1]}.md"
     assert note_data["artist"] == "Ingest Artist"
     conn.close()
+
+
+def test_ingest_result_reports_wd_tagging_status(monkeypatch, tmp_path):
+    utils, sqlite_operator, processor = fresh_backend(monkeypatch, tmp_path, "utils", "db.sqlite_operator", "processor")
+    item_hash = "6" * 64
+    source = tmp_path / "source.jpg"
+    source.write_bytes(b"fake image")
+
+    class TagResult:
+        status = "ok"
+        error = ""
+        tags = [{"name": "tag-a"}]
+
+    monkeypatch.setattr(processor, "calculate_file_hash", lambda path: item_hash)
+    monkeypatch.setattr(processor, "get_mime_type", lambda path: "image/jpeg")
+    monkeypatch.setattr(processor, "calculate_phash", lambda path: None)
+    monkeypatch.setattr(processor, "calculate_tiles", lambda path: [])
+    monkeypatch.setattr(processor, "tag_media", lambda *args, **kwargs: TagResult())
+    monkeypatch.setattr(processor, "_pending_review_match", lambda file_hash: None)
+
+    ok, _, idx_data = processor.process_file(
+        source,
+        {"firewall": {"allowed_mimes": ["image/jpeg"], "allowed_extensions": ["jpg"]}, "tagging": {}},
+        metadata={"artist": "Ingest Artist", "platform": "local", "source_url": ""},
+        sync_index=False,
+    )
+
+    conn = sqlite_operator.init_database()
+    storage_id = conn.execute("SELECT storage_id FROM items WHERE hash = ?", (item_hash,)).fetchone()[0]
+    conn.close()
+
+    assert ok
+    assert idx_data["tagging_status"] == "ok"
+    assert idx_data["tagging_tag_count"] == 1
+    assert utils.note_path_for(item_hash, storage_id).exists()
 
 
 def test_storage_id_backfill_and_compact_asset_path(monkeypatch, tmp_path):
@@ -1085,6 +1147,62 @@ def test_rebuild_metadata_index_full_clears_and_rebuilds(monkeypatch, tmp_path):
         "facet_rebuild",
         "counter_refresh",
     }
+
+
+def test_rebuild_metadata_progress_callback_reports_full_rebuild(monkeypatch, tmp_path):
+    utils, sqlite_operator, metadata_index = fresh_backend(monkeypatch, tmp_path, "utils", "db.sqlite_operator", "metadata_index")
+    item_hash = "d8" * 32
+    conn = insert_mock_item(sqlite_operator, item_hash)
+    write_compact_note(utils, conn, item_hash, "---\ntopics:\n  - progress-topic\n---\n")
+    events = []
+
+    result = metadata_index.rebuild_all_metadata(conn, progress_callback=lambda **event: events.append(event))
+    conn.close()
+
+    assert result["indexed"] == 1
+    assert any(event.get("items_total") == 1 for event in events)
+    assert any(event.get("items_done") == 1 for event in events)
+    assert {event.get("stage") for event in events if event.get("stage")} >= {
+        "reading metadata",
+        "rebuilding facets",
+        "rebuilding indexes",
+        "refreshing counters",
+    }
+
+
+def test_metadata_status_includes_maintenance_rebuild_job(monkeypatch, tmp_path):
+    sqlite_operator, metadata_index = fresh_backend(monkeypatch, tmp_path, "db.sqlite_operator", "metadata_index")
+    conn = sqlite_operator.init_database()
+
+    metadata_index._reset_maintenance_rebuild_job("full")
+    metadata_index._update_maintenance_rebuild_job(stage="reading metadata", items_total=10, items_done=3)
+    status = metadata_index.metadata_index_status(conn)
+    metadata_index._finish_maintenance_rebuild_job("completed", items_done=10)
+    finished = metadata_index.maintenance_rebuild_status()
+    conn.close()
+
+    assert status["maintenance_rebuild"]["running"] is True
+    assert status["maintenance_rebuild"]["mode"] == "full"
+    assert status["maintenance_rebuild"]["items_total"] == 10
+    assert status["maintenance_rebuild"]["items_done"] == 3
+    assert finished["running"] is False
+    assert finished["status"] == "completed"
+
+
+def test_metadata_rebuild_api_starts_maintenance_job(monkeypatch, tmp_path):
+    web_api, = fresh_backend(monkeypatch, tmp_path, "web_api")
+    calls = []
+
+    def fake_start(full=False, maintenance=False):
+        calls.append((full, maintenance))
+        return {"status": "started", "full": full, "maintenance_rebuild": {"running": True}}
+
+    monkeypatch.setattr(web_api, "start_metadata_repair_worker", fake_start)
+
+    result = asyncio.run(web_api.rebuild_metadata_index())
+
+    assert result["status"] == "started"
+    assert calls == [(True, True)]
 
 
 def test_rebuild_metadata_index_full_skips_deep_validation_by_default(monkeypatch, tmp_path):
