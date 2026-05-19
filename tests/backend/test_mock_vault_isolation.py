@@ -1036,6 +1036,49 @@ def test_metadata_repair_allows_explicit_stale_scan(monkeypatch, tmp_path):
     assert result["queued"] == 0
 
 
+def test_metadata_watchdog_keeps_pending_hashes_after_failure(monkeypatch, tmp_path):
+    sqlite_operator, metadata_index = fresh_backend(monkeypatch, tmp_path, "db.sqlite_operator", "metadata_index")
+    sqlite_operator.init_database().close()
+
+    class FakeTimer:
+        def __init__(self, delay, callback):
+            self.delay = delay
+            self.callback = callback
+            self.daemon = False
+            self.started = False
+
+        def start(self):
+            self.started = True
+
+    monkeypatch.setattr(metadata_index.threading, "Timer", FakeTimer)
+    metadata_index._watchdog_pending = {"watch-hash"}
+    metadata_index._watchdog_timer = None
+    metadata_index._watchdog_flushing = False
+
+    def fail_reindex(conn, item_hash, reason):
+        raise RuntimeError("locked")
+
+    monkeypatch.setattr(metadata_index, "safe_reindex_item_metadata", fail_reindex)
+    metadata_index._watchdog_flush()
+
+    assert metadata_index._watchdog_pending == {"watch-hash"}
+    assert isinstance(metadata_index._watchdog_timer, FakeTimer)
+    assert metadata_index._watchdog_timer.delay == 2.0
+
+    calls = []
+
+    def ok_reindex(conn, item_hash, reason):
+        calls.append((item_hash, reason))
+        return {"status": "ok"}
+
+    metadata_index._watchdog_timer = None
+    monkeypatch.setattr(metadata_index, "safe_reindex_item_metadata", ok_reindex)
+    metadata_index._watchdog_flush()
+
+    assert calls == [("watch-hash", "watchdog")]
+    assert metadata_index._watchdog_pending == set()
+
+
 def test_metadata_cached_counters_update_after_reindex(monkeypatch, tmp_path):
     utils, sqlite_operator, metadata_index = fresh_backend(monkeypatch, tmp_path, "utils", "db.sqlite_operator", "metadata_index")
     item_hash = "ac" * 32
@@ -1666,6 +1709,38 @@ def test_metadata_facets_no_match_uses_built_count_table_without_scan(monkeypatc
     assert metadata_index.metadata_facets(Conn(), "wd_tag", "missing", 10) == []
 
 
+def test_metadata_facets_empty_ready_kind_does_not_scan(monkeypatch, tmp_path):
+    metadata_index, = fresh_backend(monkeypatch, tmp_path, "metadata_index")
+
+    class Cursor:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def fetchone(self):
+            return self.rows[0] if self.rows else None
+
+        def fetchall(self):
+            return self.rows
+
+    class Conn:
+        def execute(self, sql, params=()):
+            if "SELECT 1 FROM metadata_facet_counts" in sql:
+                return Cursor([])
+            if "FROM metadata_facet_kind_state" in sql and params == ("artist",):
+                return Cursor([("1",)])
+            if "SELECT COUNT(*) FROM metadata_facet_counts" in sql:
+                return Cursor([(0,)])
+            if "FROM metadata_facet_counts" in sql:
+                return Cursor([])
+            if "FROM items" in sql or "FROM item_topics" in sql or "FROM item_wd_tags" in sql:
+                raise AssertionError("ready empty facet cache should not fall back to scan")
+            return Cursor([])
+
+    monkeypatch.setattr(metadata_index, "ensure_metadata_schema", lambda conn: None)
+
+    assert metadata_index.metadata_facets(Conn(), "artist", "missing", 10) == []
+
+
 def test_metadata_filters_use_exact_when_available_and_partial_when_needed(monkeypatch, tmp_path):
     utils, sqlite_operator, metadata_index, web_api = fresh_backend(
         monkeypatch,
@@ -2079,6 +2154,36 @@ def test_search_manager_removes_deleted_hashes_and_urls(monkeypatch, tmp_path):
     assert manager.query_image(tile_phash) == []
     assert manager.query_video(None, sig, ai_threshold=0.01) == []
     assert not manager.url_exists("https://example.test/item")
+
+
+def test_search_manager_vp_delete_defers_rebuild_outside_remove(monkeypatch, tmp_path):
+    search_manager_module, = fresh_backend(monkeypatch, tmp_path, "db.search_manager")
+    manager = search_manager_module.SearchManager()
+    manager.video_tree = search_manager_module.VPTreeSearcher(search_manager_module._cosine_dist)
+    manager.audio_tree = search_manager_module.VPTreeSearcher(search_manager_module._hamming_dist_audio)
+    manager.global_tree = search_manager_module.BKTreeSearcher()
+    manager.tile_tree = search_manager_module.BKTreeSearcher()
+    manager.url_registry = search_manager_module.URLRegistry()
+
+    import numpy as np
+
+    sig = np.array([1.0, 0.0], dtype=np.float32).tobytes()
+    manager.update_indexes("deleted-video", None, None, visual_embedding=sig)
+    manager.rebuild_deferred_indexes()
+    assert manager.query_video(None, sig, ai_threshold=0.01)
+
+    def fail_sync_rebuild(self, items):
+        raise AssertionError("remove should not rebuild VP tree synchronously")
+
+    scheduled = []
+    monkeypatch.setattr(search_manager_module.VPTreeSearcher, "_make_tree", fail_sync_rebuild)
+    monkeypatch.setattr(manager, "_rebuild_deferred_indexes_async", lambda reason: scheduled.append(reason))
+
+    result = manager.remove_indexes_batch([{"hash": "deleted-video"}])
+
+    assert result["video"]["deferred"] is True
+    assert scheduled == ["batch_remove"]
+    assert manager.query_video(None, sig, ai_threshold=0.01) == []
 
 
 def test_find_visual_duplicate_stops_tile_queries_after_first_match(monkeypatch, tmp_path):

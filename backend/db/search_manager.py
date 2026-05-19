@@ -188,6 +188,7 @@ class SearchManager:
         if not hashes and not urls:
             return {"removed": 0}
 
+        should_rebuild = False
         with self._sync_lock:
             global_stats = self.global_tree.remove_hashes(hashes)
             tile_stats = self.tile_tree.remove_hashes(hashes)
@@ -195,6 +196,7 @@ class SearchManager:
             video_stats = self.video_tree.remove_hashes(hashes)
             for url in urls:
                 self.url_registry.remove(url)
+            should_rebuild = bool(audio_stats.get("deferred") or video_stats.get("deferred"))
 
         removed = sum(
             int(stats.get("removed") or 0)
@@ -211,6 +213,8 @@ class SearchManager:
             audio_removed=audio_stats.get("removed", 0),
             video_removed=video_stats.get("removed", 0),
         )
+        if should_rebuild:
+            self._rebuild_deferred_indexes_async("batch_remove")
         return {
             "removed": removed,
             "hashes": len(hashes),
@@ -220,6 +224,16 @@ class SearchManager:
             "audio": audio_stats,
             "video": video_stats,
         }
+
+    def _rebuild_deferred_indexes_async(self, reason: str):
+
+        thread = threading.Thread(
+            target=self._rebuild_deferred_indexes,
+            args=(reason,),
+            name=f"lmz-vp-rebuild-{reason}",
+            daemon=True,
+        )
+        thread.start()
 
     def rebuild_deferred_indexes(self):
 

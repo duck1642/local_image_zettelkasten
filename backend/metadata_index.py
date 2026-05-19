@@ -25,6 +25,7 @@ COUNTER_KEYS = {
     "facet_counts": "counter:facet_counts",
     "dirty": "counter:dirty",
 }
+FACET_KINDS = ("artist", "platform", "topic", "wd_tag")
 REPAIR_BATCH_SIZE = 500
 FULL_REBUILD_BATCH_SIZE = 2500
 WD_FRONTMATTER_FIELDS = ("wd_rating", "wd_character_tags", "wd_tags")
@@ -56,6 +57,7 @@ _watchdog_lock = threading.Lock()
 _watchdog_observer = None
 _watchdog_pending: set[str] = set()
 _watchdog_timer: threading.Timer | None = None
+_watchdog_flushing = False
 _watchdog_storage_map: dict[str, str] = {}
 _watchdog_storage_map_lock = threading.Lock()
 
@@ -113,6 +115,12 @@ def ensure_metadata_schema(conn: sqlite3.Connection):
             value TEXT NOT NULL,
             count INTEGER NOT NULL,
             PRIMARY KEY(kind, value_norm)
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS metadata_facet_kind_state (
+            kind TEXT PRIMARY KEY,
+            ready INTEGER NOT NULL DEFAULT 0
         )
     """)
     cursor.execute("""
@@ -193,6 +201,24 @@ def _adjust_counter(conn: sqlite3.Connection, name: str, delta: int):
     if current is None:
         current = 0
     _set_counter(conn, name, current + int(delta or 0))
+
+
+def _set_facet_kinds_ready(conn: sqlite3.Connection, kinds: Iterable[str], ready: bool = True):
+    for kind in kinds:
+        if kind in FACET_KINDS:
+            conn.execute(
+                """
+                INSERT INTO metadata_facet_kind_state(kind, ready)
+                VALUES (?, ?)
+                ON CONFLICT(kind) DO UPDATE SET ready = excluded.ready
+                """,
+                (kind, 1 if ready else 0),
+            )
+
+
+def _facet_kind_ready(conn: sqlite3.Connection, kind: str) -> bool:
+    row = conn.execute("SELECT ready FROM metadata_facet_kind_state WHERE kind = ?", (kind,)).fetchone()
+    return bool(row and int(row[0] or 0) == 1)
 
 
 def refresh_metadata_index_counters(conn: sqlite3.Connection) -> dict:
@@ -460,6 +486,7 @@ def rebuild_metadata_facet_counts(conn: sqlite3.Connection, ensure_schema: bool 
     if ensure_schema:
         ensure_metadata_schema(conn)
     conn.execute("DELETE FROM metadata_facet_counts")
+    _set_facet_kinds_ready(conn, FACET_KINDS, False)
     conn.execute("""
         INSERT INTO metadata_facet_counts(kind, value_norm, value, count)
         SELECT 'artist', LOWER(TRIM(source_artist)), MIN(TRIM(source_artist)), COUNT(*)
@@ -486,6 +513,7 @@ def rebuild_metadata_facet_counts(conn: sqlite3.Connection, ensure_schema: bool 
         FROM item_wd_tags
         GROUP BY tag_norm
     """)
+    _set_facet_kinds_ready(conn, FACET_KINDS, True)
     _set_counter(conn, "facet_counts", conn.execute("SELECT COUNT(*) FROM metadata_facet_counts").fetchone()[0])
 
 
@@ -541,6 +569,7 @@ def refresh_metadata_facet_counts_for_values(conn: sqlite3.Connection, values: I
             (kind, value_norm, str(row[0] or value_norm), count),
         )
     if cleaned:
+        _set_facet_kinds_ready(conn, {kind for kind, _ in cleaned}, True)
         _set_counter(conn, "facet_counts", conn.execute("SELECT COUNT(*) FROM metadata_facet_counts").fetchone()[0])
 
 
@@ -1086,6 +1115,7 @@ def rebuild_all_metadata(
         conn.execute("DELETE FROM item_wd_tags")
         conn.execute("DELETE FROM item_metadata_files")
         conn.execute("DELETE FROM metadata_facet_counts")
+        conn.execute("DELETE FROM metadata_facet_kind_state")
         conn.execute("DELETE FROM metadata_dirty_queue")
         for name in COUNTER_KEYS:
             _set_counter(conn, name, 0)
@@ -1309,13 +1339,14 @@ def _hash_from_metadata_path(path: str | Path) -> str | None:
 
 
 def _watchdog_flush():
-    global _watchdog_timer
+    global _watchdog_timer, _watchdog_flushing
     with _watchdog_lock:
         hashes = sorted(_watchdog_pending)
-        _watchdog_pending.clear()
         _watchdog_timer = None
+        _watchdog_flushing = bool(hashes)
     if not hashes:
         return
+    success = False
     try:
         from db.sqlite_operator import init_database
 
@@ -1324,11 +1355,21 @@ def _watchdog_flush():
             for item_hash in hashes:
                 safe_reindex_item_metadata(conn, item_hash, "watchdog")
             conn.commit()
+            success = True
             log_system("INFO", "Metadata watchdog reindexed changes", count=len(hashes))
         finally:
             conn.close()
     except Exception as exc:
         log_system("WARNING", "Metadata watchdog reindex failed", error=str(exc))
+    finally:
+        with _watchdog_lock:
+            if success:
+                _watchdog_pending.difference_update(hashes)
+            _watchdog_flushing = False
+            if _watchdog_pending and _watchdog_timer is None:
+                _watchdog_timer = threading.Timer(0.5 if success else 2.0, _watchdog_flush)
+                _watchdog_timer.daemon = True
+                _watchdog_timer.start()
 
 
 def _watchdog_queue_hashes(hashes: Iterable[str]):
@@ -1337,7 +1378,7 @@ def _watchdog_queue_hashes(hashes: Iterable[str]):
         for item_hash in hashes:
             if item_hash:
                 _watchdog_pending.add(item_hash)
-        if _watchdog_timer is None:
+        if _watchdog_timer is None and not _watchdog_flushing:
             _watchdog_timer = threading.Timer(0.5, _watchdog_flush)
             _watchdog_timer.daemon = True
             _watchdog_timer.start()
@@ -1385,6 +1426,13 @@ def metadata_facets(conn: sqlite3.Connection, kind: str, needle: str, limit: int
         "SELECT 1 FROM metadata_facet_counts WHERE kind = ? LIMIT 1",
         (kind,),
     ).fetchone() is not None
+    if not count_rows_built:
+        count_rows_built = _facet_kind_ready(conn, kind)
+        if count_rows_built:
+            expected_rows = _state_int(conn, COUNTER_KEYS["facet_counts"]) or 0
+            actual_rows = conn.execute("SELECT COUNT(*) FROM metadata_facet_counts").fetchone()[0]
+            if expected_rows > 0 and actual_rows == 0:
+                count_rows_built = False
     params: list = [kind]
     where_sql = "WHERE kind = ?"
     if needle:

@@ -42,13 +42,12 @@ class VPTreeSearcher(BaseSearcher):
         self.pending_items = [item for item in self.pending_items if item[0] not in item_hashes]
         removed = (before_indexed - len(self.indexed_items)) + (before_pending - len(self.pending_items))
 
-        rebuilt = False
         if before_indexed != len(self.indexed_items):
-            self.tree = self._make_tree(self.indexed_items)
-            self.rebuild_count += 1
-            rebuilt = True
-        self.dirty = bool(self.pending_items)
-        return {"removed": removed, "rebuilt": rebuilt}
+            self.tree = None
+            self.dirty = bool(self.indexed_items or self.pending_items)
+        else:
+            self.dirty = bool(self.pending_items)
+        return {"removed": removed, "rebuilt": False, "deferred": before_indexed != len(self.indexed_items)}
 
     def build_index(self):
 
@@ -193,23 +192,6 @@ class VPTreeSearcher(BaseSearcher):
 
         if dist + threshold >= median_dist:
             cls._search_snapshot(right_child, query_sig, threshold, results, distance_func)
-
-    def _search(self, node, query_sig, threshold, results):
-        if node is None:
-            return
-
-        vp_item, median_dist, left_child, right_child = node
-        dist = self.distance_func(query_sig, vp_item[1])
-
-        if dist <= threshold:
-            results.append((vp_item[0], dist))
-
-
-        if dist - threshold <= median_dist:
-            self._search(left_child, query_sig, threshold, results)
-
-        if dist + threshold >= median_dist:
-            self._search(right_child, query_sig, threshold, results)
 
 class BKTreeSearcher(BaseSearcher):
 
