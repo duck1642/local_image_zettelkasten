@@ -601,7 +601,6 @@
       aria-label="Resize inspector"
       on:pointerdown={startInspectorResize}
       on:keydown={handleResizeHandleKeydown}
-      title="Resize inspector"
     ></button>
     <Inspector
       item={selectedItem}
@@ -638,7 +637,6 @@
   .viewport { flex-grow: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; position: relative; }
   .inspector-resize-handle { width: 7px; flex: 0 0 7px; cursor: col-resize; border: 0; border-left: 1px solid var(--border-dim); border-right: 1px solid transparent; border-radius: 0; background: var(--bg-main); position: relative; z-index: 20; padding: 0; }
   .inspector-resize-handle:hover, .inspector-resize-handle.active { border-left-color: var(--accent-primary); }
-  .inspector-resize-handle:hover { background: rgba(255,255,255,0.03); }
   .bulk-action-bar { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 60; display: flex; align-items: center; gap: 10px; padding: 9px 12px; border: 1px solid var(--border-dim); border-radius: 8px; background: rgba(13, 17, 23, 0.96); box-shadow: 0 10px 30px rgba(0,0,0,0.35); }
   .selection-count { color: var(--text-bright); font-weight: 600; white-space: nowrap; }
   .initial-loading { flex-grow: 1; }

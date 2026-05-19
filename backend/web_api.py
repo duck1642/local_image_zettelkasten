@@ -52,7 +52,9 @@ from artists import (
     delete_artist_link,
     get_artist_detail,
     list_artists,
+    merge_artists,
     normalize_artist_name,
+    preview_artist_merge,
     resolve_artist_name,
     update_artist,
 )
@@ -568,6 +570,9 @@ class ArtistLinkCreate(BaseModel):
     handle: str | None = None
     is_primary: bool = False
 
+class ArtistMergeRequest(BaseModel):
+    source_artist_ids: list[int]
+
 @app.get("/api/platforms")
 async def get_platforms(q: str = "", limit: int = 100):
     return await asyncio.to_thread(_get_platforms_sync, q, limit)
@@ -621,6 +626,13 @@ def _rewrite_metadata_notes_for_hashes(conn, item_hashes: list[str]):
         atomic_write_text(note_path, md_content)
         safe_reindex_item_metadata(conn, item_hash, "artist_rename")
 
+def _public_artist_merge_payload(payload: dict) -> dict:
+    public = dict(payload)
+    public.pop("source_norms", None)
+    public.pop("facet_norms", None)
+    public.pop("item_hashes", None)
+    return public
+
 @app.patch("/api/artists/{artist_id}")
 async def patch_artist(artist_id: int, update: ArtistUpdate):
     return await asyncio.to_thread(_patch_artist_sync, artist_id, update)
@@ -657,6 +669,52 @@ def _patch_artist_sync(artist_id: int, update: ArtistUpdate):
             raise HTTPException(status_code=409, detail=str(exc))
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
+    finally:
+        conn.close()
+
+@app.post("/api/artists/{artist_id}/merge-preview")
+async def preview_artist_merge_route(artist_id: int, body: ArtistMergeRequest):
+    return await asyncio.to_thread(_preview_artist_merge_sync, artist_id, body)
+
+def _preview_artist_merge_sync(artist_id: int, body: ArtistMergeRequest):
+    conn = connect_database()
+    try:
+        try:
+            return _public_artist_merge_payload(preview_artist_merge(conn, artist_id, body.source_artist_ids))
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+    finally:
+        conn.close()
+
+@app.post("/api/artists/{artist_id}/merge")
+async def merge_artist_route(artist_id: int, body: ArtistMergeRequest):
+    return await asyncio.to_thread(_merge_artist_sync, artist_id, body)
+
+def _merge_artist_sync(artist_id: int, body: ArtistMergeRequest):
+    conn = connect_database()
+    try:
+        try:
+            result = merge_artists(conn, artist_id, body.source_artist_ids)
+            if result.get("item_hashes"):
+                _rewrite_metadata_notes_for_hashes(conn, result["item_hashes"])
+                refresh_metadata_facet_counts_for_values(
+                    conn,
+                    {("artist", norm) for norm in result.get("facet_norms", [])},
+                )
+                result["target_detail"] = get_artist_detail(conn, artist_id)
+            conn.commit()
+            return _public_artist_merge_payload(result)
+        except KeyError as exc:
+            conn.rollback()
+            raise HTTPException(status_code=404, detail=str(exc))
+        except ValueError as exc:
+            conn.rollback()
+            raise HTTPException(status_code=400, detail=str(exc))
+        except Exception:
+            conn.rollback()
+            raise
     finally:
         conn.close()
 

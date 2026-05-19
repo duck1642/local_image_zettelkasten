@@ -5,7 +5,7 @@ from utils import utc_now_str
 from platforms import normalize_platform_key, resolve_platform_label
 
 
-VALID_ARTIST_KINDS = {"artist", "real_person"}
+VALID_ARTIST_KINDS = {"artist", "real_person", "brand", "other"}
 PLACEHOLDER_ARTIST_NORMS = {"", "unknown", "local", "none", "n/a", "na", "null"}
 
 
@@ -157,7 +157,7 @@ def resolve_artist_name(conn: sqlite3.Connection, name: str, kind: str = "artist
         return clean_name
     clean_kind = str(kind or "artist").strip().casefold()
     if clean_kind not in VALID_ARTIST_KINDS:
-        clean_kind = "artist"
+        clean_kind = "other"
     now = utc_now_str()
     conn.execute(
         """
@@ -304,6 +304,249 @@ def update_artist(conn: sqlite3.Connection, artist_id: int, name: str | None = N
     if detail is None:
         raise KeyError("artist not found")
     return detail
+
+
+def _load_artist_row(conn: sqlite3.Connection, artist_id: int) -> dict | None:
+    row = conn.execute(
+        "SELECT id, name, name_norm, kind, notes FROM artists WHERE id = ?",
+        (artist_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    return {"id": row[0], "name": row[1], "name_norm": row[2], "kind": row[3], "notes": row[4]}
+
+
+def _artist_alias_rows(conn: sqlite3.Connection, artist_id: int) -> list[dict]:
+    return [
+        {"id": row[0], "artist_id": artist_id, "alias": row[1], "alias_norm": row[2]}
+        for row in conn.execute(
+            "SELECT id, alias, alias_norm FROM artist_aliases WHERE artist_id = ? ORDER BY alias COLLATE NOCASE",
+            (artist_id,),
+        ).fetchall()
+    ]
+
+
+def _artist_link_rows(conn: sqlite3.Connection, artist_id: int) -> list[dict]:
+    return [
+        {
+            "id": row[0],
+            "artist_id": artist_id,
+            "platform": row[1],
+            "url": row[2],
+            "url_norm": row[3],
+            "handle": row[4],
+            "is_primary": bool(row[5]),
+        }
+        for row in conn.execute(
+            """
+            SELECT id, platform, url, url_norm, handle, is_primary
+            FROM artist_links
+            WHERE artist_id = ?
+            ORDER BY is_primary DESC, platform COLLATE NOCASE, url COLLATE NOCASE
+            """,
+            (artist_id,),
+        ).fetchall()
+    ]
+
+
+def _merge_context(conn: sqlite3.Connection, target_id: int, source_artist_ids: list[int]) -> dict:
+    ensure_artist_schema(conn, backfill=False)
+    source_ids = []
+    seen = set()
+    for raw_id in source_artist_ids or []:
+        source_id = int(raw_id)
+        if source_id not in seen:
+            seen.add(source_id)
+            source_ids.append(source_id)
+    if not source_ids:
+        raise ValueError("at least one source artist is required")
+    if int(target_id) in seen:
+        raise ValueError("target artist cannot be a source")
+    target = _load_artist_row(conn, int(target_id))
+    if target is None:
+        raise KeyError("target artist not found")
+    if is_placeholder_artist(target["name"]):
+        raise ValueError("placeholder artists cannot be merge targets")
+    sources = []
+    for source_id in source_ids:
+        source = _load_artist_row(conn, source_id)
+        if source is None:
+            raise KeyError("source artist not found")
+        if is_placeholder_artist(source["name"]):
+            raise ValueError("placeholder artists cannot be merge sources")
+        sources.append(source)
+    return {"target": target, "sources": sources}
+
+
+def preview_artist_merge(conn: sqlite3.Connection, target_id: int, source_artist_ids: list[int]) -> dict:
+    context = _merge_context(conn, target_id, source_artist_ids)
+    target = context["target"]
+    sources = context["sources"]
+    source_ids = [source["id"] for source in sources]
+    source_id_set = set(source_ids)
+
+    target_alias_rows = _artist_alias_rows(conn, target["id"])
+    target_norms = {target["name_norm"], *(row["alias_norm"] for row in target_alias_rows)}
+    source_aliases_by_id = {source["id"]: _artist_alias_rows(conn, source["id"]) for source in sources}
+    source_norms = {source["name_norm"] for source in sources}
+    for aliases in source_aliases_by_id.values():
+        source_norms.update(alias["alias_norm"] for alias in aliases)
+
+    artist_owner = {
+        row[0]: row[1]
+        for row in conn.execute("SELECT name_norm, id FROM artists").fetchall()
+    }
+    alias_owner = {
+        row[0]: row[1]
+        for row in conn.execute("SELECT alias_norm, artist_id FROM artist_aliases").fetchall()
+    }
+
+    aliases_to_add = []
+    aliases_to_move = []
+    alias_duplicates = []
+    alias_conflicts = []
+    candidate_norms = set()
+
+    def consider_alias(value: str, value_norm: str, source_id: int, mode: str):
+        if not value or not value_norm or value_norm == target["name_norm"]:
+            alias_duplicates.append({"value": value, "reason": "target name"})
+            return
+        if value_norm in target_norms or value_norm in candidate_norms:
+            alias_duplicates.append({"value": value, "reason": "duplicate"})
+            return
+        owner_artist = artist_owner.get(value_norm)
+        if owner_artist is not None and owner_artist != source_id:
+            alias_conflicts.append({"value": value, "reason": "artist name conflict"})
+            return
+        owner_alias = alias_owner.get(value_norm)
+        if owner_alias is not None and owner_alias not in source_id_set and owner_alias != target["id"]:
+            alias_conflicts.append({"value": value, "reason": "alias conflict"})
+            return
+        candidate_norms.add(value_norm)
+        row = {"value": value, "value_norm": value_norm, "source_artist_id": source_id}
+        if mode == "move":
+            aliases_to_move.append(row)
+        else:
+            aliases_to_add.append(row)
+
+    for source in sources:
+        consider_alias(source["name"], source["name_norm"], source["id"], "add")
+        for alias in source_aliases_by_id[source["id"]]:
+            consider_alias(alias["alias"], alias["alias_norm"], source["id"], "move")
+
+    target_link_norms = {link["url_norm"] for link in _artist_link_rows(conn, target["id"])}
+    seen_link_norms = set(target_link_norms)
+    links_to_move = []
+    duplicate_links = []
+    for source in sources:
+        for link in _artist_link_rows(conn, source["id"]):
+            if link["url_norm"] in seen_link_norms:
+                duplicate_links.append({"id": link["id"], "url": link["url"], "source_artist_id": source["id"]})
+                continue
+            seen_link_norms.add(link["url_norm"])
+            links_to_move.append({"id": link["id"], "url": link["url"], "source_artist_id": source["id"]})
+
+    placeholders = ",".join("?" for _ in source_norms)
+    affected_item_count = 0
+    if source_norms:
+        affected_item_count = conn.execute(
+            f"SELECT COUNT(*) FROM items WHERE LOWER(TRIM(source_artist)) IN ({placeholders})",
+            tuple(source_norms),
+        ).fetchone()[0]
+
+    notes_appended = sum(1 for source in sources if str(source.get("notes") or "").strip())
+    return {
+        "target": {"id": target["id"], "name": target["name"]},
+        "sources": [{"id": source["id"], "name": source["name"]} for source in sources],
+        "affected_items": affected_item_count,
+        "aliases": {
+            "add": aliases_to_add,
+            "move": aliases_to_move,
+            "duplicates": alias_duplicates,
+            "conflicts": alias_conflicts,
+        },
+        "links": {
+            "move": links_to_move,
+            "duplicates": duplicate_links,
+        },
+        "notes_appended": notes_appended,
+        "source_artists_deleted": len(sources),
+        "source_norms": sorted(source_norms),
+        "facet_norms": sorted(source_norms | {target["name_norm"]}),
+    }
+
+
+def merge_artists(conn: sqlite3.Connection, target_id: int, source_artist_ids: list[int]) -> dict:
+    preview = preview_artist_merge(conn, target_id, source_artist_ids)
+    target = _load_artist_row(conn, int(target_id))
+    if target is None:
+        raise KeyError("target artist not found")
+    source_ids = [source["id"] for source in preview["sources"]]
+    now = utc_now_str()
+
+    if preview["source_norms"]:
+        placeholders = ",".join("?" for _ in preview["source_norms"])
+        item_hashes = [
+            row[0]
+            for row in conn.execute(
+                f"SELECT hash FROM items WHERE LOWER(TRIM(source_artist)) IN ({placeholders})",
+                tuple(preview["source_norms"]),
+            ).fetchall()
+        ]
+    else:
+        item_hashes = []
+
+    for alias in preview["aliases"]["add"]:
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO artist_aliases(artist_id, alias, alias_norm, created_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (target["id"], alias["value"], alias["value_norm"], now),
+        )
+    for alias in preview["aliases"]["move"]:
+        conn.execute(
+            "UPDATE artist_aliases SET artist_id = ? WHERE alias_norm = ? AND artist_id IN ({})".format(
+                ",".join("?" for _ in source_ids)
+            ),
+            (target["id"], alias["value_norm"], *source_ids),
+        )
+
+    for link in preview["links"]["move"]:
+        conn.execute("UPDATE artist_links SET artist_id = ?, updated_at = ? WHERE id = ?", (target["id"], now, link["id"]))
+    for link in preview["links"]["duplicates"]:
+        conn.execute("DELETE FROM artist_links WHERE id = ?", (link["id"],))
+
+    if item_hashes:
+        conn.executemany(
+            "UPDATE items SET source_artist = ? WHERE hash = ?",
+            [(target["name"], item_hash) for item_hash in item_hashes],
+        )
+
+    target_notes = str(target.get("notes") or "").rstrip()
+    note_chunks = [target_notes] if target_notes else []
+    for source in preview["sources"]:
+        row = _load_artist_row(conn, source["id"])
+        source_notes = str((row or {}).get("notes") or "").strip()
+        if source_notes:
+            note_chunks.append(f"--- merged from {source['name']} ---\n{source_notes}")
+    if note_chunks:
+        conn.execute(
+            "UPDATE artists SET notes = ?, updated_at = ? WHERE id = ?",
+            ("\n\n".join(note_chunks), now, target["id"]),
+        )
+
+    if source_ids:
+        placeholders = ",".join("?" for _ in source_ids)
+        conn.execute(f"DELETE FROM artist_aliases WHERE artist_id IN ({placeholders})", tuple(source_ids))
+        conn.execute(f"DELETE FROM artist_links WHERE artist_id IN ({placeholders})", tuple(source_ids))
+        conn.execute(f"DELETE FROM artists WHERE id IN ({placeholders})", tuple(source_ids))
+
+    result = dict(preview)
+    result["item_hashes"] = item_hashes
+    result["target_detail"] = get_artist_detail(conn, target["id"])
+    result["merged"] = True
+    return result
 
 
 def add_artist_alias(conn: sqlite3.Connection, artist_id: int, alias: str) -> dict:

@@ -1690,7 +1690,7 @@ def test_artist_api_lists_details_and_edits(monkeypatch, tmp_path):
     )
     updated = web_api._patch_artist_sync(
         artist["id"],
-        web_api.ArtistUpdate(name="Artist Canonical", kind="real_person", notes="note"),
+        web_api.ArtistUpdate(name="Artist Canonical", kind="brand", notes="note"),
     )
 
     assert artist["item_count"] == 1
@@ -1699,7 +1699,7 @@ def test_artist_api_lists_details_and_edits(monkeypatch, tmp_path):
     assert link["platform"] == "X"
     assert link["handle"] == "api_artist"
     assert updated["name"] == "Artist Canonical"
-    assert updated["kind"] == "real_person"
+    assert updated["kind"] == "brand"
     assert updated["notes"] == "note"
     conn = sqlite_operator.init_database()
     row = conn.execute("SELECT source_artist, storage_id FROM items WHERE hash = ?", (item_hash,)).fetchone()
@@ -1740,6 +1740,159 @@ def test_artist_api_rejects_duplicate_names_and_aliases(monkeypatch, tmp_path):
     with pytest.raises(HTTPException) as placeholder_name:
         web_api._patch_artist_sync(artist_a["id"], web_api.ArtistUpdate(name="Unknown"))
     assert placeholder_name.value.status_code == 400
+
+
+def test_artist_merge_absorbs_sources_and_rewrites_items(monkeypatch, tmp_path):
+    utils, sqlite_operator, artists, web_api = fresh_backend(
+        monkeypatch,
+        tmp_path,
+        "utils",
+        "db.sqlite_operator",
+        "artists",
+        "web_api",
+    )
+    target_hash = "68" * 32
+    source_hash = "69" * 32
+    second_source_hash = "70" * 32
+    alias_hash = "71" * 32
+    for item_hash, artist_name in [
+        (target_hash, "iomayashi"),
+        (source_hash, "nixeu"),
+        (second_source_hash, "iomaya"),
+        (alias_hash, "old nix"),
+    ]:
+        conn = insert_mock_item(sqlite_operator, item_hash, artist=artist_name)
+        md_content = web_api.generate_markdown(conn, item_hash)
+        row = conn.execute("SELECT storage_id FROM items WHERE hash = ?", (item_hash,)).fetchone()
+        utils.atomic_write_text(utils.note_path_for(item_hash, row[0]), md_content)
+        conn.close()
+
+    listing = web_api._get_artists_sync("", 20)["items"]
+    ids = {artist["name"]: artist["id"] for artist in listing}
+    conn = sqlite_operator.init_database()
+    conn.execute("DELETE FROM artists WHERE id = ?", (ids["old nix"],))
+    artists.add_artist_alias(conn, ids["nixeu"], "old nix")
+    artists.add_artist_link(conn, ids["iomayashi"], "X", "https://x.com/shared")
+    artists.add_artist_link(conn, ids["nixeu"], "X", "https://x.com/shared")
+    artists.add_artist_link(conn, ids["iomaya"], "Pixiv", "https://www.pixiv.net/users/iomaya")
+    conn.execute("UPDATE artists SET notes = ? WHERE id = ?", ("old nixeu notes", ids["nixeu"]))
+    conn.execute("UPDATE artists SET notes = ? WHERE id = ?", ("old iomaya notes", ids["iomaya"]))
+    conn.commit()
+    conn.close()
+
+    preview = web_api._preview_artist_merge_sync(
+        ids["iomayashi"],
+        web_api.ArtistMergeRequest(source_artist_ids=[ids["nixeu"], ids["iomaya"]]),
+    )
+    assert preview["affected_items"] == 3
+    assert {alias["value"] for alias in preview["aliases"]["add"]} == {"nixeu", "iomaya"}
+    assert {alias["value"] for alias in preview["aliases"]["move"]} == {"old nix"}
+    assert len(preview["links"]["move"]) == 1
+    assert len(preview["links"]["duplicates"]) == 1
+    assert preview["notes_appended"] == 2
+    conn = sqlite_operator.init_database()
+    assert conn.execute("SELECT name FROM artists WHERE id = ?", (ids["nixeu"],)).fetchone()[0] == "nixeu"
+    assert conn.execute("SELECT source_artist FROM items WHERE hash = ?", (source_hash,)).fetchone()[0] == "nixeu"
+    assert conn.execute("SELECT artist_id FROM artist_links WHERE url_norm = ?", ("https://www.pixiv.net/users/iomaya",)).fetchone()[0] == ids["iomaya"]
+    conn.close()
+
+    merged = web_api._merge_artist_sync(
+        ids["iomayashi"],
+        web_api.ArtistMergeRequest(source_artist_ids=[ids["nixeu"], ids["iomaya"]]),
+    )
+    assert merged["merged"] is True
+    assert merged["target_detail"]["name"] == "iomayashi"
+    assert "merged from nixeu" in merged["target_detail"]["notes"]
+    assert "old iomaya notes" in merged["target_detail"]["notes"]
+
+    conn = sqlite_operator.init_database()
+    names = {row[0] for row in conn.execute("SELECT name FROM artists").fetchall()}
+    assert "iomayashi" in names
+    assert "nixeu" not in names
+    assert "iomaya" not in names
+    aliases = {row[0] for row in conn.execute("SELECT alias FROM artist_aliases WHERE artist_id = ?", (ids["iomayashi"],)).fetchall()}
+    assert {"nixeu", "iomaya", "old nix"} <= aliases
+    item_artists = {
+        row[0]
+        for row in conn.execute(
+            "SELECT source_artist FROM items WHERE hash IN (?, ?, ?)",
+            (source_hash, second_source_hash, alias_hash),
+        ).fetchall()
+    }
+    assert item_artists == {"iomayashi"}
+    links = conn.execute("SELECT platform, url FROM artist_links WHERE artist_id = ?", (ids["iomayashi"],)).fetchall()
+    assert len(links) == 2
+    assert artists.resolve_artist_name(conn, "nixeu") == "iomayashi"
+    row = conn.execute("SELECT storage_id FROM items WHERE hash = ?", (source_hash,)).fetchone()
+    note_data = frontmatter_from_markdown(utils.note_path_for(source_hash, row[0]).read_text(encoding="utf-8"))
+    assert note_data["artist"] == "iomayashi"
+    conn.close()
+
+
+def test_artist_merge_preview_reports_alias_conflicts_without_mutating(monkeypatch, tmp_path):
+    sqlite_operator, artists, web_api = fresh_backend(monkeypatch, tmp_path, "db.sqlite_operator", "artists", "web_api")
+    conn = insert_mock_item(sqlite_operator, "73" * 32, artist="Target Merge")
+    conn.close()
+    conn = insert_mock_item(sqlite_operator, "74" * 32, artist="Source Merge")
+    conn.close()
+    conn = insert_mock_item(sqlite_operator, "75" * 32, artist="Unrelated Merge")
+    conn.close()
+
+    listing = web_api._get_artists_sync("", 20)["items"]
+    ids = {artist["name"]: artist["id"] for artist in listing}
+    conn = sqlite_operator.init_database()
+    artists.add_artist_alias(conn, ids["Source Merge"], "conflict alias")
+    conn.execute(
+        "INSERT INTO artist_aliases(artist_id, alias, alias_norm, created_at) VALUES (?, ?, ?, ?)",
+        (ids["Unrelated Merge"], "Source Merge", "source merge", "2026-01-01 00:00:00"),
+    )
+    conn.commit()
+    conn.close()
+
+    preview = web_api._preview_artist_merge_sync(
+        ids["Target Merge"],
+        web_api.ArtistMergeRequest(source_artist_ids=[ids["Source Merge"]]),
+    )
+
+    assert {alias["value"] for alias in preview["aliases"]["move"]} == {"conflict alias"}
+    assert {alias["value"] for alias in preview["aliases"]["conflicts"]} == {"Source Merge"}
+
+    conn = sqlite_operator.init_database()
+    before_alias_owner = conn.execute("SELECT artist_id FROM artist_aliases WHERE alias_norm = 'conflict alias'").fetchone()[0]
+    assert before_alias_owner == ids["Source Merge"]
+    assert conn.execute("SELECT name FROM artists WHERE id = ?", (ids["Source Merge"],)).fetchone()[0] == "Source Merge"
+    assert conn.execute("SELECT artist_id FROM artist_aliases WHERE alias_norm = 'source merge'").fetchone()[0] == ids["Unrelated Merge"]
+    conn.close()
+
+
+def test_artist_merge_rejects_invalid_sources(monkeypatch, tmp_path):
+    sqlite_operator, web_api = fresh_backend(monkeypatch, tmp_path, "db.sqlite_operator", "web_api")
+    conn = insert_mock_item(sqlite_operator, "72" * 32, artist="Merge Target")
+    conn.execute(
+        """
+        INSERT INTO artists(name, name_norm, kind, notes, created_at, updated_at)
+        VALUES ('Unknown', 'unknown', 'artist', '', '2026-01-01 00:00:00', '2026-01-01 00:00:00')
+        """
+    )
+    placeholder_id = conn.execute("SELECT id FROM artists WHERE name_norm = 'unknown'").fetchone()[0]
+    conn.close()
+    artist = next(item for item in web_api._get_artists_sync("", 10)["items"] if item["name"] == "Merge Target")
+
+    with pytest.raises(HTTPException) as empty_sources:
+        web_api._preview_artist_merge_sync(artist["id"], web_api.ArtistMergeRequest(source_artist_ids=[]))
+    assert empty_sources.value.status_code == 400
+
+    with pytest.raises(HTTPException) as self_merge:
+        web_api._merge_artist_sync(artist["id"], web_api.ArtistMergeRequest(source_artist_ids=[artist["id"]]))
+    assert self_merge.value.status_code == 400
+
+    with pytest.raises(HTTPException) as placeholder_source:
+        web_api._merge_artist_sync(artist["id"], web_api.ArtistMergeRequest(source_artist_ids=[placeholder_id]))
+    assert placeholder_source.value.status_code == 400
+
+    with pytest.raises(HTTPException) as placeholder_target:
+        web_api._merge_artist_sync(placeholder_id, web_api.ArtistMergeRequest(source_artist_ids=[artist["id"]]))
+    assert placeholder_target.value.status_code == 400
 
 
 def test_search_manager_query_sees_pending_during_vp_rebuild(monkeypatch, tmp_path):

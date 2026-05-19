@@ -58,6 +58,7 @@ async function installMockVaultApi(
   } = {}
 ) {
   let items = cloneItems();
+  let failNextArtistMerge = false;
   let artistDetails = facetItems(items, 'artist').map((entry, index) => ({
     id: index + 1,
     name: entry.value,
@@ -142,9 +143,58 @@ async function installMockVaultApi(
   await page.route('**/api/artists**', async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    const mergeMatch = url.pathname.match(/\/api\/artists\/(\d+)\/(merge-preview|merge)$/);
     const aliasMatch = url.pathname.match(/\/api\/artists\/(\d+)\/aliases(?:\/(\d+))?$/);
     const linkMatch = url.pathname.match(/\/api\/artists\/(\d+)\/links(?:\/(\d+))?$/);
     const detailMatch = url.pathname.match(/\/api\/artists\/(\d+)$/);
+
+    if (mergeMatch) {
+      if (mergeMatch[2] === 'merge' && failNextArtistMerge) {
+        failNextArtistMerge = false;
+        return fulfillJson(route, { detail: 'merge failed' }, 500);
+      }
+      const target = artistDetails.find((entry) => entry.id === Number(mergeMatch[1]));
+      if (!target) return fulfillJson(route, { detail: 'not found' }, 404);
+      const payload = JSON.parse(request.postData() || '{}');
+      const sourceIds = Array.isArray(payload.source_artist_ids) ? payload.source_artist_ids.map(Number) : [];
+      const sources = artistDetails.filter((entry) => sourceIds.includes(entry.id));
+      const sourceNames = new Set(sources.map((entry) => entry.name));
+      const affected = items.filter((item) => sourceNames.has(String(item.artist || ''))).length;
+      const preview = {
+        target: { id: target.id, name: target.name },
+        sources: sources.map((entry) => ({ id: entry.id, name: entry.name })),
+        affected_items: affected,
+        aliases: {
+          add: sources.map((entry) => ({ value: entry.name })),
+          move: sources.flatMap((entry) => entry.aliases.map((alias) => ({ value: alias.alias }))),
+          duplicates: [],
+          conflicts: []
+        },
+        links: {
+          move: sources.flatMap((entry) => entry.links.map((link) => ({ url: link.url }))),
+          duplicates: []
+        },
+        notes_appended: sources.filter((entry) => entry.notes).length,
+        source_artists_deleted: sources.length
+      };
+      if (mergeMatch[2] === 'merge') {
+        items = items.map((item) => sourceNames.has(String(item.artist || '')) ? { ...item, artist: target.name } : item);
+        target.aliases.push(...sources.map((entry) => ({
+          id: nextArtistAliasId++,
+          alias: entry.name,
+          alias_norm: entry.name.toLowerCase()
+        })));
+        target.aliases.push(...sources.flatMap((entry) => entry.aliases));
+        target.links.push(...sources.flatMap((entry) => entry.links));
+        target.notes = [target.notes, ...sources.filter((entry) => entry.notes).map((entry) => `--- merged from ${entry.name} ---\n${entry.notes}`)]
+          .filter(Boolean)
+          .join('\n\n');
+        artistDetails = artistDetails.filter((entry) => !sourceIds.includes(entry.id));
+        target.item_count = items.filter((item) => item.artist === target.name).length;
+        return fulfillJson(route, { ...preview, merged: true, target_detail: target });
+      }
+      return fulfillJson(route, preview);
+    }
 
     if (aliasMatch) {
       const artist = artistDetails.find((entry) => entry.id === Number(aliasMatch[1]));
@@ -292,7 +342,9 @@ async function installMockVaultApi(
   await page.route('**/api/facets**', async (route) => {
     const kind = new URL(route.request().url()).searchParams.get('kind') || 'artist';
     const key = kind === 'wd_tag' ? 'artist' : kind;
-    return fulfillJson(route, { kind, items: facetItems(items, key) });
+    const values = facetItems(items, key);
+    if (kind === 'artist') values.push({ value: 'Unknown', count: 3 });
+    return fulfillJson(route, { kind, items: values });
   });
   await page.route('**/api/system/memory', async (route) => {
     if (options.memoryFails) return fulfillJson(route, { detail: 'unavailable' }, 500);
@@ -328,6 +380,9 @@ async function installMockVaultApi(
       contentType: 'image/svg+xml',
       body: '<svg xmlns="http://www.w3.org/2000/svg" width="240" height="180"><rect width="240" height="180" fill="#334155"/><text x="24" y="96" fill="#fff">Review</text></svg>'
     });
+  });
+  await page.exposeFunction('failNextArtistMerge', () => {
+    failNextArtistMerge = true;
   });
 }
 
@@ -668,14 +723,16 @@ test('stats artists tab shows compact detail editor and saves artist changes', a
   await page.getByRole('button', { name: 'Artists' }).click();
 
   await expect(page.locator('.artist-row').first()).toBeVisible();
+  await expect(page.locator('.artist-group-label')).toContainText(['Known Artists', 'Placeholders']);
+  await expect(page.locator('.placeholder-row')).toContainText('Unknown');
   await expect(page.locator('.artist-detail')).toContainText('Links');
 
   await page.locator('#artist-name').fill('Canonical Artist');
-  await page.locator('#artist-kind').selectOption('real_person');
+  await page.locator('#artist-kind').selectOption('brand');
   await page.locator('#artist-notes').fill('reviewed');
   await page.getByRole('button', { name: 'Save' }).click();
   await expect(page.locator('.artist-detail')).toContainText('Canonical Artist');
-  await expect(page.locator('.artist-detail')).toContainText('real_person');
+  await expect(page.locator('.artist-detail')).toContainText('brand');
 
   await page.getByPlaceholder('New alias').fill('Alias One');
   await page.getByRole('button', { name: 'Add Alias' }).click();
@@ -686,6 +743,48 @@ test('stats artists tab shows compact detail editor and saves artist changes', a
   await detail.getByPlaceholder('url').fill('https://www.pixiv.net/users/canonical_artist');
   await detail.getByRole('button', { name: 'Add', exact: true }).click();
   await expect(page.locator('.artist-detail')).toContainText('canonical_artist');
+});
+
+test('stats artists tab previews and confirms artist merge', async ({ page }) => {
+  await openMockVault(page);
+  await page.getByRole('button', { name: /Stats/ }).click();
+  await page.getByRole('button', { name: 'Artists' }).click();
+
+  await expect(page.locator('.artist-row').first()).toBeVisible();
+  const sourceName = (await page.locator('.artist-row .value').nth(1).textContent())?.trim() || '';
+  await page.getByRole('button', { name: 'Merge Other Artists Into This' }).click();
+  await expect(page.getByRole('dialog', { name: /Merge Into/ })).toBeVisible();
+
+  await page.locator('.merge-source-row').first().click();
+  await expect(page.locator('.merge-preview')).toContainText('Affected items');
+  await expect(page.locator('.merge-preview')).toContainText('Aliases added/moved');
+
+  await page.getByRole('button', { name: 'Merge into target' }).click();
+  await expect(page.getByRole('dialog', { name: /Merge Into/ })).toHaveCount(0);
+  await expect(page.locator('.artist-detail')).toContainText(sourceName);
+});
+
+test('stats artist merge guards empty selection and shows merge errors', async ({ page }) => {
+  await openMockVault(page);
+  await page.getByRole('button', { name: /Stats/ }).click();
+  await page.getByRole('button', { name: 'Artists' }).click();
+
+  await page.getByRole('button', { name: 'Merge Other Artists Into This' }).click();
+  const dialog = page.getByRole('dialog', { name: /Merge Into/ });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Merge into target' })).toBeDisabled();
+
+  await page.locator('.merge-source-row').first().click();
+  await expect(dialog.getByRole('button', { name: 'Merge into target' })).toBeEnabled();
+  await page.locator('.merge-source-row').first().click();
+  await expect(dialog.getByRole('button', { name: 'Merge into target' })).toBeDisabled();
+  await expect(page.locator('.merge-preview')).toContainText('Select source artists');
+
+  await page.locator('.merge-source-row').first().click();
+  await page.evaluate(() => (window as any).failNextArtistMerge());
+  await dialog.getByRole('button', { name: 'Merge into target' }).click();
+  await expect(dialog).toBeVisible();
+  await expect(page.locator('.empty-state.error')).toContainText('merge failed');
 });
 
 test('stats non-artist tabs keep facet list behavior', async ({ page }) => {
