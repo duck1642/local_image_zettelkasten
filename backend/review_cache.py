@@ -5,7 +5,7 @@ from pathlib import Path
 
 from utils import REVIEW_DIR, get_config
 
-REVIEW_RESOLVED_STATES = {"duplicate_ignored", "saved_variant", "replaced", "deleted", "accepted"}
+REVIEW_RESOLVED_STATES = {"resolved_variant", "resolved_delete", "resolved_replace"}
 REVIEW_PENDING_STATES = {"pending", "deferred"}
 REVIEW_CLEANUP_STATES = {"pending_cleanup", "cleanup_failed"}
 REVIEW_VISIBLE_STATES = REVIEW_PENDING_STATES | REVIEW_CLEANUP_STATES

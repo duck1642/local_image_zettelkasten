@@ -231,6 +231,24 @@ def test_review_count_uses_cache_without_full_resolver(monkeypatch, tmp_path):
     assert count["total"] >= count["pending"] + count["cleanup"]
 
 
+def test_review_count_cache_ignores_resolved_variant(monkeypatch, tmp_path):
+    web_api, utils = fresh_backend(monkeypatch, tmp_path, "web_api", "utils")
+    resolved_file = utils.REVIEW_DIR / "resolved-variant.webp"
+    resolved_file.write_bytes(b"resolved")
+    resolved_file.with_suffix(".webp.json").write_text(
+        json.dumps({"state": "resolved_variant", "file_hash": "12" * 32}),
+        encoding="utf-8",
+    )
+    web_api.mark_review_cache_dirty()
+
+    count = web_api._get_review_count_sync(include_resolved=True)
+    items = web_api._get_review_items_sync(False)
+
+    assert all(item["filename"] != resolved_file.name for item in items)
+    assert count["pending"] == 1
+    assert count["cleanup"] == 1
+
+
 def test_delete_item_removes_ram_indexes(monkeypatch, tmp_path):
     sqlite_operator, web_api = fresh_backend(monkeypatch, tmp_path, "db.sqlite_operator", "web_api")
     item_hash = "9a" * 32
