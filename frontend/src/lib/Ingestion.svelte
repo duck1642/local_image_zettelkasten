@@ -7,6 +7,8 @@
 
   type IngestMode = 'online' | 'local';
   type QueueName = 'normal' | 'force' | 'failed';
+  type ArtistOption = { id: number; name: string; kind: string; item_count: number; link_count: number; alias_count: number };
+  type PlatformOption = { id: number; key_norm: string; display_name: string; kind: string; item_count: number; alias_count: number };
   type DropRequest = {
     id: string;
     session_id: string;
@@ -60,6 +62,10 @@
 
   let localPaths: string[] = [];
   let localDefaults = { artist: '', platform: 'Local', source_url: '' };
+  let artistOptions: ArtistOption[] = [];
+  let platformOptions: PlatformOption[] = [];
+  let platformSelectOptions: string[] = ['Local'];
+  let artistOptionsTimer: number | null = null;
   let localStatus: LocalStatus = {
     running: false,
     phase: 'idle',
@@ -78,6 +84,14 @@
 
   $: counts = $queueStats;
   $: readyCount = (counts.normal || 0) + (counts.force || 0);
+  $: {
+    const values = new Set<string>(['Local']);
+    for (const platform of platformOptions) {
+      if (platform.display_name) values.add(platform.display_name);
+    }
+    if (localDefaults.platform) values.add(localDefaults.platform);
+    platformSelectOptions = [...values];
+  }
 
   function nextLogReconnectDelayMs() {
     const exponential = Math.min(LOG_RECONNECT_MAX_MS, LOG_RECONNECT_BASE_MS * Math.pow(2, logReconnectAttempts));
@@ -155,6 +169,37 @@
       await refreshQueueStats();
     } catch (e) {
       uiLog('ERROR', 'Failed to refresh queue stats', { error: String(e) });
+    }
+  }
+
+  async function loadArtistOptions(q = localDefaults.artist) {
+    try {
+      const params = new URLSearchParams({ q: String(q || '').trim(), limit: '50' });
+      const res = await apiFetch(`/api/artists?${params.toString()}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      artistOptions = Array.isArray(data.items) ? data.items : [];
+    } catch (e) {
+      uiLog('ERROR', 'Failed to load artist options', { error: String(e) });
+    }
+  }
+
+  function scheduleArtistOptions() {
+    if (artistOptionsTimer !== null) clearTimeout(artistOptionsTimer);
+    artistOptionsTimer = window.setTimeout(() => {
+      artistOptionsTimer = null;
+      loadArtistOptions();
+    }, 180);
+  }
+
+  async function loadPlatformOptions() {
+    try {
+      const res = await apiFetch('/api/platforms?limit=200');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      platformOptions = Array.isArray(data.items) ? data.items : [];
+    } catch (e) {
+      uiLog('ERROR', 'Failed to load platform options', { error: String(e) });
     }
   }
 
@@ -429,11 +474,14 @@
     fetchStats();
     connectMonitor();
     refreshLocalStatus();
+    loadArtistOptions('');
+    loadPlatformOptions();
     return () => {
       window.removeEventListener('lmz:refresh', handleGlobalRefresh);
       logSource?.close();
       if (logReconnectTimer !== null) clearTimeout(logReconnectTimer);
       if (parseTimer !== null) clearTimeout(parseTimer);
+      if (artistOptionsTimer !== null) clearTimeout(artistOptionsTimer);
       stopLocalStatusPolling();
     };
   });
@@ -512,8 +560,23 @@
       </div>
 
       <div class="local-defaults">
-        <label>Artist <input bind:value={localDefaults.artist} placeholder="Optional default artist" /></label>
-        <label>Platform <input bind:value={localDefaults.platform} placeholder="Local" /></label>
+        <label>
+          Artist
+          <input list="local-artist-options" bind:value={localDefaults.artist} on:input={scheduleArtistOptions} placeholder="Optional default artist" />
+        </label>
+        <datalist id="local-artist-options">
+          {#each artistOptions as artist}
+            <option value={artist.name}>{artist.item_count} items</option>
+          {/each}
+        </datalist>
+        <label>
+          Platform
+          <select bind:value={localDefaults.platform}>
+            {#each platformSelectOptions as platform}
+              <option value={platform}>{platform}</option>
+            {/each}
+          </select>
+        </label>
         <label>Source URL <input bind:value={localDefaults.source_url} placeholder="Optional default source url" /></label>
       </div>
 

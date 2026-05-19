@@ -31,6 +31,17 @@ function facetItems(items: MockItem[], key: string) {
   return [...counts.entries()].map(([value, count]) => ({ value, count }));
 }
 
+function canonicalPlatformDisplay(value: string) {
+  const key = String(value || '').trim().toLowerCase();
+  if (key === 'x' || key.startsWith('twitter')) return 'X';
+  if (key === 'pixiv') return 'Pixiv';
+  if (key === 'instagram') return 'Instagram';
+  if (key === 'pinterest') return 'Pinterest';
+  if (key === 'youtube') return 'YouTube';
+  if (key === 'local') return 'Local';
+  return value;
+}
+
 async function fulfillJson(route: Route, body: unknown, status = 200) {
   await route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 }
@@ -40,13 +51,33 @@ async function installMockVaultApi(
   options: {
     memoryFails?: boolean;
     onReviewAction?: () => Promise<void>;
-    onLocalIngestStart?: () => Promise<void> | void;
+    onLocalIngestStart?: (payload?: any) => Promise<void> | void;
     onMaintenanceAction?: (action: 'auth' | 'metadata' | 'review') => Promise<void> | void;
     metadataRebuildResponse?: unknown;
     metadataStatusSequence?: unknown[];
   } = {}
 ) {
   let items = cloneItems();
+  let artistDetails = facetItems(items, 'artist').map((entry, index) => ({
+    id: index + 1,
+    name: entry.value,
+    name_norm: entry.value.toLowerCase(),
+    kind: 'artist',
+    notes: '',
+    item_count: entry.count,
+    aliases: [] as Array<{ id: number; alias: string; alias_norm: string }>,
+    links: [] as Array<{ id: number; platform: string; url: string; handle: string; is_primary: boolean }>
+  }));
+  const platformDetails = facetItems(items, 'platform').map((entry, index) => ({
+    id: index + 1,
+    key_norm: entry.value.toLowerCase(),
+    display_name: canonicalPlatformDisplay(entry.value),
+    kind: 'source',
+    item_count: entry.count,
+    alias_count: 0
+  }));
+  let nextArtistAliasId = 1;
+  let nextArtistLinkId = 1;
   const reviewItems = JSON.parse(JSON.stringify(manifest.review));
   const queueContent: Record<string, string> = {
     normal: manifest.queues.normal.join('\n'),
@@ -108,6 +139,83 @@ async function installMockVaultApi(
   await page.route('**/api/config', async (route) => fulfillJson(route, appConfig));
   await page.route('**/api/session-key', async (route) => fulfillJson(route, { key: 'mock-key' }));
   await page.route('**/api/stats', async (route) => fulfillJson(route, { total_items: items.length }));
+  await page.route('**/api/artists**', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const aliasMatch = url.pathname.match(/\/api\/artists\/(\d+)\/aliases(?:\/(\d+))?$/);
+    const linkMatch = url.pathname.match(/\/api\/artists\/(\d+)\/links(?:\/(\d+))?$/);
+    const detailMatch = url.pathname.match(/\/api\/artists\/(\d+)$/);
+
+    if (aliasMatch) {
+      const artist = artistDetails.find((entry) => entry.id === Number(aliasMatch[1]));
+      if (!artist) return fulfillJson(route, { detail: 'not found' }, 404);
+      if (request.method() === 'POST') {
+        const payload = JSON.parse(request.postData() || '{}');
+        const alias = { id: nextArtistAliasId++, alias: String(payload.alias || ''), alias_norm: String(payload.alias || '').toLowerCase() };
+        artist.aliases.push(alias);
+        return fulfillJson(route, alias);
+      }
+      if (request.method() === 'DELETE') {
+        artist.aliases = artist.aliases.filter((alias) => alias.id !== Number(aliasMatch[2]));
+        return fulfillJson(route, { status: 'success' });
+      }
+    }
+
+    if (linkMatch) {
+      const artist = artistDetails.find((entry) => entry.id === Number(linkMatch[1]));
+      if (!artist) return fulfillJson(route, { detail: 'not found' }, 404);
+      if (request.method() === 'POST') {
+        const payload = JSON.parse(request.postData() || '{}');
+        const urlValue = String(payload.url || '');
+        const link = {
+          id: nextArtistLinkId++,
+          platform: String(payload.platform || ''),
+          url: urlValue,
+          handle: String(payload.handle || '') || urlValue.split('/').filter(Boolean).pop() || '',
+          is_primary: false
+        };
+        artist.links.push(link);
+        return fulfillJson(route, link);
+      }
+      if (request.method() === 'DELETE') {
+        artist.links = artist.links.filter((link) => link.id !== Number(linkMatch[2]));
+        return fulfillJson(route, { status: 'success' });
+      }
+    }
+
+    if (detailMatch) {
+      const artist = artistDetails.find((entry) => entry.id === Number(detailMatch[1]));
+      if (!artist) return fulfillJson(route, { detail: 'not found' }, 404);
+      if (request.method() === 'PATCH') {
+        const payload = JSON.parse(request.postData() || '{}');
+        artist.name = String(payload.name || artist.name);
+        artist.name_norm = artist.name.toLowerCase();
+        artist.kind = String(payload.kind || artist.kind);
+        artist.notes = String(payload.notes ?? artist.notes);
+        return fulfillJson(route, artist);
+      }
+      return fulfillJson(route, artist);
+    }
+
+    const q = (url.searchParams.get('q') || '').toLowerCase();
+    const list = artistDetails
+      .filter((artist) => !q || artist.name.toLowerCase().includes(q))
+      .map((artist) => ({
+        id: artist.id,
+        name: artist.name,
+        kind: artist.kind,
+        item_count: artist.item_count,
+        link_count: artist.links.length,
+        alias_count: artist.aliases.length
+      }));
+    return fulfillJson(route, { items: list });
+  });
+  await page.route('**/api/platforms**', async (route) => {
+    const url = new URL(route.request().url());
+    const q = (url.searchParams.get('q') || '').toLowerCase();
+    const list = platformDetails.filter((platform) => !q || platform.display_name.toLowerCase().includes(q));
+    return fulfillJson(route, { items: list });
+  });
   await page.route('**/api/logs**', async (route) => {
     await route.fulfill({ status: 200, contentType: 'text/event-stream', body: '' });
   });
@@ -196,7 +304,8 @@ async function installMockVaultApi(
   });
   await page.route('**/api/local-ingest/status', async (route) => fulfillJson(route, localStatus));
   await page.route('**/api/local-ingest/start', async (route) => {
-    await options.onLocalIngestStart?.();
+    const payload = JSON.parse(route.request().postData() || '{}');
+    await options.onLocalIngestStart?.(payload);
     return fulfillJson(route, { status: 'success', run_id: 'mock-run', phase: 'scanning' });
   });
   await page.route('**/api/local-ingest/retry-failed', async (route) => fulfillJson(route, { status: 'success', queued: 0, phase: 'idle' }));
@@ -227,7 +336,7 @@ async function openMockVault(
   options: {
     memoryFails?: boolean;
     onReviewAction?: () => Promise<void>;
-    onLocalIngestStart?: () => Promise<void> | void;
+    onLocalIngestStart?: (payload?: any) => Promise<void> | void;
     onMaintenanceAction?: (action: 'auth' | 'metadata' | 'review') => Promise<void> | void;
   } = {}
 ) {
@@ -435,6 +544,36 @@ test('drop request does not auto-start local ingestion', async ({ page }) => {
   expect(localStartCalls).toBe(0);
 });
 
+test('local ingest identity controls use artist suggestions and platform dropdown', async ({ page }) => {
+  let startPayload: any = null;
+  await openMockVault(page, {
+    onLocalIngestStart: (payload) => {
+      startPayload = payload;
+    }
+  });
+
+  await page.evaluate(() => {
+    window.dispatchEvent(new CustomEvent('lmz:test-drop-request', {
+      detail: {
+        id: 'drop-identity',
+        session_id: 'session-identity',
+        source_tab: 'vault',
+        accepted_paths: ['C:/drop/identity.jpg'],
+        skipped: [],
+        summary: { received: 1, accepted: 1, skipped: 0 }
+      }
+    }));
+  });
+
+  const defaults = page.locator('.local-defaults');
+  await defaults.getByLabel('Artist').fill('Mock Solo');
+  await defaults.getByLabel('Platform').selectOption('Pixiv');
+  await page.getByRole('button', { name: 'Start Local Ingestion' }).click();
+
+  await expect.poll(() => startPayload).not.toBeNull();
+  expect(startPayload?.defaults).toMatchObject({ artist: 'Mock Solo', platform: 'Pixiv' });
+});
+
 test('ram footer handles available and unavailable states', async ({ page }) => {
   await openMockVault(page);
   await expect(page.locator('.ram-status')).toContainText('RAM: backend 42.5 MB');
@@ -521,4 +660,39 @@ test('settings metadata rebuild shows progress only for maintenance job', async 
   await expect(page.locator('.metadata-progress-fill')).toHaveAttribute('style', /40%/);
   await expect(page.locator('.maintenance-status').nth(1)).toContainText('completed', { timeout: 3000 });
   await expect(page.getByLabel('Metadata rebuild progress')).toHaveCount(0);
+});
+
+test('stats artists tab shows compact detail editor and saves artist changes', async ({ page }) => {
+  await openMockVault(page);
+  await page.getByRole('button', { name: /Stats/ }).click();
+  await page.getByRole('button', { name: 'Artists' }).click();
+
+  await expect(page.locator('.artist-row').first()).toBeVisible();
+  await expect(page.locator('.artist-detail')).toContainText('Links');
+
+  await page.locator('#artist-name').fill('Canonical Artist');
+  await page.locator('#artist-kind').selectOption('real_person');
+  await page.locator('#artist-notes').fill('reviewed');
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(page.locator('.artist-detail')).toContainText('Canonical Artist');
+  await expect(page.locator('.artist-detail')).toContainText('real_person');
+
+  await page.getByPlaceholder('New alias').fill('Alias One');
+  await page.getByRole('button', { name: 'Add Alias' }).click();
+  await expect(page.locator('.alias-chip')).toContainText('Alias One');
+
+  const detail = page.locator('.artist-detail');
+  await detail.getByLabel('Link platform').selectOption('Pixiv');
+  await detail.getByPlaceholder('url').fill('https://www.pixiv.net/users/canonical_artist');
+  await detail.getByRole('button', { name: 'Add', exact: true }).click();
+  await expect(page.locator('.artist-detail')).toContainText('canonical_artist');
+});
+
+test('stats non-artist tabs keep facet list behavior', async ({ page }) => {
+  await openMockVault(page);
+  await page.getByRole('button', { name: /Stats/ }).click();
+  await page.getByRole('button', { name: 'Platforms' }).click();
+
+  await expect(page.locator('.stats-list')).toBeVisible();
+  await expect(page.locator('.stats-row').first()).toBeVisible();
 });

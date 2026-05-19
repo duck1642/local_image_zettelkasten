@@ -148,6 +148,10 @@ def init_database():
 
     from metadata_index import ensure_metadata_schema
     ensure_metadata_schema(conn)
+    from artists import ensure_artist_schema
+    ensure_artist_schema(conn, backfill=False)
+    from platforms import ensure_platform_schema
+    ensure_platform_schema(conn, backfill=False)
 
     conn.commit()
     _SCHEMA_READY = True
@@ -267,6 +271,11 @@ def reset_database():
         cursor.execute('DROP TABLE IF EXISTS item_topics')
         cursor.execute('DROP TABLE IF EXISTS item_metadata_files')
         cursor.execute('DROP TABLE IF EXISTS metadata_index_state')
+        cursor.execute('DROP TABLE IF EXISTS artist_links')
+        cursor.execute('DROP TABLE IF EXISTS artist_aliases')
+        cursor.execute('DROP TABLE IF EXISTS artists')
+        cursor.execute('DROP TABLE IF EXISTS platform_aliases')
+        cursor.execute('DROP TABLE IF EXISTS platforms')
         cursor.execute('DROP TABLE IF EXISTS item_tiles')
         cursor.execute('DROP TABLE IF EXISTS storage_id_counter')
         cursor.execute('DROP TABLE IF EXISTS items')
@@ -292,6 +301,12 @@ def insert_to_database(conn: sqlite3.Connection, filepath: Path, file_hash: str,
     source_url_norm = normalize_source_url(source_url)
     platform = metadata.get('platform', "")
     source_artist = metadata.get('artist', "")
+    if platform:
+        from platforms import resolve_platform_label
+        platform = resolve_platform_label(conn, platform)
+    if source_artist:
+        from artists import resolve_artist_name
+        source_artist = resolve_artist_name(conn, source_artist)
 
     if file_size is None:
         file_size = filepath.stat().st_size

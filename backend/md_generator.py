@@ -8,8 +8,6 @@ from utils import note_path_for, require_storage_id, storage_shard_for_hash, utc
 
 MANUAL_FRONTMATTER_FIELDS = (
     "title",
-    "artist",
-    "date_added",
     "topics",
     "wd_rating",
     "wd_character_tags",
@@ -68,7 +66,7 @@ def generate_markdown(conn: sqlite3.Connection, file_hash: str, asset_rel_path: 
         "topics": topics_override if topics_override is not None else load_note_topics(file_hash, storage_id),
         "file_format": mime_type or ""
     }
-    for field in ("title", "artist", "date_added"):
+    for field in ("title",):
         if field in existing_frontmatter:
             frontmatter[field] = existing_frontmatter[field]
     if topics_override is None and "topics" in existing_frontmatter:

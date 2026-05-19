@@ -214,7 +214,7 @@ def _config() -> dict:
 
 def _reset_backend_modules():
     for name in list(sys.modules):
-        if name in {"utils", "metadata_index", "md_generator", "thumbnails"} or name.startswith(("db.", "logger", "tagging")):
+        if name in {"utils", "metadata_index", "md_generator", "thumbnails", "artists", "platforms"} or name.startswith(("db.", "logger", "tagging")):
             del sys.modules[name]
 
 
@@ -349,6 +349,7 @@ def generate_vault(args: argparse.Namespace) -> Path:
     platform_count = max(1, len(platforms))
     topic_count = max(1, args.topics)
     artist_count = max(1, args.artists)
+    unknown_artist_count = min(args.items, max(0, int(round(args.items * float(args.unknown_artist_ratio or 0)))))
     group_count = max(1, args.groups)
     rows = []
     items = []
@@ -364,7 +365,10 @@ def generate_vault(args: argparse.Namespace) -> Path:
         height = 360 + (index % 7) * 40
         group_id = index % group_count
         platform = platforms[index % platform_count]
-        artist = f"artist-{index % artist_count:03d}"
+        if index < unknown_artist_count:
+            artist = "Unknown"
+        else:
+            artist = f"artist-{(index - unknown_artist_count) % artist_count:06d}"
         topics = [f"topic-{(index + offset) % topic_count:03d}" for offset in range(1 + (index % min(3, topic_count)))]
         wd_tags = _wd_values(index, args)
         source_url = f"https://synthetic.local/group/{group_id:06d}"
@@ -437,6 +441,8 @@ def generate_vault(args: argparse.Namespace) -> Path:
             "review": max(0, args.review),
             "groups": group_count,
             "artists": artist_count,
+            "unknown_artist_items": unknown_artist_count,
+            "platforms": platform_count,
             "topics": topic_count,
             "wd_tag_pool": max(0, args.wd_tags),
             "wd_character_tag_pool": max(0, args.wd_character_tags),
@@ -466,7 +472,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--review", type=int, default=10)
     parser.add_argument("--video-ratio", type=float, default=0.1)
     parser.add_argument("--artists", type=int, default=50)
-    parser.add_argument("--platforms", default="pixiv,x,instagram,local")
+    parser.add_argument("--unknown-artist-ratio", type=float, default=0.05)
+    parser.add_argument("--platforms", default="Local,Pixiv,Instagram,X,Pinterest,YouTube")
     parser.add_argument("--topics", type=int, default=25)
     parser.add_argument("--wd-tags", type=int, default=0, help="Unique general WD tag pool size")
     parser.add_argument("--wd-character-tags", type=int, default=0, help="Unique WD character tag pool size")
@@ -490,6 +497,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--review must be non-negative")
     if args.video_ratio < 0 or args.video_ratio > 1:
         parser.error("--video-ratio must be between 0 and 1")
+    if args.unknown_artist_ratio < 0 or args.unknown_artist_ratio > 1:
+        parser.error("--unknown-artist-ratio must be between 0 and 1")
     if args.wd_tags < 0:
         parser.error("--wd-tags must be non-negative")
     if args.wd_character_tags < 0:

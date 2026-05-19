@@ -32,7 +32,7 @@ def fresh_backend(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *module_names
     if str(BACKEND) not in sys.path:
         sys.path.insert(0, str(BACKEND))
     for name in list(sys.modules):
-        if name in {"utils", "web_api", "queue_service", "md_generator", "metadata_index", "processor", "external_ingestion", "thumbnails", "fingerprint"} or name.startswith(("logger", "db.", "tagging", "downloaders")):
+        if name in {"utils", "web_api", "queue_service", "md_generator", "metadata_index", "processor", "external_ingestion", "thumbnails", "fingerprint", "artists", "platforms"} or name.startswith(("logger", "db.", "tagging", "downloaders")):
             del sys.modules[name]
     return [importlib.import_module(name) for name in module_names]
 
@@ -256,7 +256,7 @@ def test_local_retry_preserves_defaults_and_skip_similarity(monkeypatch, tmp_pat
     assert result["status"] == "success"
     assert result["queued"] == 1
     assert calls[0][0] == ["failed-a.jpg"]
-    assert calls[0][1] == {"artist": "Retry Artist"}
+    assert calls[0][1] == {"artist": "Retry Artist", "platform": "Local", "source_url": ""}
     assert calls[0][2] is True
 
 
@@ -397,7 +397,7 @@ def test_mime_detection_falls_back_when_magic_returns_error_text(monkeypatch, tm
     assert validators.get_mime_type(sample) == "image/jpeg"
 
 
-def test_generate_markdown_preserves_manual_fields_and_explicit_empty_wd(monkeypatch, tmp_path):
+def test_generate_markdown_mirrors_sqlite_identity_and_preserves_indexed_note_fields(monkeypatch, tmp_path):
     utils, sqlite_operator, md_generator = fresh_backend(monkeypatch, tmp_path, "utils", "db.sqlite_operator", "md_generator")
     item_hash = "d" * 64
     conn = insert_mock_item(sqlite_operator, item_hash)
@@ -424,8 +424,8 @@ def test_generate_markdown_preserves_manual_fields_and_explicit_empty_wd(monkeyp
 
     data = frontmatter_from_markdown(md_generator.generate_markdown(conn, item_hash))
 
-    assert data["artist"] == "Manual Artist"
-    assert data["date_added"] == "2020-01-01 01:02:03"
+    assert data["artist"] == "DB Artist"
+    assert data["date_added"] == "2026-01-02 03:04:05"
     assert data["topics"] == ["manual-topic"]
     assert data["wd_rating"] == ""
     assert data["wd_character_tags"] == []
@@ -453,7 +453,7 @@ def test_generate_markdown_seeds_missing_wd_fields_from_cache(monkeypatch, tmp_p
     conn.close()
 
 
-def test_reindex_syncs_markdown_artist_and_date_to_sqlite(monkeypatch, tmp_path):
+def test_reindex_does_not_sync_markdown_identity_fields_to_sqlite(monkeypatch, tmp_path):
     utils, sqlite_operator, metadata_index = fresh_backend(monkeypatch, tmp_path, "utils", "db.sqlite_operator", "metadata_index")
     item_hash = "f" * 64
     conn = insert_mock_item(sqlite_operator, item_hash, artist="DB Artist", date_added="2026-01-01 00:00:00")
@@ -469,7 +469,7 @@ def test_reindex_syncs_markdown_artist_and_date_to_sqlite(monkeypatch, tmp_path)
     conn.commit()
     row = conn.execute("SELECT source_artist, date_added FROM items WHERE hash = ?", (item_hash,)).fetchone()
 
-    assert row == ("Manual Artist", "2020-01-01 01:02:03")
+    assert row == ("DB Artist", "2026-01-01 00:00:00")
     conn.close()
 
 
@@ -707,7 +707,7 @@ def test_manual_metadata_migration_dry_run_and_apply(monkeypatch, tmp_path):
     assert Path(applied["backup"]).exists()
 
 
-def test_review_replace_preserves_old_manual_metadata(monkeypatch, tmp_path):
+def test_review_replace_preserves_old_sqlite_identity_and_manual_indexed_metadata(monkeypatch, tmp_path):
     utils, sqlite_operator, web_api = fresh_backend(monkeypatch, tmp_path, "utils", "db.sqlite_operator", "web_api")
     old_hash = "3" * 64
     new_hash = "4" * 64
@@ -746,8 +746,8 @@ def test_review_replace_preserves_old_manual_metadata(monkeypatch, tmp_path):
     new_data = frontmatter_from_markdown(utils.note_path_for(new_hash, new_storage_id).read_text(encoding="utf-8"))
 
     assert result["status"] == "success"
-    assert new_data["artist"] == "Manual Old"
-    assert new_data["date_added"] == "2020-01-01 00:00:00"
+    assert new_data["artist"] == "Old DB Artist"
+    assert new_data["date_added"] == "2026-01-01 00:00:00"
     assert new_data["topics"] == ["preserved"]
     assert new_data["wd_tags"] == []
 
@@ -1626,6 +1626,120 @@ def test_artist_platform_facets_and_filters_use_exact_first(monkeypatch, tmp_pat
     assert [item["hash"] for item in exact_artist["items"]] == [artist_one_hash]
     assert [item["hash"] for item in partial_artist["items"]] == [artist_extra_hash, artist_one_hash]
     assert [item["hash"] for item in exact_platform["items"]] == [platform_hash, artist_one_hash]
+
+
+def test_artist_schema_backfills_from_item_artists(monkeypatch, tmp_path):
+    sqlite_operator, artists = fresh_backend(monkeypatch, tmp_path, "db.sqlite_operator", "artists")
+    first_hash = "61" * 32
+    second_hash = "62" * 32
+    third_hash = "66" * 32
+    conn = insert_mock_item(sqlite_operator, first_hash, artist="Artist One")
+    conn.close()
+    conn = insert_mock_item(sqlite_operator, second_hash, artist="artist one")
+    conn.close()
+    conn = insert_mock_item(sqlite_operator, third_hash, artist="Unknown")
+
+    artists.ensure_artist_schema(conn)
+    artists.ensure_artist_schema(conn)
+    rows = conn.execute("SELECT name, name_norm, kind FROM artists").fetchall()
+    conn.close()
+
+    assert rows == [("Artist One", "artist one", "artist")]
+
+
+def test_artist_resolver_uses_aliases_and_skips_placeholders(monkeypatch, tmp_path):
+    sqlite_operator, artists = fresh_backend(monkeypatch, tmp_path, "db.sqlite_operator", "artists")
+    conn = sqlite_operator.init_database()
+    canonical = artists.resolve_artist_name(conn, "Canonical Artist")
+    artist_id = conn.execute("SELECT id FROM artists WHERE name = ?", (canonical,)).fetchone()[0]
+    artists.add_artist_alias(conn, artist_id, "Old Artist")
+
+    assert artists.resolve_artist_name(conn, "old artist") == "Canonical Artist"
+    assert artists.resolve_artist_name(conn, "Unknown") == "Unknown"
+    assert conn.execute("SELECT 1 FROM artists WHERE name_norm = 'unknown'").fetchone() is None
+    conn.close()
+
+
+def test_platform_schema_backfills_and_api_lists(monkeypatch, tmp_path):
+    sqlite_operator, web_api = fresh_backend(monkeypatch, tmp_path, "db.sqlite_operator", "web_api")
+    conn = insert_mock_item(sqlite_operator, "67" * 32, artist="Platform Artist")
+    conn.execute("UPDATE items SET platform = ? WHERE hash = ?", ("twitter", "67" * 32))
+    conn.commit()
+    conn.close()
+
+    platforms = web_api._get_platforms_sync("", 20)["items"]
+    x_platform = next(item for item in platforms if item["display_name"] == "X")
+
+    assert x_platform["key_norm"] == "x"
+    assert x_platform["item_count"] == 1
+
+
+def test_artist_api_lists_details_and_edits(monkeypatch, tmp_path):
+    utils, sqlite_operator, web_api = fresh_backend(monkeypatch, tmp_path, "utils", "db.sqlite_operator", "web_api")
+    item_hash = "63" * 32
+    conn = insert_mock_item(sqlite_operator, item_hash, artist="Artist API")
+    conn.close()
+
+    listing = web_api._get_artists_sync("", 10)
+    artist = next(item for item in listing["items"] if item["name"] == "Artist API")
+    detail = web_api._get_artist_sync(artist["id"])
+    alias = web_api._post_artist_alias_sync(artist["id"], web_api.ArtistAliasCreate(alias="API Alias"))
+    link = web_api._post_artist_link_sync(
+        artist["id"],
+        web_api.ArtistLinkCreate(platform="twitter2", url="https://x.com/api_artist"),
+    )
+    updated = web_api._patch_artist_sync(
+        artist["id"],
+        web_api.ArtistUpdate(name="Artist Canonical", kind="real_person", notes="note"),
+    )
+
+    assert artist["item_count"] == 1
+    assert detail["name"] == "Artist API"
+    assert alias["alias_norm"] == "api alias"
+    assert link["platform"] == "X"
+    assert link["handle"] == "api_artist"
+    assert updated["name"] == "Artist Canonical"
+    assert updated["kind"] == "real_person"
+    assert updated["notes"] == "note"
+    conn = sqlite_operator.init_database()
+    row = conn.execute("SELECT source_artist, storage_id FROM items WHERE hash = ?", (item_hash,)).fetchone()
+    assert row[0] == "Artist Canonical"
+    note_data = frontmatter_from_markdown(utils.note_path_for(item_hash, row[1]).read_text(encoding="utf-8"))
+    assert note_data["artist"] == "Artist Canonical"
+    conn.close()
+
+    deleted_alias = web_api._delete_alias_sync(artist["id"], alias["id"])
+    deleted_link = web_api._delete_link_sync(artist["id"], link["id"])
+    assert deleted_alias == {"status": "success"}
+    assert deleted_link == {"status": "success"}
+
+
+def test_artist_api_rejects_duplicate_names_and_aliases(monkeypatch, tmp_path):
+    sqlite_operator, web_api = fresh_backend(monkeypatch, tmp_path, "db.sqlite_operator", "web_api")
+    conn = insert_mock_item(sqlite_operator, "64" * 32, artist="Artist A")
+    conn.close()
+    conn = insert_mock_item(sqlite_operator, "65" * 32, artist="Artist B")
+    conn.close()
+
+    artists = web_api._get_artists_sync("", 10)["items"]
+    artist_a = next(item for item in artists if item["name"] == "Artist A")
+    artist_b = next(item for item in artists if item["name"] == "Artist B")
+
+    with pytest.raises(HTTPException) as duplicate_name:
+        web_api._patch_artist_sync(artist_b["id"], web_api.ArtistUpdate(name="Artist A"))
+    assert duplicate_name.value.status_code == 409
+
+    with pytest.raises(HTTPException) as duplicate_alias:
+        web_api._post_artist_alias_sync(artist_a["id"], web_api.ArtistAliasCreate(alias="Artist B"))
+    assert duplicate_alias.value.status_code == 409
+
+    with pytest.raises(HTTPException) as empty_link:
+        web_api._post_artist_link_sync(artist_a["id"], web_api.ArtistLinkCreate(platform="", url=""))
+    assert empty_link.value.status_code == 400
+
+    with pytest.raises(HTTPException) as placeholder_name:
+        web_api._patch_artist_sync(artist_a["id"], web_api.ArtistUpdate(name="Unknown"))
+    assert placeholder_name.value.status_code == 400
 
 
 def test_search_manager_query_sees_pending_during_vp_rebuild(monkeypatch, tmp_path):

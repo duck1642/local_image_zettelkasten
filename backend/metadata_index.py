@@ -11,6 +11,8 @@ from logger import log_system
 from md_generator import normalize_topic_list
 from tagging import load_tag_cache
 from utils import NOTES_DIR, WD_TAGS_DIR, note_path_for, wd_tag_cache_path_for, utc_now_str
+from artists import backfill_artists_from_items
+from platforms import backfill_platforms_from_items
 
 
 READY_KEY = "initial_backfill_complete"
@@ -656,12 +658,6 @@ def reindex_item_metadata(conn: sqlite3.Connection, item_hash: str, update_facet
     wd_rows = _wd_rows(wd_payload)
     status = "error" if error else "ok"
 
-    if not error:
-        if "artist" in frontmatter:
-            conn.execute("UPDATE items SET source_artist = ? WHERE hash = ?", (str(frontmatter.get("artist") or ""), item_hash))
-        if "date_added" in frontmatter and str(frontmatter.get("date_added") or "").strip():
-            conn.execute("UPDATE items SET date_added = ? WHERE hash = ?", (str(frontmatter.get("date_added")).strip(), item_hash))
-
     conn.execute("DELETE FROM item_topics WHERE item_hash = ?", (item_hash,))
     conn.execute("DELETE FROM item_wd_tags WHERE item_hash = ?", (item_hash,))
     topic_rows = []
@@ -1101,24 +1097,12 @@ def rebuild_all_metadata(
             progress_callback(stage="reading metadata", items_total=len(rows), items_done=0, errors=0)
         indexed = 0
         errors = 0
-        item_updates: list[tuple[str, str]] = []
-        date_updates: list[tuple[str, str]] = []
         metadata_rows: list[tuple] = []
         topic_rows: list[tuple] = []
         wd_rows: list[tuple] = []
 
         def flush():
             flush_started = time.perf_counter()
-            if item_updates:
-                sub_started = time.perf_counter()
-                conn.executemany("UPDATE items SET source_artist = ? WHERE hash = ?", item_updates)
-                stages["item_updates"] += (time.perf_counter() - sub_started) * 1000
-                item_updates.clear()
-            if date_updates:
-                sub_started = time.perf_counter()
-                conn.executemany("UPDATE items SET date_added = ? WHERE hash = ?", date_updates)
-                stages["item_updates"] += (time.perf_counter() - sub_started) * 1000
-                date_updates.clear()
             if metadata_rows:
                 sub_started = time.perf_counter()
                 conn.executemany(
@@ -1165,12 +1149,6 @@ def rebuild_all_metadata(
             payload = _metadata_payload(conn, item_hash, storage_id, stages=stages)
             stages["metadata_read_parse"] += (time.perf_counter() - stage_started) * 1000
             stage_started = time.perf_counter()
-            frontmatter = payload["frontmatter"]
-            if not payload["error"]:
-                if "artist" in frontmatter:
-                    item_updates.append((str(frontmatter.get("artist") or ""), item_hash))
-                if "date_added" in frontmatter and str(frontmatter.get("date_added") or "").strip():
-                    date_updates.append((str(frontmatter.get("date_added")).strip(), item_hash))
             seen_topics: set[str] = set()
             for topic in payload["topics"]:
                 topic_norm = _norm(topic)
@@ -1219,6 +1197,8 @@ def rebuild_all_metadata(
             progress_callback(stage="refreshing counters", items_done=len(rows), errors=errors)
         stage_started = time.perf_counter()
         counters = refresh_metadata_index_counters(conn)
+        backfill_artists_from_items(conn)
+        backfill_platforms_from_items(conn)
         stages["counter_refresh"] += (time.perf_counter() - stage_started) * 1000
         duration_ms = round((time.perf_counter() - started) * 1000, 2)
         stages_ms = {key: round(value, 2) for key, value in stages.items()}

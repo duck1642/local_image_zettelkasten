@@ -170,6 +170,7 @@ def backend_memory_snapshot(base_url: str, label: str) -> dict:
 
 def start_backend(config_path: Path, base_url: str = DEFAULT_BACKEND_URL, log_path: Path | None = None) -> tuple[subprocess.Popen, float]:
     env = env_for_config(config_path)
+    env["LMZ_DISABLE_RELOAD"] = "1"
     started = time.perf_counter()
     log_file = None
     stdout = subprocess.DEVNULL

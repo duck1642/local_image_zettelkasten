@@ -11,7 +11,7 @@ const configPath = process.env.LMZ_PERF_CONFIG_PATH;
 const backendUrl = process.env.LMZ_PERF_BACKEND_URL || 'http://127.0.0.1:8000';
 const appPath = process.env.LMZ_TAURI_APP_PATH || path.join(frontendDir, 'src-tauri', 'target', 'debug', process.platform === 'win32' ? 'app.exe' : 'app');
 const tauriDriverPath = process.env.TAURI_DRIVER || path.join(process.env.USERPROFILE || '', '.cargo', 'bin', process.platform === 'win32' ? 'tauri-driver.exe' : 'tauri-driver');
-const edgeDriverPath = process.env.MSEDGEDRIVER_PATH || 'msedgedriver';
+const edgeDriverPath = resolveExecutable(process.env.MSEDGEDRIVER_PATH || 'msedgedriver');
 
 if (!configPath) {
   console.error('LMZ_PERF_CONFIG_PATH is required');
@@ -41,15 +41,28 @@ const diagnostics = {
   sandbox_env_keys: Object.keys(process.env).filter((key) => /sandbox|codex/i.test(key)).sort()
 };
 
-function nowMs() {
-  return performance.now();
-}
-
 async function measure(name, fn) {
   const start = nowMs();
   const result = await fn();
   metrics.push({ name, duration_ms: Math.round((nowMs() - start) * 100) / 100, ok: true });
   return result;
+}
+
+function nowMs() {
+  return performance.now();
+}
+
+function resolveExecutable(command) {
+  if (!command) return command;
+  if (path.isAbsolute(command) || command.includes(path.sep) || (process.platform === 'win32' && command.includes('/'))) {
+    return command;
+  }
+  const lookup = process.platform === 'win32'
+    ? spawnSync('where.exe', [command], { encoding: 'utf8', shell: false })
+    : spawnSync('which', [command], { encoding: 'utf8', shell: false });
+  if (lookup.status !== 0) return command;
+  const resolved = String(lookup.stdout || '').split(/\r?\n/).map((line) => line.trim()).find(Boolean);
+  return resolved || command;
 }
 
 async function waitFor(fn, timeoutMs = 60000, intervalMs = 150) {
@@ -96,6 +109,7 @@ async function startBackend() {
   const env = {
     ...process.env,
     LMZ_CONFIG_PATH: configPath,
+    LMZ_DISABLE_RELOAD: '1',
     PYTHONPATH: path.join(rootDir, 'backend') + path.delimiter + (process.env.PYTHONPATH || '')
   };
   backendProcess = spawn(process.env.PYTHON || 'python', [path.join(rootDir, 'backend', 'web_api.py')], {
@@ -106,6 +120,9 @@ async function startBackend() {
   });
   attachLog(backendProcess, path.join(resultDir, 'backend.log'));
   await waitFor(async () => {
+    if (backendProcess.exitCode !== null) {
+      throw new Error(`backend exited before ready with code ${backendProcess.exitCode}`);
+    }
     const response = await fetch(`${backendUrl}/api/session-key`);
     return response.ok;
   }, 60000, 350);
@@ -121,6 +138,9 @@ async function startTauriDriver() {
   });
   attachLog(tauriDriverProcess, path.join(resultDir, 'tauri-driver.log'));
   await waitFor(async () => {
+    if (tauriDriverProcess.exitCode !== null) {
+      throw new Error(`tauri-driver exited before ready with code ${tauriDriverProcess.exitCode}`);
+    }
     const response = await fetch('http://127.0.0.1:4444/status');
     return response.ok;
   }, 30000, 150);

@@ -369,6 +369,9 @@ VSCode-friendly test launchers:
 
 - Dynamic sidecar port coordination:
   - startup handshake/API base/CSP/lifecycle.
+  - remove fixed `localhost:8000` assumptions from frontend/Tauri runtime paths.
+- FastAPI lifecycle cleanup:
+  - replace deprecated `@app.on_event(...)` startup hooks with lifespan handlers.
 - Packaging-time security checks.
 - Clean-machine release validation.
 

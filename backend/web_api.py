@@ -45,6 +45,18 @@ from utils import (
     invalidate_config_cache, utc_now, utc_now_str
 )
 from ingest_control import ONLINE_STOP_AFTER_CURRENT, LOCAL_STOP_AFTER_CURRENT
+from artists import (
+    add_artist_alias,
+    add_artist_link,
+    delete_artist_alias,
+    delete_artist_link,
+    get_artist_detail,
+    list_artists,
+    normalize_artist_name,
+    resolve_artist_name,
+    update_artist,
+)
+from platforms import list_platforms, resolve_platform_label
 
 class TerminalLogger:
     def __init__(self, filename, original_stream):
@@ -427,11 +439,47 @@ def _manual_frontmatter_for_hash(item_hash: str) -> dict:
         if field in frontmatter
     }
 
-def _apply_manual_frontmatter_to_item(item_hash: str, manual_fields: dict):
-    if not manual_fields:
+def _sqlite_identity_for_hash(item_hash: str) -> dict:
+    conn = connect_database()
+    try:
+        row = conn.execute(
+            "SELECT source_artist, platform, source_url, date_added FROM items WHERE hash = ?",
+            (item_hash,),
+        ).fetchone()
+        if not row:
+            return {}
+        return {
+            "artist": row[0] or "",
+            "platform": row[1] or "",
+            "source_url": row[2] or "",
+            "date_added": row[3] or "",
+        }
+    finally:
+        conn.close()
+
+def _apply_manual_frontmatter_to_item(item_hash: str, manual_fields: dict, identity_fields: dict | None = None):
+    if not manual_fields and not identity_fields:
         return
     conn = init_database()
     try:
+        identity_fields = identity_fields or {}
+        if identity_fields:
+            source_url = str(identity_fields.get("source_url") or "")
+            conn.execute(
+                """
+                UPDATE items
+                SET source_artist = ?, platform = ?, source_url = ?, source_url_norm = ?, date_added = ?
+                WHERE hash = ?
+                """,
+                (
+                    resolve_artist_name(conn, identity_fields.get("artist") or ""),
+                    resolve_platform_label(conn, identity_fields.get("platform") or ""),
+                    source_url,
+                    normalize_source_url(source_url),
+                    str(identity_fields.get("date_added") or ""),
+                    item_hash,
+                ),
+            )
         md_content = generate_markdown(conn, item_hash, manual_overrides=manual_fields)
         if not md_content:
             raise RuntimeError("replacement note generation returned empty content")
@@ -505,6 +553,180 @@ app.mount("/review-assets", StaticFiles(directory=str(REVIEW_DIR)), name="review
 @app.get("/api/stats")
 async def get_stats():
     return await asyncio.to_thread(_get_stats_sync)
+
+class ArtistUpdate(BaseModel):
+    name: str | None = None
+    kind: str | None = None
+    notes: str | None = None
+
+class ArtistAliasCreate(BaseModel):
+    alias: str
+
+class ArtistLinkCreate(BaseModel):
+    platform: str
+    url: str
+    handle: str | None = None
+    is_primary: bool = False
+
+@app.get("/api/platforms")
+async def get_platforms(q: str = "", limit: int = 100):
+    return await asyncio.to_thread(_get_platforms_sync, q, limit)
+
+def _get_platforms_sync(q: str = "", limit: int = 100):
+    conn = connect_database()
+    try:
+        items = list_platforms(conn, q, limit)
+        conn.commit()
+        return {"items": items}
+    finally:
+        conn.close()
+
+@app.get("/api/artists")
+async def get_artists(q: str = "", limit: int = 100):
+    return await asyncio.to_thread(_get_artists_sync, q, limit)
+
+def _get_artists_sync(q: str = "", limit: int = 100):
+    conn = connect_database()
+    try:
+        items = list_artists(conn, q, limit)
+        conn.commit()
+        return {"items": items}
+    finally:
+        conn.close()
+
+@app.get("/api/artists/{artist_id}")
+async def get_artist(artist_id: int):
+    return await asyncio.to_thread(_get_artist_sync, artist_id)
+
+def _get_artist_sync(artist_id: int):
+    conn = connect_database()
+    try:
+        detail = get_artist_detail(conn, artist_id)
+        if detail is None:
+            raise HTTPException(status_code=404, detail="Artist not found")
+        return detail
+    finally:
+        conn.close()
+
+def _rewrite_metadata_notes_for_hashes(conn, item_hashes: list[str]):
+    for item_hash in item_hashes:
+        md_content = generate_markdown(conn, item_hash)
+        if not md_content:
+            continue
+        row = conn.execute("SELECT storage_id FROM items WHERE hash = ?", (item_hash,)).fetchone()
+        if not row or not row[0]:
+            continue
+        note_path = note_path_for(item_hash, row[0])
+        note_path.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_text(note_path, md_content)
+        safe_reindex_item_metadata(conn, item_hash, "artist_rename")
+
+@app.patch("/api/artists/{artist_id}")
+async def patch_artist(artist_id: int, update: ArtistUpdate):
+    return await asyncio.to_thread(_patch_artist_sync, artist_id, update)
+
+def _patch_artist_sync(artist_id: int, update: ArtistUpdate):
+    conn = connect_database()
+    try:
+        try:
+            previous = get_artist_detail(conn, artist_id)
+            if previous is None:
+                raise KeyError("artist not found")
+            previous_norm = normalize_artist_name(previous["name"])
+            detail = update_artist(conn, artist_id, update.name, update.kind, update.notes)
+            current_norm = normalize_artist_name(detail["name"])
+            if update.name is not None and previous_norm and current_norm and previous_norm != current_norm:
+                rows = conn.execute(
+                    "SELECT hash FROM items WHERE LOWER(TRIM(source_artist)) = ?",
+                    (previous_norm,),
+                ).fetchall()
+                item_hashes = [row[0] for row in rows]
+                if item_hashes:
+                    conn.executemany(
+                        "UPDATE items SET source_artist = ? WHERE hash = ?",
+                        [(detail["name"], item_hash) for item_hash in item_hashes],
+                    )
+                    _rewrite_metadata_notes_for_hashes(conn, item_hashes)
+                    refresh_metadata_facet_counts_for_values(conn, {("artist", previous_norm), ("artist", current_norm)})
+                    detail = get_artist_detail(conn, artist_id) or detail
+            conn.commit()
+            return detail
+        except KeyError:
+            raise HTTPException(status_code=404, detail="Artist not found")
+        except FileExistsError as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+    finally:
+        conn.close()
+
+@app.post("/api/artists/{artist_id}/aliases")
+async def post_artist_alias(artist_id: int, body: ArtistAliasCreate):
+    return await asyncio.to_thread(_post_artist_alias_sync, artist_id, body)
+
+def _post_artist_alias_sync(artist_id: int, body: ArtistAliasCreate):
+    conn = connect_database()
+    try:
+        try:
+            alias = add_artist_alias(conn, artist_id, body.alias)
+            conn.commit()
+            return alias
+        except KeyError:
+            raise HTTPException(status_code=404, detail="Artist not found")
+        except FileExistsError as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+    finally:
+        conn.close()
+
+@app.delete("/api/artists/{artist_id}/aliases/{alias_id}")
+async def delete_alias(artist_id: int, alias_id: int):
+    return await asyncio.to_thread(_delete_alias_sync, artist_id, alias_id)
+
+def _delete_alias_sync(artist_id: int, alias_id: int):
+    conn = connect_database()
+    try:
+        if not delete_artist_alias(conn, artist_id, alias_id):
+            raise HTTPException(status_code=404, detail="Alias not found")
+        conn.commit()
+        return {"status": "success"}
+    finally:
+        conn.close()
+
+@app.post("/api/artists/{artist_id}/links")
+async def post_artist_link(artist_id: int, body: ArtistLinkCreate):
+    return await asyncio.to_thread(_post_artist_link_sync, artist_id, body)
+
+def _post_artist_link_sync(artist_id: int, body: ArtistLinkCreate):
+    conn = connect_database()
+    try:
+        try:
+            link = add_artist_link(conn, artist_id, body.platform, body.url, body.handle, body.is_primary)
+            conn.commit()
+            return link
+        except KeyError:
+            raise HTTPException(status_code=404, detail="Artist not found")
+        except FileExistsError as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+    finally:
+        conn.close()
+
+@app.delete("/api/artists/{artist_id}/links/{link_id}")
+async def delete_link(artist_id: int, link_id: int):
+    return await asyncio.to_thread(_delete_link_sync, artist_id, link_id)
+
+def _delete_link_sync(artist_id: int, link_id: int):
+    conn = connect_database()
+    try:
+        if not delete_artist_link(conn, artist_id, link_id):
+            raise HTTPException(status_code=404, detail="Link not found")
+        conn.commit()
+        return {"status": "success"}
+    finally:
+        conn.close()
 
 @app.get("/api/metadata-index/status")
 async def get_metadata_index_status():
@@ -1108,12 +1330,13 @@ def _update_item_sync(item_hash: str, update: ItemUpdate):
         previous_core_facets = item_core_facet_values(conn, item_hash)
         manual_overrides = {}
         if update.artist is not None:
-            cursor.execute("UPDATE items SET source_artist = ? WHERE hash = ?", (update.artist, item_hash))
-            manual_overrides["artist"] = update.artist
+            resolved_artist = resolve_artist_name(conn, update.artist)
+            cursor.execute("UPDATE items SET source_artist = ? WHERE hash = ?", (resolved_artist, item_hash))
+            manual_overrides["artist"] = resolved_artist
         if update.source_url is not None:
             cursor.execute("UPDATE items SET source_url = ?, source_url_norm = ? WHERE hash = ?", (update.source_url, normalize_source_url(update.source_url), item_hash))
         if update.platform is not None:
-            cursor.execute("UPDATE items SET platform = ? WHERE hash = ?", (update.platform, item_hash))
+            cursor.execute("UPDATE items SET platform = ? WHERE hash = ?", (resolve_platform_label(conn, update.platform), item_hash))
         if update.topics is not None:
             manual_overrides["topics"] = update.topics
         
@@ -1925,12 +2148,24 @@ def _run_local_ingest_worker(raw_paths: list[str], defaults: dict, skip_similari
             summary_duplicate=summary.get("duplicate", 0),
         )
 
+def _resolve_local_ingest_defaults(defaults: dict) -> dict:
+    resolved = dict(defaults or {})
+    conn = init_database()
+    try:
+        resolved["artist"] = resolve_artist_name(conn, resolved.get("artist") or "Local")
+        resolved["platform"] = resolve_platform_label(conn, resolved.get("platform") or "Local")
+        resolved["source_url"] = str(resolved.get("source_url") or "")
+        conn.commit()
+        return resolved
+    finally:
+        conn.close()
+
 @app.post("/api/local-ingest/start")
 async def local_ingest_start(body: LocalIngestStartRequest):
     raw_paths = [str(path or "").strip() for path in (body.paths or []) if str(path or "").strip()]
     if not raw_paths:
         raise HTTPException(status_code=400, detail="No local paths provided")
-    defaults = body.defaults.model_dump() if body.defaults else {}
+    defaults = _resolve_local_ingest_defaults(body.defaults.model_dump() if body.defaults else {})
     run_id = _local_run_id()
     _prepare_local_ingest_run(run_id, defaults, bool(body.skip_similarity), len(raw_paths))
     asyncio.get_running_loop().run_in_executor(None, _run_local_ingest_worker, raw_paths, defaults, bool(body.skip_similarity), run_id)
@@ -1955,6 +2190,7 @@ async def local_ingest_retry_failed():
     if not failed_paths:
         return {"status": "success", "queued": 0, "phase": "idle"}
     run_id = _local_run_id()
+    defaults = _resolve_local_ingest_defaults(defaults)
     _prepare_local_ingest_run(run_id, defaults, skip_similarity, len(failed_paths))
     asyncio.get_running_loop().run_in_executor(None, _run_local_ingest_worker, failed_paths, defaults, skip_similarity, run_id)
     return {"status": "success", "run_id": run_id, "phase": "scanning", "queued": len(failed_paths)}
@@ -2141,6 +2377,7 @@ def _review_action_sync(filename: str, action: str):
 
     target_hash = ""
     replacement_manual_fields = {}
+    replacement_identity_fields = {}
     if action == "replace":
         target_hash = str(sidecar.get("best_match") or "").strip()
         if not target_hash:
@@ -2157,6 +2394,7 @@ def _review_action_sync(filename: str, action: str):
             log_review("WARNING", "Review replace warning", action=action, filename=filename, display_name=display_name, target_hash=target_hash, detail=message)
             return {"status": "warning", "action": action, "message": message}
         replacement_manual_fields = _manual_frontmatter_for_hash(target_hash)
+        replacement_identity_fields = _sqlite_identity_for_hash(target_hash)
 
     try:
         ok, process_message, idx_data = process_file(
@@ -2182,7 +2420,7 @@ def _review_action_sync(filename: str, action: str):
             preserve_error = "replacement hash was not returned by processor"
         else:
             try:
-                _apply_manual_frontmatter_to_item(new_hash, replacement_manual_fields)
+                _apply_manual_frontmatter_to_item(new_hash, replacement_manual_fields, replacement_identity_fields)
             except Exception as exc:
                 preserve_error = str(exc)
                 log_review("ERROR", "Review replace metadata preservation failed", action=action, filename=filename, display_name=display_name, target_hash=target_hash, new_hash=new_hash, error=preserve_error)
@@ -2329,4 +2567,4 @@ async def root(): return {"status": "LMZ API Running"}
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("web_api:app", host="127.0.0.1", port=8000, reload=True)
+    uvicorn.run("web_api:app", host="127.0.0.1", port=8000, reload=os.getenv("LMZ_DISABLE_RELOAD") != "1")
