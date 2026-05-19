@@ -180,6 +180,47 @@ class SearchManager:
         if should_rebuild:
             self._rebuild_deferred_indexes("batch_update")
 
+    def remove_indexes_batch(self, items: list[dict]):
+
+        hashes = {str(item.get("hash") or item.get("file_hash") or "").strip() for item in items or []}
+        hashes.discard("")
+        urls = [item.get("source_url") or item.get("url") for item in items or [] if item.get("source_url") or item.get("url")]
+        if not hashes and not urls:
+            return {"removed": 0}
+
+        with self._sync_lock:
+            global_stats = self.global_tree.remove_hashes(hashes)
+            tile_stats = self.tile_tree.remove_hashes(hashes)
+            audio_stats = self.audio_tree.remove_hashes(hashes)
+            video_stats = self.video_tree.remove_hashes(hashes)
+            for url in urls:
+                self.url_registry.remove(url)
+
+        removed = sum(
+            int(stats.get("removed") or 0)
+            for stats in (global_stats, tile_stats, audio_stats, video_stats)
+        )
+        log_system(
+            "INFO",
+            "RAM indexes removed deleted items",
+            hashes=len(hashes),
+            urls=len(urls),
+            removed=removed,
+            global_removed=global_stats.get("removed", 0),
+            tile_removed=tile_stats.get("removed", 0),
+            audio_removed=audio_stats.get("removed", 0),
+            video_removed=video_stats.get("removed", 0),
+        )
+        return {
+            "removed": removed,
+            "hashes": len(hashes),
+            "urls": len(urls),
+            "global": global_stats,
+            "tile": tile_stats,
+            "audio": audio_stats,
+            "video": video_stats,
+        }
+
     def rebuild_deferred_indexes(self):
 
         self._rebuild_deferred_indexes("explicit")

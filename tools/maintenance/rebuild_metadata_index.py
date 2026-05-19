@@ -98,7 +98,7 @@ def run_stale(conn, limit: int | None = None, deep_validate: bool = False) -> di
         if remaining is not None and remaining <= 0:
             break
         batch_limit = REPAIR_BATCH_SIZE if remaining is None else min(REPAIR_BATCH_SIZE, remaining)
-        result = reindex_stale_metadata_batch(conn, batch_limit)
+        result = reindex_stale_metadata_batch(conn, batch_limit, allow_scan=True)
         conn.commit()
         report["indexed"] += int(result.get("indexed") or 0)
         report["errors"] += int(result.get("errors") or 0)

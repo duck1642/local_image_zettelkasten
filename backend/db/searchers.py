@@ -32,6 +32,24 @@ class VPTreeSearcher(BaseSearcher):
             self.pending_items.append((item_hash, signature))
             self.dirty = True
 
+    def remove_hashes(self, item_hashes: set[str]) -> dict:
+        if not item_hashes:
+            return {"removed": 0, "rebuilt": False}
+
+        before_indexed = len(self.indexed_items)
+        before_pending = len(self.pending_items)
+        self.indexed_items = [item for item in self.indexed_items if item[0] not in item_hashes]
+        self.pending_items = [item for item in self.pending_items if item[0] not in item_hashes]
+        removed = (before_indexed - len(self.indexed_items)) + (before_pending - len(self.pending_items))
+
+        rebuilt = False
+        if before_indexed != len(self.indexed_items):
+            self.tree = self._make_tree(self.indexed_items)
+            self.rebuild_count += 1
+            rebuilt = True
+        self.dirty = bool(self.pending_items)
+        return {"removed": removed, "rebuilt": rebuilt}
+
     def build_index(self):
 
         pending_count = len(self.pending_items)
@@ -197,6 +215,7 @@ class BKTreeSearcher(BaseSearcher):
 
     def __init__(self):
         self.tree = None
+        self.items = []
 
     @staticmethod
     def _hamming_distance(h1: str, h2: str) -> int:
@@ -214,6 +233,26 @@ class BKTreeSearcher(BaseSearcher):
 
         if not phash_str or phash_str == "None":
             return
+        item = (item_hash, phash_str)
+        if item in self.items:
+            return
+        self.items.append(item)
+        self._add_to_tree(item_hash, phash_str)
+
+    def remove_hashes(self, item_hashes: set[str]) -> dict:
+        if not item_hashes:
+            return {"removed": 0, "rebuilt": False}
+        before = len(self.items)
+        self.items = [item for item in self.items if item[0] not in item_hashes]
+        removed = before - len(self.items)
+        if not removed:
+            return {"removed": 0, "rebuilt": False}
+        self.tree = None
+        for item_hash, phash_str in self.items:
+            self._add_to_tree(item_hash, phash_str)
+        return {"removed": removed, "rebuilt": True}
+
+    def _add_to_tree(self, item_hash: str, phash_str: str):
 
         if self.tree is None:
             self.tree = (phash_str, [item_hash], {})
@@ -275,6 +314,11 @@ class URLRegistry:
         if url:
             from db.sqlite_operator import normalize_source_url
             self.seen_urls.add(normalize_source_url(url))
+
+    def remove(self, url: str):
+        if url:
+            from db.sqlite_operator import normalize_source_url
+            self.seen_urls.discard(normalize_source_url(url))
 
     def exists(self, url: str) -> bool:
         if not url:

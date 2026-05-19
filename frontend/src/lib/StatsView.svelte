@@ -4,6 +4,7 @@
   import { log as uiLog } from './logger';
 
   type FacetKind = 'wd_tag' | 'artist' | 'platform' | 'topic';
+  type StatsSortMode = 'popularity' | 'alphabetical';
   type FacetItem = { value: string; count: number };
   type ArtistListItem = { id: number; name: string; kind: string; item_count: number; link_count: number; alias_count: number };
   type ArtistAlias = { id: number; alias: string; alias_norm: string };
@@ -47,6 +48,8 @@
   ];
 
   let activeKind: FacetKind = 'wd_tag';
+  let sortMode: StatsSortMode = 'popularity';
+  let letterFilter = 'all';
   let searchText = '';
   let items: FacetItem[] = [];
   let artists: ArtistListItem[] = [];
@@ -77,6 +80,51 @@
   let mergeSearchTimer: number | null = null;
 
   const placeholderArtistNorms = new Set(['', 'unknown', 'local', 'none', 'n/a', 'na', 'null']);
+  const letterFilters = ['all', '#', ...'abcdefghijklmnopqrstuvwxyz'.split('')];
+
+  $: showLetterFilter = activeKind === 'artist' || activeKind === 'topic' || activeKind === 'wd_tag';
+  $: visibleArtists = filterArtistsByLetter(artists, showLetterFilter, letterFilter);
+  $: visiblePlaceholderArtists = filterFacetsByLetter(placeholderArtists, showLetterFilter, letterFilter);
+  $: visibleItems = filterFacetsByLetter(items, showLetterFilter, letterFilter);
+
+  function firstBucket(value: string) {
+    const first = String(value || '').trim().charAt(0).toLowerCase();
+    return first >= 'a' && first <= 'z' ? first : '#';
+  }
+
+  function matchesLetter(value: string, activeLetter: string) {
+    return activeLetter === 'all' || firstBucket(value) === activeLetter;
+  }
+
+  function filterFacetsByLetter(values: FacetItem[], enabled: boolean, activeLetter: string) {
+    if (!enabled || activeLetter === 'all') return values;
+    return values.filter((item) => matchesLetter(item.value, activeLetter));
+  }
+
+  function filterArtistsByLetter(values: ArtistListItem[], enabled: boolean, activeLetter: string) {
+    if (!enabled || activeLetter === 'all') return values;
+    return values.filter((artist) => matchesLetter(artist.name, activeLetter));
+  }
+
+  function sortFacetItems(values: FacetItem[]) {
+    const sorted = [...values];
+    if (sortMode === 'alphabetical') {
+      sorted.sort((a, b) => a.value.localeCompare(b.value, undefined, { sensitivity: 'base' }));
+      return sorted;
+    }
+    sorted.sort((a, b) => b.count - a.count || a.value.localeCompare(b.value, undefined, { sensitivity: 'base' }));
+    return sorted;
+  }
+
+  function sortArtistItems(values: ArtistListItem[]) {
+    const sorted = [...values];
+    if (sortMode === 'alphabetical') {
+      sorted.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+      return sorted;
+    }
+    sorted.sort((a, b) => b.item_count - a.item_count || a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+    return sorted;
+  }
 
   $: {
     const values = new Set<string>();
@@ -168,9 +216,10 @@
         const data = await response.json();
         const facetData = await facetResponse.json();
         if (seq !== requestSeq) return;
-        artists = Array.isArray(data.items) ? data.items : [];
-        placeholderArtists = (Array.isArray(facetData.items) ? facetData.items : [])
-          .filter((item: FacetItem) => placeholderArtistNorms.has(String(item.value || '').trim().toLowerCase()));
+        artists = sortArtistItems((Array.isArray(data.items) ? data.items : [])
+          .filter((artist: ArtistListItem) => !placeholderArtistNorms.has(String(artist.name || '').trim().toLowerCase())));
+        placeholderArtists = sortFacetItems((Array.isArray(facetData.items) ? facetData.items : [])
+          .filter((item: FacetItem) => placeholderArtistNorms.has(String(item.value || '').trim().toLowerCase())));
         if (!selectedArtistId || !artists.some((artist) => artist.id === selectedArtistId)) {
           selectedArtistId = artists[0]?.id ?? null;
         }
@@ -188,7 +237,7 @@
       if (!response.ok) throw new Error(`Facet request failed: ${response.status}`);
       const data = await response.json();
       if (seq !== requestSeq) return;
-      items = Array.isArray(data.items) ? data.items : [];
+      items = sortFacetItems(Array.isArray(data.items) ? data.items : []);
     } catch (err) {
       if (seq !== requestSeq) return;
       error = 'Failed to load stats';
@@ -200,8 +249,23 @@
 
   function setKind(kind: FacetKind) {
     activeKind = kind;
+    letterFilter = 'all';
     error = '';
     loadFacets();
+  }
+
+  function setSortMode(mode: StatsSortMode) {
+    sortMode = mode;
+    if (activeKind === 'artist') {
+      artists = sortArtistItems(artists);
+      placeholderArtists = sortFacetItems(placeholderArtists);
+      return;
+    }
+    items = sortFacetItems(items);
+  }
+
+  function setLetterFilter(value: string) {
+    letterFilter = value;
   }
 
   async function selectArtist(id: number) {
@@ -462,7 +526,7 @@
 <div class="stats-container">
   <div class="stats-header">
     <h3>Vault Stats</h3>
-    <span class="muted">{activeKind === 'artist' ? artists.length : items.length} values</span>
+    <span class="muted">{activeKind === 'artist' ? visibleArtists.length + visiblePlaceholderArtists.length : visibleItems.length} values</span>
   </div>
 
   <div class="kind-tabs">
@@ -472,6 +536,28 @@
       </button>
     {/each}
   </div>
+
+  <div class="stats-controls">
+    <span class="muted">Sort</span>
+    <div class="sort-tabs">
+      <button type="button" class:active={sortMode === 'popularity'} on:click={() => setSortMode('popularity')}>
+        Popularity
+      </button>
+      <button type="button" class:active={sortMode === 'alphabetical'} on:click={() => setSortMode('alphabetical')}>
+        Alphabetical
+      </button>
+    </div>
+  </div>
+
+  {#if showLetterFilter}
+    <div class="letter-tabs" aria-label="First character filter">
+      {#each letterFilters as letter}
+        <button type="button" class:active={letterFilter === letter} on:click={() => setLetterFilter(letter)}>
+          {letter === 'all' ? 'All' : letter.toUpperCase()}
+        </button>
+      {/each}
+    </div>
+  {/if}
 
   <input
     class="stats-search"
@@ -484,22 +570,22 @@
   {#if activeKind === 'artist'}
     <div class="artist-layout">
       <div class="artist-list" style={`width: ${artistListWidth}px;`}>
-        {#if loading && artists.length === 0}
+        {#if loading && visibleArtists.length === 0}
           <div class="empty-state">Loading...</div>
-        {:else if artists.length === 0}
+        {:else if visibleArtists.length === 0}
           <div class="empty-state">No artists</div>
         {:else}
           <div class="artist-group-label">Known Artists</div>
-          {#each artists as artist}
+          {#each visibleArtists as artist}
             <button type="button" class="artist-row" class:active={selectedArtistId === artist.id} on:click={() => selectArtist(artist.id)}>
               <span class="value" title={artist.name}>{artist.name}</span>
               <span class="artist-meta">{artist.item_count} items - {artist.link_count} links</span>
             </button>
           {/each}
         {/if}
-        {#if placeholderArtists.length > 0}
+        {#if visiblePlaceholderArtists.length > 0}
           <div class="artist-group-label">Placeholders</div>
-          {#each placeholderArtists as artist}
+          {#each visiblePlaceholderArtists as artist}
             <div class="artist-row placeholder-row">
               <span class="value" title={artist.value}>{artist.value}</span>
               <span class="artist-meta">{artist.count} items - read only</span>
@@ -594,15 +680,26 @@
         <div class="empty-state">Loading...</div>
       {:else if error}
         <div class="empty-state error">{error}</div>
-      {:else if items.length === 0}
+      {:else if visibleItems.length === 0}
         <div class="empty-state">No values</div>
       {:else}
-        {#each items as item}
-          <div class="stats-row">
-            <span class="value" title={item.value}>{item.value}</span>
-            <span class="count">{item.count}</span>
+        {#if activeKind === 'platform'}
+          {#each visibleItems as item}
+            <div class="stats-row">
+              <span class="value" title={item.value}>{item.value}</span>
+              <span class="count">{item.count}</span>
+            </div>
+          {/each}
+        {:else}
+          <div class="chip-cloud">
+            {#each visibleItems as item}
+              <button type="button" class="stat-chip" title={`${item.value} (${item.count})`}>
+                <span class="value">{item.value}</span>
+                <span class="chip-count">{item.count}</span>
+              </button>
+            {/each}
           </div>
-        {/each}
+        {/if}
       {/if}
     </div>
   {/if}
@@ -715,7 +812,33 @@
     flex-wrap: wrap;
   }
 
-  .kind-tabs button.active {
+  .stats-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .sort-tabs {
+    display: flex;
+    gap: 6px;
+  }
+
+  .letter-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    align-items: center;
+  }
+
+  .letter-tabs button {
+    min-width: 30px;
+    padding: 5px 7px;
+    font-size: 12px;
+  }
+
+  .kind-tabs button.active,
+  .sort-tabs button.active,
+  .letter-tabs button.active {
     background: var(--accent-primary);
     border-color: var(--accent-primary);
     color: white;
@@ -740,9 +863,39 @@
     flex-grow: 1;
   }
 
+  .chip-cloud {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-content: flex-start;
+    padding: 12px;
+  }
+
+  .stat-chip {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0;
+    max-width: 100%;
+    min-width: 0;
+    border: 1px solid var(--border-dim);
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.07);
+    color: var(--text-main);
+    padding: 0;
+    font-size: 13px;
+    line-height: 1.15;
+    overflow: hidden;
+  }
+
+  .stat-chip:hover {
+    background: rgba(31, 111, 235, 0.22);
+    border-color: rgba(31, 111, 235, 0.75);
+  }
+
   .stats-row {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 80px;
+    grid-template-columns: minmax(0, 1fr) auto;
     gap: 16px;
     align-items: center;
     padding: 9px 12px;
@@ -758,6 +911,24 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     color: var(--text-main);
+  }
+
+  .chip-count {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-bright);
+    background: rgba(255, 255, 255, 0.13);
+    border-radius: 0 4px 4px 0;
+    min-width: 24px;
+    height: 100%;
+    padding: 3px 5px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .stat-chip .value {
+    padding: 4px 7px;
   }
 
   .count {
@@ -817,6 +988,17 @@
     );
   }
 
+  .artist-group-label {
+    padding: 8px 12px 6px;
+    color: var(--text-muted);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    background: rgba(255, 255, 255, 0.02);
+  }
+
   .artist-row {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
@@ -830,17 +1012,6 @@
     text-align: left;
   }
 
-  .artist-group-label {
-    padding: 8px 12px 6px;
-    color: var(--text-muted);
-    font-size: 11px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-    background: rgba(255, 255, 255, 0.02);
-  }
-
   .artist-row.active,
   .artist-row:hover {
     background: rgba(31, 111, 235, 0.16);
@@ -848,6 +1019,7 @@
 
   .placeholder-row {
     cursor: default;
+    opacity: 0.74;
   }
 
   .placeholder-row:hover {

@@ -59,6 +59,13 @@ from artists import (
     update_artist,
 )
 from platforms import list_platforms, resolve_platform_label
+from review_cache import (
+    mark_review_cache_dirty,
+    remove_review_cache_entry,
+    replace_review_cache_entries,
+    review_counts,
+    upsert_review_cache_entry,
+)
 
 class TerminalLogger:
     def __init__(self, filename, original_stream):
@@ -278,6 +285,7 @@ def _read_review_sidecar(path: Path) -> dict:
 def _write_review_sidecar(path: Path, sidecar: dict):
     sidecar_path = _review_sidecar_path(path)
     atomic_write_text(sidecar_path, json.dumps(sidecar, indent=2, ensure_ascii=False))
+    upsert_review_cache_entry(path, sidecar)
 
 def _stat_signature(path: Path) -> tuple[int, int]:
     stat = path.stat()
@@ -407,6 +415,10 @@ def _review_cleanup_path(path: Path, retries: int = 5, delay_seconds: float = 0.
     for _ in range(retries):
         try:
             path.unlink()
+            if path.suffix.lower() != ".json":
+                remove_review_cache_entry(path)
+            else:
+                mark_review_cache_dirty()
             return True, ""
         except OSError as exc:
             last_error = str(exc)
@@ -1426,8 +1438,8 @@ async def delete_item(item_hash: str):
 async def bulk_delete_items(request: BulkDeleteRequest):
     return await asyncio.to_thread(_bulk_delete_items_sync, request.hashes)
 
-def _delete_item_row(cursor, conn, item_hash: str):
-    cursor.execute("SELECT file_extension, mime_type, storage_id FROM items WHERE hash = ?", (item_hash,))
+def _delete_item_row(cursor, conn, item_hash: str, remove_indexes: bool = True):
+    cursor.execute("SELECT file_extension, mime_type, storage_id, source_url FROM items WHERE hash = ?", (item_hash,))
     row = cursor.fetchone()
     if not row:
         return {"hash": item_hash, "status": "missing", "cleanup_errors": []}
@@ -1436,6 +1448,9 @@ def _delete_item_row(cursor, conn, item_hash: str):
 
     cursor.execute("DELETE FROM items WHERE hash = ?", (item_hash,))
     conn.commit()
+    index_payload = {"hash": item_hash, "source_url": row[3] or ""}
+    if remove_indexes:
+        search_manager.remove_indexes_batch([index_payload])
 
     cleanup_errors = []
     for path in cleanup_paths:
@@ -1448,13 +1463,13 @@ def _delete_item_row(cursor, conn, item_hash: str):
             log_system("WARNING", "Deleted DB row but file cleanup failed", hash=item_hash, path=str(path), error=str(exc))
 
     log_system("INFO", f"Deleted item {item_hash}")
-    return {"hash": item_hash, "status": "deleted", "cleanup_errors": cleanup_errors}
+    return {"hash": item_hash, "status": "deleted", "cleanup_errors": cleanup_errors, "index": index_payload}
 
 def _delete_item_after_replacement(item_hash: str):
     conn = init_database()
     cursor = conn.cursor()
     try:
-        cursor.execute("SELECT file_extension, mime_type, storage_id FROM items WHERE hash = ?", (item_hash,))
+        cursor.execute("SELECT file_extension, mime_type, storage_id, source_url FROM items WHERE hash = ?", (item_hash,))
         row = cursor.fetchone()
         if not row:
             return {"hash": item_hash, "status": "missing", "cleanup_errors": []}
@@ -1489,6 +1504,7 @@ def _delete_item_after_replacement(item_hash: str):
         try:
             cursor.execute("DELETE FROM items WHERE hash = ?", (item_hash,))
             conn.commit()
+            search_manager.remove_indexes_batch([{"hash": item_hash, "source_url": row[3] or ""}])
         except Exception as exc:
             conn.rollback()
             cleanup_errors = [{"hash": item_hash, "path": "database", "error": str(exc)}]
@@ -1530,14 +1546,17 @@ def _bulk_delete_items_sync(hashes: list[str]):
     deleted = []
     missing = []
     failed_cleanup = []
+    index_payloads = []
     try:
         for item_hash in unique_hashes:
-            result = _delete_item_row(cursor, conn, item_hash)
+            result = _delete_item_row(cursor, conn, item_hash, remove_indexes=False)
             if result["status"] == "missing":
                 missing.append(item_hash)
             else:
                 deleted.append(item_hash)
                 failed_cleanup.extend(result["cleanup_errors"])
+                index_payloads.append(result.get("index") or {"hash": item_hash})
+        search_manager.remove_indexes_batch(index_payloads)
         return {
             "status": "success",
             "requested_count": len(unique_hashes),
@@ -2309,6 +2328,7 @@ def _resolve_review_entries() -> list[dict]:
                 _write_review_sidecar(entry["path"], sidecar)
             except Exception as exc:
                 log_system("WARNING", "Failed to persist review sidecar reconciliation", filename=entry["path"].name, error=str(exc))
+    replace_review_cache_entries(entries)
     return entries
 
 def _is_pending_review_state(state: str) -> bool:
@@ -2317,12 +2337,7 @@ def _is_pending_review_state(state: str) -> bool:
     return _normalize_review_state(state) in REVIEW_PENDING_STATES
 
 def _get_review_count_sync(include_resolved: bool = False):
-    entries = _resolve_review_entries()
-    pending = sum(1 for entry in entries if _is_pending_review_state(entry["state"]))
-    cleanup = sum(1 for entry in entries if _is_cleanup_review_state(entry["state"]))
-    if include_resolved:
-        return {"count": pending, "pending": pending, "cleanup": cleanup, "total": len(entries)}
-    return {"count": pending, "pending": pending, "cleanup": cleanup}
+    return review_counts(include_resolved)
 
 @app.get("/api/review")
 async def get_review_items(include_resolved: bool = False):

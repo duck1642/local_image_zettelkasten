@@ -192,12 +192,14 @@ def _ensure_storage_counter(conn: sqlite3.Connection):
 
 
 def allocate_storage_id(conn: sqlite3.Connection) -> str:
-    _ensure_storage_counter(conn)
     cursor = conn.cursor()
     while True:
         row = cursor.execute(
             "UPDATE storage_id_counter SET next_value = next_value + 1 WHERE id = 1 RETURNING next_value - 1"
         ).fetchone()
+        if row is None:
+            _ensure_storage_counter(conn)
+            continue
         next_value = int(row[0] if row else 1)
         storage_id = int_to_storage_id(next_value)
         exists = cursor.execute("SELECT 1 FROM items WHERE storage_id = ?", (storage_id,)).fetchone()
@@ -210,6 +212,8 @@ def _backfill_missing_storage_ids(conn: sqlite3.Connection):
     rows = cursor.execute(
         'SELECT hash FROM items WHERE storage_id IS NULL OR storage_id = "" ORDER BY date_added ASC, hash ASC'
     ).fetchall()
+    if rows:
+        _ensure_storage_counter(conn)
     for (file_hash,) in rows:
         cursor.execute("UPDATE items SET storage_id = ? WHERE hash = ?", (allocate_storage_id(conn), file_hash))
 

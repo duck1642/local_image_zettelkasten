@@ -25,6 +25,27 @@ function cloneItems() {
 function facetItems(items: MockItem[], key: string) {
   const counts = new Map<string, number>();
   for (const item of items) {
+    if (key === 'wd_tag') {
+      const wd = item.wd_tags as { rating?: string; characters?: string[]; general?: string[] } | undefined;
+      const values = [
+        wd?.rating,
+        ...(Array.isArray(wd?.characters) ? wd.characters : []),
+        ...(Array.isArray(wd?.general) ? wd.general : [])
+      ];
+      for (const tag of values) {
+        const value = String(tag || '').trim();
+        if (value) counts.set(value, (counts.get(value) || 0) + 1);
+      }
+      continue;
+    }
+    if (key === 'topic' || key === 'topics') {
+      const topics = Array.isArray(item.topics) ? item.topics : [];
+      for (const topic of topics) {
+        const value = String(topic || '').trim();
+        if (value) counts.set(value, (counts.get(value) || 0) + 1);
+      }
+      continue;
+    }
     const value = String(item[key] || '').trim();
     if (value) counts.set(value, (counts.get(value) || 0) + 1);
   }
@@ -341,9 +362,13 @@ async function installMockVaultApi(
   await page.route('**/api/review', async (route) => fulfillJson(route, reviewItems));
   await page.route('**/api/facets**', async (route) => {
     const kind = new URL(route.request().url()).searchParams.get('kind') || 'artist';
-    const key = kind === 'wd_tag' ? 'artist' : kind;
+    const key = kind === 'wd_tag' ? 'wd_tag' : kind;
     const values = facetItems(items, key);
     if (kind === 'artist') values.push({ value: 'Unknown', count: 3 });
+    if (kind === 'platform') {
+      const pixiv = values.find((item) => item.value === 'pixiv');
+      if (pixiv) pixiv.count = 3;
+    }
     return fulfillJson(route, { kind, items: values });
   });
   await page.route('**/api/system/memory', async (route) => {
@@ -751,10 +776,10 @@ test('stats artists tab previews and confirms artist merge', async ({ page }) =>
   await page.getByRole('button', { name: 'Artists' }).click();
 
   await expect(page.locator('.artist-row').first()).toBeVisible();
-  const sourceName = (await page.locator('.artist-row .value').nth(1).textContent())?.trim() || '';
   await page.getByRole('button', { name: 'Merge Other Artists Into This' }).click();
   await expect(page.getByRole('dialog', { name: /Merge Into/ })).toBeVisible();
 
+  const sourceName = (await page.locator('.merge-source-row .value').first().textContent())?.trim() || '';
   await page.locator('.merge-source-row').first().click();
   await expect(page.locator('.merge-preview')).toContainText('Affected items');
   await expect(page.locator('.merge-preview')).toContainText('Aliases added/moved');
@@ -794,4 +819,45 @@ test('stats non-artist tabs keep facet list behavior', async ({ page }) => {
 
   await expect(page.locator('.stats-list')).toBeVisible();
   await expect(page.locator('.stats-row').first()).toBeVisible();
+});
+
+test('stats WD tag facets include rating character and general tags', async ({ page }) => {
+  await openMockVault(page);
+  await page.getByRole('button', { name: /Stats/ }).click();
+
+  await expect(page.locator('.stat-chip')).toContainText(['safe', 'mock_character', 'mock_tag']);
+});
+
+test('stats sort toggles between popularity and alphabetical', async ({ page }) => {
+  await openMockVault(page);
+  await page.getByRole('button', { name: /Stats/ }).click();
+  await page.getByRole('button', { name: 'Artists' }).click();
+
+  await expect(page.locator('.artist-row .value').first()).toHaveText('Mock Group B');
+  await page.getByRole('button', { name: 'Alphabetical' }).click();
+  await expect(page.locator('.artist-row .value').first()).toHaveText('Mock Group B');
+  await page.getByRole('button', { name: 'Platforms' }).click();
+  await expect(page.locator('.stats-row .value').first()).toHaveText('local');
+  await page.getByRole('button', { name: 'Popularity' }).click();
+  await expect(page.locator('.stats-row .value').first()).toHaveText('pixiv');
+});
+
+test('stats letter filter applies to artists and tag chips but not platforms', async ({ page }) => {
+  await openMockVault(page);
+  await page.getByRole('button', { name: /Stats/ }).click();
+
+  await page.getByRole('button', { name: 'Artists' }).click();
+  await expect(page.locator('.artist-row:not(.placeholder-row)')).toHaveCount(3);
+  await page.locator('.letter-tabs').getByRole('button', { name: 'M' }).click();
+  await expect(page.locator('.artist-row:not(.placeholder-row)')).toHaveCount(3);
+  await expect(page.locator('.artist-row .value').first()).toContainText('Mock');
+
+  await page.getByRole('button', { name: 'Topics' }).click();
+  await expect(page.locator('.stat-chip')).toHaveCount(3);
+  await page.locator('.letter-tabs').getByRole('button', { name: 'G' }).click();
+  await expect(page.locator('.stat-chip')).toHaveCount(1);
+  await expect(page.locator('.stat-chip .value').first()).toHaveText('group-topic');
+
+  await page.getByRole('button', { name: 'Platforms' }).click();
+  await expect(page.locator('.letter-tabs')).toHaveCount(0);
 });

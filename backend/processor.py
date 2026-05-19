@@ -25,6 +25,7 @@ from metadata_index import safe_reindex_item_metadata
 from logger import log_activity, log_system
 from tagging import tag_media
 from thumbnails import ensure_thumbnail
+from review_cache import pending_review_match as cached_pending_review_match, upsert_review_cache_entry
 
 def _safe_review_name(name: str) -> str:
     invalid = '<>:"/\\|?*'
@@ -78,36 +79,11 @@ def _move_to_review(filepath: Path, file_hash: str, metadata: dict, sidecar_fiel
     }
     with open(sidecar_path, 'w', encoding='utf-8') as f:
         json.dump(sidecar, f, indent=4, ensure_ascii=False)
+    upsert_review_cache_entry(dest_path, sidecar)
     return dest_path
 
 def _pending_review_match(file_hash: str) -> dict | None:
-    if not file_hash or not REVIEW_DIR.exists():
-        return None
-    pending_states = {"", "pending", "deferred"}
-    for sidecar_path in REVIEW_DIR.glob("*.json"):
-        try:
-            sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
-        except Exception:
-            continue
-        if not isinstance(sidecar, dict):
-            continue
-        state = str(sidecar.get("state") or "pending").strip().lower()
-        if state not in pending_states:
-            continue
-        review_hash = str(sidecar.get("file_hash") or "").strip()
-        media_path = sidecar_path.with_suffix("")
-        if not review_hash and media_path.exists():
-            try:
-                review_hash = calculate_file_hash(media_path)
-            except Exception:
-                review_hash = ""
-        if review_hash == file_hash:
-            return {
-                "filename": sidecar.get("storage_name") or media_path.name,
-                "original_name": sidecar.get("original_name") or media_path.name,
-                "state": state or "pending",
-            }
-    return None
+    return cached_pending_review_match(file_hash)
 
 def calculate_tiles(filepath: Path, ratio_threshold: float = 3.0) -> list:
 
@@ -183,10 +159,10 @@ def find_visual_duplicate(new_phash: str, threshold: int = 5, new_tiles: list = 
                 if tile_matches:
                     f_hash, dist = tile_matches[0]
                     total_conflicts += len(tile_matches)
-                    if not best_match:
-                        best_match = f_hash
-                        min_distance = dist
-                        match_type = f"Whole-to-Fragment (Tile #{t_index})"
+                    best_match = f_hash
+                    min_distance = dist
+                    match_type = f"Whole-to-Fragment (Tile #{t_index})"
+                    break
 
     except Exception as e:
         log_system("ERROR", f"Search error in find_visual_duplicate: {e}")

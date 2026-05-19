@@ -480,6 +480,7 @@ class ExternalIngestor:
     def _rollback_batch(self, batch_data: List[dict]) -> int:
         conn = connect_database()
         rolled_back = 0
+        removed_indexes = []
         try:
             for item in batch_data:
                 file_hash = item.get("file_hash")
@@ -487,14 +488,16 @@ class ExternalIngestor:
                     continue
 
                 row = conn.execute(
-                    'SELECT file_extension, mime_type, storage_id FROM items WHERE hash = ?',
+                    'SELECT file_extension, mime_type, storage_id, source_url FROM items WHERE hash = ?',
                     (file_hash,)
                 ).fetchone()
 
                 file_extension = row[0] if row else ""
                 mime_type = row[1] if row else ""
                 storage_id = row[2] if row else ""
+                source_url = row[3] if row else ""
                 conn.execute('DELETE FROM items WHERE hash = ?', (file_hash,))
+                removed_indexes.append({"hash": file_hash, "source_url": source_url})
 
                 if file_extension:
                     asset_path = asset_path_for(file_hash, file_extension, mime_type, storage_id=storage_id)
@@ -512,6 +515,7 @@ class ExternalIngestor:
                 rolled_back += 1
 
             conn.commit()
+            search_manager.remove_indexes_batch(removed_indexes)
             return rolled_back
         except Exception as e:
             conn.rollback()

@@ -872,12 +872,13 @@ def stale_metadata_count(conn: sqlite3.Connection) -> int:
     return sum(1 for row in cursor if _row_stale(row))
 
 
-def reindex_stale_metadata_batch(conn: sqlite3.Connection, limit: int = REPAIR_BATCH_SIZE) -> dict:
+def reindex_stale_metadata_batch(conn: sqlite3.Connection, limit: int = REPAIR_BATCH_SIZE, allow_scan: bool = False) -> dict:
     ensure_metadata_schema(conn)
     started = time.perf_counter()
     hashes = dirty_metadata_hashes(conn, limit=limit)
-    source = "dirty_queue" if hashes else "stale_scan"
-    if not hashes:
+    source = "dirty_queue" if hashes else "idle"
+    if not hashes and allow_scan:
+        source = "stale_scan"
         hashes = stale_metadata_hashes(conn, limit=limit)
     ok = 0
     errors = 0
@@ -1240,7 +1241,7 @@ def _repair_worker(full: bool = False, maintenance: bool = False):
                     )
             else:
                 while True:
-                    result = reindex_stale_metadata_batch(conn, REPAIR_BATCH_SIZE)
+                    result = reindex_stale_metadata_batch(conn, REPAIR_BATCH_SIZE, allow_scan=maintenance)
                     conn.commit()
                     if result.get("source") == "dirty_queue" and not result.get("dirty_remaining"):
                         continue

@@ -32,7 +32,7 @@ def fresh_backend(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *module_names
     if str(BACKEND) not in sys.path:
         sys.path.insert(0, str(BACKEND))
     for name in list(sys.modules):
-        if name in {"utils", "web_api", "queue_service", "md_generator", "metadata_index", "processor", "external_ingestion", "thumbnails", "fingerprint", "artists", "platforms"} or name.startswith(("logger", "db.", "tagging", "downloaders")):
+        if name in {"utils", "web_api", "queue_service", "md_generator", "metadata_index", "processor", "external_ingestion", "thumbnails", "fingerprint", "artists", "platforms", "review_cache"} or name.startswith(("logger", "db.", "tagging", "downloaders")):
             del sys.modules[name]
     return [importlib.import_module(name) for name in module_names]
 
@@ -215,6 +215,44 @@ def test_review_listing_does_not_auto_resolve_pending_db_hash(monkeypatch, tmp_p
     assert target["state"] == "pending"
     assert saved["state"] == "pending"
     assert "last_action" not in saved
+
+
+def test_review_count_uses_cache_without_full_resolver(monkeypatch, tmp_path):
+    web_api, = fresh_backend(monkeypatch, tmp_path, "web_api")
+
+    def fail_resolver():
+        raise AssertionError("review count should not resolve all review entries")
+
+    monkeypatch.setattr(web_api, "_resolve_review_entries", fail_resolver)
+    count = web_api._get_review_count_sync(include_resolved=True)
+
+    assert count["pending"] >= 1
+    assert count["cleanup"] >= 1
+    assert count["total"] >= count["pending"] + count["cleanup"]
+
+
+def test_delete_item_removes_ram_indexes(monkeypatch, tmp_path):
+    sqlite_operator, web_api = fresh_backend(monkeypatch, tmp_path, "db.sqlite_operator", "web_api")
+    item_hash = "9a" * 32
+    conn = insert_mock_item(sqlite_operator, item_hash)
+    conn.execute(
+        "UPDATE items SET source_url = ?, source_url_norm = ? WHERE hash = ?",
+        ("https://example.test/delete", sqlite_operator.normalize_source_url("https://example.test/delete"), item_hash),
+    )
+    conn.commit()
+    conn.close()
+    removed = []
+
+    class FakeSearchManager:
+        def remove_indexes_batch(self, items):
+            removed.extend(items)
+
+    monkeypatch.setattr(web_api, "search_manager", FakeSearchManager())
+
+    result = web_api._delete_item_sync(item_hash)
+
+    assert result["status"] == "success"
+    assert removed == [{"hash": item_hash, "source_url": "https://example.test/delete"}]
 
 
 def test_local_ingest_state_guards_and_result_cap(monkeypatch, tmp_path):
@@ -528,6 +566,26 @@ def test_processor_skips_file_already_pending_review(monkeypatch, tmp_path):
     assert idx_data is None
 
 
+def test_pending_review_match_uses_cache_without_sidecar_glob(monkeypatch, tmp_path):
+    utils, processor = fresh_backend(monkeypatch, tmp_path, "utils", "processor")
+    review_hash = "ab" * 32
+    review_file = utils.REVIEW_DIR / "cached.webp"
+    review_file.parent.mkdir(parents=True, exist_ok=True)
+    review_file.write_bytes(b"existing review bytes")
+    review_file.with_suffix(".webp.json").write_text(
+        json.dumps({"state": "pending", "file_hash": review_hash, "original_name": "cached.webp"}),
+        encoding="utf-8",
+    )
+
+    class FakeReviewDir:
+        def glob(self, *args, **kwargs):
+            raise AssertionError("pending review match should not glob sidecars")
+
+    monkeypatch.setattr(processor, "REVIEW_DIR", FakeReviewDir())
+
+    assert processor._pending_review_match(review_hash)["original_name"] == "cached.webp"
+
+
 def test_pending_review_guard_blocks_reingest_after_restart(monkeypatch, tmp_path):
     utils, sqlite_operator, processor = fresh_backend(monkeypatch, tmp_path, "utils", "db.sqlite_operator", "processor")
     existing_hash = "2" * 64
@@ -651,6 +709,20 @@ def test_storage_id_backfill_and_compact_asset_path(monkeypatch, tmp_path):
     assert len(storage_id) == 12
     assert utils.asset_path_for(item_hash, ".jpg", "image/jpeg", storage_id=storage_id).name == f"{storage_id}.jpg"
     conn.close()
+
+
+def test_storage_id_allocation_does_not_rescan_counter(monkeypatch, tmp_path):
+    sqlite_operator, = fresh_backend(monkeypatch, tmp_path, "db.sqlite_operator")
+    conn = sqlite_operator.init_database()
+
+    def fail_rescan(conn):
+        raise AssertionError("_ensure_storage_counter should not run during allocation")
+
+    monkeypatch.setattr(sqlite_operator, "_ensure_storage_counter", fail_rescan)
+    storage_id = sqlite_operator.allocate_storage_id(conn)
+    conn.close()
+
+    assert len(storage_id) == 12
 
 
 def test_manage_review_uses_quarantine_sidecar_for_artist(monkeypatch, tmp_path):
@@ -912,6 +984,38 @@ def test_metadata_dirty_queue_created_and_drained_before_scan(monkeypatch, tmp_p
     assert result["dirty_remaining"] is False
     assert topics == ["queued-topic"]
     assert queued == 0
+
+
+def test_metadata_repair_idles_without_dirty_queue_by_default(monkeypatch, tmp_path):
+    sqlite_operator, metadata_index = fresh_backend(monkeypatch, tmp_path, "db.sqlite_operator", "metadata_index")
+    conn = sqlite_operator.init_database()
+
+    monkeypatch.setattr(
+        metadata_index,
+        "stale_metadata_hashes",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("default repair should not stale scan")),
+    )
+
+    result = metadata_index.reindex_stale_metadata_batch(conn, limit=10)
+    conn.close()
+
+    assert result["source"] == "idle"
+    assert result["queued"] == 0
+
+
+def test_metadata_repair_allows_explicit_stale_scan(monkeypatch, tmp_path):
+    sqlite_operator, metadata_index = fresh_backend(monkeypatch, tmp_path, "db.sqlite_operator", "metadata_index")
+    conn = sqlite_operator.init_database()
+    calls = []
+
+    monkeypatch.setattr(metadata_index, "stale_metadata_hashes", lambda *args, **kwargs: calls.append("scan") or [])
+
+    result = metadata_index.reindex_stale_metadata_batch(conn, limit=10, allow_scan=True)
+    conn.close()
+
+    assert calls == ["scan"]
+    assert result["source"] == "stale_scan"
+    assert result["queued"] == 0
 
 
 def test_metadata_cached_counters_update_after_reindex(monkeypatch, tmp_path):
@@ -1927,6 +2031,62 @@ def test_search_manager_query_sees_pending_during_vp_rebuild(monkeypatch, tmp_pa
         future.result(timeout=2)
 
     assert matches == [("video-hash", 1.0, "Semantic")]
+
+
+def test_search_manager_removes_deleted_hashes_and_urls(monkeypatch, tmp_path):
+    search_manager_module, = fresh_backend(monkeypatch, tmp_path, "db.search_manager")
+    manager = search_manager_module.SearchManager()
+    manager.video_tree = search_manager_module.VPTreeSearcher(search_manager_module._cosine_dist)
+    manager.audio_tree = search_manager_module.VPTreeSearcher(search_manager_module._hamming_dist_audio)
+    manager.global_tree = search_manager_module.BKTreeSearcher()
+    manager.tile_tree = search_manager_module.BKTreeSearcher()
+    manager.url_registry = search_manager_module.URLRegistry()
+
+    import numpy as np
+
+    phash = "0" * 16
+    tile_phash = "f" * 16
+    sig = np.array([1.0, 0.0], dtype=np.float32).tobytes()
+    manager.update_indexes("deleted-hash", phash, "https://example.test/item", [(0, tile_phash)], visual_embedding=sig)
+    manager.rebuild_deferred_indexes()
+
+    assert manager.query_image(phash)
+    assert manager.query_image(tile_phash)
+    assert manager.query_video(None, sig, ai_threshold=0.01)
+    assert manager.url_exists("https://example.test/item")
+
+    manager.remove_indexes_batch([{"hash": "deleted-hash", "source_url": "https://example.test/item"}])
+
+    assert manager.query_image(phash) == []
+    assert manager.query_image(tile_phash) == []
+    assert manager.query_video(None, sig, ai_threshold=0.01) == []
+    assert not manager.url_exists("https://example.test/item")
+
+
+def test_find_visual_duplicate_stops_tile_queries_after_first_match(monkeypatch, tmp_path):
+    processor, = fresh_backend(monkeypatch, tmp_path, "processor")
+    calls = []
+
+    class FakeSearchManager:
+        def query_image(self, phash, threshold):
+            return []
+
+        def query_global_only(self, phash, threshold):
+            calls.append(phash)
+            return [("match-hash", 1)]
+
+    monkeypatch.setattr(processor, "search_manager", FakeSearchManager())
+
+    match, match_type, total, distance = processor.find_visual_duplicate(
+        "0" * 16,
+        new_tiles=[(0, "tile-a"), (1, "tile-b"), (2, "tile-c")],
+    )
+
+    assert match == "match-hash"
+    assert match_type == "Whole-to-Fragment (Tile #0)"
+    assert total == 1
+    assert distance == 1
+    assert calls == ["tile-a"]
 
 
 def test_hot_ingestion_paths_use_lightweight_db_helper(monkeypatch, tmp_path):
