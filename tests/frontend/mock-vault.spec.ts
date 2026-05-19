@@ -52,6 +52,10 @@ function facetItems(items: MockItem[], key: string) {
   return [...counts.entries()].map(([value, count]) => ({ value, count }));
 }
 
+function facetCountMap(items: MockItem[], key: string) {
+  return Object.fromEntries(facetItems(items, key).map((item) => [item.value, item.count]));
+}
+
 function canonicalPlatformDisplay(value: string) {
   const key = String(value || '').trim().toLowerCase();
   if (key === 'x' || key.startsWith('twitter')) return 'X';
@@ -148,7 +152,11 @@ async function installMockVaultApi(
         items = items.map((entry) => entry.hash === hash ? { ...entry, ...patch } : entry);
         return fulfillJson(route, { status: 'success' });
       }
-      return fulfillJson(route, item);
+      return fulfillJson(route, {
+        ...item,
+        topic_counts: facetCountMap(items, 'topic'),
+        wd_tag_counts: facetCountMap(items, 'wd_tag')
+      });
     }
 
     await options.onItemsRequest?.(url);
@@ -454,6 +462,17 @@ test('artist edit refreshes tile while source URL and platform stay read-only', 
   await expect(page.getByText(String(manifest.expectations.editedArtist))).toBeVisible();
   await expect(page.getByLabel('Artist')).toHaveValue(String(manifest.expectations.editedArtist));
   await expect(page.locator('.bottom-status')).toContainText(`Showing ${manifest.expectations.initialGroups} groups`);
+});
+
+test('inspector topic and WD chips show global counts', async ({ page }) => {
+  await openMockVault(page);
+
+  await page.getByText('Mock Solo').click();
+  const inspector = page.locator('aside.inspector');
+  await expect(inspector.locator('.tag-chip.topic').filter({ hasText: 'mock-topic' }).locator('.tag-count')).toHaveText('1');
+  await expect(inspector.locator('.tag-chip.rating').filter({ hasText: 'safe' }).locator('.tag-count')).toHaveText('3');
+  await expect(inspector.locator('.tag-chip.character').filter({ hasText: 'mock_character' }).locator('.tag-count')).toHaveText('1');
+  await expect(inspector.locator('.tag-chip.visual').filter({ hasText: 'mock_tag' }).locator('.tag-count')).toHaveText('1');
 });
 
 test('masonry keeps current data after metadata update cache reuse', async ({ page }) => {

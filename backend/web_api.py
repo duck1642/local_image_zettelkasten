@@ -1269,11 +1269,41 @@ def _get_item_details(h, row, conn=None):
             elif isinstance(t, dict): names.append(t.get("display_name") or t.get("name") or "")
         return [n for n in names if n]
 
+    def facet_counts(kind: str, values: list[str]) -> dict[str, int]:
+        if conn is None:
+            return {}
+        cleaned = [(value, str(value or "").strip().casefold()) for value in values if str(value or "").strip()]
+        if not cleaned:
+            return {}
+        counts: dict[str, int] = {}
+        for value, value_norm in cleaned:
+            row = conn.execute(
+                "SELECT count FROM metadata_facet_counts WHERE kind = ? AND value_norm = ?",
+                (kind, value_norm),
+            ).fetchone()
+            if row:
+                counts[value] = int(row[0] or 0)
+                continue
+            if kind == "topic":
+                fallback = conn.execute("SELECT COUNT(*) FROM item_topics WHERE topic_norm = ?", (value_norm,)).fetchone()
+            elif kind == "wd_tag":
+                fallback = conn.execute("SELECT COUNT(DISTINCT item_hash) FROM item_wd_tags WHERE tag_norm = ?", (value_norm,)).fetchone()
+            else:
+                fallback = None
+            if fallback:
+                counts[value] = int(fallback[0] or 0)
+        return counts
+
     formatted_wd = {
         "rating": wd_data.get("rating", {}).get("label") or wd_data.get("rating", {}).get("name") or "None",
         "characters": get_names(wd_data.get("character_tags", [])),
         "general": get_names(wd_data.get("tags", []))
     }
+    wd_values = [
+        formatted_wd["rating"] if formatted_wd["rating"] != "None" else "",
+        *formatted_wd["characters"],
+        *formatted_wd["general"],
+    ]
     
     return {
         "hash": h, "extension": ext, "mime_type": row[2] or "",
@@ -1283,7 +1313,9 @@ def _get_item_details(h, row, conn=None):
         "thumbnail_url": f"/api/thumbnails/{h}",
         "width": row[8], "height": row[9],
         "topics": topics,
-        "wd_tags": formatted_wd
+        "topic_counts": facet_counts("topic", topics),
+        "wd_tags": formatted_wd,
+        "wd_tag_counts": facet_counts("wd_tag", wd_values)
     }
 
 @app.get("/api/items/{item_hash}")

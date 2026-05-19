@@ -1,6 +1,6 @@
   # LMZ Current Status
 
-Last updated: 2026-05-18
+Last updated: 2026-05-20
 
 ## Current Status
 
@@ -8,7 +8,7 @@ LMZ is a local media vault desktop app.
 
 - Frontend: Tauri + Svelte.
 - Backend: local FastAPI/Python API under `backend/`.
-- Runtime model: SQLite for operational indexes; Markdown/YAML remains source of truth.
+- Runtime model: SQLite owns item identity/source fields; Markdown mirrors item identity fields and remains the editable source for topics/WD metadata.
 - Old Flet and PySide/PyQt UI paths are inactive.
 
 Launch commands:
@@ -101,6 +101,37 @@ VSCode-friendly test launchers:
   - Repeated `a:` and `p:` use OR.
   - Repeated `t:` and `#` use AND.
   - Plain text terms use AND.
+
+## Phase B Current Process
+
+- Phase B core is mostly implemented.
+- SQLite-owned identity is active:
+  - `items.source_artist`, `items.platform`, `items.source_url`, file metadata, and storage identity are SQLite-owned.
+  - Markdown mirrors artist/platform/source/date fields for readability.
+  - normal metadata reindex no longer silently imports Markdown artist/platform/date back into SQLite.
+  - topics and WD tags remain Markdown/index-owned.
+- Artist knowledge layer is active:
+  - artist tables, aliases, links, notes, kinds, backfill, resolver, rename, and merge are implemented.
+  - Stats Artists panel supports compact editing and explicit merge.
+  - local ingestion uses artist autocomplete to avoid duplicate artist names.
+- Platform dictionary foundation is active:
+  - platform tables/backfill/API exist.
+  - local ingestion uses platform dropdown.
+  - full platform maintenance panel is deferred until browser-extension/platform parsing is clearer.
+- Stats metadata browsing is active:
+  - topic, WD tag, artist, and platform counts use metadata facet counts.
+  - topic and WD tag panels support selection and `Filter Vault`.
+  - selected topic/WD tags hand off into the normal Vault search query.
+- Inspector metadata visibility is active:
+  - topic and WD tag chips show global counts.
+  - artist remains editable.
+  - platform/source URL remain read-only.
+- Remaining Phase B work:
+  - tag/topic rename.
+  - tag/topic deletion.
+  - promote WD tag to manual topic.
+  - likely implemented from Stats topic/WD panels, with backend endpoints that rewrite affected notes and refresh metadata indexes/facets.
+  - platform panel refinement remains deferred to browser-extension phase.
 - Current commands include:
   - `/masonry`, `/grid`.
   - `/zoom-in`, `/zoom-out`.
@@ -238,7 +269,6 @@ VSCode-friendly test launchers:
   - artist/platform filters use exact-first normalized matching, then partial fallback.
   - normalized and normalized/date indexes support artist/platform filter paging.
   - artist/platform facet counts refresh after item metadata updates and full rebuilds.
-
 ## Current Test Results
 
 ### Phase A Generated-Vault Performance Findings
@@ -309,18 +339,22 @@ VSCode-friendly test launchers:
 
 ## Deferred / Will Do Later
 
-### Phase B - Knowledge Tools
+### Phase B - Remaining Knowledge Tools
 
-- Artist database:
-  - artist grouping.
-  - artist aliases/platform handles/source links/counts.
-  - workflows that make artist maintenance easier during normal vault use.
-- Tag/topic workflows:
-  - fast and trustworthy WD tag counts and topic counts.
-  - in-memory facet cache or equivalent faster count path if current index is not enough.
+- Tag/topic maintenance:
+  - rename topic.
+  - delete topic.
+  - rename WD tag.
+  - delete WD tag.
   - promote WD tag to manual topic.
-  - WD tag maintenance: delete, rename, hide/ignore, and later merge.
-  - interactive tag management in Inspector.
+  - implement as explicit UI actions from Stats topic/WD panels.
+  - backend should rewrite affected Markdown frontmatter, refresh metadata index/facet counts, and preserve existing API search semantics.
+- Later tag tools:
+  - hide/ignore WD tag.
+  - merge tags/topics if real use shows it is needed.
+  - richer Inspector tag editing if Stats-only workflow feels insufficient.
+- Platform maintenance:
+  - full platform panel is deferred until browser extension ingestion clarifies platform names, aliases, and URL parsing behavior.
 - Search/index improvements:
   - persistent search/facet tables beyond current derived metadata index if needed for scale.
   - search chips.
@@ -381,6 +415,20 @@ VSCode-friendly test launchers:
   - one failed expected image can still keep the post retryable.
 
 ## Done But Needs Check
+
+- Phase B - Knowledge tools core:
+  - artist dictionary schema/API added inside the vault SQLite DB.
+  - artist backfill from existing item artists skips placeholder identity values.
+  - artist aliases, links, notes, and rigid kind values are implemented.
+  - artist rename updates matching item snapshots, regenerates Markdown mirrors, and refreshes metadata facets.
+  - artist merge keeps selected artist as canonical, moves aliases/links, appends source notes, rewrites affected items/notes, and deletes source artist rows.
+  - platform dictionary schema/API/backfill added as foundation.
+  - local ingest artist autocomplete and platform dropdown are wired.
+  - Stats Artists panel is implemented with resizable split view.
+  - Stats topic/WD panels support multi-select filtering into Vault search.
+  - Stats/Inspector show topic and WD counts through facet/index data.
+  - remaining Phase B scope is tag/topic maintenance: rename, delete, and promote WD tag to topic.
+  - needs real-vault smoke for artist rename/merge, local ingest artist autocomplete, platform dropdown, Stats filtering handoff, and Inspector counts.
 
 - Phase A - Stability V1:
   - implementation is considered finished.

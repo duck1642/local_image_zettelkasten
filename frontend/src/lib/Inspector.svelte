@@ -62,6 +62,11 @@
 
   function handleInput() { isDirty = true; }
 
+  function countFor(map: Record<string, number> | undefined, value: string) {
+    const count = map?.[value];
+    return typeof count === 'number' && count > 0 ? count : null;
+  }
+
   async function responseErrorText(response: Response, fallback: string) {
     try {
       const data = await response.json();
@@ -296,7 +301,10 @@
       <div class="tags-list">
           {#each (topics || []) as tag}
               <span class="tag-chip topic">
-                  {tag}
+                  <span class="tag-label">{tag}</span>
+                  {#if countFor(fullItem.topic_counts, tag)}
+                      <span class="tag-count">{countFor(fullItem.topic_counts, tag)}</span>
+                  {/if}
               </span>
           {/each}
           {#if !topics || topics.length === 0}
@@ -313,7 +321,10 @@
         <div class="tags-list">
             {#if fullItem.wd_tags?.rating && fullItem.wd_tags.rating !== 'None'}
                 <span class="tag-chip rating">
-                    {fullItem.wd_tags.rating}
+                    <span class="tag-label">{fullItem.wd_tags.rating}</span>
+                    {#if countFor(fullItem.wd_tag_counts, fullItem.wd_tags.rating)}
+                        <span class="tag-count">{countFor(fullItem.wd_tag_counts, fullItem.wd_tags.rating)}</span>
+                    {/if}
                 </span>
             {:else}
                 <div class="value-text">No rating</div>
@@ -325,7 +336,10 @@
         <div class="tags-list">
             {#each (fullItem.wd_tags?.characters || []) as tag}
                 <span class="tag-chip character">
-                    {tag}
+                    <span class="tag-label">{tag}</span>
+                    {#if countFor(fullItem.wd_tag_counts, tag)}
+                        <span class="tag-count">{countFor(fullItem.wd_tag_counts, tag)}</span>
+                    {/if}
                 </span>
             {/each}
             {#if !fullItem.wd_tags?.characters || fullItem.wd_tags.characters.length === 0}
@@ -338,7 +352,10 @@
         <div class="tags-list">
             {#each (fullItem.wd_tags?.general || []) as tag}
                 <span class="tag-chip visual">
-                    {tag}
+                    <span class="tag-label">{tag}</span>
+                    {#if countFor(fullItem.wd_tag_counts, tag)}
+                        <span class="tag-count">{countFor(fullItem.wd_tag_counts, tag)}</span>
+                    {/if}
                 </span>
             {/each}
             {#if !fullItem.wd_tags?.general || fullItem.wd_tags.general.length === 0}
@@ -457,7 +474,7 @@
   .tags-list { display: flex; flex-wrap: wrap; gap: 6px; }
 
   .tag-chip {
-      padding: 3px 8px;
+      padding: 0;
       border-radius: 4px;
       font-size: 11px;
       font-weight: 600;
@@ -465,6 +482,20 @@
       color: var(--text-main);
       border: 1px solid var(--border-dim);
       user-select: none;
+      display: inline-flex;
+      align-items: stretch;
+      overflow: hidden;
+      line-height: 1.2;
+  }
+
+  .tag-label { padding: 3px 7px; }
+  .tag-count {
+      min-width: 22px;
+      padding: 3px 6px;
+      background: rgba(255,255,255,0.08);
+      color: var(--text-bright);
+      text-align: right;
+      border-left: 1px solid rgba(255,255,255,0.06);
   }
 
   .tag-chip:hover { border-color: var(--border-hover); background: var(--bg-main); }

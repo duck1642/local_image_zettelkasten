@@ -1681,6 +1681,36 @@ def test_metadata_facet_counts_refresh_and_fallback(monkeypatch, tmp_path):
     assert facet == {"kind": "wd_tag", "items": [{"value": "New Tag", "count": 1}]}
 
 
+def test_item_details_include_topic_and_wd_counts(monkeypatch, tmp_path):
+    utils, sqlite_operator, metadata_index, web_api = fresh_backend(
+        monkeypatch,
+        tmp_path,
+        "utils",
+        "db.sqlite_operator",
+        "metadata_index",
+        "web_api",
+    )
+    item_a = "91" * 32
+    item_b = "92" * 32
+    conn = insert_mock_item(sqlite_operator, item_a)
+    write_compact_note(conn=conn, utils=utils, item_hash=item_a, text="---\ntopics:\n  - Shared Topic\nwd_rating: safe\nwd_tags:\n  - Shared Tag\n---\n")
+    metadata_index.reindex_item_metadata(conn, item_a)
+    conn.commit()
+    conn.close()
+
+    conn = insert_mock_item(sqlite_operator, item_b)
+    write_compact_note(conn=conn, utils=utils, item_hash=item_b, text="---\ntopics:\n  - Shared Topic\nwd_rating: safe\nwd_tags:\n  - Shared Tag\n---\n")
+    metadata_index.reindex_item_metadata(conn, item_b)
+    conn.commit()
+    conn.close()
+
+    detail = web_api._get_item_sync(item_a)
+
+    assert detail["topic_counts"]["Shared Topic"] == 2
+    assert detail["wd_tag_counts"]["safe"] == 2
+    assert detail["wd_tag_counts"]["Shared Tag"] == 2
+
+
 def test_metadata_facets_no_match_uses_built_count_table_without_scan(monkeypatch, tmp_path):
     metadata_index, = fresh_backend(monkeypatch, tmp_path, "metadata_index")
 
