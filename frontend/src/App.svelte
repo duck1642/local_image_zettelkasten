@@ -22,6 +22,10 @@
     summary: { received: number; accepted: number; skipped: number };
     source_tab: string;
   };
+  type VaultFilterRequest = {
+    id: string;
+    query: string;
+  };
 
   let activeTab: AppTab = 'vault';
   let vaultStatus = { totalItems: 0, groups: 0, hasMore: false, layoutMode: 'masonry' };
@@ -31,6 +35,7 @@
   let dragOverlayVisible = false;
   let dragOverlayText = 'Drop files/folders to stage in Local Ingestion';
   let pendingDropRequest: DropRequest | null = null;
+  let pendingVaultFilterRequest: VaultFilterRequest | null = null;
   let dragScaleFactor = 1;
 
   function handleVaultStatus(event: CustomEvent) {
@@ -180,6 +185,24 @@
     activeTab = 'ingest';
   }
 
+  function searchSegment(prefix: string, value: string) {
+    const clean = String(value || '').trim().replace(/;/g, ' ');
+    return clean ? `${prefix}${clean};` : '';
+  }
+
+  function handleStatsFilterVault(event: CustomEvent<{ topics?: string[]; wd_tags?: string[] }>) {
+    const topics = Array.isArray(event.detail?.topics) ? event.detail.topics : [];
+    const wdTags = Array.isArray(event.detail?.wd_tags) ? event.detail.wd_tags : [];
+    const query = [
+      ...topics.map((value) => searchSegment('t:', value)),
+      ...wdTags.map((value) => searchSegment('#', value))
+    ].filter(Boolean).join(' ');
+    if (!query) return;
+    pendingVaultFilterRequest = { id: `${Date.now()}_${Math.random().toString(16).slice(2, 8)}`, query };
+    activeTab = 'vault';
+    uiLog('INFO', 'Stats filters applied to vault', { topics: topics.length, wd_tags: wdTags.length });
+  }
+
   onMount(() => {
     uiLog('INFO', 'Svelte UI initialized and mounted');
     const stopStats = startSharedStatsPolling();
@@ -320,7 +343,7 @@
            Its IntersectionObserver/ResizeObserver are idle when display:none, so the cost is negligible.
            Other tabs use {#if} since they can re-fetch on demand. -->
       <div class:hidden={activeTab !== 'vault'} class="tab-panel" data-drop-zone="vault">
-        <VaultView on:status={handleVaultStatus} />
+        <VaultView filterRequest={pendingVaultFilterRequest} on:status={handleVaultStatus} />
       </div>
       {#if activeTab === 'review'}
         <div class="view-shell"><ReviewView /></div>
@@ -329,7 +352,7 @@
           <Ingestion dropRequest={pendingDropRequest} on:modechange={handleIngestModeChange} />
         </div>
       {:else if activeTab === 'stats'}
-        <div class="view-shell"><StatsView /></div>
+        <div class="view-shell"><StatsView on:filterVault={handleStatsFilterVault} /></div>
       {:else if activeTab === 'settings'}
         <div class="view-shell"><SettingsView /></div>
       {:else if activeTab === 'logs'}

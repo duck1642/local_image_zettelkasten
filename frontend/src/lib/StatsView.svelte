@@ -1,11 +1,12 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { createEventDispatcher, onMount } from 'svelte';
   import { apiFetch } from './api';
   import { log as uiLog } from './logger';
 
   type FacetKind = 'wd_tag' | 'artist' | 'platform' | 'topic';
   type StatsSortMode = 'popularity' | 'alphabetical';
   type FacetItem = { value: string; count: number };
+  type FilterVaultPayload = { topics: string[]; wd_tags: string[] };
   type ArtistListItem = { id: number; name: string; kind: string; item_count: number; link_count: number; alias_count: number };
   type ArtistAlias = { id: number; alias: string; alias_norm: string };
   type ArtistLink = { id: number; platform: string; url: string; handle: string; is_primary: boolean };
@@ -29,6 +30,8 @@
     target_detail?: ArtistDetail;
     merged?: boolean;
   };
+
+  const dispatch = createEventDispatcher<{ filterVault: FilterVaultPayload }>();
   type ArtistDetail = {
     id: number;
     name: string;
@@ -78,6 +81,8 @@
   let mergeBusy = false;
   let mergeError = '';
   let mergeSearchTimer: number | null = null;
+  let selectedTopics: string[] = [];
+  let selectedWdTags: string[] = [];
 
   const placeholderArtistNorms = new Set(['', 'unknown', 'local', 'none', 'n/a', 'na', 'null']);
   const letterFilters = ['all', '#', ...'abcdefghijklmnopqrstuvwxyz'.split('')];
@@ -86,6 +91,9 @@
   $: visibleArtists = filterArtistsByLetter(artists, showLetterFilter, letterFilter);
   $: visiblePlaceholderArtists = filterFacetsByLetter(placeholderArtists, showLetterFilter, letterFilter);
   $: visibleItems = filterFacetsByLetter(items, showLetterFilter, letterFilter);
+  $: selectedTopicCount = selectedTopics.length;
+  $: selectedWdTagCount = selectedWdTags.length;
+  $: selectedFacetCount = selectedTopicCount + selectedWdTagCount;
 
   function firstBucket(value: string) {
     const first = String(value || '').trim().charAt(0).toLowerCase();
@@ -266,6 +274,41 @@
 
   function setLetterFilter(value: string) {
     letterFilter = value;
+  }
+
+  function isSelectableFacet(kind: FacetKind) {
+    return kind === 'topic' || kind === 'wd_tag';
+  }
+
+  function isFacetSelected(kind: FacetKind, value: string) {
+    if (kind === 'topic') return selectedTopics.includes(value);
+    if (kind === 'wd_tag') return selectedWdTags.includes(value);
+    return false;
+  }
+
+  function toggleFacetSelection(kind: FacetKind, value: string) {
+    if (!isSelectableFacet(kind)) return;
+    if (kind === 'topic') {
+      selectedTopics = selectedTopics.includes(value)
+        ? selectedTopics.filter((item) => item !== value)
+        : [...selectedTopics, value];
+      return;
+    }
+    selectedWdTags = selectedWdTags.includes(value)
+      ? selectedWdTags.filter((item) => item !== value)
+      : [...selectedWdTags, value];
+  }
+
+  function clearFacetSelection() {
+    selectedTopics = [];
+    selectedWdTags = [];
+  }
+
+  function filterVaultFromSelection() {
+    if (selectedFacetCount <= 0) return;
+    dispatch('filterVault', { topics: selectedTopics, wd_tags: selectedWdTags });
+    uiLog('INFO', 'Stats filter sent to vault', { topics: selectedTopicCount, wd_tags: selectedWdTagCount });
+    clearFacetSelection();
   }
 
   async function selectArtist(id: number) {
@@ -693,8 +736,15 @@
         {:else}
           <div class="chip-cloud">
             {#each visibleItems as item}
-              <button type="button" class="stat-chip" title={`${item.value} (${item.count})`}>
-                <span class="value">{item.value}</span>
+              <button
+                type="button"
+                class="stat-chip"
+                class:selected={isFacetSelected(activeKind, item.value)}
+                aria-pressed={isFacetSelected(activeKind, item.value)}
+                title={`${item.value} (${item.count})`}
+                on:click={() => toggleFacetSelection(activeKind, item.value)}
+              >
+                <span class="value">{isFacetSelected(activeKind, item.value) ? `✓ ${item.value}` : item.value}</span>
                 <span class="chip-count">{item.count}</span>
               </button>
             {/each}
@@ -704,6 +754,16 @@
     </div>
   {/if}
 </div>
+
+{#if selectedFacetCount > 0}
+  <div class="stats-filter-bar">
+    <span>{selectedFacetCount} selected · {selectedTopicCount} topics · {selectedWdTagCount} WD tags</span>
+    <div class="filter-actions">
+      <button type="button" on:click={clearFacetSelection}>Clear</button>
+      <button type="button" class="primary" on:click={filterVaultFromSelection}>Filter Vault</button>
+    </div>
+  </div>
+{/if}
 
 {#if mergeOpen && selectedArtist}
   <div class="modal-backdrop" role="presentation">
@@ -893,6 +953,12 @@
     border-color: rgba(31, 111, 235, 0.75);
   }
 
+  .stat-chip.selected {
+    background: rgba(31, 111, 235, 0.26);
+    border-color: var(--accent-primary);
+    box-shadow: inset 0 0 0 1px rgba(31, 111, 235, 0.45);
+  }
+
   .stats-row {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
@@ -935,6 +1001,39 @@
     text-align: right;
     color: var(--text-muted);
     font-variant-numeric: tabular-nums;
+  }
+
+  .stats-filter-bar {
+    position: fixed;
+    left: 50%;
+    bottom: 42px;
+    transform: translateX(-50%);
+    z-index: 900;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 8px 10px 8px 12px;
+    border: 1px solid var(--border-dim);
+    border-radius: 8px;
+    background: var(--bg-panel);
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.42);
+    color: var(--text-main);
+    font-size: 12px;
+  }
+
+  .filter-actions {
+    display: flex;
+    gap: 8px;
+  }
+
+  .filter-actions button {
+    padding: 6px 10px;
+  }
+
+  .filter-actions .primary {
+    background: var(--accent-primary);
+    border-color: var(--accent-primary);
+    color: white;
   }
 
   .empty-state {

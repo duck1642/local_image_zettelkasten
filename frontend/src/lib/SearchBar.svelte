@@ -6,6 +6,7 @@
   import { log as uiLog } from './logger';
 
   const dispatch = createEventDispatcher();
+  export let externalQuery: { id: string; query: string } | null = null;
   const availableCommands = [
     '/masonry',
     '/grid',
@@ -35,6 +36,11 @@
   let refreshDebounceTimer: number | null = null;
   let measureCanvas: HTMLCanvasElement | null = null;
   let measureContext: CanvasRenderingContext2D | null = null;
+  let appliedExternalQueryId = '';
+
+  $: if (externalQuery && externalQuery.id !== appliedExternalQueryId) {
+    applyExternalQuery(externalQuery.id, externalQuery.query);
+  }
 
   function emitFilters(immediate = false) {
     dispatch('filtersChanged', { filters: activeFilters, immediate });
@@ -164,6 +170,19 @@
     suggestions = [];
     clearDebounce();
     emitFilters(true);
+  }
+
+  async function applyExternalQuery(id: string, query: string) {
+    appliedExternalQueryId = id;
+    searchQuery = String(query || '').trim();
+    showSuggestions = false;
+    suggestions = [];
+    clearDebounce();
+    activeFilters = parseSearchQuery(searchQuery);
+    emitFilters(true);
+    await tick();
+    searchInputEl?.focus();
+    searchInputEl?.setSelectionRange(searchQuery.length, searchQuery.length);
   }
 
   function handleSearchInput() {

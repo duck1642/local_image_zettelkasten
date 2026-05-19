@@ -27,6 +27,7 @@
   import SearchBar from './SearchBar.svelte';
 
   const dispatch = createEventDispatcher();
+  export let filterRequest: { id: string; query: string } | null = null;
 
   let items: VaultItem[] = [];
   let groupedItems: VaultGroup[] = [];
@@ -546,7 +547,7 @@
 <div class="vault-shell">
   <div class="vault-main">
     <header class="top-header">
-      <SearchBar on:filtersChanged={handleFiltersChanged} on:command={handleCommand} />
+      <SearchBar externalQuery={filterRequest} on:filtersChanged={handleFiltersChanged} on:command={handleCommand} />
     </header>
 
     <div class="viewport" on:wheel={handleVaultWheel}>

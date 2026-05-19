@@ -74,6 +74,7 @@ async function installMockVaultApi(
     onReviewAction?: () => Promise<void>;
     onLocalIngestStart?: (payload?: any) => Promise<void> | void;
     onMaintenanceAction?: (action: 'auth' | 'metadata' | 'review') => Promise<void> | void;
+    onItemsRequest?: (url: URL) => Promise<void> | void;
     metadataRebuildResponse?: unknown;
     metadataStatusSequence?: unknown[];
   } = {}
@@ -150,6 +151,7 @@ async function installMockVaultApi(
       return fulfillJson(route, item);
     }
 
+    await options.onItemsRequest?.(url);
     const limit = Math.max(1, Math.min(Number(url.searchParams.get('limit') || 50), 100000));
     return fulfillJson(route, {
       items: items.slice(0, limit),
@@ -418,6 +420,7 @@ async function openMockVault(
     onReviewAction?: () => Promise<void>;
     onLocalIngestStart?: (payload?: any) => Promise<void> | void;
     onMaintenanceAction?: (action: 'auth' | 'metadata' | 'review') => Promise<void> | void;
+    onItemsRequest?: (url: URL) => Promise<void> | void;
   } = {}
 ) {
   await installMockVaultApi(page, options);
@@ -860,4 +863,40 @@ test('stats letter filter applies to artists and tag chips but not platforms', a
 
   await page.getByRole('button', { name: 'Platforms' }).click();
   await expect(page.locator('.letter-tabs')).toHaveCount(0);
+});
+
+test('stats selected topics and wd tags filter the vault', async ({ page }) => {
+  const itemRequests: URL[] = [];
+  await openMockVault(page, {
+    onItemsRequest: (url) => {
+      itemRequests.push(new URL(url.toString()));
+    }
+  });
+  await page.getByRole('button', { name: /Stats/ }).click();
+
+  await page.getByRole('button', { name: 'WD Tags' }).click();
+  await page.locator('.stat-chip').filter({ hasText: 'mock_tag' }).click();
+  await expect(page.locator('.stats-filter-bar')).toContainText('1 selected');
+  await expect(page.locator('.stat-chip.selected')).toContainText('mock_tag');
+
+  await page.getByRole('button', { name: 'Topics' }).click();
+  await page.locator('.stat-chip').filter({ hasText: 'mock-topic' }).click();
+  await expect(page.locator('.stats-filter-bar')).toContainText('2 selected');
+  await expect(page.locator('.stats-filter-bar')).toContainText('1 topics');
+  await expect(page.locator('.stats-filter-bar')).toContainText('1 WD tags');
+
+  await page.getByRole('button', { name: 'Alphabetical' }).click();
+  await page.locator('.letter-tabs').getByRole('button', { name: 'M' }).click();
+  await expect(page.locator('.stats-filter-bar')).toContainText('2 selected');
+
+  await page.getByRole('button', { name: 'Filter Vault' }).click();
+  await expect(page.getByRole('button', { name: 'Vault', exact: true })).toHaveClass(/active/);
+  await expect(page.getByTestId('vault-search-input')).toHaveValue('t:mock-topic; #mock_tag;');
+  await expect(page.locator('.stats-filter-bar')).toHaveCount(0);
+
+  const filteredRequest = itemRequests.find((url) =>
+    url.searchParams.getAll('topic').includes('mock-topic') &&
+    url.searchParams.getAll('wd_tag').includes('mock_tag')
+  );
+  expect(filteredRequest).toBeTruthy();
 });
