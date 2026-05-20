@@ -47,6 +47,8 @@ coverage.xml
 *.py,cover
 .hypothesis/
 .pytest_cache/
+/.pytest-*/
+tests/.pytest-*/
 tests/.pytest-tmp/
 tests/.npm-cache/
 tests/.drivers/
@@ -189,6 +191,7 @@ cython_debug/
 # docs/
 data/
 /logs/
+config/logs/
 secrets/
 backups/
 .vscode/
@@ -214,3 +217,5 @@ test_videos/
 !tests/fixtures/mock-vault/config.yaml
 !tests/fixtures/mock-vault/data/
 !tests/fixtures/mock-vault/data/**
+config/workspaces.yaml
+config/workspaces.yaml

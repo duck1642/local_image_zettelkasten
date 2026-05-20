@@ -19,6 +19,8 @@ if _CONFIG_PATH_ENV:
     _config_path_candidate = Path(_CONFIG_PATH_ENV).expanduser()
     CONFIG_PATH = (_config_path_candidate if _config_path_candidate.is_absolute() else PROJECT_ROOT / _config_path_candidate).resolve()
     CONFIG_ROOT = CONFIG_PATH.parent
+    if CONFIG_PATH.parent == PROJECT_ROOT / "config":
+        CONFIG_ROOT = PROJECT_ROOT
 else:
     try:
         from workspaces import active_workspace_config_path
