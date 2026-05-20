@@ -20,6 +20,7 @@ function cloneConfig(value: any) {
 
 function normalizeConfig(value: any) {
   const next = cloneConfig(value);
+  const runtime = next._runtime;
   if (!next.ui) next.ui = {};
   if (!next.processing) next.processing = {};
   if (!next.tagging) next.tagging = {};
@@ -33,6 +34,7 @@ function normalizeConfig(value: any) {
   next.tagging.device = String(next.tagging.device || 'auto');
   next.tagging.threshold = Number.isFinite(Number(next.tagging.threshold)) ? Number(next.tagging.threshold) : 0.35;
   next.tagging.max_tags = Number.isFinite(Number(next.tagging.max_tags)) ? Number(next.tagging.max_tags) : 30;
+  if (runtime) next._runtime = runtime;
   return next;
 }
 

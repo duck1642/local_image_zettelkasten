@@ -25,6 +25,7 @@ class VPTreeSearcher(BaseSearcher):
         self.pending_items = []
         self.dirty = False
         self.rebuild_count = 0
+        self.mutation_version = 0
 
     def add(self, item_hash: str, signature: Any):
 
@@ -42,6 +43,8 @@ class VPTreeSearcher(BaseSearcher):
         self.pending_items = [item for item in self.pending_items if item[0] not in item_hashes]
         removed = (before_indexed - len(self.indexed_items)) + (before_pending - len(self.pending_items))
 
+        if removed:
+            self.mutation_version += 1
         if before_indexed != len(self.indexed_items):
             self.tree = None
             self.dirty = bool(self.indexed_items or self.pending_items)
@@ -75,6 +78,7 @@ class VPTreeSearcher(BaseSearcher):
             "pending_items": list(self.pending_items),
             "dirty": self.dirty,
             "rebuild_count": self.rebuild_count,
+            "mutation_version": self.mutation_version,
         }
 
     def build_replacement(self, plan: dict):
@@ -104,17 +108,28 @@ class VPTreeSearcher(BaseSearcher):
 
     def apply_replacement(self, plan: dict, replacement: dict):
         merged = int(replacement.get("merged") or 0)
+        planned_pending_hashes = {item[0] for item in plan.get("pending_items") or []}
+        current_hashes = {item[0] for item in self.indexed_items}
+        current_hashes.update(item[0] for item in self.pending_items)
         if merged:
-            self.pending_items = self.pending_items[merged:]
-        self.indexed_items = list(replacement.get("indexed_items") or [])
-        self.tree = replacement.get("tree")
-        self.dirty = bool(self.pending_items)
+            self.pending_items = [item for item in self.pending_items if item[0] not in planned_pending_hashes]
+        replacement_items = list(replacement.get("indexed_items") or [])
+        stale = self.mutation_version != int(plan.get("mutation_version") or 0)
+        if stale:
+            self.indexed_items = [item for item in replacement_items if item[0] in current_hashes]
+            self.tree = None
+            self.dirty = bool(self.indexed_items or self.pending_items)
+        else:
+            self.indexed_items = replacement_items
+            self.tree = replacement.get("tree")
+            self.dirty = bool(self.pending_items)
         if replacement.get("rebuilt"):
             self.rebuild_count += 1
         return {
             "indexed": len(self.indexed_items),
             "merged": merged,
             "rebuilt": bool(replacement.get("rebuilt")),
+            "stale": stale,
         }
 
     def snapshot(self) -> dict:

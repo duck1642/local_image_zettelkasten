@@ -10,6 +10,7 @@ import re
 import runpy
 import shutil
 import sys
+import tempfile
 import threading
 import time
 import types
@@ -32,7 +33,7 @@ def fresh_backend(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *module_names
     if str(BACKEND) not in sys.path:
         sys.path.insert(0, str(BACKEND))
     for name in list(sys.modules):
-        if name in {"utils", "web_api", "queue_service", "md_generator", "metadata_index", "processor", "external_ingestion", "thumbnails", "fingerprint", "artists", "platforms", "review_cache"} or name.startswith(("logger", "db.", "tagging", "downloaders")):
+        if name in {"utils", "web_api", "queue_service", "md_generator", "metadata_index", "processor", "external_ingestion", "thumbnails", "fingerprint", "artists", "platforms", "review_cache", "topics"} or name.startswith(("logger", "db.", "tagging", "downloaders")):
             del sys.modules[name]
     return [importlib.import_module(name) for name in module_names]
 
@@ -69,6 +70,10 @@ def load_maintenance_tool(name: str):
     return module
 
 
+def load_maintenance_script(name: str):
+    return load_maintenance_tool(name)
+
+
 def write_compact_note(utils, conn, item_hash: str, text: str):
     storage_id = storage_id_for(conn, item_hash)
     note_path = utils.note_path_for(item_hash, storage_id)
@@ -86,7 +91,122 @@ def test_config_override_resolves_paths_inside_mock_vault(monkeypatch, tmp_path)
     assert utils.LOCAL_INGEST_DIR == tmp_path / "mock-vault" / "data" / "local_ingest"
     assert utils.ONLINE_INGEST_DIR == tmp_path / "mock-vault" / "data" / "online_ingest"
     assert utils.THUMBNAILS_DIR == tmp_path / "mock-vault" / "data" / "ui_cache" / "thumbnails"
+    assert utils.TOPICS_DIR == tmp_path / "mock-vault" / "data" / "topics"
     assert str(ROOT / "data") not in str(utils.VAULT_DIR)
+
+
+def test_workspace_registry_resolves_active_and_env_override(monkeypatch, tmp_path):
+    monkeypatch.delenv("LMZ_CONFIG_PATH", raising=False)
+    if str(BACKEND) not in sys.path:
+        sys.path.insert(0, str(BACKEND))
+    for name in ["utils", "workspaces"]:
+        sys.modules.pop(name, None)
+    workspaces = importlib.import_module("workspaces")
+    registry_path = tmp_path / "workspaces.yaml"
+    custom_root = tmp_path / "custom-workspace"
+    custom_root.mkdir()
+    custom_config = custom_root / "config.yaml"
+    shutil.copy2(FIXTURE / "config.yaml", custom_config)
+    monkeypatch.setattr(workspaces, "REGISTRY_PATH", registry_path)
+    workspaces.save_workspace_registry({
+        "active": "custom",
+        "workspaces": {
+            "default": {"name": "Default", "config_path": str(FIXTURE / "config.yaml")},
+            "custom": {"name": "Custom", "config_path": str(custom_config)},
+        },
+    })
+
+    utils = importlib.import_module("utils")
+    assert utils.CONFIG_PATH == custom_config
+    assert utils.CONFIG_ROOT == custom_root
+
+    monkeypatch.setenv("LMZ_CONFIG_PATH", str(FIXTURE / "config.yaml"))
+    sys.modules.pop("utils", None)
+    utils = importlib.import_module("utils")
+    assert utils.CONFIG_PATH == FIXTURE / "config.yaml"
+
+
+def test_obsidian_workspace_setup_creates_lmz_layout_and_resolves_paths(monkeypatch, tmp_path):
+    setup_tool = load_maintenance_script("setup_obsidian_workspace")
+    obsidian_vault = (Path(tempfile.gettempdir()) / f"lmz-obsidian-test-{time.time_ns()}").resolve()
+
+    payload = setup_tool.setup_obsidian_workspace(obsidian_vault)
+    config_path = Path(payload["config_path"])
+
+    assert config_path == obsidian_vault / "lmz" / "config.yaml"
+    for relative in [
+        "data/topics",
+        "data/vault/notes",
+        "data/vault/assets",
+        "data/db",
+        "data/logs",
+        "data/review",
+        "data/wd-tags",
+    ]:
+        assert (obsidian_vault / "lmz" / relative).exists()
+
+    monkeypatch.setenv("LMZ_CONFIG_PATH", str(config_path))
+    if str(BACKEND) not in sys.path:
+        sys.path.insert(0, str(BACKEND))
+    for name in list(sys.modules):
+        if name in {"utils", "db.sqlite_operator", "web_api", "topics"} or name.startswith(("logger", "db.", "tagging")):
+            del sys.modules[name]
+    utils = importlib.import_module("utils")
+    sqlite_operator = importlib.import_module("db.sqlite_operator")
+    web_api = importlib.import_module("web_api")
+
+    assert utils.CONFIG_ROOT == obsidian_vault / "lmz"
+    assert utils.TOPICS_DIR == obsidian_vault / "lmz" / "data" / "topics"
+    assert utils.VAULT_DIR == obsidian_vault / "lmz" / "data" / "vault"
+    utils.validate_config_schema(utils.get_config())
+    conn = sqlite_operator.init_database()
+    item_hash = "97" * 32
+    storage_id = sqlite_operator.allocate_storage_id(conn)
+    conn.execute(
+        """
+        INSERT INTO items(hash, storage_id, original_filename, file_extension, mime_type, size_bytes, date_added, source_url, source_url_norm, platform, source_artist, phash)
+        VALUES (?, ?, ?, '.jpg', 'image/jpeg', 10, '2026-01-01 00:00:00', '', '', 'local', 'artist', '')
+        """,
+        (item_hash, storage_id, f"{item_hash}.jpg"),
+    )
+    conn.commit()
+    conn.close()
+
+    detail = web_api._update_item_sync(item_hash, web_api.ItemUpdate(topics=["obsidian topic"]))
+    assert detail["topics"] == ["obsidian_topic"]
+    assert (obsidian_vault / "lmz" / "data" / "topics" / "obsidian_topic.md").exists()
+    assert utils.note_path_for(item_hash, storage_id).exists()
+    runtime = web_api._load_public_config_sync()["_runtime"]
+    assert runtime["workspace_mode"] == "obsidian"
+    shutil.rmtree(obsidian_vault, ignore_errors=True)
+
+
+def test_obsidian_workspace_setup_refuses_runtime_paths(tmp_path):
+    setup_tool = load_maintenance_script("setup_obsidian_workspace")
+    for dangerous in [ROOT, ROOT / "data", ROOT / "config", ROOT / "logs", ROOT / "secrets"]:
+        with pytest.raises(ValueError):
+            setup_tool.setup_obsidian_workspace(dangerous)
+
+
+def test_workspace_api_lists_registers_and_sets_active(monkeypatch, tmp_path):
+    web_api, workspaces = fresh_backend(monkeypatch, tmp_path, "web_api", "workspaces")
+    registry_path = tmp_path / "workspaces.yaml"
+    monkeypatch.setattr(workspaces, "REGISTRY_PATH", registry_path)
+    obsidian_vault = (Path(tempfile.gettempdir()) / f"lmz-obsidian-api-test-{time.time_ns()}").resolve()
+    try:
+        initial = web_api._get_workspaces_sync()
+        assert initial["active"] == "default"
+        assert initial["items"][0]["id"] == "default"
+
+        added = web_api._add_obsidian_workspace_sync({"path": str(obsidian_vault), "name": "API Obsidian"})
+        assert any(item["name"] == "API Obsidian" for item in added["items"])
+
+        workspace_id = next(item["id"] for item in added["items"] if item["name"] == "API Obsidian")
+        active = web_api._set_workspace_active_sync({"id": workspace_id})
+        assert active["restart_required"] is True
+        assert active["active"] == workspace_id
+    finally:
+        shutil.rmtree(obsidian_vault, ignore_errors=True)
 
 
 def test_get_config_cache_hits_and_returns_defensive_copy(monkeypatch, tmp_path):
@@ -838,7 +958,7 @@ def test_review_replace_preserves_old_sqlite_identity_and_manual_indexed_metadat
     assert result["status"] == "success"
     assert new_data["artist"] == "Old DB Artist"
     assert new_data["date_added"] == "2026-01-01 00:00:00"
-    assert new_data["topics"] == ["preserved"]
+    assert new_data["topics"] == ["[preserved](../../../topics/preserved.md)"]
     assert new_data["wd_tags"] == []
 
 
@@ -1711,6 +1831,128 @@ def test_item_details_include_topic_and_wd_counts(monkeypatch, tmp_path):
     assert detail["wd_tag_counts"]["Shared Tag"] == 2
 
 
+def test_patch_item_updates_topics_and_wd_frontmatter_for_one_item(monkeypatch, tmp_path):
+    utils, sqlite_operator, metadata_index, web_api = fresh_backend(
+        monkeypatch,
+        tmp_path,
+        "utils",
+        "db.sqlite_operator",
+        "metadata_index",
+        "web_api",
+    )
+    item_a = "93" * 32
+    item_b = "94" * 32
+    conn = insert_mock_item(sqlite_operator, item_a)
+    write_compact_note(
+        utils,
+        conn,
+        item_a,
+        "---\ntopics:\n  - keep\nwd_rating: safe\nwd_character_tags:\n  - wrong character\nwd_tags:\n  - promote me\n  - remove me\n---\n",
+    )
+    metadata_index.reindex_item_metadata(conn, item_a)
+    conn.commit()
+    conn.close()
+
+    conn = insert_mock_item(sqlite_operator, item_b)
+    write_compact_note(
+        utils,
+        conn,
+        item_b,
+        "---\ntopics:\n  - keep\nwd_rating: safe\nwd_character_tags:\n  - wrong character\nwd_tags:\n  - promote me\n  - remove me\n---\n",
+    )
+    metadata_index.reindex_item_metadata(conn, item_b)
+    conn.commit()
+    conn.close()
+
+    result = web_api._update_item_sync(
+        item_a,
+        web_api.ItemUpdate(
+            topics=["keep", "promote me"],
+            wd_rating="",
+            wd_character_tags=[],
+            wd_tags=["promote me"],
+        ),
+    )
+
+    conn = sqlite_operator.init_database()
+    storage_a = storage_id_for(conn, item_a)
+    storage_b = storage_id_for(conn, item_b)
+    data_a = frontmatter_from_markdown(utils.note_path_for(item_a, storage_a).read_text(encoding="utf-8"))
+    data_b = frontmatter_from_markdown(utils.note_path_for(item_b, storage_b).read_text(encoding="utf-8"))
+    rows_a = conn.execute("SELECT tag_type, tag FROM item_wd_tags WHERE item_hash = ? ORDER BY tag_type, tag", (item_a,)).fetchall()
+    rows_b = conn.execute("SELECT tag_type, tag FROM item_wd_tags WHERE item_hash = ? ORDER BY tag_type, tag", (item_b,)).fetchall()
+    conn.close()
+
+    assert result["topics"] == ["keep", "promote_me"]
+    assert result["wd_tags"]["rating"] == "None"
+    assert result["wd_tags"]["characters"] == []
+    assert result["wd_tags"]["general"] == ["promote me"]
+    assert data_a["topics"][0].startswith("[keep](")
+    assert data_a["topics"][1].startswith("[promote_me](")
+    assert data_a["wd_rating"] == ""
+    assert data_a["wd_character_tags"] == []
+    assert data_a["wd_tags"] == ["promote me"]
+    assert data_b["topics"] == ["keep"]
+    assert data_b["wd_rating"] == "safe"
+    assert data_b["wd_character_tags"] == ["wrong character"]
+    assert data_b["wd_tags"] == ["promote me", "remove me"]
+    assert rows_a == [("general", "promote me")]
+    assert rows_b == [("character", "wrong character"), ("general", "promote me"), ("general", "remove me"), ("rating", "safe")]
+
+
+def test_topic_file_creation_preserves_body_and_item_markdown_uses_links(monkeypatch, tmp_path):
+    utils, sqlite_operator, web_api, topics = fresh_backend(monkeypatch, tmp_path, "utils", "db.sqlite_operator", "web_api", "topics")
+    item_hash = "95" * 32
+    conn = insert_mock_item(sqlite_operator, item_hash)
+    storage_id = storage_id_for(conn, item_hash)
+    note_path = utils.note_path_for(item_hash, storage_id)
+
+    existing_topic = utils.TOPICS_DIR / "syntax.md"
+    existing_topic.parent.mkdir(parents=True, exist_ok=True)
+    existing_topic.write_text("---\ncreated_at: old\n---\n\npersonal notes stay\n", encoding="utf-8")
+
+    result = web_api._update_item_sync(
+        item_hash,
+        web_api.ItemUpdate(topics=["syntax", "color theory"]),
+    )
+    data = frontmatter_from_markdown(note_path.read_text(encoding="utf-8"))
+
+    assert result["topics"] == ["color_theory", "syntax"]
+    assert data["topics"][0].startswith("[syntax](")
+    assert data["topics"][1].startswith("[color_theory](")
+    assert "personal notes stay" in existing_topic.read_text(encoding="utf-8")
+    assert (utils.TOPICS_DIR / "color_theory.md").exists()
+
+    parsed = topics.parse_topic_values(data["topics"], note_path)
+    assert [entry["label"] for entry in parsed] == ["syntax", "color_theory"]
+    assert [entry["topic_rel"] for entry in parsed] == ["syntax.md", "color_theory.md"]
+    conn.close()
+
+
+def test_metadata_index_parses_linked_and_legacy_topics(monkeypatch, tmp_path):
+    utils, sqlite_operator, metadata_index, topics = fresh_backend(monkeypatch, tmp_path, "utils", "db.sqlite_operator", "metadata_index", "topics")
+    item_hash = "96" * 32
+    conn = insert_mock_item(sqlite_operator, item_hash)
+    storage_id = storage_id_for(conn, item_hash)
+    note_path = utils.note_path_for(item_hash, storage_id)
+    linked = topics.topic_markdown_link("syntax", note_path)
+    note_path.parent.mkdir(parents=True, exist_ok=True)
+    note_path.write_text(f"---\ntopics:\n  - '{linked}'\n  - legacy topic\n---\n", encoding="utf-8")
+
+    metadata_index.reindex_item_metadata(conn, item_hash)
+
+    rows = conn.execute(
+        "SELECT topic, topic_norm, topic_rel, topic_key FROM item_topics WHERE item_hash = ? ORDER BY topic",
+        (item_hash,),
+    ).fetchall()
+    assert rows == [
+        ("legacy topic", "legacy topic", "", "plain:legacy topic"),
+        ("syntax", "syntax", "syntax.md", "rel:syntax.md"),
+    ]
+    assert metadata_index.metadata_facets(conn, "topic", "synt", 10) == [{"value": "syntax", "count": 1}]
+    conn.close()
+
+
 def test_metadata_facets_no_match_uses_built_count_table_without_scan(monkeypatch, tmp_path):
     metadata_index, = fresh_backend(monkeypatch, tmp_path, "metadata_index")
 
@@ -2214,6 +2456,35 @@ def test_search_manager_vp_delete_defers_rebuild_outside_remove(monkeypatch, tmp
     assert result["video"]["deferred"] is True
     assert scheduled == ["batch_remove"]
     assert manager.query_video(None, sig, ai_threshold=0.01) == []
+
+
+def test_vp_rebuild_apply_does_not_resurrect_concurrent_delete(monkeypatch, tmp_path):
+    search_manager_module, = fresh_backend(monkeypatch, tmp_path, "db.search_manager")
+    tree = search_manager_module.VPTreeSearcher(search_manager_module._cosine_dist)
+
+    import numpy as np
+
+    sig_x = np.array([1.0, 0.0], dtype=np.float32).tobytes()
+    sig_y = np.array([0.0, 1.0], dtype=np.float32).tobytes()
+    tree.add("x", sig_x)
+    tree.add("y", sig_y)
+    tree.build_index()
+    tree.dirty = True
+
+    plan = tree.rebuild_plan()
+    replacement = tree.build_replacement(plan)
+
+    removed = tree.remove_hashes({"y"})
+    assert removed["removed"] == 1
+
+    applied = tree.apply_replacement(plan, replacement)
+    assert applied["stale"] is True
+    assert [item_hash for item_hash, _ in tree.indexed_items] == ["x"]
+    assert tree.query(sig_y, 0.01) == []
+
+    tree.build_index()
+    assert tree.query(sig_x, 0.01) == [("x", 0.0)]
+    assert tree.query(sig_y, 0.01) == []
 
 
 def test_find_visual_duplicate_stops_tile_queries_after_first_match(monkeypatch, tmp_path):

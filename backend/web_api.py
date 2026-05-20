@@ -26,7 +26,7 @@ from utils import (
 )
 from processor import process_file
 from logger import log_auth, log_ingest_audit, log_ingest_local, log_review, log_svelte, log_system, RAW_LOGS_DIR, STRUCTURED_LOGS_DIR
-from md_generator import MANUAL_FRONTMATTER_FIELDS, load_note_frontmatter, load_note_topics, load_note_wd_tags, generate_markdown
+from md_generator import MANUAL_FRONTMATTER_FIELDS, load_note_frontmatter, load_note_topics, load_note_wd_tags, generate_markdown, normalize_topic_list
 from metadata_index import (
     item_core_facet_values,
     indexed_item_metadata,
@@ -1414,6 +1414,9 @@ class ItemUpdate(BaseModel):
     source_url: str = None
     platform: str = None
     topics: list[str] = None
+    wd_rating: str = None
+    wd_character_tags: list[str] = None
+    wd_tags: list[str] = None
 
 class BulkDeleteRequest(BaseModel):
     hashes: list[str]
@@ -1440,7 +1443,19 @@ def _update_item_sync(item_hash: str, update: ItemUpdate):
         if update.platform is not None:
             cursor.execute("UPDATE items SET platform = ? WHERE hash = ?", (resolve_platform_label(conn, update.platform), item_hash))
         if update.topics is not None:
-            manual_overrides["topics"] = update.topics
+            if not isinstance(update.topics, list):
+                raise HTTPException(status_code=400, detail="topics must be a list")
+            manual_overrides["topics"] = normalize_topic_list(update.topics)
+        if update.wd_rating is not None:
+            manual_overrides["wd_rating"] = str(update.wd_rating or "").strip()
+        if update.wd_character_tags is not None:
+            if not isinstance(update.wd_character_tags, list):
+                raise HTTPException(status_code=400, detail="wd_character_tags must be a list")
+            manual_overrides["wd_character_tags"] = normalize_topic_list(update.wd_character_tags)
+        if update.wd_tags is not None:
+            if not isinstance(update.wd_tags, list):
+                raise HTTPException(status_code=400, detail="wd_tags must be a list")
+            manual_overrides["wd_tags"] = normalize_topic_list(update.wd_tags)
         
         md_content = generate_markdown(conn, item_hash, topics_override=update.topics, manual_overrides=manual_overrides)
         if md_content:
@@ -1455,7 +1470,8 @@ def _update_item_sync(item_hash: str, update: ItemUpdate):
             refresh_metadata_facet_counts_for_values(conn, previous_core_facets | current_core_facets)
             conn.commit()
             
-        return {"status": "success"}
+        row = cursor.execute("SELECT hash, file_extension, mime_type, original_filename, source_url, date_added, platform, source_artist, width, height, storage_id FROM items WHERE hash = ?", (item_hash,)).fetchone()
+        return _get_item_details(item_hash, row, conn) if row else {"status": "success"}
     except Exception:
         conn.rollback()
         raise
@@ -2641,14 +2657,34 @@ def _strip_config_secrets(config: dict) -> dict:
     return safe_config
 
 
+def _config_runtime_info() -> dict:
+    from utils import CONFIG_PATH, CONFIG_ROOT, TOPICS_DIR
+    from workspaces import REGISTRY_PATH
+
+    mode = "obsidian" if CONFIG_ROOT.name.casefold() == "lmz" and CONFIG_ROOT.parent != CONFIG_ROOT else "default"
+    return {
+        "config_path": str(CONFIG_PATH),
+        "config_root": str(CONFIG_ROOT),
+        "topic_root": str(TOPICS_DIR),
+        "workspace_mode": mode,
+        "workspace_label": "Obsidian workspace" if mode == "obsidian" else "Default workspace",
+        "workspace_registry": str(REGISTRY_PATH),
+        "env_override": bool(os.environ.get("LMZ_CONFIG_PATH")),
+    }
+
+
 def _load_public_config_sync() -> dict:
     from utils import CONFIG_PATH
     import yaml
     if not CONFIG_PATH.exists():
-        return _strip_config_secrets(get_config())
+        config = _strip_config_secrets(get_config())
+        config["_runtime"] = _config_runtime_info()
+        return config
     with open(CONFIG_PATH, "r", encoding="utf-8") as handle:
         config = yaml.safe_load(handle) or {}
-    return _strip_config_secrets(config)
+    config = _strip_config_secrets(config)
+    config["_runtime"] = _config_runtime_info()
+    return config
 
 
 @app.get("/api/config")
@@ -2663,9 +2699,67 @@ def _update_app_config_sync(new_config: dict):
     from utils import CONFIG_PATH
     import yaml
     safe_config = _strip_config_secrets(new_config)
+    safe_config.pop("_runtime", None)
     atomic_write_text(CONFIG_PATH, yaml.dump(safe_config, default_flow_style=False, allow_unicode=True))
     invalidate_config_cache()
     return {"status": "success"}
+
+
+@app.get("/api/workspaces")
+async def get_workspaces():
+    return await asyncio.to_thread(_get_workspaces_sync)
+
+
+def _get_workspaces_sync():
+    from workspaces import load_workspace_registry, workspace_list
+
+    return {"active": load_workspace_registry()["active"], "items": workspace_list()}
+
+
+@app.post("/api/workspaces/active")
+async def set_workspace_active(body: dict):
+    return await asyncio.to_thread(_set_workspace_active_sync, body)
+
+
+def _set_workspace_active_sync(body: dict):
+    from workspaces import set_active_workspace, workspace_list
+
+    workspace_id = str((body or {}).get("id") or "").strip()
+    if not workspace_id:
+        raise HTTPException(status_code=400, detail="workspace id is required")
+    try:
+        registry = set_active_workspace(workspace_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"status": "success", "active": registry["active"], "restart_required": True, "items": workspace_list()}
+
+
+@app.post("/api/workspaces/obsidian")
+async def add_obsidian_workspace(body: dict):
+    return await asyncio.to_thread(_add_obsidian_workspace_sync, body)
+
+
+def _add_obsidian_workspace_sync(body: dict):
+    from tools.maintenance.setup_obsidian_workspace import setup_obsidian_workspace
+    from workspaces import register_workspace, workspace_list
+
+    vault_path = str((body or {}).get("path") or "").strip()
+    name = str((body or {}).get("name") or "Obsidian Workspace").strip() or "Obsidian Workspace"
+    set_active = bool((body or {}).get("set_active"))
+    if not vault_path:
+        raise HTTPException(status_code=400, detail="Obsidian vault path is required")
+    try:
+        payload = setup_obsidian_workspace(vault_path)
+        registry = register_workspace(name, payload["config_path"], set_active=set_active)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {
+        "status": "success",
+        "workspace": payload,
+        "active": registry["active"],
+        "restart_required": set_active,
+        "items": workspace_list(),
+    }
 
 @app.get("/")
 async def root(): return {"status": "LMZ API Running"}

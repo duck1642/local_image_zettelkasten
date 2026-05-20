@@ -9,6 +9,7 @@ import yaml
 
 from logger import log_system
 from md_generator import normalize_topic_list
+from topics import parse_topic_values
 from tagging import load_tag_cache
 from utils import NOTES_DIR, WD_TAGS_DIR, note_path_for, wd_tag_cache_path_for, utc_now_str
 from artists import backfill_artists_from_items
@@ -32,6 +33,7 @@ WD_FRONTMATTER_FIELDS = ("wd_rating", "wd_character_tags", "wd_tags")
 METADATA_SECONDARY_INDEXES = {
     "idx_item_topics_norm": "CREATE INDEX IF NOT EXISTS idx_item_topics_norm ON item_topics(topic_norm)",
     "idx_item_topics_hash": "CREATE INDEX IF NOT EXISTS idx_item_topics_hash ON item_topics(item_hash)",
+    "idx_item_topics_key": "CREATE INDEX IF NOT EXISTS idx_item_topics_key ON item_topics(topic_key)",
     "idx_item_wd_tags_norm": "CREATE INDEX IF NOT EXISTS idx_item_wd_tags_norm ON item_wd_tags(tag_norm)",
     "idx_item_wd_tags_hash": "CREATE INDEX IF NOT EXISTS idx_item_wd_tags_hash ON item_wd_tags(item_hash)",
     "idx_item_metadata_status": "CREATE INDEX IF NOT EXISTS idx_item_metadata_status ON item_metadata_files(status)",
@@ -94,10 +96,18 @@ def ensure_metadata_schema(conn: sqlite3.Connection):
             item_hash TEXT NOT NULL,
             topic TEXT NOT NULL,
             topic_norm TEXT NOT NULL,
+            topic_rel TEXT NOT NULL DEFAULT '',
+            topic_key TEXT NOT NULL DEFAULT '',
             PRIMARY KEY(item_hash, topic_norm),
             FOREIGN KEY(item_hash) REFERENCES items(hash) ON DELETE CASCADE
         )
     """)
+    topic_columns = {row[1] for row in cursor.execute("PRAGMA table_info(item_topics)").fetchall()}
+    if "topic_rel" not in topic_columns:
+        cursor.execute("ALTER TABLE item_topics ADD COLUMN topic_rel TEXT NOT NULL DEFAULT ''")
+    if "topic_key" not in topic_columns:
+        cursor.execute("ALTER TABLE item_topics ADD COLUMN topic_key TEXT NOT NULL DEFAULT ''")
+        cursor.execute("UPDATE item_topics SET topic_key = 'plain:' || topic_norm WHERE topic_key = ''")
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS item_wd_tags (
             item_hash TEXT NOT NULL,
@@ -682,7 +692,7 @@ def reindex_item_metadata(conn: sqlite3.Connection, item_hash: str, update_facet
     previous_facet_values = _item_facet_values(conn, item_hash) if update_facets else set()
     sigs = _current_sigs(item_hash, storage_id)
     frontmatter, error = _load_frontmatter(item_hash, storage_id)
-    topics = normalize_topic_list(frontmatter.get("topics")) if not error else []
+    topics = parse_topic_values(frontmatter.get("topics"), note_path_for(item_hash, storage_id)) if not error else []
     wd_payload = _wd_payload(item_hash, storage_id, frontmatter) if not error else {"status": "missing"}
     wd_rows = _wd_rows(wd_payload)
     status = "error" if error else "ok"
@@ -691,11 +701,12 @@ def reindex_item_metadata(conn: sqlite3.Connection, item_hash: str, update_facet
     conn.execute("DELETE FROM item_wd_tags WHERE item_hash = ?", (item_hash,))
     topic_rows = []
     for topic in topics:
-        topic_norm = _norm(topic)
+        topic_label = topic["label"]
+        topic_norm = _norm(topic_label)
         if topic_norm:
-            topic_rows.append((item_hash, topic, topic_norm))
+            topic_rows.append((item_hash, topic_label, topic_norm, topic["topic_rel"], topic["topic_key"]))
     conn.executemany(
-        "INSERT OR IGNORE INTO item_topics(item_hash, topic, topic_norm) VALUES (?, ?, ?)",
+        "INSERT OR IGNORE INTO item_topics(item_hash, topic, topic_norm, topic_rel, topic_key) VALUES (?, ?, ?, ?, ?)",
         topic_rows,
     )
     wd_insert_rows = []
@@ -1037,7 +1048,7 @@ def _metadata_payload(conn: sqlite3.Connection, item_hash: str, storage_id: str,
     frontmatter, error = _load_frontmatter(item_hash, storage_id, stages=stages)
     _add_stage(stages, "frontmatter_load_parse", stage_started)
     stage_started = time.perf_counter()
-    topics = normalize_topic_list(frontmatter.get("topics")) if not error else []
+    topics = parse_topic_values(frontmatter.get("topics"), note_path_for(item_hash, storage_id)) if not error else []
     _add_stage(stages, "topic_normalize", stage_started)
     stage_started = time.perf_counter()
     wd_payload = _wd_payload(item_hash, storage_id, frontmatter) if not error else {"status": "missing"}
@@ -1151,7 +1162,7 @@ def rebuild_all_metadata(
             if topic_rows:
                 sub_started = time.perf_counter()
                 conn.executemany(
-                    "INSERT INTO item_topics(item_hash, topic, topic_norm) VALUES (?, ?, ?)",
+                    "INSERT INTO item_topics(item_hash, topic, topic_norm, topic_rel, topic_key) VALUES (?, ?, ?, ?, ?)",
                     topic_rows,
                 )
                 stages["topic_inserts"] += (time.perf_counter() - sub_started) * 1000
@@ -1182,10 +1193,11 @@ def rebuild_all_metadata(
             stage_started = time.perf_counter()
             seen_topics: set[str] = set()
             for topic in payload["topics"]:
-                topic_norm = _norm(topic)
+                topic_label = topic["label"]
+                topic_norm = _norm(topic_label)
                 if topic_norm and topic_norm not in seen_topics:
                     seen_topics.add(topic_norm)
-                    topic_rows.append((item_hash, topic, topic_norm))
+                    topic_rows.append((item_hash, topic_label, topic_norm, topic["topic_rel"], topic["topic_key"]))
             seen_wd: set[tuple[str, str]] = set()
             for tag_type, tag in payload["wd_rows"]:
                 tag_norm = _norm(tag)

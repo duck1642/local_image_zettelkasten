@@ -4,6 +4,7 @@ import yaml
 from datetime import datetime
 
 from tagging import wd_frontmatter_fields
+from topics import format_topics_for_note
 from utils import note_path_for, require_storage_id, storage_shard_for_hash, utc_now_str
 
 MANUAL_FRONTMATTER_FIELDS = (
@@ -43,6 +44,7 @@ def generate_markdown(conn: sqlite3.Connection, file_hash: str, asset_rel_path: 
     original_filename, mime_type, file_extension, source_url, platform, source_artist, date_added, phash, storage_id = row
 
     storage_id = require_storage_id(storage_id)
+    note_path = note_path_for(file_hash, storage_id)
     existing_frontmatter = load_note_frontmatter(file_hash, storage_id)
     date_added_str = _format_date_added(date_added)
 
@@ -63,7 +65,7 @@ def generate_markdown(conn: sqlite3.Connection, file_hash: str, asset_rel_path: 
         "platform": platform or "",
         "artist": source_artist or "",
         "phash": phash or "",
-        "topics": topics_override if topics_override is not None else load_note_topics(file_hash, storage_id),
+        "topics": format_topics_for_note(topics_override, note_path) if topics_override is not None else load_note_topics(file_hash, storage_id),
         "file_format": mime_type or ""
     }
     for field in ("title",):
@@ -77,7 +79,7 @@ def generate_markdown(conn: sqlite3.Connection, file_hash: str, asset_rel_path: 
         frontmatter[field] = existing_frontmatter[field] if field in existing_frontmatter else cache_wd_fields.get(field, [] if field != "wd_rating" else "")
     for field, value in (manual_overrides or {}).items():
         if field in MANUAL_FRONTMATTER_FIELDS:
-            frontmatter[field] = value
+            frontmatter[field] = format_topics_for_note(value, note_path) if field == "topics" else value
 
 
     fm_str = yaml.dump(frontmatter, default_flow_style=False, sort_keys=False, allow_unicode=True)

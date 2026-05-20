@@ -79,8 +79,10 @@ async function installMockVaultApi(
     onLocalIngestStart?: (payload?: any) => Promise<void> | void;
     onMaintenanceAction?: (action: 'auth' | 'metadata' | 'review') => Promise<void> | void;
     onItemsRequest?: (url: URL) => Promise<void> | void;
+    onItemPatch?: (payload: any) => Promise<void> | void;
     metadataRebuildResponse?: unknown;
     metadataStatusSequence?: unknown[];
+    onWorkspaceAction?: (action: 'add' | 'active', payload?: any) => Promise<void> | void;
   } = {}
 ) {
   let items = cloneItems();
@@ -129,7 +131,31 @@ async function installMockVaultApi(
     stop_requested: false
   };
   let metadataStatusIndex = 0;
+  let workspaceActive = 'default';
+  let workspaceItems = [
+    {
+      id: 'default',
+      name: 'Default',
+      config_path: 'C:/Repo/config/config.yaml',
+      active: true,
+      exists: true
+    },
+    {
+      id: 'obsidian-main',
+      name: 'Obsidian Main',
+      config_path: 'C:/ObsidianVault/lmz/config.yaml',
+      active: false,
+      exists: true
+    }
+  ];
   const appConfig = {
+    _runtime: {
+      config_path: 'C:/ObsidianVault/lmz/config.yaml',
+      config_root: 'C:/ObsidianVault/lmz',
+      topic_root: 'C:/ObsidianVault/lmz/data/topics',
+      workspace_mode: 'obsidian',
+      workspace_label: 'Obsidian workspace'
+    },
     ui: {
       vault_layout_mode: 'masonry',
       vault_tile_min_width: 190,
@@ -149,8 +175,25 @@ async function installMockVaultApi(
       if (!item) return fulfillJson(route, { detail: 'not found' }, 404);
       if (request.method() === 'PATCH') {
         const patch = JSON.parse(request.postData() || '{}');
-        items = items.map((entry) => entry.hash === hash ? { ...entry, ...patch } : entry);
-        return fulfillJson(route, { status: 'success' });
+        await options.onItemPatch?.(patch);
+        items = items.map((entry) => {
+          if (entry.hash !== hash) return entry;
+          const next = { ...entry, ...patch };
+          if ('wd_rating' in patch || 'wd_character_tags' in patch || 'wd_tags' in patch) {
+            next.wd_tags = {
+              rating: patch.wd_rating || '',
+              characters: Array.isArray(patch.wd_character_tags) ? patch.wd_character_tags : [],
+              general: Array.isArray(patch.wd_tags) ? patch.wd_tags : []
+            };
+          }
+          return next;
+        });
+        const updated = items.find((entry) => entry.hash === hash);
+        return fulfillJson(route, {
+          ...updated,
+          topic_counts: facetCountMap(items, 'topic'),
+          wd_tag_counts: facetCountMap(items, 'wd_tag')
+        });
       }
       return fulfillJson(route, {
         ...item,
@@ -169,6 +212,36 @@ async function installMockVaultApi(
   });
 
   await page.route('**/api/config', async (route) => fulfillJson(route, appConfig));
+  await page.route('**/api/workspaces**', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (url.pathname === '/api/workspaces' && request.method() === 'GET') {
+      return fulfillJson(route, { active: workspaceActive, items: workspaceItems });
+    }
+    if (url.pathname === '/api/workspaces/active' && request.method() === 'POST') {
+      const payload = JSON.parse(request.postData() || '{}');
+      await options.onWorkspaceAction?.('active', payload);
+      workspaceActive = String(payload.id || workspaceActive);
+      workspaceItems = workspaceItems.map((item) => ({ ...item, active: item.id === workspaceActive }));
+      return fulfillJson(route, { status: 'success', active: workspaceActive, restart_required: true, items: workspaceItems });
+    }
+    if (url.pathname === '/api/workspaces/obsidian' && request.method() === 'POST') {
+      const payload = JSON.parse(request.postData() || '{}');
+      await options.onWorkspaceAction?.('add', payload);
+      workspaceItems = [
+        ...workspaceItems,
+        {
+          id: 'obsidian-workspace',
+          name: payload.name || 'Obsidian Workspace',
+          config_path: `${payload.path}/lmz/config.yaml`,
+          active: false,
+          exists: true
+        }
+      ];
+      return fulfillJson(route, { status: 'success', active: workspaceActive, restart_required: false, items: workspaceItems });
+    }
+    return fulfillJson(route, { detail: 'not found' }, 404);
+  });
   await page.route('**/api/session-key', async (route) => fulfillJson(route, { key: 'mock-key' }));
   await page.route('**/api/stats', async (route) => fulfillJson(route, { total_items: items.length }));
   await page.route('**/api/artists**', async (route) => {
@@ -429,6 +502,7 @@ async function openMockVault(
     onLocalIngestStart?: (payload?: any) => Promise<void> | void;
     onMaintenanceAction?: (action: 'auth' | 'metadata' | 'review') => Promise<void> | void;
     onItemsRequest?: (url: URL) => Promise<void> | void;
+    onItemPatch?: (payload: any) => Promise<void> | void;
   } = {}
 ) {
   await installMockVaultApi(page, options);
@@ -473,6 +547,68 @@ test('inspector topic and WD chips show global counts', async ({ page }) => {
   await expect(inspector.locator('.tag-chip.rating').filter({ hasText: 'safe' }).locator('.tag-count')).toHaveText('3');
   await expect(inspector.locator('.tag-chip.character').filter({ hasText: 'mock_character' }).locator('.tag-count')).toHaveText('1');
   await expect(inspector.locator('.tag-chip.visual').filter({ hasText: 'mock_tag' }).locator('.tag-count')).toHaveText('1');
+});
+
+test('clearing search cancels pending autocomplete request', async ({ page }) => {
+  const suggestionRequests: string[] = [];
+  await page.route('**/api/search/suggestions**', async (route) => {
+    suggestionRequests.push(route.request().url());
+    return fulfillJson(route, { suggestions: [] });
+  });
+  await openMockVault(page);
+
+  await page.getByTestId('vault-search-input').fill('a:mo');
+  await page.waitForTimeout(50);
+  await page.getByTitle('Clear Search').click();
+  await page.waitForTimeout(250);
+
+  expect(suggestionRequests).toHaveLength(0);
+});
+
+test('inspector drafts WD promotion and removal until save', async ({ page }) => {
+  const patches: any[] = [];
+  await openMockVault(page, { onItemPatch: (payload) => patches.push(payload) });
+
+  await page.getByText('Mock Solo').click();
+  const inspector = page.locator('aside.inspector');
+  const visualTag = inspector.locator('.tag-chip.visual').filter({ hasText: 'mock_tag' });
+
+  await visualTag.click();
+  await expect(inspector.locator('.tag-chip.topic').filter({ hasText: 'mock_tag' })).toBeVisible();
+  await expect(inspector.getByRole('button', { name: 'Revert' })).toBeVisible();
+  await expect(inspector.getByRole('button', { name: 'Save Changes' })).toBeEnabled();
+  expect(patches).toHaveLength(0);
+
+  await visualTag.hover();
+  await visualTag.getByTitle('Remove WD tag').click();
+  await expect(inspector.locator('.tag-chip.visual').filter({ hasText: 'mock_tag' })).toHaveCount(0);
+
+  await inspector.getByRole('button', { name: 'Save Changes' }).click();
+  expect(patches).toHaveLength(1);
+  expect(patches[0]).toMatchObject({
+    topics: ['mock-topic', 'mock_tag'],
+    wd_rating: 'safe',
+    wd_character_tags: ['mock_character'],
+    wd_tags: []
+  });
+  await expect(inspector.getByRole('button', { name: 'Revert' })).toHaveCount(0);
+});
+
+test('inspector revert restores draft topic and WD tag edits', async ({ page }) => {
+  const patches: any[] = [];
+  await openMockVault(page, { onItemPatch: (payload) => patches.push(payload) });
+
+  await page.getByText('Mock Solo').click();
+  const inspector = page.locator('aside.inspector');
+  const topic = inspector.locator('.tag-chip.topic').filter({ hasText: 'mock-topic' });
+  await topic.hover();
+  await topic.getByTitle('Remove topic').click();
+  await expect(inspector.locator('.tag-chip.topic').filter({ hasText: 'mock-topic' })).toHaveCount(0);
+
+  await inspector.getByRole('button', { name: 'Revert' }).click();
+  await expect(inspector.locator('.tag-chip.topic').filter({ hasText: 'mock-topic' })).toBeVisible();
+  await expect(inspector.getByRole('button', { name: 'Revert' })).toHaveCount(0);
+  expect(patches).toHaveLength(0);
 });
 
 test('masonry keeps current data after metadata update cache reuse', async ({ page }) => {
@@ -701,6 +837,37 @@ test('settings maintenance actions call existing endpoints and show compact stat
 
   await expect(page.locator('.maintenance-status')).toContainText(['OK (available)', 'started', 'cleaned 0, failed 0']);
   expect(calls).toEqual(['auth', 'metadata', 'review']);
+});
+
+test('settings shows workspace paths from config runtime metadata', async ({ page }) => {
+  await openMockVault(page);
+  await page.getByRole('button', { name: /Settings/ }).click();
+
+  await expect(page.getByText('Obsidian workspace')).toBeVisible();
+  await expect(page.getByText('C:/ObsidianVault/lmz/config.yaml').first()).toBeVisible();
+  await expect(page.getByText('C:/ObsidianVault/lmz/data/topics')).toBeVisible();
+});
+
+test('settings registers and activates workspaces for next restart', async ({ page }) => {
+  const actions: Array<{ action: string; payload: any }> = [];
+  await openMockVault(page, {
+    onWorkspaceAction: (action, payload) => actions.push({ action, payload })
+  });
+  await page.getByRole('button', { name: /Settings/ }).click();
+
+  await expect(page.getByText('Default')).toBeVisible();
+  await page.getByRole('button', { name: 'Use on Restart' }).click();
+  await expect(page.getByText('Restart required to use the selected workspace.')).toBeVisible();
+
+  await page.getByPlaceholder('Obsidian vault path').fill('F:/Archive/Main');
+  await page.getByPlaceholder('Workspace name').fill('Main Vault');
+  await page.getByRole('button', { name: 'Add Obsidian' }).click();
+
+  await expect(page.getByText('Main Vault')).toBeVisible();
+  expect(actions).toEqual([
+    { action: 'active', payload: { id: 'obsidian-main' } },
+    { action: 'add', payload: { path: 'F:/Archive/Main', name: 'Main Vault' } }
+  ]);
 });
 
 test('settings metadata rebuild shows progress only for maintenance job', async ({ page }) => {

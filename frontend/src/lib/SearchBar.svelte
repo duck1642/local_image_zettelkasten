@@ -85,12 +85,14 @@
     updateSuggestionPosition(active);
 
     if (active.kind === 'none') {
+      clearRefreshDebounce();
       showSuggestions = false;
       suggestions = [];
       return;
     }
 
     if (active.kind === 'command') {
+      clearRefreshDebounce();
       const query = active.value.toLowerCase();
       suggestions = availableCommands
         .filter((cmd) => cmd.slice(1).toLowerCase().startsWith(query))
@@ -100,7 +102,7 @@
       return;
     }
 
-    if (refreshDebounceTimer !== null) clearTimeout(refreshDebounceTimer);
+    clearRefreshDebounce();
     refreshDebounceTimer = window.setTimeout(async () => {
       refreshDebounceTimer = null;
       const requestKind = active.kind;
@@ -133,6 +135,13 @@
     if (searchDebounceTimer !== null) {
       clearTimeout(searchDebounceTimer);
       searchDebounceTimer = null;
+    }
+  }
+
+  function clearRefreshDebounce() {
+    if (refreshDebounceTimer !== null) {
+      clearTimeout(refreshDebounceTimer);
+      refreshDebounceTimer = null;
     }
   }
 
@@ -169,6 +178,7 @@
     showSuggestions = false;
     suggestions = [];
     clearDebounce();
+    clearRefreshDebounce();
     emitFilters(true);
   }
 
@@ -178,6 +188,7 @@
     showSuggestions = false;
     suggestions = [];
     clearDebounce();
+    clearRefreshDebounce();
     activeFilters = parseSearchQuery(searchQuery);
     emitFilters(true);
     await tick();
@@ -196,6 +207,7 @@
       searchQuery = value;
       showSuggestions = false;
       suggestions = [];
+      clearRefreshDebounce();
       applySearch(true);
       return;
     }
@@ -207,6 +219,7 @@
     searchQuery = `${before}${nextSegment}${after}`;
     showSuggestions = false;
     suggestions = [];
+    clearRefreshDebounce();
     activeFilters = parseSearchQuery(searchQuery);
     applySearch(false);
     await tick();
@@ -233,6 +246,7 @@
         return;
       } else if (event.key === 'Escape') {
         showSuggestions = false;
+        clearRefreshDebounce();
         return;
       }
     }
@@ -240,13 +254,14 @@
     if (event.key === 'Enter') {
       event.preventDefault();
       showSuggestions = false;
+      clearRefreshDebounce();
       applySearch(true);
     }
   }
 
   onDestroy(() => {
     if (searchDebounceTimer !== null) clearTimeout(searchDebounceTimer);
-    if (refreshDebounceTimer !== null) clearTimeout(refreshDebounceTimer);
+    clearRefreshDebounce();
   });
 </script>
 

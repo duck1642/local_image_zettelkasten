@@ -1,0 +1,8 @@
+active: default
+workspaces:
+  default:
+    name: Default
+    config_path: config/config.yaml
+  obsidian-main:
+    name: Obsidian Main
+    config_path: F:/ARCHIVE/main/lmz/config.yaml

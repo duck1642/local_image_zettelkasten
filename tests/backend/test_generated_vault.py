@@ -23,7 +23,7 @@ def load_generator():
 
 def reset_backend_modules():
     for name in list(sys.modules):
-        if name in {"utils", "web_api", "metadata_index", "md_generator", "thumbnails"} or name.startswith(("db.", "logger", "tagging")):
+        if name in {"utils", "web_api", "metadata_index", "md_generator", "thumbnails", "topics"} or name.startswith(("db.", "logger", "tagging")):
             del sys.modules[name]
 
 
@@ -63,6 +63,8 @@ def test_generated_vault_smoke_and_isolation(tmp_path, monkeypatch):
     assert manifest["counts"]["wd_tag_pool"] == 30
     assert manifest["counts"]["wd_character_tag_pool"] == 6
     assert manifest["counts"]["wd_rows_estimated"] == 2200
+    assert manifest["counts"]["topic_files"] == 9
+    assert (output / "data" / "topics").exists()
 
     config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     for value in config["paths"].values():
@@ -155,13 +157,15 @@ def test_generated_vault_rows_notes_and_media_are_consistent(tmp_path):
             assert frontmatter["source_url"] == item["source_url"]
             assert frontmatter["platform"] == item["platform"]
             assert frontmatter["source_artist"] == item["artist"]
-            assert frontmatter["topics"] == item["topics"]
+            assert frontmatter["topics"] == item["topic_links"]
+            assert all(value.startswith("[topic_") and "](../../../topics/topic_" in value for value in frontmatter["topics"])
             assert frontmatter["wd_rating"] == item["wd_tags"]["rating"]
             assert frontmatter["wd_character_tags"] == item["wd_tags"]["characters"]
             assert frontmatter["wd_tags"] == item["wd_tags"]["general"]
 
         assert conn.execute("SELECT COUNT(*) FROM item_wd_tags").fetchone()[0] == manifest["counts"]["wd_rows_estimated"]
         assert conn.execute("SELECT COUNT(*) FROM metadata_facet_counts").fetchone()[0] == manifest["counts"]["metadata_index_facet_counts"]
+        assert conn.execute("SELECT COUNT(*) FROM item_topics WHERE topic_rel != ''").fetchone()[0] == manifest["counts"]["metadata_index_topics"]
     finally:
         conn.close()
 

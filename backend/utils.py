@@ -20,8 +20,14 @@ if _CONFIG_PATH_ENV:
     CONFIG_PATH = (_config_path_candidate if _config_path_candidate.is_absolute() else PROJECT_ROOT / _config_path_candidate).resolve()
     CONFIG_ROOT = CONFIG_PATH.parent
 else:
-    CONFIG_PATH = PROJECT_ROOT / "config" / "config.yaml"
+    try:
+        from workspaces import active_workspace_config_path
+        CONFIG_PATH = active_workspace_config_path()
+    except Exception:
+        CONFIG_PATH = PROJECT_ROOT / "config" / "config.yaml"
     CONFIG_ROOT = PROJECT_ROOT
+    if CONFIG_PATH.parent != PROJECT_ROOT / "config":
+        CONFIG_ROOT = CONFIG_PATH.parent
 
 def _early_load_config() -> dict:
 
@@ -54,6 +60,7 @@ SECRETS_DIR = _resolve_path('secrets', "secrets")
 MODELS_DIR = _resolve_path('models', "data/models")
 WD_TAGS_DIR = _resolve_path('wd_tags', "data/wd-tags")
 THUMBNAILS_DIR = _resolve_path('thumbnails', "data/ui_cache/thumbnails")
+TOPICS_DIR = (CONFIG_ROOT / "data" / "topics").resolve()
 
 OUTPUT_DIR = VAULT_DIR
 ASSETS_DIR = OUTPUT_DIR / "assets"
@@ -123,6 +130,7 @@ def setup_directories():
         MODELS_DIR,
         WD_TAGS_DIR,
         THUMBNAILS_DIR,
+        TOPICS_DIR,
         OUTPUT_DIR,
         ASSETS_DIR,
         NOTES_DIR,

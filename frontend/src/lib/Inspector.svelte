@@ -14,9 +14,18 @@
 
   let fullItem: any = null;
   let artist = '';
+  let savedArtist = '';
   let sourceUrl = '';
   let platform = '';
   let topics: string[] = [];
+  let savedTopics: string[] = [];
+  let draftTopics: string[] = [];
+  let savedWdRating = '';
+  let draftWdRating = '';
+  let savedWdCharacters: string[] = [];
+  let draftWdCharacters: string[] = [];
+  let savedWdGeneral: string[] = [];
+  let draftWdGeneral: string[] = [];
   let isDirty = false;
   let loading = false;
   let tagging = false;
@@ -33,6 +42,11 @@
   }
 
   $: currentIndex = group ? group.items.findIndex(i => i.hash === item?.hash) : 0;
+  $: metadataDirty = !sameStringList(draftTopics, savedTopics)
+    || draftWdRating !== savedWdRating
+    || !sameStringList(draftWdCharacters, savedWdCharacters)
+    || !sameStringList(draftWdGeneral, savedWdGeneral);
+  $: isDirty = Boolean(fullItem && (artist !== savedArtist || metadataDirty));
 
   async function loadFullDetails(hash: string) {
     if (abortController) abortController.abort();
@@ -45,11 +59,7 @@
         if (!res.ok) throw new Error('API error');
         fullItem = await res.json();
 
-        artist = fullItem.artist || '';
-        sourceUrl = fullItem.source_url || '';
-        platform = fullItem.platform || '';
-        topics = fullItem.topics || [];
-        isDirty = false;
+        applyLoadedDetails(fullItem);
         lastLoadedHash = hash;
     } catch (e: any) {
         if (e.name !== 'AbortError') {
@@ -60,11 +70,88 @@
     }
   }
 
-  function handleInput() { isDirty = true; }
+  function handleInput() {}
+
+  function normalizeList(values: unknown): string[] {
+    if (!Array.isArray(values)) return [];
+    const seen = new Set<string>();
+    const result: string[] = [];
+    for (const value of values) {
+      const clean = String(value || '').trim();
+      const key = clean.toLocaleLowerCase();
+      if (!clean || seen.has(key)) continue;
+      seen.add(key);
+      result.push(clean);
+    }
+    return result;
+  }
+
+  function sameStringList(a: string[], b: string[]) {
+    if (a.length !== b.length) return false;
+    return a.every((value, index) => value === b[index]);
+  }
+
+  function applyLoadedDetails(detail: any) {
+    fullItem = detail;
+    savedArtist = detail.artist || '';
+    artist = savedArtist;
+    sourceUrl = detail.source_url || '';
+    platform = detail.platform || '';
+    savedTopics = normalizeList(detail.topics || []);
+    draftTopics = [...savedTopics];
+    topics = draftTopics;
+    savedWdRating = detail.wd_tags?.rating && detail.wd_tags.rating !== 'None' ? String(detail.wd_tags.rating) : '';
+    draftWdRating = savedWdRating;
+    savedWdCharacters = normalizeList(detail.wd_tags?.characters || []);
+    draftWdCharacters = [...savedWdCharacters];
+    savedWdGeneral = normalizeList(detail.wd_tags?.general || []);
+    draftWdGeneral = [...savedWdGeneral];
+  }
 
   function countFor(map: Record<string, number> | undefined, value: string) {
     const count = map?.[value];
     return typeof count === 'number' && count > 0 ? count : null;
+  }
+
+  function isUnsavedTopic(value: string) {
+    const key = value.toLocaleLowerCase();
+    return !savedTopics.some((topic) => topic.toLocaleLowerCase() === key);
+  }
+
+  function promoteWdToTopic(value: string) {
+    const clean = String(value || '').trim();
+    if (!clean) return;
+    const key = clean.toLocaleLowerCase();
+    if (draftTopics.some((topic) => topic.toLocaleLowerCase() === key)) return;
+    draftTopics = [...draftTopics, clean];
+    topics = draftTopics;
+  }
+
+  function removeDraftTopic(value: string) {
+    const key = String(value || '').trim().toLocaleLowerCase();
+    draftTopics = draftTopics.filter((topic) => topic.toLocaleLowerCase() !== key);
+    topics = draftTopics;
+  }
+
+  function removeDraftWdTag(kind: 'rating' | 'character' | 'general', value: string) {
+    const key = String(value || '').trim().toLocaleLowerCase();
+    if (kind === 'rating' && draftWdRating.toLocaleLowerCase() === key) {
+      draftWdRating = '';
+    } else if (kind === 'character') {
+      draftWdCharacters = draftWdCharacters.filter((tag) => tag.toLocaleLowerCase() !== key);
+    } else if (kind === 'general') {
+      draftWdGeneral = draftWdGeneral.filter((tag) => tag.toLocaleLowerCase() !== key);
+    }
+  }
+
+  function stopChipRemove(event: Event) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  async function revertChanges() {
+    if (!item) return;
+    await loadFullDetails(item.hash);
   }
 
   async function responseErrorText(response: Response, fallback: string) {
@@ -88,10 +175,17 @@
       const res = await apiFetch(`/api/items/${item.hash}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ artist })
+        body: JSON.stringify({
+          artist,
+          topics: draftTopics,
+          wd_rating: draftWdRating,
+          wd_character_tags: draftWdCharacters,
+          wd_tags: draftWdGeneral
+        })
       });
       if (!res.ok) throw new Error('Failed to save');
-      isDirty = false;
+      const detail = await res.json();
+      applyLoadedDetails(detail);
       dispatch('updated', { hash: item.hash, artist, source_url: sourceUrl, platform });
       uiLog('INFO', `Metadata saved for ${item.hash.substring(0, 12)}`);
     } catch (e) {
@@ -111,7 +205,7 @@
               throw new Error(err.detail || 'Tagging failed');
           }
           fullItem = await res.json();
-          topics = fullItem.topics || [];
+          applyLoadedDetails(fullItem);
           uiLog('INFO', `Tagging complete for ${item.hash.substring(0, 12)}`);
       } catch (e) {
           uiLog('ERROR', 'Tagging failed', { error: String(e) });
@@ -299,15 +393,19 @@
       <!-- svelte-ignore a11y-label-has-associated-control -->
       <label class="section-label">My Topics</label>
       <div class="tags-list">
-          {#each (topics || []) as tag}
+          {#each (draftTopics || []) as tag}
               <span class="tag-chip topic">
                   <span class="tag-label">{tag}</span>
                   {#if countFor(fullItem.topic_counts, tag)}
                       <span class="tag-count">{countFor(fullItem.topic_counts, tag)}</span>
                   {/if}
+                  {#if isUnsavedTopic(tag)}
+                      <span class="tag-unsaved">*</span>
+                  {/if}
+                  <button class="chip-remove" type="button" title="Remove topic" on:click={(event) => { stopChipRemove(event); removeDraftTopic(tag); }}>x</button>
               </span>
           {/each}
-          {#if !topics || topics.length === 0}
+          {#if !draftTopics || draftTopics.length === 0}
               <div class="value-text">No topics</div>
           {/if}
       </div>
@@ -319,12 +417,13 @@
       <div class="sub-section">
         <span class="muted-title">Rating</span>
         <div class="tags-list">
-            {#if fullItem.wd_tags?.rating && fullItem.wd_tags.rating !== 'None'}
-                <span class="tag-chip rating">
-                    <span class="tag-label">{fullItem.wd_tags.rating}</span>
-                    {#if countFor(fullItem.wd_tag_counts, fullItem.wd_tags.rating)}
-                        <span class="tag-count">{countFor(fullItem.wd_tag_counts, fullItem.wd_tags.rating)}</span>
+            {#if draftWdRating}
+                <span class="tag-chip rating clickable" role="button" tabindex="0" title="Promote to topic" on:click={() => promoteWdToTopic(draftWdRating)} on:keydown={(event) => { if (event.key === 'Enter' || event.key === ' ') promoteWdToTopic(draftWdRating); }}>
+                    <span class="tag-label">{draftWdRating}</span>
+                    {#if countFor(fullItem.wd_tag_counts, draftWdRating)}
+                        <span class="tag-count">{countFor(fullItem.wd_tag_counts, draftWdRating)}</span>
                     {/if}
+                    <button class="chip-remove" type="button" title="Remove WD tag" on:click={(event) => { stopChipRemove(event); removeDraftWdTag('rating', draftWdRating); }}>x</button>
                 </span>
             {:else}
                 <div class="value-text">No rating</div>
@@ -334,15 +433,16 @@
       <div class="sub-section">
         <span class="muted-title">Character Tags</span>
         <div class="tags-list">
-            {#each (fullItem.wd_tags?.characters || []) as tag}
-                <span class="tag-chip character">
+            {#each (draftWdCharacters || []) as tag}
+                <span class="tag-chip character clickable" role="button" tabindex="0" title="Promote to topic" on:click={() => promoteWdToTopic(tag)} on:keydown={(event) => { if (event.key === 'Enter' || event.key === ' ') promoteWdToTopic(tag); }}>
                     <span class="tag-label">{tag}</span>
                     {#if countFor(fullItem.wd_tag_counts, tag)}
                         <span class="tag-count">{countFor(fullItem.wd_tag_counts, tag)}</span>
                     {/if}
+                    <button class="chip-remove" type="button" title="Remove WD tag" on:click={(event) => { stopChipRemove(event); removeDraftWdTag('character', tag); }}>x</button>
                 </span>
             {/each}
-            {#if !fullItem.wd_tags?.characters || fullItem.wd_tags.characters.length === 0}
+            {#if !draftWdCharacters || draftWdCharacters.length === 0}
                 <div class="value-text">No character tags</div>
             {/if}
         </div>
@@ -350,15 +450,16 @@
       <div class="sub-section">
         <span class="muted-title">Visual Tags</span>
         <div class="tags-list">
-            {#each (fullItem.wd_tags?.general || []) as tag}
-                <span class="tag-chip visual">
+            {#each (draftWdGeneral || []) as tag}
+                <span class="tag-chip visual clickable" role="button" tabindex="0" title="Promote to topic" on:click={() => promoteWdToTopic(tag)} on:keydown={(event) => { if (event.key === 'Enter' || event.key === ' ') promoteWdToTopic(tag); }}>
                     <span class="tag-label">{tag}</span>
                     {#if countFor(fullItem.wd_tag_counts, tag)}
                         <span class="tag-count">{countFor(fullItem.wd_tag_counts, tag)}</span>
                     {/if}
+                    <button class="chip-remove" type="button" title="Remove WD tag" on:click={(event) => { stopChipRemove(event); removeDraftWdTag('general', tag); }}>x</button>
                 </span>
             {/each}
-            {#if !fullItem.wd_tags?.general || fullItem.wd_tags.general.length === 0}
+            {#if !draftWdGeneral || draftWdGeneral.length === 0}
                 <div class="value-text">No tags</div>
             {/if}
         </div>
@@ -369,6 +470,11 @@
         <button class="tag-btn" on:click={runTagging} disabled={tagging}>
             {tagging ? 'Tagging...' : 'Tag Media'}
         </button>
+        {#if isDirty}
+        <button class="revert-btn" on:click={revertChanges}>
+            Revert
+        </button>
+        {/if}
         <button class="save-btn primary" on:click={save} disabled={!isDirty}>
             Save Changes
         </button>
@@ -486,8 +592,10 @@
       align-items: stretch;
       overflow: hidden;
       line-height: 1.2;
+      position: relative;
   }
 
+  .tag-chip.clickable { cursor: pointer; }
   .tag-label { padding: 3px 7px; }
   .tag-count {
       min-width: 22px;
@@ -497,6 +605,30 @@
       text-align: right;
       border-left: 1px solid rgba(255,255,255,0.06);
   }
+  .tag-unsaved { padding: 3px 3px 3px 0; color: var(--accent-warning); }
+  .chip-remove {
+      width: 0;
+      min-width: 0;
+      padding: 0;
+      border: 0;
+      border-left: 1px solid transparent;
+      border-radius: 0;
+      opacity: 0;
+      overflow: hidden;
+      background: rgba(255,255,255,0.08);
+      color: var(--text-muted);
+      font-size: 11px;
+      cursor: pointer;
+      transition: opacity 0.12s ease, width 0.12s ease, padding 0.12s ease;
+  }
+  .tag-chip:hover .chip-remove,
+  .tag-chip:focus-within .chip-remove {
+      width: 18px;
+      padding: 3px 5px;
+      opacity: 1;
+      border-left-color: rgba(255,255,255,0.08);
+  }
+  .chip-remove:hover { color: var(--accent-danger); background: rgba(248, 81, 73, 0.12); }
 
   .tag-chip:hover { border-color: var(--border-hover); background: var(--bg-main); }
 

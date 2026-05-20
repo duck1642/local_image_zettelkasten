@@ -29,6 +29,13 @@
   };
   let metadataRebuildJob: MetadataRebuildJob | null = null;
   let metadataRebuildPollTimer: number | null = null;
+  let workspaces: any[] = [];
+  let workspaceActive = '';
+  let workspaceBusy = false;
+  let workspaceResult = '';
+  let obsidianPath = '';
+  let obsidianName = 'Obsidian Workspace';
+  let workspaceRestartRequired = false;
 
   function setConfig(mutator: (draft: any) => void) {
     updateConfig(mutator, false);
@@ -57,11 +64,75 @@
   onMount(() => {
     window.addEventListener('lmz:refresh', handleGlobalRefresh);
     loadConfig();
+    loadWorkspaces();
     return () => {
       window.removeEventListener('lmz:refresh', handleGlobalRefresh);
       stopMetadataRebuildPolling();
     };
   });
+
+  async function loadWorkspaces() {
+    try {
+      const response = await apiFetch('/api/workspaces');
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload?.detail || `HTTP ${response.status}`);
+      workspaceActive = String(payload?.active || '');
+      workspaces = Array.isArray(payload?.items) ? payload.items : [];
+    } catch (error) {
+      workspaceResult = `error: ${String(error)}`;
+    }
+  }
+
+  async function setActiveWorkspace(id: string) {
+    if (!id || workspaceBusy) return;
+    workspaceBusy = true;
+    workspaceResult = '';
+    try {
+      const response = await apiFetch('/api/workspaces/active', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id })
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload?.detail || `HTTP ${response.status}`);
+      workspaceActive = String(payload?.active || id);
+      workspaces = Array.isArray(payload?.items) ? payload.items : workspaces;
+      workspaceRestartRequired = true;
+      workspaceResult = 'active on next restart';
+      uiLog('INFO', 'Workspace active changed', { id });
+    } catch (error) {
+      workspaceResult = `error: ${String(error)}`;
+      uiLog('ERROR', 'Workspace active change failed', { id, error: String(error) });
+    } finally {
+      workspaceBusy = false;
+    }
+  }
+
+  async function addObsidianWorkspace() {
+    const path = obsidianPath.trim();
+    if (!path || workspaceBusy) return;
+    workspaceBusy = true;
+    workspaceResult = '';
+    try {
+      const response = await apiFetch('/api/workspaces/obsidian', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path, name: obsidianName.trim() || 'Obsidian Workspace' })
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload?.detail || `HTTP ${response.status}`);
+      workspaceActive = String(payload?.active || workspaceActive);
+      workspaces = Array.isArray(payload?.items) ? payload.items : workspaces;
+      workspaceResult = 'workspace registered';
+      obsidianPath = '';
+      uiLog('INFO', 'Obsidian workspace registered', { path });
+    } catch (error) {
+      workspaceResult = `error: ${String(error)}`;
+      uiLog('ERROR', 'Obsidian workspace registration failed', { path, error: String(error) });
+    } finally {
+      workspaceBusy = false;
+    }
+  }
 
   function setMaintenanceBusy(action: MaintenanceAction, busy: boolean) {
     maintenanceBusy = { ...maintenanceBusy, [action]: busy };
@@ -188,6 +259,59 @@
         <span class="status-label unsaved">Unsaved Changes</span>
       {/if}
     </div>
+
+    {#if $config._runtime}
+      <div class="workspace-panel">
+        <h4>Workspace</h4>
+        <div class="workspace-grid">
+          <span>Mode</span>
+          <strong>{$config._runtime.workspace_label || $config._runtime.workspace_mode || 'Default workspace'}</strong>
+          <span>Config</span>
+          <code>{$config._runtime.config_path}</code>
+          <span>Root</span>
+          <code>{$config._runtime.config_root}</code>
+          <span>Topics</span>
+          <code>{$config._runtime.topic_root}</code>
+        </div>
+        {#if $config._runtime.env_override}
+          <div class="workspace-note">Environment override is active. Registry changes apply only after restarting without LMZ_CONFIG_PATH.</div>
+        {/if}
+        <div class="workspace-actions">
+          <h5>Registered Workspaces</h5>
+          {#if workspaceRestartRequired}
+            <div class="restart-banner">Restart required to use the selected workspace.</div>
+          {/if}
+          <div class="workspace-list">
+            {#each workspaces as workspace}
+              <div class="workspace-row">
+                <div>
+                  <strong>{workspace.name}</strong>
+                  <code>{workspace.config_path}</code>
+                  {#if !workspace.exists}
+                    <span class="missing">missing config</span>
+                  {/if}
+                </div>
+                <button
+                  type="button"
+                  disabled={workspaceBusy || workspace.id === workspaceActive || !workspace.exists}
+                  on:click={() => setActiveWorkspace(workspace.id)}
+                >
+                  {workspace.id === workspaceActive ? 'Active' : 'Use on Restart'}
+                </button>
+              </div>
+            {/each}
+          </div>
+          <div class="add-workspace">
+            <input type="text" placeholder="Obsidian vault path" bind:value={obsidianPath} />
+            <input type="text" placeholder="Workspace name" bind:value={obsidianName} />
+            <button type="button" on:click={addObsidianWorkspace} disabled={workspaceBusy || !obsidianPath.trim()}>Add Obsidian</button>
+          </div>
+          {#if workspaceResult}
+            <div class="workspace-result">{workspaceResult}</div>
+          {/if}
+        </div>
+      </div>
+    {/if}
 
     <div class="form-grid">
       <label for="settings-layout-mode">Vault Layout Mode</label>
@@ -418,6 +542,109 @@
     gap: 15px;
     align-items: center;
     max-width: 600px;
+  }
+
+  .workspace-panel {
+    max-width: 900px;
+    margin-bottom: 24px;
+    border: 1px solid var(--border-dim);
+    background: var(--bg-panel);
+    border-radius: 8px;
+    padding: 14px;
+  }
+
+  .workspace-panel h4 {
+    margin: 0 0 12px 0;
+    color: var(--text-bright);
+    font-size: 14px;
+  }
+
+  .workspace-grid {
+    display: grid;
+    grid-template-columns: 90px minmax(0, 1fr);
+    gap: 8px 12px;
+    align-items: center;
+    color: var(--text-muted);
+    font-size: 12px;
+  }
+
+  .workspace-grid strong {
+    color: var(--text-main);
+  }
+
+  .workspace-grid code {
+    color: var(--text-main);
+    background: var(--bg-main);
+    border: 1px solid var(--border-dim);
+    border-radius: 4px;
+    padding: 4px 6px;
+    overflow-wrap: anywhere;
+  }
+
+  .workspace-note,
+  .workspace-result,
+  .restart-banner {
+    margin-top: 10px;
+    color: var(--text-muted);
+    font-size: 12px;
+  }
+
+  .restart-banner {
+    color: var(--accent-warning);
+    font-weight: 600;
+  }
+
+  .workspace-actions {
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border-dim);
+  }
+
+  .workspace-actions h5 {
+    margin: 0 0 10px 0;
+    color: var(--text-bright);
+    font-size: 13px;
+  }
+
+  .workspace-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .workspace-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 140px;
+    gap: 10px;
+    align-items: center;
+    padding: 8px;
+    border: 1px solid var(--border-dim);
+    border-radius: 6px;
+    background: var(--bg-main);
+  }
+
+  .workspace-row div {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .workspace-row code {
+    color: var(--text-muted);
+    overflow-wrap: anywhere;
+  }
+
+  .missing {
+    color: var(--accent-danger);
+    font-size: 12px;
+  }
+
+  .add-workspace {
+    display: grid;
+    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) 130px;
+    gap: 8px;
+    margin-top: 10px;
   }
 
   label { font-size: 13px; color: var(--text-main); }

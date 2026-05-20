@@ -258,6 +258,10 @@ class SearchManager:
 
         return self.audio_tree.pending_count() + self.video_tree.pending_count()
 
+    def _vp_rebuild_needed_locked(self) -> bool:
+
+        return bool(self.video_tree.rebuild_plan() or self.audio_tree.rebuild_plan())
+
     def _rebuild_deferred_indexes_locked(self, reason: str):
 
         for name, tree in (("video", self.video_tree), ("audio", self.audio_tree)):
@@ -317,7 +321,7 @@ class SearchManager:
                     rebuild_count=rebuild_count,
                 )
             with self._sync_lock:
-                needs_follow_up = self._vp_pending_count_locked() >= self.VP_PENDING_REBUILD_THRESHOLD
+                needs_follow_up = self._vp_pending_count_locked() >= self.VP_PENDING_REBUILD_THRESHOLD or self._vp_rebuild_needed_locked()
         finally:
             self._rebuild_lock.release()
         if needs_follow_up:

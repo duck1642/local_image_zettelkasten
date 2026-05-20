@@ -42,6 +42,11 @@ def _slug(value: str) -> str:
     return "-".join(part for part in cleaned.split("-") if part) or "vault"
 
 
+def _topic_slug(value: str) -> str:
+    cleaned = "".join(ch.lower() if ch.isalnum() else "_" for ch in value.strip())
+    return "_".join(part for part in cleaned.split("_") if part) or "topic"
+
+
 def _next_numbered_output(root: Path, name: str) -> Path:
     root.mkdir(parents=True, exist_ok=True)
     highest = 0
@@ -76,6 +81,31 @@ def _guard_output(output: Path, generated_root: Path, allow_outside_generated: b
 
 def _write_yaml(path: Path, data: dict):
     path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+
+def _topic_file(topic_dir: Path, label: str) -> Path:
+    return topic_dir / f"{_topic_slug(label)}.md"
+
+
+def _ensure_topic_file(topic_dir: Path, label: str):
+    path = _topic_file(topic_dir, label)
+    if path.exists():
+        return
+    timestamp = datetime(2026, 1, 1, tzinfo=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    data = {
+        "created_at": timestamp,
+        "updated_at": timestamp,
+        "aliases": [],
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"---\n{yaml.safe_dump(data, sort_keys=False)}---\n\n", encoding="utf-8")
+
+
+def _topic_link(note_path: Path, topic_dir: Path, label: str) -> str:
+    _ensure_topic_file(topic_dir, label)
+    topic_path = _topic_file(topic_dir, label)
+    rel = os.path.relpath(topic_path.resolve(), note_path.parent.resolve()).replace("\\", "/")
+    return f"[{topic_path.stem}]({rel})"
 
 
 def _hash_for(seed: int, index: int) -> str:
@@ -214,7 +244,7 @@ def _config() -> dict:
 
 def _reset_backend_modules():
     for name in list(sys.modules):
-        if name in {"utils", "metadata_index", "md_generator", "thumbnails", "artists", "platforms"} or name.startswith(("db.", "logger", "tagging")):
+        if name in {"utils", "metadata_index", "md_generator", "thumbnails", "artists", "platforms", "topics"} or name.startswith(("db.", "logger", "tagging")):
             del sys.modules[name]
 
 
@@ -319,6 +349,7 @@ def generate_vault(args: argparse.Namespace) -> Path:
     data_dir = output / "data"
     assets_dir = data_dir / "vault" / "assets"
     notes_dir = data_dir / "vault" / "notes"
+    topics_dir = data_dir / "topics"
     thumbs_dir = data_dir / "ui_cache" / "thumbnails"
     logs_dir = data_dir / "logs"
     for directory in [
@@ -326,6 +357,7 @@ def generate_vault(args: argparse.Namespace) -> Path:
         assets_dir,
         notes_dir,
         thumbs_dir,
+        topics_dir,
         data_dir / "review",
         logs_dir / "raw",
         logs_dir / "structured",
@@ -369,7 +401,7 @@ def generate_vault(args: argparse.Namespace) -> Path:
             artist = "Unknown"
         else:
             artist = f"artist-{(index - unknown_artist_count) % artist_count:06d}"
-        topics = [f"topic-{(index + offset) % topic_count:03d}" for offset in range(1 + (index % min(3, topic_count)))]
+        topic_labels = [f"topic-{(index + offset) % topic_count:03d}" for offset in range(1 + (index % min(3, topic_count)))]
         wd_tags = _wd_values(index, args)
         source_url = f"https://synthetic.local/group/{group_id:06d}"
         original_filename = f"{storage_id}{ext}"
@@ -400,7 +432,8 @@ def generate_vault(args: argparse.Namespace) -> Path:
         note_path.parent.mkdir(parents=True, exist_ok=True)
         thumb_path.parent.mkdir(parents=True, exist_ok=True)
         asset_path.write_bytes(b"lmz synthetic video placeholder" if is_video else _svg_bytes(storage_id, width, height))
-        note_path.write_text(_frontmatter(row, topics, wd_tags), encoding="utf-8")
+        linked_topics = [_topic_link(note_path, topics_dir, label) for label in topic_labels]
+        note_path.write_text(_frontmatter(row, linked_topics, wd_tags), encoding="utf-8")
         thumb_path.write_bytes(_svg_bytes(f"thumb-{storage_id}", 320, 240))
 
         items.append({
@@ -415,7 +448,8 @@ def generate_vault(args: argparse.Namespace) -> Path:
             "original_filename": original_filename,
             "width": width,
             "height": height,
-            "topics": topics,
+            "topics": topic_labels,
+            "topic_links": linked_topics,
             "wd_tags": wd_tags,
             "url": f"/vault/{shard}/{original_filename}",
             "thumbnail_url": f"/api/thumbnails/{item_hash}",
@@ -444,6 +478,7 @@ def generate_vault(args: argparse.Namespace) -> Path:
             "unknown_artist_items": unknown_artist_count,
             "platforms": platform_count,
             "topics": topic_count,
+            "topic_files": len(list(topics_dir.glob("*.md"))),
             "wd_tag_pool": max(0, args.wd_tags),
             "wd_character_tag_pool": max(0, args.wd_character_tags),
             "wd_rows_estimated": sum(
