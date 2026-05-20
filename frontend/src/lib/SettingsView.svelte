@@ -5,15 +5,19 @@
   import { log as uiLog } from './logger';
   import { apiFetch } from './api';
 
-  type MaintenanceAction = 'auth' | 'metadata' | 'review';
+  type MaintenanceAction = 'auth' | 'metadata' | 'workspaceMetadata' | 'workspacePrune' | 'review';
   let maintenanceBusy: Record<MaintenanceAction, boolean> = {
     auth: false,
     metadata: false,
+    workspaceMetadata: false,
+    workspacePrune: false,
     review: false
   };
   let maintenanceResult: Record<MaintenanceAction, string> = {
     auth: '',
     metadata: '',
+    workspaceMetadata: '',
+    workspacePrune: '',
     review: ''
   };
   type MetadataRebuildJob = {
@@ -337,6 +341,20 @@
           startMetadataRebuildPolling();
           return;
         }
+      } else if (action === 'workspaceMetadata') {
+        const response = await apiFetch('/api/workspace-metadata/rebuild', { method: 'POST' });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload?.detail || `HTTP ${response.status}`);
+        const after = payload?.after || {};
+        setMaintenanceResult(action, `artists ${after.artists || 0}, platforms ${after.platforms || 0}, WD ${after.wd_tags || 0}`);
+        uiLog('INFO', 'Maintenance action completed', { action: 'workspace_metadata_rebuild', after });
+      } else if (action === 'workspacePrune') {
+        const response = await apiFetch('/api/workspace-metadata/prune', { method: 'POST' });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload?.detail || `HTTP ${response.status}`);
+        const pruned = payload?.pruned || {};
+        setMaintenanceResult(action, `pruned artists ${pruned.artists || 0}, platforms ${pruned.platforms || 0}, WD ${pruned.wd_tags || 0}`);
+        uiLog('INFO', 'Maintenance action completed', { action: 'workspace_metadata_prune', pruned });
       } else {
         const response = await apiFetch('/api/review/cleanup', { method: 'POST' });
         const payload = await response.json().catch(() => ({}));
@@ -535,6 +553,14 @@
             </div>
           {/if}
         </div>
+        <button on:click={() => runMaintenance('workspaceMetadata')} disabled={maintenanceBusy.workspaceMetadata}>
+          {maintenanceBusy.workspaceMetadata ? 'Running...' : 'Rebuild Workspace Metadata'}
+        </button>
+        <span class="maintenance-status">{maintenanceResult.workspaceMetadata}</span>
+        <button on:click={() => runMaintenance('workspacePrune')} disabled={maintenanceBusy.workspacePrune}>
+          {maintenanceBusy.workspacePrune ? 'Running...' : 'Prune Workspace Metadata'}
+        </button>
+        <span class="maintenance-status">{maintenanceResult.workspacePrune}</span>
         <button on:click={() => runMaintenance('review')} disabled={maintenanceBusy.review}>
           {maintenanceBusy.review ? 'Running...' : 'Cleanup Review'}
         </button>

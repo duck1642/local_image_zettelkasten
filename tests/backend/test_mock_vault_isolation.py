@@ -36,7 +36,7 @@ def fresh_backend(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *module_names
     if str(BACKEND) not in sys.path:
         sys.path.insert(0, str(BACKEND))
     for name in list(sys.modules):
-        if name in {"utils", "web_api", "queue_service", "md_generator", "metadata_index", "processor", "external_ingestion", "thumbnails", "fingerprint", "artists", "platforms", "review_cache", "topics", "vaults"} or name.startswith(("logger", "db.", "tagging", "downloaders")):
+        if name in {"utils", "web_api", "queue_service", "md_generator", "metadata_index", "processor", "external_ingestion", "thumbnails", "fingerprint", "artists", "platforms", "review_cache", "topics", "vaults", "workspace_db"} or name.startswith(("logger", "db.", "tagging", "downloaders")):
             del sys.modules[name]
     return [importlib.import_module(name) for name in module_names]
 
@@ -2285,17 +2285,72 @@ def test_artist_resolver_uses_aliases_and_skips_placeholders(monkeypatch, tmp_pa
 
 
 def test_platform_schema_backfills_and_api_lists(monkeypatch, tmp_path):
-    sqlite_operator, web_api = fresh_backend(monkeypatch, tmp_path, "db.sqlite_operator", "web_api")
+    sqlite_operator, platforms_module, workspace_db, web_api = fresh_backend(monkeypatch, tmp_path, "db.sqlite_operator", "platforms", "workspace_db", "web_api")
     conn = insert_mock_item(sqlite_operator, "67" * 32, artist="Platform Artist")
     conn.execute("UPDATE items SET platform = ? WHERE hash = ?", ("twitter", "67" * 32))
     conn.commit()
     conn.close()
+    workspace_conn = workspace_db.connect_workspace_database()
+    platforms_module.resolve_platform_label(workspace_conn, "Fanbox", create=True)
+    workspace_conn.commit()
+    workspace_conn.close()
 
     platforms = web_api._get_platforms_sync("", 20)["items"]
+    used_platforms = web_api._get_platforms_sync("", 20, "used")["items"]
     x_platform = next(item for item in platforms if item["display_name"] == "X")
 
     assert x_platform["key_norm"] == "x"
     assert x_platform["item_count"] == 1
+    assert any(item["display_name"] == "Fanbox" and item["item_count"] == 0 for item in platforms)
+    assert all(item["item_count"] > 0 for item in used_platforms)
+
+
+def test_stats_scope_used_and_all_for_artists_and_topics(monkeypatch, tmp_path):
+    utils, sqlite_operator, artists_module, topics_module, metadata_index, workspace_db, web_api = fresh_backend(
+        monkeypatch,
+        tmp_path,
+        "utils",
+        "db.sqlite_operator",
+        "artists",
+        "topics",
+        "metadata_index",
+        "workspace_db",
+        "web_api",
+    )
+    item_hash = "68" * 32
+    conn = insert_mock_item(sqlite_operator, item_hash, artist="Used Artist")
+    conn.commit()
+    conn.close()
+    workspace_conn = workspace_db.connect_workspace_database()
+    artists_module.resolve_artist_name(workspace_conn, "Unused Artist", create=True)
+    workspace_conn.commit()
+    workspace_conn.close()
+
+    web_api._update_item_sync(item_hash, web_api.ItemUpdate(topics=["used topic"]))
+    web_api._update_item_sync(item_hash, web_api.ItemUpdate(wd_tags=["used wd tag"]))
+    topics_module.ensure_topic_file("unused topic")
+    workspace_conn = workspace_db.connect_workspace_database()
+    workspace_db.upsert_wd_dictionary_tags(workspace_conn, [("general", "unused wd tag")])
+    workspace_conn.commit()
+    workspace_conn.close()
+    conn = sqlite_operator.connect_database()
+    metadata_index.rebuild_all_metadata(conn)
+    conn.commit()
+    conn.close()
+
+    all_artists = web_api._get_artists_sync("", 20, "all")["items"]
+    used_artists = web_api._get_artists_sync("", 20, "used")["items"]
+    all_topics = web_api._get_facets_sync("topic", "", 20, "all")["items"]
+    used_topics = web_api._get_facets_sync("topic", "", 20, "used")["items"]
+    all_wd = web_api._get_facets_sync("wd_tag", "", 20, "all")["items"]
+    used_wd = web_api._get_facets_sync("wd_tag", "", 20, "used")["items"]
+
+    assert any(item["name"] == "Unused Artist" and item["item_count"] == 0 for item in all_artists)
+    assert all(item["item_count"] > 0 for item in used_artists)
+    assert any(item == {"value": "unused_topic", "count": 0} for item in all_topics)
+    assert all(item["count"] > 0 for item in used_topics)
+    assert any(item == {"value": "unused wd tag", "count": 0} for item in all_wd)
+    assert all(item["count"] > 0 for item in used_wd)
 
 
 def test_artist_api_lists_details_and_edits(monkeypatch, tmp_path):
@@ -2367,12 +2422,13 @@ def test_artist_api_rejects_duplicate_names_and_aliases(monkeypatch, tmp_path):
 
 
 def test_artist_merge_absorbs_sources_and_rewrites_items(monkeypatch, tmp_path):
-    utils, sqlite_operator, artists, web_api = fresh_backend(
+    utils, sqlite_operator, artists, workspace_db, web_api = fresh_backend(
         monkeypatch,
         tmp_path,
         "utils",
         "db.sqlite_operator",
         "artists",
+        "workspace_db",
         "web_api",
     )
     target_hash = "68" * 32
@@ -2393,16 +2449,16 @@ def test_artist_merge_absorbs_sources_and_rewrites_items(monkeypatch, tmp_path):
 
     listing = web_api._get_artists_sync("", 20)["items"]
     ids = {artist["name"]: artist["id"] for artist in listing}
-    conn = sqlite_operator.init_database()
-    conn.execute("DELETE FROM artists WHERE id = ?", (ids["old nix"],))
-    artists.add_artist_alias(conn, ids["nixeu"], "old nix")
-    artists.add_artist_link(conn, ids["iomayashi"], "X", "https://x.com/shared")
-    artists.add_artist_link(conn, ids["nixeu"], "X", "https://x.com/shared")
-    artists.add_artist_link(conn, ids["iomaya"], "Pixiv", "https://www.pixiv.net/users/iomaya")
-    conn.execute("UPDATE artists SET notes = ? WHERE id = ?", ("old nixeu notes", ids["nixeu"]))
-    conn.execute("UPDATE artists SET notes = ? WHERE id = ?", ("old iomaya notes", ids["iomaya"]))
-    conn.commit()
-    conn.close()
+    workspace_conn = workspace_db.connect_workspace_database()
+    workspace_conn.execute("DELETE FROM artists WHERE id = ?", (ids["old nix"],))
+    artists.add_artist_alias(workspace_conn, ids["nixeu"], "old nix")
+    artists.add_artist_link(workspace_conn, ids["iomayashi"], "X", "https://x.com/shared")
+    artists.add_artist_link(workspace_conn, ids["nixeu"], "X", "https://x.com/shared")
+    artists.add_artist_link(workspace_conn, ids["iomaya"], "Pixiv", "https://www.pixiv.net/users/iomaya")
+    workspace_conn.execute("UPDATE artists SET notes = ? WHERE id = ?", ("old nixeu notes", ids["nixeu"]))
+    workspace_conn.execute("UPDATE artists SET notes = ? WHERE id = ?", ("old iomaya notes", ids["iomaya"]))
+    workspace_conn.commit()
+    workspace_conn.close()
 
     preview = web_api._preview_artist_merge_sync(
         ids["iomayashi"],
@@ -2415,10 +2471,12 @@ def test_artist_merge_absorbs_sources_and_rewrites_items(monkeypatch, tmp_path):
     assert len(preview["links"]["duplicates"]) == 1
     assert preview["notes_appended"] == 2
     conn = sqlite_operator.init_database()
-    assert conn.execute("SELECT name FROM artists WHERE id = ?", (ids["nixeu"],)).fetchone()[0] == "nixeu"
+    workspace_conn = workspace_db.connect_workspace_database()
+    assert workspace_conn.execute("SELECT name FROM artists WHERE id = ?", (ids["nixeu"],)).fetchone()[0] == "nixeu"
     assert conn.execute("SELECT source_artist FROM items WHERE hash = ?", (source_hash,)).fetchone()[0] == "nixeu"
-    assert conn.execute("SELECT artist_id FROM artist_links WHERE url_norm = ?", ("https://www.pixiv.net/users/iomaya",)).fetchone()[0] == ids["iomaya"]
+    assert workspace_conn.execute("SELECT artist_id FROM artist_links WHERE url_norm = ?", ("https://www.pixiv.net/users/iomaya",)).fetchone()[0] == ids["iomaya"]
     conn.close()
+    workspace_conn.close()
 
     merged = web_api._merge_artist_sync(
         ids["iomayashi"],
@@ -2430,11 +2488,12 @@ def test_artist_merge_absorbs_sources_and_rewrites_items(monkeypatch, tmp_path):
     assert "old iomaya notes" in merged["target_detail"]["notes"]
 
     conn = sqlite_operator.init_database()
-    names = {row[0] for row in conn.execute("SELECT name FROM artists").fetchall()}
+    workspace_conn = workspace_db.connect_workspace_database()
+    names = {row[0] for row in workspace_conn.execute("SELECT name FROM artists").fetchall()}
     assert "iomayashi" in names
     assert "nixeu" not in names
     assert "iomaya" not in names
-    aliases = {row[0] for row in conn.execute("SELECT alias FROM artist_aliases WHERE artist_id = ?", (ids["iomayashi"],)).fetchall()}
+    aliases = {row[0] for row in workspace_conn.execute("SELECT alias FROM artist_aliases WHERE artist_id = ?", (ids["iomayashi"],)).fetchall()}
     assert {"nixeu", "iomaya", "old nix"} <= aliases
     item_artists = {
         row[0]
@@ -2444,17 +2503,18 @@ def test_artist_merge_absorbs_sources_and_rewrites_items(monkeypatch, tmp_path):
         ).fetchall()
     }
     assert item_artists == {"iomayashi"}
-    links = conn.execute("SELECT platform, url FROM artist_links WHERE artist_id = ?", (ids["iomayashi"],)).fetchall()
+    links = workspace_conn.execute("SELECT platform, url FROM artist_links WHERE artist_id = ?", (ids["iomayashi"],)).fetchall()
     assert len(links) == 2
-    assert artists.resolve_artist_name(conn, "nixeu") == "iomayashi"
+    assert artists.resolve_artist_name(workspace_conn, "nixeu") == "iomayashi"
     row = conn.execute("SELECT storage_id FROM items WHERE hash = ?", (source_hash,)).fetchone()
     note_data = frontmatter_from_markdown(utils.note_path_for(source_hash, row[0]).read_text(encoding="utf-8"))
     assert note_data["artist"] == "iomayashi"
     conn.close()
+    workspace_conn.close()
 
 
 def test_artist_merge_preview_reports_alias_conflicts_without_mutating(monkeypatch, tmp_path):
-    sqlite_operator, artists, web_api = fresh_backend(monkeypatch, tmp_path, "db.sqlite_operator", "artists", "web_api")
+    sqlite_operator, artists, workspace_db, web_api = fresh_backend(monkeypatch, tmp_path, "db.sqlite_operator", "artists", "workspace_db", "web_api")
     conn = insert_mock_item(sqlite_operator, "73" * 32, artist="Target Merge")
     conn.close()
     conn = insert_mock_item(sqlite_operator, "74" * 32, artist="Source Merge")
@@ -2464,14 +2524,14 @@ def test_artist_merge_preview_reports_alias_conflicts_without_mutating(monkeypat
 
     listing = web_api._get_artists_sync("", 20)["items"]
     ids = {artist["name"]: artist["id"] for artist in listing}
-    conn = sqlite_operator.init_database()
-    artists.add_artist_alias(conn, ids["Source Merge"], "conflict alias")
-    conn.execute(
+    workspace_conn = workspace_db.connect_workspace_database()
+    artists.add_artist_alias(workspace_conn, ids["Source Merge"], "conflict alias")
+    workspace_conn.execute(
         "INSERT INTO artist_aliases(artist_id, alias, alias_norm, created_at) VALUES (?, ?, ?, ?)",
         (ids["Unrelated Merge"], "Source Merge", "source merge", "2026-01-01 00:00:00"),
     )
-    conn.commit()
-    conn.close()
+    workspace_conn.commit()
+    workspace_conn.close()
 
     preview = web_api._preview_artist_merge_sync(
         ids["Target Merge"],
@@ -2481,24 +2541,27 @@ def test_artist_merge_preview_reports_alias_conflicts_without_mutating(monkeypat
     assert {alias["value"] for alias in preview["aliases"]["move"]} == {"conflict alias"}
     assert {alias["value"] for alias in preview["aliases"]["conflicts"]} == {"Source Merge"}
 
-    conn = sqlite_operator.init_database()
-    before_alias_owner = conn.execute("SELECT artist_id FROM artist_aliases WHERE alias_norm = 'conflict alias'").fetchone()[0]
+    workspace_conn = workspace_db.connect_workspace_database()
+    before_alias_owner = workspace_conn.execute("SELECT artist_id FROM artist_aliases WHERE alias_norm = 'conflict alias'").fetchone()[0]
     assert before_alias_owner == ids["Source Merge"]
-    assert conn.execute("SELECT name FROM artists WHERE id = ?", (ids["Source Merge"],)).fetchone()[0] == "Source Merge"
-    assert conn.execute("SELECT artist_id FROM artist_aliases WHERE alias_norm = 'source merge'").fetchone()[0] == ids["Unrelated Merge"]
-    conn.close()
+    assert workspace_conn.execute("SELECT name FROM artists WHERE id = ?", (ids["Source Merge"],)).fetchone()[0] == "Source Merge"
+    assert workspace_conn.execute("SELECT artist_id FROM artist_aliases WHERE alias_norm = 'source merge'").fetchone()[0] == ids["Unrelated Merge"]
+    workspace_conn.close()
 
 
 def test_artist_merge_rejects_invalid_sources(monkeypatch, tmp_path):
-    sqlite_operator, web_api = fresh_backend(monkeypatch, tmp_path, "db.sqlite_operator", "web_api")
+    sqlite_operator, workspace_db, web_api = fresh_backend(monkeypatch, tmp_path, "db.sqlite_operator", "workspace_db", "web_api")
     conn = insert_mock_item(sqlite_operator, "72" * 32, artist="Merge Target")
-    conn.execute(
+    workspace_conn = workspace_db.connect_workspace_database()
+    workspace_conn.execute(
         """
         INSERT INTO artists(name, name_norm, kind, notes, created_at, updated_at)
         VALUES ('Unknown', 'unknown', 'artist', '', '2026-01-01 00:00:00', '2026-01-01 00:00:00')
         """
     )
-    placeholder_id = conn.execute("SELECT id FROM artists WHERE name_norm = 'unknown'").fetchone()[0]
+    workspace_conn.commit()
+    placeholder_id = workspace_conn.execute("SELECT id FROM artists WHERE name_norm = 'unknown'").fetchone()[0]
+    workspace_conn.close()
     conn.close()
     artist = next(item for item in web_api._get_artists_sync("", 10)["items"] if item["name"] == "Merge Target")
 
@@ -3058,3 +3121,122 @@ def test_local_ingest_worker_emits_local_and_audit_logs(monkeypatch, tmp_path):
     assert audit_calls[-1][1] == "Local ingestion run summary"
     assert audit_calls[-1][2]["ingest_type"] == "local"
     assert audit_calls[-1][2]["summary_ingested"] == 1
+
+
+def test_multi_vault_shared_workspace_metadata(monkeypatch, tmp_path):
+    """Workspace DB aggregates artists/platforms/wd_tags from all vault DBs.
+
+    Creates a second vault alongside the default one, inserts items with
+    different artists into each vault's DB, and verifies:
+    - Workspace DB sees artists from both vaults after rebuild
+    - Active vault counts are scoped to the active vault only
+    - Prune removes metadata not referenced by any vault
+    - Scope=all facets include entries from all vaults
+    """
+    vaults, utils, sqlite_operator, workspace_db, web_api = fresh_backend(
+        monkeypatch,
+        tmp_path,
+        "vaults",
+        "utils",
+        "db.sqlite_operator",
+        "workspace_db",
+        "web_api",
+    )
+
+    # ── Create a second vault ──
+    vaults.create_vault("Second")
+    vault_items = {item["id"]: item for item in vaults.vault_list()}
+    assert "second" in vault_items
+    second_db_path = Path(vault_items["second"]["db_path"])
+
+    # ── Insert items into default vault (the active one) ──
+    default_hash = "d1" * 32
+    conn = insert_mock_item(sqlite_operator, default_hash, artist="Default Artist")
+    conn.execute("UPDATE items SET platform = ? WHERE hash = ?", ("pixiv", default_hash))
+    conn.commit()
+    conn.close()
+
+    # ── Insert items into second vault's DB directly ──
+    second_conn = sqlite_operator.init_database(second_db_path)
+    second_storage_id = sqlite_operator.allocate_storage_id(second_conn)
+    second_hash = "s1" * 32
+    second_conn.execute(
+        """
+        INSERT INTO items(hash, storage_id, original_filename, file_extension, mime_type, size_bytes, date_added, source_url, source_url_norm, platform, source_artist, phash)
+        VALUES (?, ?, ?, '.jpg', 'image/jpeg', 10, '2026-01-01 00:00:00', '', '', 'instagram', 'Second Vault Artist', '')
+        """,
+        (second_hash, second_storage_id, f"{second_hash}.jpg"),
+    )
+    second_conn.commit()
+    second_conn.close()
+
+    # ── Rebuild workspace metadata — should pull from both vaults ──
+    result = workspace_db.rebuild_workspace_metadata()
+    assert result["status"] == "success"
+
+    ws_conn = workspace_db.connect_workspace_database()
+    try:
+        artist_norms = {row[0] for row in ws_conn.execute("SELECT name_norm FROM artists").fetchall()}
+        platform_norms = {row[0] for row in ws_conn.execute("SELECT key_norm FROM platforms").fetchall()}
+    finally:
+        ws_conn.close()
+
+    # Both vaults' artists should be in workspace DB
+    assert "default artist" in artist_norms
+    assert "second vault artist" in artist_norms
+
+    # Both vaults' platforms should be in workspace DB
+    assert "pixiv" in platform_norms
+    assert "instagram" in platform_norms
+
+    # ── Verify counts are scoped to active vault (default) ──
+    all_artists = web_api._get_artists_sync("", 50, "all")["items"]
+    artist_map = {a["name"]: a for a in all_artists}
+
+    # Default Artist has 1 item in the active vault
+    assert artist_map["Default Artist"]["item_count"] == 1
+    # Second Vault Artist has 0 items in the active vault (items are in second vault)
+    assert artist_map["Second Vault Artist"]["item_count"] == 0
+
+    # ── Verify used_only filters correctly ──
+    used_artists = web_api._get_artists_sync("", 50, "used")["items"]
+    used_names = {a["name"] for a in used_artists}
+    assert "Default Artist" in used_names
+    assert "Second Vault Artist" not in used_names
+
+    # ── Verify facets scope=all includes workspace data ──
+    all_artist_facets = web_api._get_facets_sync("artist", "", 50, "all")["items"]
+    facet_values = {item["value"] for item in all_artist_facets}
+    assert "Default Artist" in facet_values
+    assert "Second Vault Artist" in facet_values
+
+    all_platform_facets = web_api._get_facets_sync("platform", "", 50, "all")["items"]
+    platform_values = {item["value"] for item in all_platform_facets}
+    assert "Pixiv" in platform_values
+    assert "Instagram" in platform_values
+
+    # ── Prune should NOT remove Second Vault Artist (used in second vault) ──
+    prune_result = workspace_db.prune_unused_workspace_metadata()
+    assert prune_result["status"] == "success"
+    assert prune_result["pruned"]["artists"] == 0
+
+    # ── Insert an orphan artist, then prune should remove it ──
+    ws_conn = workspace_db.connect_workspace_database()
+    ws_conn.execute(
+        "INSERT INTO artists(name, name_norm, kind, notes, created_at, updated_at) VALUES (?, ?, 'artist', '', '2026-01-01', '2026-01-01')",
+        ("Orphan Artist", "orphan artist"),
+    )
+    ws_conn.commit()
+    ws_conn.close()
+
+    prune_result = workspace_db.prune_unused_workspace_metadata()
+    assert prune_result["pruned"]["artists"] == 1
+
+    ws_conn = workspace_db.connect_workspace_database()
+    try:
+        assert ws_conn.execute("SELECT 1 FROM artists WHERE name_norm = 'orphan artist'").fetchone() is None
+        assert ws_conn.execute("SELECT 1 FROM artists WHERE name_norm = 'default artist'").fetchone() is not None
+        assert ws_conn.execute("SELECT 1 FROM artists WHERE name_norm = 'second vault artist'").fetchone() is not None
+    finally:
+        ws_conn.close()
+

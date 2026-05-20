@@ -41,7 +41,7 @@ from metadata_index import (
 from tagging import load_tag_cache, tag_media
 from thumbnails import ThumbnailBusyError, get_or_generate_thumbnail
 from utils import (
-    SECRETS_DIR, WD_TAGS_DIR, atomic_write_text, get_cookie_auth_status,
+    SECRETS_DIR, TOPICS_DIR, WD_TAGS_DIR, atomic_write_text, get_cookie_auth_status,
     invalidate_config_cache, utc_now, utc_now_str
 )
 from ingest_control import ONLINE_STOP_AFTER_CURRENT, LOCAL_STOP_AFTER_CURRENT
@@ -59,6 +59,7 @@ from artists import (
     update_artist,
 )
 from platforms import list_platforms, resolve_platform_label
+from workspace_db import connect_workspace_database, prune_unused_workspace_metadata, rebuild_workspace_metadata, upsert_wd_dictionary_tags
 from review_cache import (
     mark_review_cache_dirty,
     remove_review_cache_entry,
@@ -475,6 +476,7 @@ def _apply_manual_frontmatter_to_item(item_hash: str, manual_fields: dict, ident
     if not manual_fields and not identity_fields:
         return
     conn = init_database()
+    workspace_conn = connect_workspace_database()
     try:
         identity_fields = identity_fields or {}
         if identity_fields:
@@ -486,8 +488,8 @@ def _apply_manual_frontmatter_to_item(item_hash: str, manual_fields: dict, ident
                 WHERE hash = ?
                 """,
                 (
-                    resolve_artist_name(conn, identity_fields.get("artist") or ""),
-                    resolve_platform_label(conn, identity_fields.get("platform") or ""),
+                    resolve_artist_name(workspace_conn, identity_fields.get("artist") or ""),
+                    resolve_platform_label(workspace_conn, identity_fields.get("platform") or ""),
                     source_url,
                     normalize_source_url(source_url),
                     str(identity_fields.get("date_added") or ""),
@@ -504,12 +506,15 @@ def _apply_manual_frontmatter_to_item(item_hash: str, manual_fields: dict, ident
         note_path.parent.mkdir(parents=True, exist_ok=True)
         atomic_write_text(note_path, md_content)
         safe_reindex_item_metadata(conn, item_hash, "review_replace_preserve")
+        workspace_conn.commit()
         conn.commit()
     except Exception:
+        workspace_conn.rollback()
         conn.rollback()
         raise
     finally:
         conn.close()
+        workspace_conn.close()
 
 def _item_file_paths(item_hash: str, extension: str, mime_type: str, storage_id: str | None, conn=None) -> list[Path]:
     if not storage_id:
@@ -586,30 +591,34 @@ class ArtistMergeRequest(BaseModel):
     source_artist_ids: list[int]
 
 @app.get("/api/platforms")
-async def get_platforms(q: str = "", limit: int = 100):
-    return await asyncio.to_thread(_get_platforms_sync, q, limit)
+async def get_platforms(q: str = "", limit: int = 100, scope: str = "all"):
+    return await asyncio.to_thread(_get_platforms_sync, q, limit, scope)
 
-def _get_platforms_sync(q: str = "", limit: int = 100):
+def _get_platforms_sync(q: str = "", limit: int = 100, scope: str = "all"):
     conn = connect_database()
+    workspace_conn = connect_workspace_database()
     try:
-        items = list_platforms(conn, q, limit)
-        conn.commit()
+        items = list_platforms(workspace_conn, q, limit, used_only=str(scope or "").casefold() == "used", item_conn=conn)
+        workspace_conn.commit()
         return {"items": items}
     finally:
         conn.close()
+        workspace_conn.close()
 
 @app.get("/api/artists")
-async def get_artists(q: str = "", limit: int = 100):
-    return await asyncio.to_thread(_get_artists_sync, q, limit)
+async def get_artists(q: str = "", limit: int = 100, scope: str = "all"):
+    return await asyncio.to_thread(_get_artists_sync, q, limit, scope)
 
-def _get_artists_sync(q: str = "", limit: int = 100):
+def _get_artists_sync(q: str = "", limit: int = 100, scope: str = "all"):
     conn = connect_database()
+    workspace_conn = connect_workspace_database()
     try:
-        items = list_artists(conn, q, limit)
-        conn.commit()
+        items = list_artists(workspace_conn, q, limit, used_only=str(scope or "").casefold() == "used", item_conn=conn)
+        workspace_conn.commit()
         return {"items": items}
     finally:
         conn.close()
+        workspace_conn.close()
 
 @app.get("/api/artists/{artist_id}")
 async def get_artist(artist_id: int):
@@ -617,13 +626,15 @@ async def get_artist(artist_id: int):
 
 def _get_artist_sync(artist_id: int):
     conn = connect_database()
+    workspace_conn = connect_workspace_database()
     try:
-        detail = get_artist_detail(conn, artist_id)
+        detail = get_artist_detail(workspace_conn, artist_id, item_conn=conn)
         if detail is None:
             raise HTTPException(status_code=404, detail="Artist not found")
         return detail
     finally:
         conn.close()
+        workspace_conn.close()
 
 def _rewrite_metadata_notes_for_hashes(conn, item_hashes: list[str]):
     for item_hash in item_hashes:
@@ -651,13 +662,14 @@ async def patch_artist(artist_id: int, update: ArtistUpdate):
 
 def _patch_artist_sync(artist_id: int, update: ArtistUpdate):
     conn = connect_database()
+    workspace_conn = connect_workspace_database()
     try:
         try:
-            previous = get_artist_detail(conn, artist_id)
+            previous = get_artist_detail(workspace_conn, artist_id, item_conn=conn)
             if previous is None:
                 raise KeyError("artist not found")
             previous_norm = normalize_artist_name(previous["name"])
-            detail = update_artist(conn, artist_id, update.name, update.kind, update.notes)
+            detail = update_artist(workspace_conn, artist_id, update.name, update.kind, update.notes, item_conn=conn)
             current_norm = normalize_artist_name(detail["name"])
             if update.name is not None and previous_norm and current_norm and previous_norm != current_norm:
                 rows = conn.execute(
@@ -672,7 +684,8 @@ def _patch_artist_sync(artist_id: int, update: ArtistUpdate):
                     )
                     _rewrite_metadata_notes_for_hashes(conn, item_hashes)
                     refresh_metadata_facet_counts_for_values(conn, {("artist", previous_norm), ("artist", current_norm)})
-                    detail = get_artist_detail(conn, artist_id) or detail
+                    detail = get_artist_detail(workspace_conn, artist_id, item_conn=conn) or detail
+            workspace_conn.commit()
             conn.commit()
             return detail
         except KeyError:
@@ -683,6 +696,7 @@ def _patch_artist_sync(artist_id: int, update: ArtistUpdate):
             raise HTTPException(status_code=400, detail=str(exc))
     finally:
         conn.close()
+        workspace_conn.close()
 
 @app.post("/api/artists/{artist_id}/merge-preview")
 async def preview_artist_merge_route(artist_id: int, body: ArtistMergeRequest):
@@ -690,15 +704,17 @@ async def preview_artist_merge_route(artist_id: int, body: ArtistMergeRequest):
 
 def _preview_artist_merge_sync(artist_id: int, body: ArtistMergeRequest):
     conn = connect_database()
+    workspace_conn = connect_workspace_database()
     try:
         try:
-            return _public_artist_merge_payload(preview_artist_merge(conn, artist_id, body.source_artist_ids))
+            return _public_artist_merge_payload(preview_artist_merge(workspace_conn, artist_id, body.source_artist_ids, item_conn=conn))
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc))
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
     finally:
         conn.close()
+        workspace_conn.close()
 
 @app.post("/api/artists/{artist_id}/merge")
 async def merge_artist_route(artist_id: int, body: ArtistMergeRequest):
@@ -706,36 +722,42 @@ async def merge_artist_route(artist_id: int, body: ArtistMergeRequest):
 
 def _merge_artist_sync(artist_id: int, body: ArtistMergeRequest):
     conn = connect_database()
+    workspace_conn = connect_workspace_database()
     try:
         try:
-            result = merge_artists(conn, artist_id, body.source_artist_ids)
+            result = merge_artists(workspace_conn, artist_id, body.source_artist_ids, item_conn=conn)
             if result.get("item_hashes"):
                 _rewrite_metadata_notes_for_hashes(conn, result["item_hashes"])
                 refresh_metadata_facet_counts_for_values(
                     conn,
                     {("artist", norm) for norm in result.get("facet_norms", [])},
                 )
-                result["target_detail"] = get_artist_detail(conn, artist_id)
+                result["target_detail"] = get_artist_detail(workspace_conn, artist_id, item_conn=conn)
+            workspace_conn.commit()
             conn.commit()
             return _public_artist_merge_payload(result)
         except KeyError as exc:
+            workspace_conn.rollback()
             conn.rollback()
             raise HTTPException(status_code=404, detail=str(exc))
         except ValueError as exc:
+            workspace_conn.rollback()
             conn.rollback()
             raise HTTPException(status_code=400, detail=str(exc))
         except Exception:
+            workspace_conn.rollback()
             conn.rollback()
             raise
     finally:
         conn.close()
+        workspace_conn.close()
 
 @app.post("/api/artists/{artist_id}/aliases")
 async def post_artist_alias(artist_id: int, body: ArtistAliasCreate):
     return await asyncio.to_thread(_post_artist_alias_sync, artist_id, body)
 
 def _post_artist_alias_sync(artist_id: int, body: ArtistAliasCreate):
-    conn = connect_database()
+    conn = connect_workspace_database()
     try:
         try:
             alias = add_artist_alias(conn, artist_id, body.alias)
@@ -755,7 +777,7 @@ async def delete_alias(artist_id: int, alias_id: int):
     return await asyncio.to_thread(_delete_alias_sync, artist_id, alias_id)
 
 def _delete_alias_sync(artist_id: int, alias_id: int):
-    conn = connect_database()
+    conn = connect_workspace_database()
     try:
         if not delete_artist_alias(conn, artist_id, alias_id):
             raise HTTPException(status_code=404, detail="Alias not found")
@@ -769,7 +791,7 @@ async def post_artist_link(artist_id: int, body: ArtistLinkCreate):
     return await asyncio.to_thread(_post_artist_link_sync, artist_id, body)
 
 def _post_artist_link_sync(artist_id: int, body: ArtistLinkCreate):
-    conn = connect_database()
+    conn = connect_workspace_database()
     try:
         try:
             link = add_artist_link(conn, artist_id, body.platform, body.url, body.handle, body.is_primary)
@@ -789,7 +811,7 @@ async def delete_link(artist_id: int, link_id: int):
     return await asyncio.to_thread(_delete_link_sync, artist_id, link_id)
 
 def _delete_link_sync(artist_id: int, link_id: int):
-    conn = connect_database()
+    conn = connect_workspace_database()
     try:
         if not delete_artist_link(conn, artist_id, link_id):
             raise HTTPException(status_code=404, detail="Link not found")
@@ -812,6 +834,14 @@ def _get_metadata_index_status_sync():
 @app.post("/api/metadata-index/rebuild")
 async def rebuild_metadata_index():
     return await asyncio.to_thread(start_metadata_repair_worker, True, True)
+
+@app.post("/api/workspace-metadata/rebuild")
+async def rebuild_workspace_metadata_route():
+    return await asyncio.to_thread(rebuild_workspace_metadata)
+
+@app.post("/api/workspace-metadata/prune")
+async def prune_workspace_metadata_route():
+    return await asyncio.to_thread(prune_unused_workspace_metadata)
 
 def _get_stats_sync():
     conn = connect_database()
@@ -881,8 +911,8 @@ async def get_search_suggestions(kind: str, q: str = "", limit: int = 20):
     return await asyncio.to_thread(_get_search_suggestions_sync, kind, q, limit)
 
 @app.get("/api/facets")
-async def get_facets(kind: str, q: str = "", limit: int = 100):
-    return await asyncio.to_thread(_get_facets_sync, kind, q, limit)
+async def get_facets(kind: str, q: str = "", limit: int = 100, scope: str = "used"):
+    return await asyncio.to_thread(_get_facets_sync, kind, q, limit, scope)
 
 def _get_search_suggestions_sync(kind: str, q: str = "", limit: int = 20):
     kind = (kind or "").strip().lower()
@@ -952,9 +982,65 @@ def _count_python_facets(rows, value_loader, needle, limit):
     items = [{"value": display_values[key], "count": count} for key, count in counts.items()]
     return _sort_facets(items, needle, limit)
 
-def _get_facets_sync(kind: str, q: str = "", limit: int = 100):
+def _topic_library_facets(conn, needle: str, limit: int) -> list[dict]:
+    used = {
+        str(item["value"]).casefold(): {"value": item["value"], "count": int(item["count"] or 0)}
+        for item in metadata_facets(conn, "topic", needle.casefold(), 10000)
+    }
+    merged = dict(used)
+    if TOPICS_DIR.exists():
+        for path in TOPICS_DIR.glob("*.md"):
+            label = path.stem
+            key = label.casefold()
+            if needle and needle not in key:
+                continue
+            merged.setdefault(key, {"value": label, "count": 0})
+    items = list(merged.values())
+    items.sort(
+        key=lambda item: (
+            0 if needle and str(item["value"]).casefold().startswith(needle) else 1,
+            -int(item["count"] or 0),
+            str(item["value"]).casefold(),
+        )
+    )
+    return items[:limit]
+
+def _wd_dictionary_facets(workspace_conn, item_conn, needle: str, limit: int) -> list[dict]:
+    used = {
+        str(item["value"]).casefold(): {"value": item["value"], "count": int(item["count"] or 0)}
+        for item in metadata_facets(item_conn, "wd_tag", needle.casefold(), 10000)
+    }
+    merged = dict(used)
+    where_sql = ""
+    params: list = []
+    if needle:
+        where_sql = "WHERE tag_norm LIKE ? OR LOWER(tag) LIKE ?"
+        params.extend([f"%{needle}%", f"%{needle}%"])
+    for tag_norm, tag in workspace_conn.execute(
+        f"""
+        SELECT tag_norm, tag
+        FROM wd_tag_dictionary
+        {where_sql}
+        ORDER BY tag COLLATE NOCASE ASC
+        LIMIT 10000
+        """,
+        params,
+    ).fetchall():
+        merged.setdefault(str(tag_norm), {"value": tag, "count": 0})
+    items = list(merged.values())
+    items.sort(
+        key=lambda item: (
+            0 if needle and str(item["value"]).casefold().startswith(needle) else 1,
+            -int(item["count"] or 0),
+            str(item["value"]).casefold(),
+        )
+    )
+    return items[:limit]
+
+def _get_facets_sync(kind: str, q: str = "", limit: int = 100, scope: str = "used"):
     kind = (kind or "").strip().lower()
     needle = (q or "").strip().lower()
+    scope = (scope or "used").strip().lower()
     limit = max(1, min(int(limit or 100), 500))
 
     if kind not in {"artist", "platform", "topic", "wd_tag"}:
@@ -962,7 +1048,34 @@ def _get_facets_sync(kind: str, q: str = "", limit: int = 100):
 
     conn = connect_database()
     try:
-        if kind in {"artist", "platform"}:
+        if kind == "topic" and scope == "all":
+            return {"kind": kind, "items": _topic_library_facets(conn, needle.casefold(), limit)}
+
+        if kind == "wd_tag" and scope == "all":
+            workspace_conn = connect_workspace_database()
+            try:
+                return {"kind": kind, "items": _wd_dictionary_facets(workspace_conn, conn, needle.casefold(), limit)}
+            finally:
+                workspace_conn.close()
+
+        if kind == "artist":
+            if scope == "all":
+                workspace_conn = connect_workspace_database()
+                try:
+                    artists = list_artists(workspace_conn, needle, limit, used_only=False, item_conn=conn)
+                    return {"kind": kind, "items": [{"value": a["name"], "count": a["item_count"]} for a in artists]}
+                finally:
+                    workspace_conn.close()
+            return {"kind": kind, "items": metadata_facets(conn, kind, needle.casefold(), limit)}
+
+        if kind == "platform":
+            if scope == "all":
+                workspace_conn = connect_workspace_database()
+                try:
+                    platforms = list_platforms(workspace_conn, needle, limit, used_only=False, item_conn=conn)
+                    return {"kind": kind, "items": [{"value": p["display_name"], "count": p["item_count"]} for p in platforms]}
+                finally:
+                    workspace_conn.close()
             return {"kind": kind, "items": metadata_facets(conn, kind, needle.casefold(), limit)}
 
         if metadata_index_ready(conn):
@@ -1427,6 +1540,7 @@ async def update_item(item_hash: str, update: ItemUpdate):
 
 def _update_item_sync(item_hash: str, update: ItemUpdate):
     conn = init_database()
+    workspace_conn = connect_workspace_database()
     cursor = conn.cursor()
     try:
         cursor.execute("SELECT 1 FROM items WHERE hash = ?", (item_hash,))
@@ -1435,13 +1549,13 @@ def _update_item_sync(item_hash: str, update: ItemUpdate):
         previous_core_facets = item_core_facet_values(conn, item_hash)
         manual_overrides = {}
         if update.artist is not None:
-            resolved_artist = resolve_artist_name(conn, update.artist)
+            resolved_artist = resolve_artist_name(workspace_conn, update.artist)
             cursor.execute("UPDATE items SET source_artist = ? WHERE hash = ?", (resolved_artist, item_hash))
             manual_overrides["artist"] = resolved_artist
         if update.source_url is not None:
             cursor.execute("UPDATE items SET source_url = ?, source_url_norm = ? WHERE hash = ?", (update.source_url, normalize_source_url(update.source_url), item_hash))
         if update.platform is not None:
-            cursor.execute("UPDATE items SET platform = ? WHERE hash = ?", (resolve_platform_label(conn, update.platform), item_hash))
+            cursor.execute("UPDATE items SET platform = ? WHERE hash = ?", (resolve_platform_label(workspace_conn, update.platform), item_hash))
         if update.topics is not None:
             if not isinstance(update.topics, list):
                 raise HTTPException(status_code=400, detail="topics must be a list")
@@ -1456,6 +1570,14 @@ def _update_item_sync(item_hash: str, update: ItemUpdate):
             if not isinstance(update.wd_tags, list):
                 raise HTTPException(status_code=400, detail="wd_tags must be a list")
             manual_overrides["wd_tags"] = normalize_topic_list(update.wd_tags)
+        wd_dictionary_rows = []
+        if "wd_rating" in manual_overrides and manual_overrides["wd_rating"]:
+            wd_dictionary_rows.append(("rating", manual_overrides["wd_rating"]))
+        for value in manual_overrides.get("wd_character_tags", []) or []:
+            wd_dictionary_rows.append(("character", value))
+        for value in manual_overrides.get("wd_tags", []) or []:
+            wd_dictionary_rows.append(("general", value))
+        upsert_wd_dictionary_tags(workspace_conn, wd_dictionary_rows)
         
         md_content = generate_markdown(conn, item_hash, topics_override=update.topics, manual_overrides=manual_overrides)
         if md_content:
@@ -1468,15 +1590,18 @@ def _update_item_sync(item_hash: str, update: ItemUpdate):
             safe_reindex_item_metadata(conn, item_hash, "item_patch")
             current_core_facets = item_core_facet_values(conn, item_hash)
             refresh_metadata_facet_counts_for_values(conn, previous_core_facets | current_core_facets)
+            workspace_conn.commit()
             conn.commit()
             
         row = cursor.execute("SELECT hash, file_extension, mime_type, original_filename, source_url, date_added, platform, source_artist, width, height, storage_id FROM items WHERE hash = ?", (item_hash,)).fetchone()
         return _get_item_details(item_hash, row, conn) if row else {"status": "success"}
     except Exception:
+        workspace_conn.rollback()
         conn.rollback()
         raise
     finally:
         conn.close()
+        workspace_conn.close()
 
 @app.delete("/api/items/{item_hash}")
 async def delete_item(item_hash: str):
@@ -2275,7 +2400,7 @@ def _run_local_ingest_worker(raw_paths: list[str], defaults: dict, skip_similari
 
 def _resolve_local_ingest_defaults(defaults: dict) -> dict:
     resolved = dict(defaults or {})
-    conn = init_database()
+    conn = connect_workspace_database()
     try:
         resolved["artist"] = resolve_artist_name(conn, resolved.get("artist") or "Local")
         resolved["platform"] = resolve_platform_label(conn, resolved.get("platform") or "Local")

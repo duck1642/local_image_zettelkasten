@@ -308,12 +308,19 @@ def insert_to_database(conn: sqlite3.Connection, filepath: Path, file_hash: str,
     source_url_norm = normalize_source_url(source_url)
     platform = metadata.get('platform', "")
     source_artist = metadata.get('artist', "")
-    if platform:
-        from platforms import resolve_platform_label
-        platform = resolve_platform_label(conn, platform)
-    if source_artist:
-        from artists import resolve_artist_name
-        source_artist = resolve_artist_name(conn, source_artist)
+    if platform or source_artist:
+        from workspace_db import connect_workspace_database
+        workspace_conn = connect_workspace_database()
+        try:
+            if platform:
+                from platforms import resolve_platform_label
+                platform = resolve_platform_label(workspace_conn, platform)
+            if source_artist:
+                from artists import resolve_artist_name
+                source_artist = resolve_artist_name(workspace_conn, source_artist)
+            workspace_conn.commit()
+        finally:
+            workspace_conn.close()
 
     if file_size is None:
         file_size = filepath.stat().st_size

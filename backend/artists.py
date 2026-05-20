@@ -173,19 +173,43 @@ def _artist_exists(conn: sqlite3.Connection, artist_id: int) -> bool:
     return conn.execute("SELECT 1 FROM artists WHERE id = ?", (artist_id,)).fetchone() is not None
 
 
-def _item_count_sql() -> str:
-    return """
-        SELECT COUNT(*)
+
+
+
+def _active_artist_counts(item_conn: sqlite3.Connection, artist_conn: sqlite3.Connection, rows: list[sqlite3.Row | tuple]) -> dict[int, int]:
+    counts = {int(row[0]): 0 for row in rows}
+    if not rows:
+        return counts
+    norm_to_artist: dict[str, int] = {}
+    artist_ids = []
+    for row in rows:
+        artist_id = int(row[0])
+        name_norm = str(row[3])
+        artist_ids.append(artist_id)
+        if name_norm:
+            norm_to_artist[name_norm] = artist_id
+    if artist_ids:
+        placeholders = ",".join("?" for _ in artist_ids)
+        for alias_norm, alias_artist_id in artist_conn.execute(
+            f"SELECT alias_norm, artist_id FROM artist_aliases WHERE artist_id IN ({placeholders})",
+            tuple(artist_ids),
+        ).fetchall():
+            if alias_norm:
+                norm_to_artist[str(alias_norm)] = int(alias_artist_id)
+    for artist_value, count in item_conn.execute("""
+        SELECT LOWER(TRIM(source_artist)), COUNT(*)
         FROM items
-        WHERE LOWER(TRIM(source_artist)) = artists.name_norm
-           OR LOWER(TRIM(source_artist)) IN (
-               SELECT alias_norm FROM artist_aliases WHERE artist_aliases.artist_id = artists.id
-           )
-    """
+        WHERE source_artist IS NOT NULL AND TRIM(source_artist) != ''
+        GROUP BY LOWER(TRIM(source_artist))
+    """).fetchall():
+        artist_id = norm_to_artist.get(str(artist_value or ""))
+        if artist_id is not None:
+            counts[artist_id] = counts.get(artist_id, 0) + int(count or 0)
+    return counts
 
 
-def list_artists(conn: sqlite3.Connection, q: str = "", limit: int = 100) -> list[dict]:
-    ensure_artist_schema(conn, backfill=True)
+def list_artists(conn: sqlite3.Connection, q: str = "", limit: int = 100, used_only: bool = False, item_conn: sqlite3.Connection | None = None) -> list[dict]:
+    ensure_artist_schema(conn, backfill=False)
     needle = normalize_artist_name(q)
     limit = max(1, min(int(limit or 100), 500))
     params: list = []
@@ -202,34 +226,38 @@ def list_artists(conn: sqlite3.Connection, q: str = "", limit: int = 100) -> lis
             artists.id,
             artists.name,
             artists.kind,
-            ({_item_count_sql()}) AS item_count,
+            artists.name_norm,
             (SELECT COUNT(*) FROM artist_links WHERE artist_links.artist_id = artists.id) AS link_count,
             (SELECT COUNT(*) FROM artist_aliases WHERE artist_aliases.artist_id = artists.id) AS alias_count
         FROM artists
         {where}
-        ORDER BY item_count DESC, artists.name COLLATE NOCASE ASC
+        ORDER BY artists.name COLLATE NOCASE ASC
         LIMIT ?
         """,
         (*params, limit),
     ).fetchall()
-    return [
+    counts = _active_artist_counts(item_conn or conn, conn, rows)
+    items = [
         {
             "id": row[0],
             "name": row[1],
             "kind": row[2],
-            "item_count": row[3],
+            "item_count": counts.get(int(row[0]), 0),
             "link_count": row[4],
             "alias_count": row[5],
         }
         for row in rows
     ]
+    if used_only:
+        items = [item for item in items if int(item["item_count"] or 0) > 0]
+    return items
 
 
-def get_artist_detail(conn: sqlite3.Connection, artist_id: int) -> dict | None:
+def get_artist_detail(conn: sqlite3.Connection, artist_id: int, item_conn: sqlite3.Connection | None = None) -> dict | None:
     ensure_artist_schema(conn, backfill=False)
     row = conn.execute(
-        f"""
-        SELECT id, name, name_norm, kind, notes, ({_item_count_sql()}) AS item_count
+        """
+        SELECT id, name, name_norm, kind, notes
         FROM artists
         WHERE id = ?
         """,
@@ -237,6 +265,8 @@ def get_artist_detail(conn: sqlite3.Connection, artist_id: int) -> dict | None:
     ).fetchone()
     if row is None:
         return None
+    # _active_artist_counts expects index [3] = name_norm; SELECT order is id, name, name_norm, kind, notes
+    counts = _active_artist_counts(item_conn or conn, conn, [(row[0], row[1], row[3], row[2])])
     aliases = [
         {"id": alias_id, "alias": alias, "alias_norm": alias_norm}
         for alias_id, alias, alias_norm in conn.execute(
@@ -262,13 +292,13 @@ def get_artist_detail(conn: sqlite3.Connection, artist_id: int) -> dict | None:
         "name_norm": row[2],
         "kind": row[3],
         "notes": row[4],
-        "item_count": row[5],
+        "item_count": counts.get(int(row[0]), 0),
         "aliases": aliases,
         "links": links,
     }
 
 
-def update_artist(conn: sqlite3.Connection, artist_id: int, name: str | None = None, kind: str | None = None, notes: str | None = None) -> dict:
+def update_artist(conn: sqlite3.Connection, artist_id: int, name: str | None = None, kind: str | None = None, notes: str | None = None, item_conn: sqlite3.Connection | None = None) -> dict:
     ensure_artist_schema(conn, backfill=False)
     if not _artist_exists(conn, artist_id):
         raise KeyError("artist not found")
@@ -300,7 +330,7 @@ def update_artist(conn: sqlite3.Connection, artist_id: int, name: str | None = N
         params.append(utc_now_str())
         params.append(artist_id)
         conn.execute(f"UPDATE artists SET {', '.join(updates)} WHERE id = ?", params)
-    detail = get_artist_detail(conn, artist_id)
+    detail = get_artist_detail(conn, artist_id, item_conn=item_conn)
     if detail is None:
         raise KeyError("artist not found")
     return detail
@@ -378,7 +408,7 @@ def _merge_context(conn: sqlite3.Connection, target_id: int, source_artist_ids: 
     return {"target": target, "sources": sources}
 
 
-def preview_artist_merge(conn: sqlite3.Connection, target_id: int, source_artist_ids: list[int]) -> dict:
+def preview_artist_merge(conn: sqlite3.Connection, target_id: int, source_artist_ids: list[int], item_conn: sqlite3.Connection | None = None) -> dict:
     context = _merge_context(conn, target_id, source_artist_ids)
     target = context["target"]
     sources = context["sources"]
@@ -452,6 +482,9 @@ def preview_artist_merge(conn: sqlite3.Connection, target_id: int, source_artist
         affected_item_count = conn.execute(
             f"SELECT COUNT(*) FROM items WHERE LOWER(TRIM(source_artist)) IN ({placeholders})",
             tuple(source_norms),
+        ).fetchone()[0] if item_conn is None else item_conn.execute(
+            f"SELECT COUNT(*) FROM items WHERE LOWER(TRIM(source_artist)) IN ({placeholders})",
+            tuple(source_norms),
         ).fetchone()[0]
 
     notes_appended = sum(1 for source in sources if str(source.get("notes") or "").strip())
@@ -476,8 +509,8 @@ def preview_artist_merge(conn: sqlite3.Connection, target_id: int, source_artist
     }
 
 
-def merge_artists(conn: sqlite3.Connection, target_id: int, source_artist_ids: list[int]) -> dict:
-    preview = preview_artist_merge(conn, target_id, source_artist_ids)
+def merge_artists(conn: sqlite3.Connection, target_id: int, source_artist_ids: list[int], item_conn: sqlite3.Connection | None = None) -> dict:
+    preview = preview_artist_merge(conn, target_id, source_artist_ids, item_conn=item_conn)
     target = _load_artist_row(conn, int(target_id))
     if target is None:
         raise KeyError("target artist not found")
@@ -486,9 +519,10 @@ def merge_artists(conn: sqlite3.Connection, target_id: int, source_artist_ids: l
 
     if preview["source_norms"]:
         placeholders = ",".join("?" for _ in preview["source_norms"])
+        query_conn = item_conn or conn
         item_hashes = [
             row[0]
-            for row in conn.execute(
+            for row in query_conn.execute(
                 f"SELECT hash FROM items WHERE LOWER(TRIM(source_artist)) IN ({placeholders})",
                 tuple(preview["source_norms"]),
             ).fetchall()
@@ -518,7 +552,7 @@ def merge_artists(conn: sqlite3.Connection, target_id: int, source_artist_ids: l
         conn.execute("DELETE FROM artist_links WHERE id = ?", (link["id"],))
 
     if item_hashes:
-        conn.executemany(
+        (item_conn or conn).executemany(
             "UPDATE items SET source_artist = ? WHERE hash = ?",
             [(target["name"], item_hash) for item_hash in item_hashes],
         )
@@ -544,7 +578,7 @@ def merge_artists(conn: sqlite3.Connection, target_id: int, source_artist_ids: l
 
     result = dict(preview)
     result["item_hashes"] = item_hashes
-    result["target_detail"] = get_artist_detail(conn, target["id"])
+    result["target_detail"] = get_artist_detail(conn, target["id"], item_conn=item_conn)
     result["merged"] = True
     return result
 

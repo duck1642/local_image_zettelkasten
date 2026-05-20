@@ -5,6 +5,7 @@
 
   type FacetKind = 'wd_tag' | 'artist' | 'platform' | 'topic';
   type StatsSortMode = 'popularity' | 'alphabetical';
+  type StatsScopeMode = 'used' | 'all';
   type FacetItem = { value: string; count: number };
   type FilterVaultPayload = { topics: string[]; wd_tags: string[] };
   type ArtistListItem = { id: number; name: string; kind: string; item_count: number; link_count: number; alias_count: number };
@@ -52,6 +53,7 @@
 
   let activeKind: FacetKind = 'wd_tag';
   let sortMode: StatsSortMode = 'popularity';
+  let scopeMode: StatsScopeMode = 'used';
   let letterFilter = 'all';
   let searchText = '';
   let items: FacetItem[] = [];
@@ -88,6 +90,7 @@
   const letterFilters = ['all', '#', ...'abcdefghijklmnopqrstuvwxyz'.split('')];
 
   $: showLetterFilter = activeKind === 'artist' || activeKind === 'topic' || activeKind === 'wd_tag';
+  $: showScopeFilter = activeKind === 'artist' || activeKind === 'platform' || activeKind === 'topic' || activeKind === 'wd_tag';
   $: visibleArtists = filterArtistsByLetter(artists, showLetterFilter, letterFilter);
   $: visiblePlaceholderArtists = filterFacetsByLetter(placeholderArtists, showLetterFilter, letterFilter);
   $: visibleItems = filterFacetsByLetter(items, showLetterFilter, letterFilter);
@@ -212,7 +215,7 @@
     error = '';
     try {
       if (activeKind === 'artist') {
-        const params = new URLSearchParams({ q: searchText.trim(), limit: '200' });
+        const params = new URLSearchParams({ q: searchText.trim(), limit: '200', scope: scopeMode });
         const facetParams = new URLSearchParams({ kind: 'artist', q: searchText.trim(), limit: '200' });
         const [response, facetResponse] = await Promise.all([
           apiFetch(`/api/artists?${params.toString()}`),
@@ -235,10 +238,24 @@
         else selectedArtist = null;
         return;
       }
+      if (activeKind === 'platform') {
+        const params = new URLSearchParams({ q: searchText.trim(), limit: '200', scope: scopeMode });
+        const response = await apiFetch(`/api/platforms?${params.toString()}`);
+        if (seq !== requestSeq) return;
+        if (!response.ok) throw new Error(`Platform request failed: ${response.status}`);
+        const data = await response.json();
+        if (seq !== requestSeq) return;
+        items = sortFacetItems((Array.isArray(data.items) ? data.items : []).map((platform: PlatformListItem) => ({
+          value: platform.display_name,
+          count: platform.item_count
+        })));
+        return;
+      }
       const params = new URLSearchParams({
         kind: activeKind,
         q: searchText.trim(),
-        limit: '200'
+        limit: '200',
+        scope: activeKind === 'topic' || activeKind === 'wd_tag' ? scopeMode : 'used'
       });
       const response = await apiFetch(`/api/facets?${params.toString()}`);
       if (seq !== requestSeq) return;
@@ -270,6 +287,11 @@
       return;
     }
     items = sortFacetItems(items);
+  }
+
+  function setScopeMode(mode: StatsScopeMode) {
+    scopeMode = mode;
+    loadFacets();
   }
 
   function setLetterFilter(value: string) {
@@ -581,6 +603,17 @@
   </div>
 
   <div class="stats-controls">
+    {#if showScopeFilter}
+      <span class="muted">View</span>
+      <div class="scope-tabs">
+        <button type="button" class:active={scopeMode === 'used'} on:click={() => setScopeMode('used')}>
+          Used
+        </button>
+        <button type="button" class:active={scopeMode === 'all'} on:click={() => setScopeMode('all')}>
+          All
+        </button>
+      </div>
+    {/if}
     <span class="muted">Sort</span>
     <div class="sort-tabs">
       <button type="button" class:active={sortMode === 'popularity'} on:click={() => setSortMode('popularity')}>
@@ -878,7 +911,8 @@
     gap: 10px;
   }
 
-  .sort-tabs {
+  .sort-tabs,
+  .scope-tabs {
     display: flex;
     gap: 6px;
   }
@@ -898,6 +932,7 @@
 
   .kind-tabs button.active,
   .sort-tabs button.active,
+  .scope-tabs button.active,
   .letter-tabs button.active {
     background: var(--accent-primary);
     border-color: var(--accent-primary);

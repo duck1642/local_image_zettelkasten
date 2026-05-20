@@ -721,6 +721,17 @@ def reindex_item_metadata(conn: sqlite3.Connection, item_hash: str, update_facet
         """,
         wd_insert_rows,
     )
+    if wd_insert_rows:
+        try:
+            from workspace_db import connect_workspace_database, upsert_wd_dictionary_tags
+            workspace_conn = connect_workspace_database()
+            try:
+                upsert_wd_dictionary_tags(workspace_conn, [(row[3], row[1]) for row in wd_insert_rows])
+                workspace_conn.commit()
+            finally:
+                workspace_conn.close()
+        except Exception:
+            pass
     if update_facets:
         current_facet_values = item_core_facet_values(conn, item_hash)
         current_facet_values.update(("topic", row[2]) for row in topic_rows)
@@ -1176,6 +1187,16 @@ def rebuild_all_metadata(
                     """,
                     wd_rows,
                 )
+                try:
+                    from workspace_db import connect_workspace_database, upsert_wd_dictionary_tags
+                    workspace_conn = connect_workspace_database()
+                    try:
+                        upsert_wd_dictionary_tags(workspace_conn, [(row[3], row[1]) for row in wd_rows])
+                        workspace_conn.commit()
+                    finally:
+                        workspace_conn.close()
+                except Exception:
+                    pass
                 stages["wd_tag_inserts"] += (time.perf_counter() - sub_started) * 1000
                 wd_rows.clear()
             stages["db_flushes"] += (time.perf_counter() - flush_started) * 1000

@@ -161,12 +161,13 @@ def resolve_platform_label(conn: sqlite3.Connection, value: str, create: bool = 
     return clean
 
 
-def list_platforms(conn: sqlite3.Connection, q: str = "", limit: int = 100) -> list[dict]:
-    ensure_platform_schema(conn, backfill=True)
+def list_platforms(conn: sqlite3.Connection, q: str = "", limit: int = 100, used_only: bool = False, item_conn: sqlite3.Connection | None = None) -> list[dict]:
+    ensure_platform_schema(conn, backfill=False)
     needle = str(q or "").strip().casefold()
     limit = max(1, min(int(limit or 100), 500))
     item_counts: dict[str, int] = {}
-    for platform, count in conn.execute("""
+    count_conn = item_conn or conn
+    for platform, count in count_conn.execute("""
         SELECT platform, COUNT(*)
         FROM items
         WHERE platform IS NOT NULL AND TRIM(platform) != ''
@@ -193,12 +194,15 @@ def list_platforms(conn: sqlite3.Connection, q: str = "", limit: int = 100) -> l
         key_norm = str(row[1])
         if needle and needle not in display.casefold() and needle not in key_norm:
             continue
+        item_count = item_counts.get(key_norm, 0)
+        if used_only and item_count <= 0:
+            continue
         items.append({
             "id": row[0],
             "key_norm": key_norm,
             "display_name": display,
             "kind": row[3],
-            "item_count": item_counts.get(key_norm, 0),
+            "item_count": item_count,
             "alias_count": row[4],
         })
     items.sort(key=lambda item: (-int(item["item_count"]), str(item["display_name"]).casefold()))
