@@ -12,5 +12,5 @@ if "%LMZ_CONFIG_PATH%"=="" (
 )
 
 echo LMZ_CONFIG_PATH=%LMZ_CONFIG_PATH%
-python backend\web_api.py
+python dev.py
 exit /b %ERRORLEVEL%

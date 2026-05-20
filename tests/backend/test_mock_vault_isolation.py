@@ -30,6 +30,8 @@ def fresh_backend(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *module_names
     work = tmp_path / "mock-vault"
     shutil.copytree(FIXTURE, work)
     monkeypatch.setenv("LMZ_CONFIG_PATH", str(work / "config.yaml"))
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
     if str(BACKEND) not in sys.path:
         sys.path.insert(0, str(BACKEND))
     for name in list(sys.modules):
@@ -626,6 +628,52 @@ def test_generate_markdown_seeds_missing_wd_fields_from_cache(monkeypatch, tmp_p
     assert data["wd_rating"] == "safe"
     assert data["wd_character_tags"] == ["Cached Character"]
     assert data["wd_tags"] == ["Cached Tag"]
+    conn.close()
+
+
+def test_generate_markdown_overwrites_existing_fields_if_forced(monkeypatch, tmp_path):
+    utils, sqlite_operator, md_generator = fresh_backend(monkeypatch, tmp_path, "utils", "db.sqlite_operator", "md_generator")
+    item_hash = "f" * 64
+    conn = insert_mock_item(sqlite_operator, item_hash)
+    storage_id = storage_id_for(conn, item_hash)
+    
+    note_path = utils.note_path_for(item_hash, storage_id)
+    note_path.parent.mkdir(parents=True, exist_ok=True)
+    note_path.write_text(
+        "---\n"
+        "artist: DB Artist\n"
+        "date_added: '2026-01-02 03:04:05'\n"
+        "topics: []\n"
+        "wd_rating: 'old_rating'\n"
+        "wd_character_tags: ['old_character']\n"
+        "wd_tags: ['old_tag']\n"
+        "---\nbody\n",
+        encoding="utf-8",
+    )
+    
+    cache_path = utils.wd_tag_cache_path_for(item_hash, storage_id)
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    cache_path.write_text(
+        json.dumps({
+            "hash": item_hash,
+            "status": "ok",
+            "rating": {"label": "new_rating"},
+            "character_tags": [{"name": "new_character", "display_name": "New Character"}],
+            "tags": [{"name": "new_tag", "display_name": "New Tag"}]
+        }),
+        encoding="utf-8",
+    )
+
+    data = frontmatter_from_markdown(md_generator.generate_markdown(conn, item_hash))
+    assert data["wd_rating"] == "old_rating"
+    assert data["wd_character_tags"] == ["old_character"]
+    assert data["wd_tags"] == ["old_tag"]
+
+    data_forced = frontmatter_from_markdown(md_generator.generate_markdown(conn, item_hash, force_wd_from_cache=True))
+    assert data_forced["wd_rating"] == "new_rating"
+    assert data_forced["wd_character_tags"] == ["New Character"]
+    assert data_forced["wd_tags"] == ["New Tag"]
+    
     conn.close()
 
 

@@ -59,6 +59,7 @@ def normalize_source_url(url: str) -> str:
 def init_database():
     global _SCHEMA_READY
 
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH, timeout=5)
     cursor = conn.cursor()
     cursor.execute('PRAGMA journal_mode=WAL;')

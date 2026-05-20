@@ -395,7 +395,7 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
                 if config.get('tagging', {}).get('fail_ingestion_on_error', False):
                     raise RuntimeError(tag_result.error or f"tagging ended with status {tag_result.status}")
             else:
-                md_content = generate_markdown(conn, file_hash, asset_rel_path, title=title)
+                md_content = generate_markdown(conn, file_hash, asset_rel_path, title=title, force_wd_from_cache=True)
                 if md_content:
                     md_path = note_path_for(file_hash, storage_id=storage_id)
                     md_path.parent.mkdir(parents=True, exist_ok=True)

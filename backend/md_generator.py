@@ -27,7 +27,7 @@ def _format_date_added(date_added) -> str:
     return str(date_added)
 
 
-def generate_markdown(conn: sqlite3.Connection, file_hash: str, asset_rel_path: str | None = None, title: str = "", topics_override: list | None = None, manual_overrides: dict | None = None) -> str:
+def generate_markdown(conn: sqlite3.Connection, file_hash: str, asset_rel_path: str | None = None, title: str = "", topics_override: list | None = None, manual_overrides: dict | None = None, force_wd_from_cache: bool = False) -> str:
 
     cursor = conn.cursor()
     cursor.execute('''
@@ -76,7 +76,10 @@ def generate_markdown(conn: sqlite3.Connection, file_hash: str, asset_rel_path: 
 
     cache_wd_fields = wd_frontmatter_fields(file_hash, storage_id)
     for field in WD_FRONTMATTER_FIELDS:
-        frontmatter[field] = existing_frontmatter[field] if field in existing_frontmatter else cache_wd_fields.get(field, [] if field != "wd_rating" else "")
+        if force_wd_from_cache:
+            frontmatter[field] = cache_wd_fields.get(field, [] if field != "wd_rating" else "")
+        else:
+            frontmatter[field] = existing_frontmatter[field] if field in existing_frontmatter else cache_wd_fields.get(field, [] if field != "wd_rating" else "")
     for field, value in (manual_overrides or {}).items():
         if field in MANUAL_FRONTMATTER_FIELDS:
             frontmatter[field] = format_topics_for_note(value, note_path) if field == "topics" else value

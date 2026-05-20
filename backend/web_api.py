@@ -1636,7 +1636,7 @@ async def trigger_tagging(item_hash: str):
             log_system("INFO", f"Triggering AI tagging for {item_hash}")
             tag_media(asset_path, item_hash=item_hash, config=get_config(), storage_id=row[2])
             
-            md_content = generate_markdown(conn, item_hash)
+            md_content = generate_markdown(conn, item_hash, force_wd_from_cache=True)
             if md_content:
                 note_path = note_path_for(item_hash, storage_id=row[2])
                 note_path.parent.mkdir(parents=True, exist_ok=True)

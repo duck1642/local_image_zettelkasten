@@ -27,7 +27,8 @@ def choose_workspace() -> int:
         active = " *" if item["active"] else ""
         print(f"{index}. {item['name']}{active} - {item['config_path']}", file=sys.stderr)
     try:
-        choice = input("Workspace number: ").strip()
+        print("Workspace number: ", end="", file=sys.stderr, flush=True)
+        choice = input("").strip()
     except EOFError:
         return 2
     if not choice.isdigit():
