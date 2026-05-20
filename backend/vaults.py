@@ -81,31 +81,7 @@ def create_vault_layout(root: Path, initialize_db: bool = True):
 
 
 def vault_list() -> list[dict]:
-    config = _read_config()
-    if not _has_vault_registry(config):
-        paths = config.get("paths", {}) if isinstance(config.get("paths"), dict) else {}
-        vault_path = _resolve_config_path(paths.get("vault") or "data/vault")
-        db_path = _resolve_config_path(paths.get("db") or "data/db/lmz_main.db")
-        item_count = 0
-        if db_path.exists():
-            try:
-                conn = sqlite3.connect(db_path)
-                item_count = int(conn.execute("SELECT COUNT(*) FROM items").fetchone()[0] or 0)
-                conn.close()
-            except sqlite3.Error:
-                item_count = 0
-        return [{
-            "id": "legacy",
-            "name": "Legacy",
-            "root": str(vault_path.parent),
-            "config_root": str(CONFIG_ROOT),
-            "active": True,
-            "exists": vault_path.exists() or db_path.exists(),
-            "db_path": str(db_path),
-            "item_count": item_count,
-            "legacy": True,
-        }]
-    config = _ensure_vault_registry(config)
+    config = _ensure_vault_registry(_read_config())
     active = str(config.get("active_vault") or "default")
     items = []
     for vault_id, entry in sorted(config.get("vaults", {}).items()):
@@ -133,18 +109,12 @@ def vault_list() -> list[dict]:
 
 
 def active_vault_id() -> str:
-    config = _read_config()
-    if not _has_vault_registry(config):
-        return "legacy"
-    config = _ensure_vault_registry(config)
+    config = _ensure_vault_registry(_read_config())
     return str(config.get("active_vault") or "default")
 
 
 def create_vault(name: str, vault_id: str | None = None) -> dict:
-    config = _read_config()
-    if not _has_vault_registry(config):
-        raise ValueError("migrate legacy layout before creating additional vaults")
-    config = _ensure_vault_registry(config)
+    config = _ensure_vault_registry(_read_config())
     vaults = config["vaults"]
     clean_id = vault_id_slug(vault_id or name)
     if clean_id in vaults:
@@ -315,23 +285,30 @@ def merge_vaults(target_id: str, source_ids: list[str]) -> dict:
 
 
 def migrate_legacy_layout(copy: bool = True, overwrite: bool = False) -> dict:
-    config = _ensure_vault_registry(_read_config())
+    raw_config = _read_config()
+    paths = raw_config.get("paths", {}) if isinstance(raw_config.get("paths"), dict) else {}
+    config = _ensure_vault_registry(raw_config)
     target_root = vault_root(config["vaults"]["default"])
     if target_root.exists() and any(target_root.iterdir()) and not overwrite:
         raise ValueError(f"default vault already exists: {target_root}")
     create_vault_layout(target_root, initialize_db=False)
+
+    def source_dir_for(key: str, fallback: str, parent_of_file: bool = False) -> Path:
+        source = _resolve_config_path(paths.get(key) or fallback)
+        return source.parent if parent_of_file else source
+
     mappings = {
-        CONFIG_ROOT / "data" / "vault": target_root / "vault",
-        CONFIG_ROOT / "data" / "db": target_root / "db",
-        CONFIG_ROOT / "data" / "review": target_root / "review",
-        CONFIG_ROOT / "data" / "wd-tags": target_root / "wd-tags",
-        CONFIG_ROOT / "data" / "ui_cache": target_root / "ui_cache",
-        CONFIG_ROOT / "data" / "logs": target_root / "logs",
-        CONFIG_ROOT / "data" / "queues": target_root / "queues",
-        CONFIG_ROOT / "data" / "batches": target_root / "batches",
-        CONFIG_ROOT / "data" / "input": target_root / "input",
-        CONFIG_ROOT / "data" / "local_ingest": target_root / "local_ingest",
-        CONFIG_ROOT / "data" / "online_ingest": target_root / "online_ingest",
+        source_dir_for("vault", "data/vault"): target_root / "vault",
+        source_dir_for("db", "data/db/lmz_main.db", parent_of_file=True): target_root / "db",
+        source_dir_for("review", "data/review"): target_root / "review",
+        source_dir_for("wd_tags", "data/wd-tags"): target_root / "wd-tags",
+        source_dir_for("thumbnails", "data/ui_cache/thumbnails"): target_root / "ui_cache" / "thumbnails",
+        source_dir_for("logs", "logs"): target_root / "logs",
+        source_dir_for("queues", "data/queues"): target_root / "queues",
+        source_dir_for("batches", "data/batches"): target_root / "batches",
+        source_dir_for("input", "data/input"): target_root / "input",
+        source_dir_for("local_ingest", "data/local_ingest"): target_root / "local_ingest",
+        source_dir_for("online_ingest", "data/online_ingest"): target_root / "online_ingest",
     }
     copied = []
     for source, target in mappings.items():

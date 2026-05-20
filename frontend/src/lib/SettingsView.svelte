@@ -384,7 +384,7 @@
           <span>Vault</span>
           <strong>{$config._runtime.active_vault_name || $config._runtime.active_vault || 'Default'}</strong>
           <span>Vault Root</span>
-          <code>{$config._runtime.active_vault_root || 'legacy paths'}</code>
+          <code>{$config._runtime.active_vault_root}</code>
         </div>
         {#if $config._runtime.env_override}
           <div class="workspace-note">Environment override is active. Registry changes apply only after restarting without LMZ_CONFIG_PATH.</div>
@@ -440,7 +440,7 @@
                   {/if}
                 </div>
                 <div class="row-actions">
-                  <button type="button" disabled={vaultBusy || vault.legacy} on:click={() => renameVault(vault.id, vault.name)}>Rename</button>
+                  <button type="button" disabled={vaultBusy} on:click={() => renameVault(vault.id, vault.name)}>Rename</button>
                   <button
                     type="button"
                     disabled={vaultBusy || vault.id === vaultActive || !vault.exists}
@@ -448,18 +448,15 @@
                   >
                     {vault.id === vaultActive ? 'Active' : 'Use on Restart'}
                   </button>
-                  <button type="button" disabled={vaultBusy || vault.id === vaultActive || vault.legacy} on:click={() => deleteVault(vault.id)}>Delete</button>
+                  <button type="button" disabled={vaultBusy || vault.id === vaultActive} on:click={() => deleteVault(vault.id)}>Delete</button>
                 </div>
               </div>
             {/each}
           </div>
           <div class="add-workspace">
             <input type="text" placeholder="Vault name" bind:value={vaultName} />
-            <button type="button" on:click={addVault} disabled={vaultBusy || !vaultName.trim() || !$config._runtime.vaults_configured}>Create Vault</button>
+            <button type="button" on:click={addVault} disabled={vaultBusy || !vaultName.trim()}>Create Vault</button>
           </div>
-          {#if !$config._runtime.vaults_configured}
-            <div class="workspace-note">Legacy vault layout is active. Run the legacy vault migration helper before creating more vaults.</div>
-          {/if}
           {#if vaultResult}
             <div class="workspace-result">{vaultResult}</div>
           {/if}

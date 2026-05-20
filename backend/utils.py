@@ -61,7 +61,7 @@ def _resolve_config_relative(path_str: str) -> Path:
 
 def _active_vault_config() -> tuple[bool, str, str, Path | None]:
     if not _vaults:
-        return False, "", "", None
+        raise RuntimeError("config.yaml must define vaults")
     active_id = _slug_vault_id(str(_config.get("active_vault") or "default"))
     if active_id not in _vaults:
         active_id = "default" if "default" in _vaults else sorted(_vaults.keys())[0]
@@ -72,48 +72,26 @@ def _active_vault_config() -> tuple[bool, str, str, Path | None]:
 
 VAULTS_CONFIGURED, ACTIVE_VAULT_ID, ACTIVE_VAULT_NAME, ACTIVE_VAULT_ROOT = _active_vault_config()
 
-if VAULTS_CONFIGURED and ACTIVE_VAULT_ROOT is not None:
-    VAULT_DIR = ACTIVE_VAULT_ROOT / "vault"
-else:
-    VAULT_DIR = _resolve_path('vault', "data/vault")
-
-if VAULTS_CONFIGURED and ACTIVE_VAULT_ROOT is not None:
-    INPUT_DIR = ACTIVE_VAULT_ROOT / "input"
-    REVIEW_DIR = ACTIVE_VAULT_ROOT / "review"
-    LOCAL_INGEST_DIR = ACTIVE_VAULT_ROOT / "local_ingest"
-    ONLINE_INGEST_DIR = ACTIVE_VAULT_ROOT / "online_ingest"
-    QUEUES_DIR = ACTIVE_VAULT_ROOT / "queues"
-    BATCHES_DIR = ACTIVE_VAULT_ROOT / "batches"
-else:
-    INPUT_DIR = _resolve_path('input', "data/input")
-    REVIEW_DIR = _resolve_path('review', "data/review")
-    LOCAL_INGEST_DIR = _resolve_path('local_ingest', str(INPUT_DIR / "local"))
-    ONLINE_INGEST_DIR = _resolve_path('online_ingest', str(INPUT_DIR / "online"))
-    QUEUES_DIR = _resolve_path('queues', "data/queues")
-    BATCHES_DIR = _resolve_path('batches', "data/batches")
+VAULT_DIR = ACTIVE_VAULT_ROOT / "vault"
+INPUT_DIR = ACTIVE_VAULT_ROOT / "input"
+REVIEW_DIR = ACTIVE_VAULT_ROOT / "review"
+LOCAL_INGEST_DIR = ACTIVE_VAULT_ROOT / "local_ingest"
+ONLINE_INGEST_DIR = ACTIVE_VAULT_ROOT / "online_ingest"
+QUEUES_DIR = ACTIVE_VAULT_ROOT / "queues"
+BATCHES_DIR = ACTIVE_VAULT_ROOT / "batches"
 SECRETS_DIR = _resolve_path('secrets', "secrets")
 MODELS_DIR = _resolve_path('models', "data/models")
-if VAULTS_CONFIGURED and ACTIVE_VAULT_ROOT is not None:
-    WD_TAGS_DIR = ACTIVE_VAULT_ROOT / "wd-tags"
-    THUMBNAILS_DIR = ACTIVE_VAULT_ROOT / "ui_cache" / "thumbnails"
-else:
-    WD_TAGS_DIR = _resolve_path('wd_tags', "data/wd-tags")
-    THUMBNAILS_DIR = _resolve_path('thumbnails', "data/ui_cache/thumbnails")
+WD_TAGS_DIR = ACTIVE_VAULT_ROOT / "wd-tags"
+THUMBNAILS_DIR = ACTIVE_VAULT_ROOT / "ui_cache" / "thumbnails"
 TOPICS_DIR = (CONFIG_ROOT / "data" / "topics").resolve()
 
 OUTPUT_DIR = VAULT_DIR
 ASSETS_DIR = OUTPUT_DIR / "assets"
 NOTES_DIR = OUTPUT_DIR / "notes"
 
-if VAULTS_CONFIGURED and ACTIVE_VAULT_ROOT is not None:
-    DB_PATH = ACTIVE_VAULT_ROOT / "db" / "lmz_main.db"
-else:
-    DB_PATH = _resolve_path('db', "data/db/lmz_main.db")
+DB_PATH = ACTIVE_VAULT_ROOT / "db" / "lmz_main.db"
 
-if VAULTS_CONFIGURED and ACTIVE_VAULT_ROOT is not None:
-    LOGS_DIR = ACTIVE_VAULT_ROOT / "logs"
-else:
-    LOGS_DIR = _resolve_path('logs', "logs")
+LOGS_DIR = ACTIVE_VAULT_ROOT / "logs"
 
 _CONFIG_CACHE_LOCK = threading.Lock()
 _CONFIG_CACHE_DATA: dict | None = None
@@ -202,14 +180,13 @@ def validate_config_schema(config: dict):
     if not isinstance(config, dict):
         raise ValueError("config.yaml must be a dictionary")
 
-    if 'paths' not in config:
-        errors.append("Missing mandatory section: 'paths'")
-    else:
-        for key in ['vault', 'db', 'logs', 'queues', 'batches', 'secrets']:
-            if key not in config['paths']:
-                errors.append(f"Missing mandatory key in 'paths': '{key}'")
-            elif not isinstance(config['paths'][key], str):
-                errors.append(f"Key 'paths.{key}' must be a string")
+    if 'paths' in config:
+        if not isinstance(config['paths'], dict):
+            errors.append("Key 'paths' must be a dictionary")
+        else:
+            for key in ['secrets', 'models']:
+                if key in config['paths'] and not isinstance(config['paths'][key], str):
+                    errors.append(f"Key 'paths.{key}' must be a string")
 
     if 'firewall' not in config:
         errors.append("Missing mandatory section: 'firewall'")
@@ -222,6 +199,10 @@ def validate_config_schema(config: dict):
 
     if 'hash_algorithm' not in config:
         errors.append("Missing mandatory key: 'hash_algorithm'")
+    if not isinstance(config.get('vaults'), dict) or not config.get('vaults'):
+        errors.append("Missing mandatory section: 'vaults'")
+    if not isinstance(config.get('active_vault'), str) or not config.get('active_vault').strip():
+        errors.append("Missing mandatory key: 'active_vault'")
 
     if errors:
         raise ValueError("Configuration Error in config.yaml: " + "; ".join(errors))
@@ -241,15 +222,8 @@ def load_secrets() -> dict:
 def _default_config() -> dict:
     return {
         'paths': {
-            'vault': str(VAULT_DIR),
-            'db': str(DB_PATH),
-            'logs': str(LOGS_DIR),
-            'queues': str(QUEUES_DIR),
-            'batches': str(BATCHES_DIR),
             'secrets': str(SECRETS_DIR),
             'models': str(MODELS_DIR),
-            'wd_tags': str(WD_TAGS_DIR),
-            'thumbnails': str(THUMBNAILS_DIR),
         },
         'active_vault': ACTIVE_VAULT_ID or 'default',
         'vaults': {

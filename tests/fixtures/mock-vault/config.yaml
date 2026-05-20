@@ -22,6 +22,11 @@ firewall:
     - video/webm
     - video/ogg
 hash_algorithm: sha256
+active_vault: default
+vaults:
+  default:
+    name: Default
+    root: data/vaults/default
 ingestion_concurrency:
   global_max_workers: 2
   platforms:
@@ -30,19 +35,8 @@ ingestion_concurrency:
       jitter_range: [0, 0]
 log_level: INFO
 paths:
-  batches: data/batches
-  db: data/db/lmz_mock.db
-  input: data/input
-  local_ingest: data/local_ingest
-  logs: data/logs
   models: data/models
-  online_ingest: data/online_ingest
-  queues: data/queues
-  review: data/review
   secrets: data/secrets
-  thumbnails: data/ui_cache/thumbnails
-  vault: data/vault
-  wd_tags: data/wd-tags
 processing:
   background_preset: white
   custom_color: [255, 255, 255]

@@ -89,11 +89,11 @@ def test_config_override_resolves_paths_inside_mock_vault(monkeypatch, tmp_path)
     (utils,) = fresh_backend(monkeypatch, tmp_path, "utils")
 
     assert utils.CONFIG_PATH == tmp_path / "mock-vault" / "config.yaml"
-    assert utils.VAULT_DIR == tmp_path / "mock-vault" / "data" / "vault"
-    assert utils.DB_PATH == tmp_path / "mock-vault" / "data" / "db" / "lmz_mock.db"
-    assert utils.LOCAL_INGEST_DIR == tmp_path / "mock-vault" / "data" / "local_ingest"
-    assert utils.ONLINE_INGEST_DIR == tmp_path / "mock-vault" / "data" / "online_ingest"
-    assert utils.THUMBNAILS_DIR == tmp_path / "mock-vault" / "data" / "ui_cache" / "thumbnails"
+    assert utils.VAULT_DIR == tmp_path / "mock-vault" / "data" / "vaults" / "default" / "vault"
+    assert utils.DB_PATH == tmp_path / "mock-vault" / "data" / "vaults" / "default" / "db" / "lmz_main.db"
+    assert utils.LOCAL_INGEST_DIR == tmp_path / "mock-vault" / "data" / "vaults" / "default" / "local_ingest"
+    assert utils.ONLINE_INGEST_DIR == tmp_path / "mock-vault" / "data" / "vaults" / "default" / "online_ingest"
+    assert utils.THUMBNAILS_DIR == tmp_path / "mock-vault" / "data" / "vaults" / "default" / "ui_cache" / "thumbnails"
     assert utils.TOPICS_DIR == tmp_path / "mock-vault" / "data" / "topics"
     assert utils.get_configured_cookie_path() == tmp_path / "mock-vault" / "secrets" / "cookies.txt"
     assert str(ROOT / "data") not in str(utils.VAULT_DIR)
@@ -219,7 +219,6 @@ def test_workspace_api_lists_registers_and_sets_active(monkeypatch, tmp_path):
 
 def test_vault_api_creates_sets_active_and_rejects_active_delete(monkeypatch, tmp_path):
     web_api, vaults = fresh_backend(monkeypatch, tmp_path, "web_api", "vaults")
-    vaults.migrate_legacy_layout(overwrite=True)
 
     created = web_api._create_vault_sync({"name": "Second Vault"})
     second = next(item for item in created["items"] if item["id"] == "second-vault")
@@ -236,19 +235,8 @@ def test_vault_api_creates_sets_active_and_rejects_active_delete(monkeypatch, tm
     assert exc.value.status_code == 400
 
 
-def test_vault_create_refuses_unmigrated_legacy_config(monkeypatch, tmp_path):
-    web_api, = fresh_backend(monkeypatch, tmp_path, "web_api")
-
-    with pytest.raises(HTTPException) as exc:
-        web_api._create_vault_sync({"name": "Unsafe New Vault"})
-
-    assert exc.value.status_code == 400
-    assert "migrate legacy layout" in str(exc.value.detail)
-
-
 def test_vault_merge_reallocates_storage_ids_and_keeps_source(monkeypatch, tmp_path):
     vaults, sqlite_operator = fresh_backend(monkeypatch, tmp_path, "vaults", "db.sqlite_operator")
-    vaults.migrate_legacy_layout(overwrite=True)
     vaults.create_vault("Source")
     vaults.create_vault("Target")
     items = {item["id"]: item for item in vaults.vault_list()}
@@ -349,7 +337,16 @@ def test_update_app_config_invalidates_config_cache(monkeypatch, tmp_path):
     called = []
 
     monkeypatch.setattr(web_api, "invalidate_config_cache", lambda: called.append("invalidated"))
-    web_api._update_app_config_sync({"paths": {"vault": "data/vault", "db": "data/db/lmz_mock.db", "logs": "data/logs", "queues": "data/queues", "batches": "data/batches", "secrets": "data/secrets"}, "firewall": {"allowed_extensions": [".jpg"], "allowed_mimes": ["image/jpeg"]}, "hash_algorithm": "sha256"})
+    web_api._update_app_config_sync({
+        "active_vault": "default",
+        "vaults": {"default": {"name": "Default", "root": "data/vaults/default"}},
+        "paths": {
+            "secrets": "data/secrets",
+            "models": "data/models",
+        },
+        "firewall": {"allowed_extensions": [".jpg"], "allowed_mimes": ["image/jpeg"]},
+        "hash_algorithm": "sha256",
+    })
 
     assert called == ["invalidated"]
 
@@ -1086,7 +1083,7 @@ def test_review_replace_preserves_old_sqlite_identity_and_manual_indexed_metadat
     assert result["status"] == "success"
     assert new_data["artist"] == "Old DB Artist"
     assert new_data["date_added"] == "2026-01-01 00:00:00"
-    assert new_data["topics"] == ["[preserved](../../../topics/preserved.md)"]
+    assert new_data["topics"] == ["[preserved](../../../../../topics/preserved.md)"]
     assert new_data["wd_tags"] == []
 
 
@@ -2082,8 +2079,8 @@ def test_repeated_topic_promotions_create_each_topic_file(monkeypatch, tmp_path)
     assert (utils.TOPICS_DIR / "karin_blue_archive.md").exists()
     assert (utils.TOPICS_DIR / "black_hair.md").exists()
     assert data["topics"] == [
-        "[karin_blue_archive](../../../topics/karin_blue_archive.md)",
-        "[black_hair](../../../topics/black_hair.md)",
+        "[karin_blue_archive](../../../../../topics/karin_blue_archive.md)",
+        "[black_hair](../../../../../topics/black_hair.md)",
     ]
 
 

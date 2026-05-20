@@ -9,6 +9,7 @@ from pathlib import Path
 import yaml
 
 
+
 ROOT = Path(__file__).resolve().parents[2]
 BACKEND = ROOT / "backend"
 GENERATOR_PATH = ROOT / "tests" / "generators" / "generate_test_vault.py"
@@ -67,9 +68,21 @@ def test_generated_vault_smoke_and_isolation(tmp_path, monkeypatch):
     assert manifest["counts"]["topic_files"] == 9
     assert (output / "data" / "topics").exists()
 
-    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    for value in config["paths"].values():
-        assert_inside(output / value, output)
+    for relative in [
+        "vault/assets",
+        "vault/notes",
+        "db",
+        "review",
+        "wd-tags",
+        "ui_cache/thumbnails",
+        "logs",
+        "queues",
+        "batches",
+        "input",
+        "local_ingest",
+        "online_ingest",
+    ]:
+        assert (vault_root / relative).exists()
 
     conn = sqlite3.connect(db_path)
     try:
