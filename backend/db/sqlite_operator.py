@@ -56,11 +56,12 @@ def normalize_source_url(url: str) -> str:
     query = urlencode(sorted(parse_qsl(parsed.query, keep_blank_values=True)))
     return urlunsplit((scheme, host, path, query, ""))
 
-def init_database():
+def init_database(db_path: Path | None = None):
     global _SCHEMA_READY
 
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH, timeout=5)
+    target_path = Path(db_path or DB_PATH)
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(target_path, timeout=5)
     cursor = conn.cursor()
     cursor.execute('PRAGMA journal_mode=WAL;')
     cursor.execute('PRAGMA foreign_keys = ON;')
@@ -155,7 +156,8 @@ def init_database():
     ensure_platform_schema(conn, backfill=False)
 
     conn.commit()
-    _SCHEMA_READY = True
+    if target_path.resolve() == DB_PATH.resolve():
+        _SCHEMA_READY = True
     return conn
 
 

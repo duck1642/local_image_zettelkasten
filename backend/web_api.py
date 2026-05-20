@@ -2658,7 +2658,16 @@ def _strip_config_secrets(config: dict) -> dict:
 
 
 def _config_runtime_info() -> dict:
-    from utils import CONFIG_PATH, CONFIG_ROOT, TOPICS_DIR
+    from utils import (
+        ACTIVE_VAULT_ID,
+        ACTIVE_VAULT_NAME,
+        ACTIVE_VAULT_ROOT,
+        CONFIG_PATH,
+        CONFIG_ROOT,
+        DB_PATH,
+        TOPICS_DIR,
+        VAULTS_CONFIGURED,
+    )
     from workspaces import REGISTRY_PATH
 
     mode = "obsidian" if CONFIG_ROOT.name.casefold() == "lmz" and CONFIG_ROOT.parent != CONFIG_ROOT else "default"
@@ -2669,6 +2678,11 @@ def _config_runtime_info() -> dict:
         "workspace_mode": mode,
         "workspace_label": "Obsidian workspace" if mode == "obsidian" else "Default workspace",
         "workspace_registry": str(REGISTRY_PATH),
+        "active_vault": ACTIVE_VAULT_ID or "legacy",
+        "active_vault_name": ACTIVE_VAULT_NAME or "Legacy",
+        "active_vault_root": str(ACTIVE_VAULT_ROOT) if ACTIVE_VAULT_ROOT else "",
+        "vaults_configured": bool(VAULTS_CONFIGURED),
+        "db_path": str(DB_PATH),
         "env_override": bool(os.environ.get("LMZ_CONFIG_PATH")),
     }
 
@@ -2760,6 +2774,123 @@ def _add_obsidian_workspace_sync(body: dict):
         "restart_required": set_active,
         "items": workspace_list(),
     }
+
+
+@app.get("/api/vaults")
+async def get_vaults():
+    return await asyncio.to_thread(_get_vaults_sync)
+
+
+def _get_vaults_sync():
+    from vaults import active_vault_id, vault_list
+
+    return {"active": active_vault_id(), "items": vault_list()}
+
+
+@app.post("/api/vaults")
+async def create_vault(body: dict):
+    return await asyncio.to_thread(_create_vault_sync, body)
+
+
+def _create_vault_sync(body: dict):
+    from vaults import create_vault
+
+    name = str((body or {}).get("name") or "").strip()
+    vault_id = str((body or {}).get("id") or "").strip() or None
+    if not name:
+        raise HTTPException(status_code=400, detail="vault name is required")
+    try:
+        payload = create_vault(name, vault_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    payload["restart_required"] = False
+    return payload
+
+
+@app.patch("/api/vaults/{vault_id}")
+async def rename_vault(vault_id: str, body: dict):
+    return await asyncio.to_thread(_rename_vault_sync, vault_id, body)
+
+
+def _rename_vault_sync(vault_id: str, body: dict):
+    from vaults import rename_vault
+
+    name = str((body or {}).get("name") or "").strip()
+    try:
+        return rename_vault(vault_id, name)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.post("/api/vaults/active")
+async def set_vault_active(body: dict):
+    return await asyncio.to_thread(_set_vault_active_sync, body)
+
+
+def _set_vault_active_sync(body: dict):
+    from vaults import set_active_vault
+
+    vault_id = str((body or {}).get("id") or "").strip()
+    if not vault_id:
+        raise HTTPException(status_code=400, detail="vault id is required")
+    try:
+        return set_active_vault(vault_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.delete("/api/vaults/{vault_id}")
+async def delete_vault(vault_id: str, confirm: bool = Query(False)):
+    return await asyncio.to_thread(_delete_vault_sync, vault_id, confirm)
+
+
+def _delete_vault_sync(vault_id: str, confirm: bool = False):
+    from vaults import delete_vault
+
+    try:
+        return delete_vault(vault_id, confirm=confirm)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.post("/api/vaults/{target_id}/merge-preview")
+async def preview_vault_merge(target_id: str, body: dict):
+    return await asyncio.to_thread(_preview_vault_merge_sync, target_id, body)
+
+
+def _preview_vault_merge_sync(target_id: str, body: dict):
+    from vaults import preview_vault_merge
+
+    sources = list((body or {}).get("source_vault_ids") or [])
+    try:
+        return preview_vault_merge(target_id, sources)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.post("/api/vaults/{target_id}/merge")
+async def merge_vaults(target_id: str, body: dict):
+    return await asyncio.to_thread(_merge_vaults_sync, target_id, body)
+
+
+def _merge_vaults_sync(target_id: str, body: dict):
+    from vaults import merge_vaults
+
+    sources = list((body or {}).get("source_vault_ids") or [])
+    try:
+        return merge_vaults(target_id, sources)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 @app.get("/")
 async def root(): return {"status": "LMZ API Running"}

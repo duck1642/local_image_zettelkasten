@@ -192,6 +192,13 @@ def _config() -> dict:
             "allowed_mimes": ["image/jpeg", "image/png", "image/gif", "image/webp", "video/mp4", "video/webm", "video/ogg"],
         },
         "hash_algorithm": "sha256",
+        "active_vault": "default",
+        "vaults": {
+            "default": {
+                "name": "Default",
+                "root": "data/vaults/default",
+            },
+        },
         "ingestion_concurrency": {
             "global_max_workers": 2,
             "platforms": {"default": {"workers": 1, "jitter_range": [0, 0]}},
@@ -312,7 +319,7 @@ def _insert_rows(db_path: Path, rows: list[dict]):
 
 
 def _write_review_fixture(output: Path, index: int, item: dict):
-    review_dir = output / "data" / "review"
+    review_dir = output / "data" / "vaults" / "default" / "review"
     review_dir.mkdir(parents=True, exist_ok=True)
     suffix = ".mp4" if item["mime_type"].startswith("video/") else ".jpg"
     media_name = f"review_{index:04d}{suffix}"
@@ -347,26 +354,27 @@ def generate_vault(args: argparse.Namespace) -> Path:
     _write_yaml(config_path, _config())
 
     data_dir = output / "data"
-    assets_dir = data_dir / "vault" / "assets"
-    notes_dir = data_dir / "vault" / "notes"
+    vault_root = data_dir / "vaults" / "default"
+    assets_dir = vault_root / "vault" / "assets"
+    notes_dir = vault_root / "vault" / "notes"
     topics_dir = data_dir / "topics"
-    thumbs_dir = data_dir / "ui_cache" / "thumbnails"
-    logs_dir = data_dir / "logs"
+    thumbs_dir = vault_root / "ui_cache" / "thumbnails"
+    logs_dir = vault_root / "logs"
     for directory in [
-        data_dir / "db",
+        vault_root / "db",
         assets_dir,
         notes_dir,
         thumbs_dir,
         topics_dir,
-        data_dir / "review",
+        vault_root / "review",
         logs_dir / "raw",
         logs_dir / "structured",
-        data_dir / "queues",
-        data_dir / "input",
-        data_dir / "local_ingest",
-        data_dir / "online_ingest",
+        vault_root / "queues",
+        vault_root / "input",
+        vault_root / "local_ingest",
+        vault_root / "online_ingest",
         data_dir / "secrets",
-        data_dir / "wd-tags",
+        vault_root / "wd-tags",
     ]:
         directory.mkdir(parents=True, exist_ok=True)
 
@@ -455,7 +463,7 @@ def generate_vault(args: argparse.Namespace) -> Path:
             "thumbnail_url": f"/api/thumbnails/{item_hash}",
         })
 
-    _insert_rows(output / "data" / "db" / "lmz_main.db", rows)
+    _insert_rows(vault_root / "db" / "lmz_main.db", rows)
     metadata_report = _rebuild_metadata_index(config_path)
 
     for index, item in enumerate(items[: max(0, args.review)], start=1):
@@ -467,7 +475,7 @@ def generate_vault(args: argparse.Namespace) -> Path:
         "seed": args.seed,
         "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
         "config_path": "config.yaml",
-        "db_path": "data/db/lmz_main.db",
+        "db_path": "data/vaults/default/db/lmz_main.db",
         "counts": {
             "items": args.items,
             "videos": sum(1 for item in items if item["mime_type"].startswith("video/")),

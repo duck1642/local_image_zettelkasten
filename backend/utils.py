@@ -43,6 +43,11 @@ def _early_load_config() -> dict:
 
 _config = _early_load_config()
 _paths = _config.get('paths', {})
+_vaults = _config.get('vaults', {}) if isinstance(_config.get('vaults'), dict) else {}
+
+def _slug_vault_id(value: str) -> str:
+    cleaned = "".join(ch.casefold() if ch.isalnum() else "-" for ch in str(value or "").strip())
+    return "-".join(part for part in cleaned.split("-") if part) or "default"
 
 def _resolve_path(key: str, default: str) -> Path:
 
@@ -50,27 +55,65 @@ def _resolve_path(key: str, default: str) -> Path:
     p = Path(path_str)
     return p.resolve() if p.is_absolute() else (CONFIG_ROOT / p).resolve()
 
-VAULT_DIR = _resolve_path('vault', "data/vault")
+def _resolve_config_relative(path_str: str) -> Path:
+    p = Path(path_str)
+    return p.resolve() if p.is_absolute() else (CONFIG_ROOT / p).resolve()
 
-INPUT_DIR = _resolve_path('input', "data/input")
-REVIEW_DIR = _resolve_path('review', "data/review")
-LOCAL_INGEST_DIR = _resolve_path('local_ingest', str(INPUT_DIR / "local"))
-ONLINE_INGEST_DIR = _resolve_path('online_ingest', str(INPUT_DIR / "online"))
-QUEUES_DIR = _resolve_path('queues', "data/queues")
-BATCHES_DIR = _resolve_path('batches', "data/batches")
+def _active_vault_config() -> tuple[bool, str, str, Path | None]:
+    if not _vaults:
+        return False, "", "", None
+    active_id = _slug_vault_id(str(_config.get("active_vault") or "default"))
+    if active_id not in _vaults:
+        active_id = "default" if "default" in _vaults else sorted(_vaults.keys())[0]
+    entry = _vaults.get(active_id) or {}
+    name = str(entry.get("name") or active_id)
+    root_value = str(entry.get("root") or f"data/vaults/{active_id}")
+    return True, active_id, name, _resolve_config_relative(root_value)
+
+VAULTS_CONFIGURED, ACTIVE_VAULT_ID, ACTIVE_VAULT_NAME, ACTIVE_VAULT_ROOT = _active_vault_config()
+
+if VAULTS_CONFIGURED and ACTIVE_VAULT_ROOT is not None:
+    VAULT_DIR = ACTIVE_VAULT_ROOT / "vault"
+else:
+    VAULT_DIR = _resolve_path('vault', "data/vault")
+
+if VAULTS_CONFIGURED and ACTIVE_VAULT_ROOT is not None:
+    INPUT_DIR = ACTIVE_VAULT_ROOT / "input"
+    REVIEW_DIR = ACTIVE_VAULT_ROOT / "review"
+    LOCAL_INGEST_DIR = ACTIVE_VAULT_ROOT / "local_ingest"
+    ONLINE_INGEST_DIR = ACTIVE_VAULT_ROOT / "online_ingest"
+    QUEUES_DIR = ACTIVE_VAULT_ROOT / "queues"
+    BATCHES_DIR = ACTIVE_VAULT_ROOT / "batches"
+else:
+    INPUT_DIR = _resolve_path('input', "data/input")
+    REVIEW_DIR = _resolve_path('review', "data/review")
+    LOCAL_INGEST_DIR = _resolve_path('local_ingest', str(INPUT_DIR / "local"))
+    ONLINE_INGEST_DIR = _resolve_path('online_ingest', str(INPUT_DIR / "online"))
+    QUEUES_DIR = _resolve_path('queues', "data/queues")
+    BATCHES_DIR = _resolve_path('batches', "data/batches")
 SECRETS_DIR = _resolve_path('secrets', "secrets")
 MODELS_DIR = _resolve_path('models', "data/models")
-WD_TAGS_DIR = _resolve_path('wd_tags', "data/wd-tags")
-THUMBNAILS_DIR = _resolve_path('thumbnails', "data/ui_cache/thumbnails")
+if VAULTS_CONFIGURED and ACTIVE_VAULT_ROOT is not None:
+    WD_TAGS_DIR = ACTIVE_VAULT_ROOT / "wd-tags"
+    THUMBNAILS_DIR = ACTIVE_VAULT_ROOT / "ui_cache" / "thumbnails"
+else:
+    WD_TAGS_DIR = _resolve_path('wd_tags', "data/wd-tags")
+    THUMBNAILS_DIR = _resolve_path('thumbnails', "data/ui_cache/thumbnails")
 TOPICS_DIR = (CONFIG_ROOT / "data" / "topics").resolve()
 
 OUTPUT_DIR = VAULT_DIR
 ASSETS_DIR = OUTPUT_DIR / "assets"
 NOTES_DIR = OUTPUT_DIR / "notes"
 
-DB_PATH = _resolve_path('db', "data/db/lmz_main.db")
+if VAULTS_CONFIGURED and ACTIVE_VAULT_ROOT is not None:
+    DB_PATH = ACTIVE_VAULT_ROOT / "db" / "lmz_main.db"
+else:
+    DB_PATH = _resolve_path('db', "data/db/lmz_main.db")
 
-LOGS_DIR = _resolve_path('logs', "logs")
+if VAULTS_CONFIGURED and ACTIVE_VAULT_ROOT is not None:
+    LOGS_DIR = ACTIVE_VAULT_ROOT / "logs"
+else:
+    LOGS_DIR = _resolve_path('logs', "logs")
 
 _CONFIG_CACHE_LOCK = threading.Lock()
 _CONFIG_CACHE_DATA: dict | None = None
@@ -207,6 +250,13 @@ def _default_config() -> dict:
             'models': str(MODELS_DIR),
             'wd_tags': str(WD_TAGS_DIR),
             'thumbnails': str(THUMBNAILS_DIR),
+        },
+        'active_vault': ACTIVE_VAULT_ID or 'default',
+        'vaults': {
+            ACTIVE_VAULT_ID or 'default': {
+                'name': ACTIVE_VAULT_NAME or 'Default',
+                'root': str(ACTIVE_VAULT_ROOT or (CONFIG_ROOT / 'data' / 'vaults' / 'default')),
+            }
         },
         'ui': {
             'vault_layout_mode': 'masonry',
@@ -381,6 +431,13 @@ def resolve_project_path(path_str: str) -> Path:
         path = PROJECT_ROOT / path
     return path.resolve()
 
+def resolve_config_path(path_str: str) -> Path:
+
+    path = Path(path_str)
+    if not path.is_absolute():
+        path = CONFIG_ROOT / path
+    return path.resolve()
+
 def get_configured_cookie_path() -> Optional[Path]:
 
     config = get_config()
@@ -389,7 +446,7 @@ def get_configured_cookie_path() -> Optional[Path]:
     if not cookie_str:
         return None
 
-    return resolve_project_path(cookie_str)
+    return resolve_config_path(cookie_str)
 
 def get_cookie_auth_status() -> dict:
 

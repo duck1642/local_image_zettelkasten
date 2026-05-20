@@ -192,6 +192,7 @@ cython_debug/
 data/
 /logs/
 config/logs/
+config/workspaces.yaml
 secrets/
 backups/
 .vscode/
@@ -217,5 +218,3 @@ test_videos/
 !tests/fixtures/mock-vault/config.yaml
 !tests/fixtures/mock-vault/data/
 !tests/fixtures/mock-vault/data/**
-config/workspaces.yaml
-config/workspaces.yaml

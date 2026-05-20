@@ -51,7 +51,8 @@ def test_generated_vault_smoke_and_isolation(tmp_path, monkeypatch):
 
     config_path = output / "config.yaml"
     manifest_path = output / "manifest.json"
-    db_path = output / "data" / "db" / "lmz_main.db"
+    vault_root = output / "data" / "vaults" / "default"
+    db_path = vault_root / "db" / "lmz_main.db"
     assert config_path.exists()
     assert manifest_path.exists()
     assert db_path.exists()
@@ -79,13 +80,13 @@ def test_generated_vault_smoke_and_isolation(tmp_path, monkeypatch):
         conn.close()
 
     for relative in [
-        "data/logs/structured/system.jsonl",
-        "data/logs/structured/auth.jsonl",
-        "data/logs/structured/review.jsonl",
-        "data/logs/structured/ingest_local.jsonl",
-        "data/logs/structured/ingest_online.jsonl",
-        "data/logs/structured/ingestion_audit.jsonl",
-        "data/logs/raw/terminal.log",
+        "data/vaults/default/logs/structured/system.jsonl",
+        "data/vaults/default/logs/structured/auth.jsonl",
+        "data/vaults/default/logs/structured/review.jsonl",
+        "data/vaults/default/logs/structured/ingest_local.jsonl",
+        "data/vaults/default/logs/structured/ingest_online.jsonl",
+        "data/vaults/default/logs/structured/ingestion_audit.jsonl",
+        "data/vaults/default/logs/raw/terminal.log",
     ]:
         assert (output / relative).exists()
 
@@ -98,8 +99,8 @@ def test_generated_vault_smoke_and_isolation(tmp_path, monkeypatch):
     thumbnails = importlib.import_module("thumbnails")
 
     assert utils.DB_PATH == db_path
-    assert utils.LOGS_DIR == output / "data" / "logs"
-    assert utils.THUMBNAILS_DIR == output / "data" / "ui_cache" / "thumbnails"
+    assert utils.LOGS_DIR == vault_root / "logs"
+    assert utils.THUMBNAILS_DIR == vault_root / "ui_cache" / "thumbnails"
     assert thumbnails.THUMBNAIL_DIR == utils.THUMBNAILS_DIR
     conn = sqlite_operator.connect_database()
     try:
@@ -125,7 +126,8 @@ def test_generated_vault_rows_notes_and_media_are_consistent(tmp_path):
     ])
 
     manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
-    conn = sqlite3.connect(output / "data" / "db" / "lmz_main.db")
+    vault_root = output / "data" / "vaults" / "default"
+    conn = sqlite3.connect(vault_root / "db" / "lmz_main.db")
     try:
         samples = [manifest["items"][0], manifest["items"][7], next(item for item in manifest["items"] if item["mime_type"] == "video/mp4")]
         for item in samples:
@@ -143,10 +145,10 @@ def test_generated_vault_rows_notes_and_media_are_consistent(tmp_path):
             )
 
             shard = item["hash"][:2]
-            asset_path = output / "data" / "vault" / "assets" / shard / f"{item['storage_id']}{item['extension']}"
-            note_path = output / "data" / "vault" / "notes" / shard / f"{item['storage_id']}.md"
+            asset_path = vault_root / "vault" / "assets" / shard / f"{item['storage_id']}{item['extension']}"
+            note_path = vault_root / "vault" / "notes" / shard / f"{item['storage_id']}.md"
             suffix = "_video" if item["mime_type"].startswith("video/") else ""
-            thumb_path = output / "data" / "ui_cache" / "thumbnails" / shard / f"{item['storage_id']}{suffix}.jpg"
+            thumb_path = vault_root / "ui_cache" / "thumbnails" / shard / f"{item['storage_id']}{suffix}.jpg"
             assert asset_path.exists()
             assert note_path.exists()
             assert thumb_path.exists()
@@ -158,7 +160,7 @@ def test_generated_vault_rows_notes_and_media_are_consistent(tmp_path):
             assert frontmatter["platform"] == item["platform"]
             assert frontmatter["source_artist"] == item["artist"]
             assert frontmatter["topics"] == item["topic_links"]
-            assert all(value.startswith("[topic_") and "](../../../topics/topic_" in value for value in frontmatter["topics"])
+            assert all(value.startswith("[topic_") and "topics/topic_" in value for value in frontmatter["topics"])
             assert frontmatter["wd_rating"] == item["wd_tags"]["rating"]
             assert frontmatter["wd_character_tags"] == item["wd_tags"]["characters"]
             assert frontmatter["wd_tags"] == item["wd_tags"]["general"]

@@ -36,6 +36,12 @@
   let obsidianPath = '';
   let obsidianName = 'Obsidian Workspace';
   let workspaceRestartRequired = false;
+  let vaults: any[] = [];
+  let vaultActive = '';
+  let vaultBusy = false;
+  let vaultResult = '';
+  let vaultName = 'New Vault';
+  let vaultRestartRequired = false;
 
   function setConfig(mutator: (draft: any) => void) {
     updateConfig(mutator, false);
@@ -65,6 +71,7 @@
     window.addEventListener('lmz:refresh', handleGlobalRefresh);
     loadConfig();
     loadWorkspaces();
+    loadVaults();
     return () => {
       window.removeEventListener('lmz:refresh', handleGlobalRefresh);
       stopMetadataRebuildPolling();
@@ -131,6 +138,108 @@
       uiLog('ERROR', 'Obsidian workspace registration failed', { path, error: String(error) });
     } finally {
       workspaceBusy = false;
+    }
+  }
+
+  async function loadVaults() {
+    try {
+      const response = await apiFetch('/api/vaults');
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload?.detail || `HTTP ${response.status}`);
+      vaultActive = String(payload?.active || '');
+      vaults = Array.isArray(payload?.items) ? payload.items : [];
+    } catch (error) {
+      vaultResult = `error: ${String(error)}`;
+    }
+  }
+
+  async function addVault() {
+    const name = vaultName.trim();
+    if (!name || vaultBusy) return;
+    vaultBusy = true;
+    vaultResult = '';
+    try {
+      const response = await apiFetch('/api/vaults', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name })
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload?.detail || `HTTP ${response.status}`);
+      vaults = Array.isArray(payload?.items) ? payload.items : vaults;
+      vaultName = 'New Vault';
+      vaultResult = 'vault created';
+      uiLog('INFO', 'Vault created', { name });
+    } catch (error) {
+      vaultResult = `error: ${String(error)}`;
+      uiLog('ERROR', 'Vault create failed', { name, error: String(error) });
+    } finally {
+      vaultBusy = false;
+    }
+  }
+
+  async function setActiveVault(id: string) {
+    if (!id || vaultBusy) return;
+    vaultBusy = true;
+    vaultResult = '';
+    try {
+      const response = await apiFetch('/api/vaults/active', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id })
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload?.detail || `HTTP ${response.status}`);
+      vaultActive = String(payload?.active || id);
+      vaults = Array.isArray(payload?.items) ? payload.items : vaults;
+      vaultRestartRequired = true;
+      vaultResult = 'active on next restart';
+      uiLog('INFO', 'Vault active changed', { id });
+    } catch (error) {
+      vaultResult = `error: ${String(error)}`;
+      uiLog('ERROR', 'Vault active change failed', { id, error: String(error) });
+    } finally {
+      vaultBusy = false;
+    }
+  }
+
+  async function renameVault(id: string, currentName: string) {
+    const name = prompt('Vault name', currentName || id)?.trim();
+    if (!name || vaultBusy) return;
+    vaultBusy = true;
+    vaultResult = '';
+    try {
+      const response = await apiFetch(`/api/vaults/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name })
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload?.detail || `HTTP ${response.status}`);
+      vaults = Array.isArray(payload?.items) ? payload.items : vaults;
+      vaultResult = 'vault renamed';
+    } catch (error) {
+      vaultResult = `error: ${String(error)}`;
+    } finally {
+      vaultBusy = false;
+    }
+  }
+
+  async function deleteVault(id: string) {
+    if (!id || vaultBusy) return;
+    if (!confirm(`Delete vault "${id}"? This removes that vault folder.`)) return;
+    vaultBusy = true;
+    vaultResult = '';
+    try {
+      const response = await apiFetch(`/api/vaults/${encodeURIComponent(id)}?confirm=true`, { method: 'DELETE' });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload?.detail || `HTTP ${response.status}`);
+      vaults = Array.isArray(payload?.items) ? payload.items : vaults;
+      vaultResult = 'vault deleted';
+    } catch (error) {
+      vaultResult = `error: ${String(error)}`;
+    } finally {
+      vaultBusy = false;
     }
   }
 
@@ -272,6 +381,10 @@
           <code>{$config._runtime.config_root}</code>
           <span>Topics</span>
           <code>{$config._runtime.topic_root}</code>
+          <span>Vault</span>
+          <strong>{$config._runtime.active_vault_name || $config._runtime.active_vault || 'Default'}</strong>
+          <span>Vault Root</span>
+          <code>{$config._runtime.active_vault_root || 'legacy paths'}</code>
         </div>
         {#if $config._runtime.env_override}
           <div class="workspace-note">Environment override is active. Registry changes apply only after restarting without LMZ_CONFIG_PATH.</div>
@@ -308,6 +421,47 @@
           </div>
           {#if workspaceResult}
             <div class="workspace-result">{workspaceResult}</div>
+          {/if}
+        </div>
+        <div class="workspace-actions">
+          <h5>Vaults</h5>
+          {#if vaultRestartRequired}
+            <div class="restart-banner">Restart required to use the selected vault.</div>
+          {/if}
+          <div class="workspace-list">
+            {#each vaults as vault}
+              <div class="workspace-row">
+                <div>
+                  <strong>{vault.name}</strong>
+                  <code>{vault.root}</code>
+                  <span class="workspace-note">{Number(vault.item_count || 0).toLocaleString()} items</span>
+                  {#if !vault.exists}
+                    <span class="missing">missing vault</span>
+                  {/if}
+                </div>
+                <div class="row-actions">
+                  <button type="button" disabled={vaultBusy || vault.legacy} on:click={() => renameVault(vault.id, vault.name)}>Rename</button>
+                  <button
+                    type="button"
+                    disabled={vaultBusy || vault.id === vaultActive || !vault.exists}
+                    on:click={() => setActiveVault(vault.id)}
+                  >
+                    {vault.id === vaultActive ? 'Active' : 'Use on Restart'}
+                  </button>
+                  <button type="button" disabled={vaultBusy || vault.id === vaultActive || vault.legacy} on:click={() => deleteVault(vault.id)}>Delete</button>
+                </div>
+              </div>
+            {/each}
+          </div>
+          <div class="add-workspace">
+            <input type="text" placeholder="Vault name" bind:value={vaultName} />
+            <button type="button" on:click={addVault} disabled={vaultBusy || !vaultName.trim() || !$config._runtime.vaults_configured}>Create Vault</button>
+          </div>
+          {#if !$config._runtime.vaults_configured}
+            <div class="workspace-note">Legacy vault layout is active. Run the legacy vault migration helper before creating more vaults.</div>
+          {/if}
+          {#if vaultResult}
+            <div class="workspace-result">{vaultResult}</div>
           {/if}
         </div>
       </div>
@@ -614,7 +768,7 @@
 
   .workspace-row {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 140px;
+    grid-template-columns: minmax(0, 1fr) auto;
     gap: 10px;
     align-items: center;
     padding: 8px;
@@ -628,6 +782,17 @@
     display: flex;
     flex-direction: column;
     gap: 4px;
+  }
+
+  .row-actions {
+    display: flex;
+    flex-direction: row;
+    gap: 6px;
+    justify-content: flex-end;
+  }
+
+  .row-actions button {
+    white-space: nowrap;
   }
 
   .workspace-row code {

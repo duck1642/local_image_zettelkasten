@@ -9,6 +9,7 @@ import os
 import re
 import runpy
 import shutil
+import sqlite3
 import sys
 import tempfile
 import threading
@@ -35,7 +36,7 @@ def fresh_backend(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *module_names
     if str(BACKEND) not in sys.path:
         sys.path.insert(0, str(BACKEND))
     for name in list(sys.modules):
-        if name in {"utils", "web_api", "queue_service", "md_generator", "metadata_index", "processor", "external_ingestion", "thumbnails", "fingerprint", "artists", "platforms", "review_cache", "topics"} or name.startswith(("logger", "db.", "tagging", "downloaders")):
+        if name in {"utils", "web_api", "queue_service", "md_generator", "metadata_index", "processor", "external_ingestion", "thumbnails", "fingerprint", "artists", "platforms", "review_cache", "topics", "vaults"} or name.startswith(("logger", "db.", "tagging", "downloaders")):
             del sys.modules[name]
     return [importlib.import_module(name) for name in module_names]
 
@@ -94,6 +95,7 @@ def test_config_override_resolves_paths_inside_mock_vault(monkeypatch, tmp_path)
     assert utils.ONLINE_INGEST_DIR == tmp_path / "mock-vault" / "data" / "online_ingest"
     assert utils.THUMBNAILS_DIR == tmp_path / "mock-vault" / "data" / "ui_cache" / "thumbnails"
     assert utils.TOPICS_DIR == tmp_path / "mock-vault" / "data" / "topics"
+    assert utils.get_configured_cookie_path() == tmp_path / "mock-vault" / "secrets" / "cookies.txt"
     assert str(ROOT / "data") not in str(utils.VAULT_DIR)
 
 
@@ -138,12 +140,13 @@ def test_obsidian_workspace_setup_creates_lmz_layout_and_resolves_paths(monkeypa
     assert config_path == obsidian_vault / "lmz" / "config.yaml"
     for relative in [
         "data/topics",
-        "data/vault/notes",
-        "data/vault/assets",
-        "data/db",
-        "data/logs",
-        "data/review",
-        "data/wd-tags",
+        "data/vaults/default/vault/notes",
+        "data/vaults/default/vault/assets",
+        "data/vaults/default/db",
+        "data/vaults/default/logs/raw",
+        "data/vaults/default/logs/structured",
+        "data/vaults/default/review",
+        "data/vaults/default/wd-tags",
     ]:
         assert (obsidian_vault / "lmz" / relative).exists()
 
@@ -151,7 +154,7 @@ def test_obsidian_workspace_setup_creates_lmz_layout_and_resolves_paths(monkeypa
     if str(BACKEND) not in sys.path:
         sys.path.insert(0, str(BACKEND))
     for name in list(sys.modules):
-        if name in {"utils", "db.sqlite_operator", "web_api", "topics"} or name.startswith(("logger", "db.", "tagging")):
+        if name in {"utils", "db.sqlite_operator", "web_api", "topics", "vaults"} or name.startswith(("logger", "db.", "tagging")):
             del sys.modules[name]
     utils = importlib.import_module("utils")
     sqlite_operator = importlib.import_module("db.sqlite_operator")
@@ -159,7 +162,9 @@ def test_obsidian_workspace_setup_creates_lmz_layout_and_resolves_paths(monkeypa
 
     assert utils.CONFIG_ROOT == obsidian_vault / "lmz"
     assert utils.TOPICS_DIR == obsidian_vault / "lmz" / "data" / "topics"
-    assert utils.VAULT_DIR == obsidian_vault / "lmz" / "data" / "vault"
+    assert utils.VAULT_DIR == obsidian_vault / "lmz" / "data" / "vaults" / "default" / "vault"
+    assert utils.DB_PATH == obsidian_vault / "lmz" / "data" / "vaults" / "default" / "db" / "lmz_main.db"
+    assert utils.get_configured_cookie_path() == obsidian_vault / "lmz" / "data" / "secrets" / "cookies.txt"
     utils.validate_config_schema(utils.get_config())
     conn = sqlite_operator.init_database()
     item_hash = "97" * 32
@@ -180,6 +185,7 @@ def test_obsidian_workspace_setup_creates_lmz_layout_and_resolves_paths(monkeypa
     assert utils.note_path_for(item_hash, storage_id).exists()
     runtime = web_api._load_public_config_sync()["_runtime"]
     assert runtime["workspace_mode"] == "obsidian"
+    assert runtime["active_vault"] == "default"
     shutil.rmtree(obsidian_vault, ignore_errors=True)
 
 
@@ -209,6 +215,80 @@ def test_workspace_api_lists_registers_and_sets_active(monkeypatch, tmp_path):
         assert active["active"] == workspace_id
     finally:
         shutil.rmtree(obsidian_vault, ignore_errors=True)
+
+
+def test_vault_api_creates_sets_active_and_rejects_active_delete(monkeypatch, tmp_path):
+    web_api, vaults = fresh_backend(monkeypatch, tmp_path, "web_api", "vaults")
+    vaults.migrate_legacy_layout(overwrite=True)
+
+    created = web_api._create_vault_sync({"name": "Second Vault"})
+    second = next(item for item in created["items"] if item["id"] == "second-vault")
+
+    assert Path(second["root"]).exists()
+    assert Path(second["db_path"]).exists()
+
+    active = web_api._set_vault_active_sync({"id": "second-vault"})
+    assert active["restart_required"] is True
+    assert active["active"] == "second-vault"
+
+    with pytest.raises(HTTPException) as exc:
+        web_api._delete_vault_sync("second-vault", confirm=True)
+    assert exc.value.status_code == 400
+
+
+def test_vault_create_refuses_unmigrated_legacy_config(monkeypatch, tmp_path):
+    web_api, = fresh_backend(monkeypatch, tmp_path, "web_api")
+
+    with pytest.raises(HTTPException) as exc:
+        web_api._create_vault_sync({"name": "Unsafe New Vault"})
+
+    assert exc.value.status_code == 400
+    assert "migrate legacy layout" in str(exc.value.detail)
+
+
+def test_vault_merge_reallocates_storage_ids_and_keeps_source(monkeypatch, tmp_path):
+    vaults, sqlite_operator = fresh_backend(monkeypatch, tmp_path, "vaults", "db.sqlite_operator")
+    vaults.migrate_legacy_layout(overwrite=True)
+    vaults.create_vault("Source")
+    vaults.create_vault("Target")
+    items = {item["id"]: item for item in vaults.vault_list()}
+    source_root = Path(items["source"]["root"])
+    target_root = Path(items["target"]["root"])
+
+    item_hash = "ab" * 32
+    source_storage_id = "00000000000a"
+    source_db = Path(items["source"]["db_path"])
+    conn = sqlite_operator.init_database(source_db)
+    conn.execute(
+        """
+        INSERT INTO items(hash, storage_id, original_filename, file_extension, mime_type, size_bytes, date_added, source_url, source_url_norm, platform, source_artist, phash)
+        VALUES (?, ?, ?, '.jpg', 'image/jpeg', 10, '2026-01-01 00:00:00', '', '', 'Local', 'Artist', '')
+        """,
+        (item_hash, source_storage_id, "source.jpg"),
+    )
+    conn.commit()
+    conn.close()
+    source_asset = source_root / "vault" / "assets" / item_hash[:2] / f"{source_storage_id}.jpg"
+    source_note = source_root / "vault" / "notes" / item_hash[:2] / f"{source_storage_id}.md"
+    source_asset.parent.mkdir(parents=True, exist_ok=True)
+    source_note.parent.mkdir(parents=True, exist_ok=True)
+    source_asset.write_bytes(b"asset")
+    source_note.write_text("---\ntopics: []\n---\n", encoding="utf-8")
+
+    result = vaults.merge_vaults("target", ["source"])
+
+    target_conn = sqlite3.connect(items["target"]["db_path"])
+    source_conn = sqlite3.connect(items["source"]["db_path"])
+    target_row = target_conn.execute("SELECT storage_id FROM items WHERE hash = ?", (item_hash,)).fetchone()
+    source_count = source_conn.execute("SELECT COUNT(*) FROM items").fetchone()[0]
+    target_conn.close()
+    source_conn.close()
+
+    assert result["imported"] == 1
+    assert target_row is not None
+    assert target_row[0] != source_storage_id
+    assert (target_root / "vault" / "assets" / item_hash[:2] / f"{target_row[0]}.jpg").exists()
+    assert source_count == 1
 
 
 def test_get_config_cache_hits_and_returns_defensive_copy(monkeypatch, tmp_path):
@@ -1975,6 +2055,36 @@ def test_topic_file_creation_preserves_body_and_item_markdown_uses_links(monkeyp
     assert [entry["label"] for entry in parsed] == ["syntax", "color_theory"]
     assert [entry["topic_rel"] for entry in parsed] == ["syntax.md", "color_theory.md"]
     conn.close()
+
+
+def test_repeated_topic_promotions_create_each_topic_file(monkeypatch, tmp_path):
+    utils, sqlite_operator, web_api = fresh_backend(monkeypatch, tmp_path, "utils", "db.sqlite_operator", "web_api")
+    item_hash = "99" * 32
+    conn = insert_mock_item(sqlite_operator, item_hash)
+    storage_id = storage_id_for(conn, item_hash)
+    conn.close()
+
+    first = web_api._update_item_sync(
+        item_hash,
+        web_api.ItemUpdate(topics=["karin (blue archive)"]),
+    )
+    assert first["topics"] == ["karin_blue_archive"]
+    assert (utils.TOPICS_DIR / "karin_blue_archive.md").exists()
+
+    second = web_api._update_item_sync(
+        item_hash,
+        web_api.ItemUpdate(topics=["karin_blue_archive", "black hair"]),
+    )
+    note_path = utils.note_path_for(item_hash, storage_id)
+    data = frontmatter_from_markdown(note_path.read_text(encoding="utf-8"))
+
+    assert second["topics"] == ["black_hair", "karin_blue_archive"]
+    assert (utils.TOPICS_DIR / "karin_blue_archive.md").exists()
+    assert (utils.TOPICS_DIR / "black_hair.md").exists()
+    assert data["topics"] == [
+        "[karin_blue_archive](../../../topics/karin_blue_archive.md)",
+        "[black_hair](../../../topics/black_hair.md)",
+    ]
 
 
 def test_metadata_index_parses_linked_and_legacy_topics(monkeypatch, tmp_path):
