@@ -10,7 +10,7 @@ from utils import (
     atomic_write_text, flatten_image, get_normalization_color, note_path_for,
     storage_asset_path_for, storage_shard_for_hash, utc_now, utc_now_str
 )
-from runtime_context import get_runtime_context
+from runtime_context import get_runtime_context, WorkspaceContext
 from fingerprint import (
     get_audio_fingerprint, get_visual_embedding,
     compare_embeddings, compare_audio_fingerprints
@@ -29,6 +29,9 @@ from thumbnails import ensure_thumbnail
 from review_cache import pending_review_match as cached_pending_review_match, upsert_review_cache_entry
 
 REVIEW_DIR = get_runtime_context().active_vault.review_dir
+
+def _ctx(ctx: WorkspaceContext | None = None) -> WorkspaceContext:
+    return ctx or get_runtime_context()
 
 
 def _safe_review_name(name: str) -> str:
@@ -52,8 +55,8 @@ def _review_original_name(filepath: Path, metadata: dict) -> str:
             return source_name
     return filepath.name
 
-def _move_to_review(filepath: Path, file_hash: str, metadata: dict, sidecar_fields: dict) -> Path:
-    review_dir = get_runtime_context().active_vault.review_dir
+def _move_to_review(filepath: Path, file_hash: str, metadata: dict, sidecar_fields: dict, ctx: WorkspaceContext | None = None) -> Path:
+    review_dir = _ctx(ctx).active_vault.review_dir
     review_dir.mkdir(parents=True, exist_ok=True)
     original_name = _review_original_name(filepath, metadata)
     safe_original_name = _safe_review_name(original_name)
@@ -84,11 +87,11 @@ def _move_to_review(filepath: Path, file_hash: str, metadata: dict, sidecar_fiel
     }
     with open(sidecar_path, 'w', encoding='utf-8') as f:
         json.dump(sidecar, f, indent=4, ensure_ascii=False)
-    upsert_review_cache_entry(dest_path, sidecar)
+    upsert_review_cache_entry(dest_path, sidecar, ctx=ctx)
     return dest_path
 
-def _pending_review_match(file_hash: str) -> dict | None:
-    return cached_pending_review_match(file_hash)
+def _pending_review_match(file_hash: str, ctx: WorkspaceContext | None = None) -> dict | None:
+    return cached_pending_review_match(file_hash, ctx=ctx)
 
 def calculate_tiles(filepath: Path, ratio_threshold: float = 3.0) -> list:
 
@@ -137,7 +140,7 @@ def calculate_tiles(filepath: Path, ratio_threshold: float = 3.0) -> list:
     except Exception:
         return []
 
-def find_visual_duplicate(new_phash: str, threshold: int = 5, new_tiles: list = None) -> Tuple[Optional[str], Optional[str], int, Optional[int]]:
+def find_visual_duplicate(new_phash: str, threshold: int = 5, new_tiles: list = None, ctx: WorkspaceContext | None = None) -> Tuple[Optional[str], Optional[str], int, Optional[int]]:
 
     best_match = None
     match_type = None
@@ -147,7 +150,10 @@ def find_visual_duplicate(new_phash: str, threshold: int = 5, new_tiles: list = 
     try:
 
 
-        matches = search_manager.query_image(new_phash, threshold)
+        try:
+            matches = search_manager.query_image(new_phash, threshold, ctx=ctx)
+        except TypeError:
+            matches = search_manager.query_image(new_phash, threshold)
 
         for f_hash, dist, m_type in matches:
             total_conflicts += 1
@@ -160,7 +166,10 @@ def find_visual_duplicate(new_phash: str, threshold: int = 5, new_tiles: list = 
         if not best_match and new_tiles:
             for t_index, t_phash in new_tiles:
 
-                tile_matches = search_manager.query_global_only(t_phash, threshold)
+                try:
+                    tile_matches = search_manager.query_global_only(t_phash, threshold, ctx=ctx)
+                except TypeError:
+                    tile_matches = search_manager.query_global_only(t_phash, threshold)
                 if tile_matches:
                     f_hash, dist = tile_matches[0]
                     total_conflicts += len(tile_matches)
@@ -174,7 +183,7 @@ def find_visual_duplicate(new_phash: str, threshold: int = 5, new_tiles: list = 
 
     return best_match, match_type, total_conflicts, min_distance
 
-def find_video_duplicate(audio_hash: bytes, visual_embedding: bytes, ai_threshold: float = 0.08) -> Tuple[Optional[str], Optional[str], int, Optional[float]]:
+def find_video_duplicate(audio_hash: bytes, visual_embedding: bytes, ai_threshold: float = 0.08, ctx: WorkspaceContext | None = None) -> Tuple[Optional[str], Optional[str], int, Optional[float]]:
 
     best_match = None
     match_type = None
@@ -183,7 +192,10 @@ def find_video_duplicate(audio_hash: bytes, visual_embedding: bytes, ai_threshol
 
     try:
 
-        matches = search_manager.query_video(audio_hash, visual_embedding, ai_threshold)
+        try:
+            matches = search_manager.query_video(audio_hash, visual_embedding, ai_threshold, ctx=ctx)
+        except TypeError:
+            matches = search_manager.query_video(audio_hash, visual_embedding, ai_threshold)
 
 
         conflict_map = {}
@@ -216,7 +228,7 @@ def find_video_duplicate(audio_hash: bytes, visual_embedding: bytes, ai_threshol
 
     return best_match, match_type, total_conflicts, max_similarity if best_match else None
 
-def process_file(filepath: Path, config: dict, metadata: dict = None, delete_source: bool = False, skip_similarity: bool = False, sync_index: bool = True) -> Tuple[bool, str, Optional[dict]]:
+def process_file(filepath: Path, config: dict, metadata: dict = None, delete_source: bool = False, skip_similarity: bool = False, sync_index: bool = True, ctx: WorkspaceContext | None = None) -> Tuple[bool, str, Optional[dict]]:
 
     metadata = metadata or {}
     index_data = None
@@ -239,7 +251,10 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
         return False, f"Invalid extension: {filepath.suffix}", None
 
     file_hash = calculate_file_hash(filepath)
-    pending_review = _pending_review_match(file_hash)
+    try:
+        pending_review = _pending_review_match(file_hash, ctx=ctx)
+    except TypeError:
+        pending_review = _pending_review_match(file_hash)
     if pending_review:
         log_system(
             "INFO",
@@ -250,7 +265,7 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
         )
         return False, f"Already pending review: {file_hash[:8]}...", None
 
-    conn = connect_database()
+    conn = connect_database(ctx=ctx)  # connect_database()
     if check_duplicate_hash(conn, file_hash):
         conn.close()
         log_system("INFO", f"Skipped: Duplicate hash", hash=file_hash, file=filepath.name)
@@ -275,7 +290,7 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
             pass
 
         if phash and not skip_similarity:
-            conflict_hash, match_type, total_conflicts, distance = find_visual_duplicate(phash, threshold=5, new_tiles=tiles)
+            conflict_hash, match_type, total_conflicts, distance = find_visual_duplicate(phash, threshold=5, new_tiles=tiles, ctx=ctx)
             if conflict_hash:
 
                 conn.close()
@@ -292,6 +307,7 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
                     "total_conflicts": total_conflicts,
                     "is_tiled": bool(tiles),
                     },
+                    ctx=ctx,
                 )
 
                 log_system("WARNING", f"Quarantined: Visual match detected ({match_type})", file=filepath.name, match_type=match_type, conflicts=total_conflicts)
@@ -314,7 +330,7 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
             pass
 
         if (audio_hash or visual_embedding) and not skip_similarity:
-            conflict_hash, match_type, total_conflicts, similarity = find_video_duplicate(audio_hash, visual_embedding, ai_threshold=0.08)
+            conflict_hash, match_type, total_conflicts, similarity = find_video_duplicate(audio_hash, visual_embedding, ai_threshold=0.08, ctx=ctx)
             if conflict_hash:
 
                 conn.close()
@@ -331,6 +347,7 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
                     "audio_present": bool(audio_hash),
                     "visual_embedding_present": bool(visual_embedding),
                     },
+                    ctx=ctx,
                 )
 
                 log_system("WARNING", f"Quarantined: Video duplicate detected ({match_type})", file=filepath.name, match_type=match_type, conflicts=total_conflicts)
@@ -352,10 +369,10 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
         shard_folder = storage_shard_for_hash(file_hash)
         new_filename = f"{storage_id}{target_ext}"
 
-        shard_path = get_runtime_context().active_vault.assets_dir / shard_folder
+        shard_path = _ctx(ctx).active_vault.assets_dir / shard_folder
         shard_path.mkdir(parents=True, exist_ok=True)
 
-        vault_path = storage_asset_path_for(file_hash, storage_id, target_ext, mime_type)
+        vault_path = storage_asset_path_for(file_hash, storage_id, target_ext, mime_type, ctx=ctx)
         asset_rel_path = f"../../assets/{shard_folder}/{new_filename}"
 
         file_size = filepath.stat().st_size
@@ -372,7 +389,7 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
 
         md_content = generate_markdown(conn, file_hash, asset_rel_path, title=title)
         if md_content:
-            md_path = note_path_for(file_hash, storage_id=storage_id)
+            md_path = note_path_for(file_hash, storage_id=storage_id, ctx=ctx)
             md_path.parent.mkdir(parents=True, exist_ok=True)
             atomic_write_text(md_path, md_content)
 
@@ -402,7 +419,7 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
             else:
                 md_content = generate_markdown(conn, file_hash, asset_rel_path, title=title, force_wd_from_cache=True)
                 if md_content:
-                    md_path = note_path_for(file_hash, storage_id=storage_id)
+                    md_path = note_path_for(file_hash, storage_id=storage_id, ctx=ctx)
                     md_path.parent.mkdir(parents=True, exist_ok=True)
                     atomic_write_text(md_path, md_content)
         except Exception as tag_exc:
@@ -417,12 +434,15 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
         conn.commit()
 
         try:
-            ensure_thumbnail(file_hash, target_ext, mime_type, wait=True, storage_id=storage_id)
+            ensure_thumbnail(file_hash, target_ext, mime_type, wait=True, storage_id=storage_id, ctx=ctx)
         except Exception as thumb_exc:
             log_system("WARNING", "Ingest thumbnail pregeneration failed", hash=file_hash, error=str(thumb_exc))
 
         if sync_index:
-            search_manager.update_indexes(**index_data)
+            try:
+                search_manager.update_indexes(**index_data, ctx=ctx)
+            except TypeError:
+                search_manager.update_indexes(**index_data)
 
         if delete_source:
             cleanup_error = None

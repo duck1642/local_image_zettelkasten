@@ -108,8 +108,16 @@
       if (!response.ok) throw new Error(payload?.detail || `HTTP ${response.status}`);
       workspaceActive = String(payload?.active || id);
       workspaces = Array.isArray(payload?.items) ? payload.items : workspaces;
-      workspaceRestartRequired = true;
-      workspaceResult = 'active on next restart';
+      if (payload?.restart_required !== false) {
+        workspaceRestartRequired = true;
+        workspaceResult = 'active on next restart';
+      } else {
+        workspaceRestartRequired = false;
+        workspaceResult = 'Workspace switched dynamically!';
+        await loadConfig(true);
+        const { refreshSharedStats } = await import('./statsStore');
+        await refreshSharedStats();
+      }
       uiLog('INFO', 'Workspace active changed', { id });
     } catch (error) {
       workspaceResult = `error: ${String(error)}`;
@@ -196,8 +204,16 @@
       if (!response.ok) throw new Error(payload?.detail || `HTTP ${response.status}`);
       vaultActive = String(payload?.active || id);
       vaults = Array.isArray(payload?.items) ? payload.items : vaults;
-      vaultRestartRequired = true;
-      vaultResult = 'active on next restart';
+      if (payload?.restart_required !== false) {
+        vaultRestartRequired = true;
+        vaultResult = 'active on next restart';
+      } else {
+        vaultRestartRequired = false;
+        vaultResult = 'Vault switched dynamically!';
+        await loadConfig(true);
+        const { refreshSharedStats } = await import('./statsStore');
+        await refreshSharedStats();
+      }
       uiLog('INFO', 'Vault active changed', { id });
     } catch (error) {
       vaultResult = `error: ${String(error)}`;
@@ -427,7 +443,7 @@
                   disabled={workspaceBusy || workspace.id === workspaceActive || !workspace.exists}
                   on:click={() => setActiveWorkspace(workspace.id)}
                 >
-                  {workspace.id === workspaceActive ? 'Active' : 'Use on Restart'}
+                  {workspace.id === workspaceActive ? 'Active' : 'Activate'}
                 </button>
               </div>
             {/each}
@@ -464,7 +480,7 @@
                     disabled={vaultBusy || vault.id === vaultActive || !vault.exists}
                     on:click={() => setActiveVault(vault.id)}
                   >
-                    {vault.id === vaultActive ? 'Active' : 'Use on Restart'}
+                    {vault.id === vaultActive ? 'Active' : 'Activate'}
                   </button>
                   <button type="button" disabled={vaultBusy || vault.id === vaultActive} on:click={() => deleteVault(vault.id)}>Delete</button>
                 </div>

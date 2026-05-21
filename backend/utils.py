@@ -47,31 +47,41 @@ def _resolve_config_relative(path_str: str) -> Path:
     p = Path(path_str)
     return p.resolve() if p.is_absolute() else (CONFIG_ROOT / p).resolve()
 
-VAULTS_CONFIGURED = _RUNTIME_CONTEXT.vaults_configured
-ACTIVE_VAULT_ID = _RUNTIME_CONTEXT.active_vault.id
-ACTIVE_VAULT_NAME = _RUNTIME_CONTEXT.active_vault.name
-ACTIVE_VAULT_ROOT = _RUNTIME_CONTEXT.active_vault.root
+_DYNAMIC_CONSTANTS = {
+    "VAULTS_CONFIGURED": lambda: get_runtime_context().vaults_configured,
+    "ACTIVE_VAULT_ID": lambda: get_runtime_context().active_vault.id,
+    "ACTIVE_VAULT_NAME": lambda: get_runtime_context().active_vault.name,
+    "ACTIVE_VAULT_ROOT": lambda: get_runtime_context().active_vault.root,
 
-VAULT_DIR = _RUNTIME_CONTEXT.active_vault.vault_dir
-INPUT_DIR = _RUNTIME_CONTEXT.active_vault.input_dir
-REVIEW_DIR = _RUNTIME_CONTEXT.active_vault.review_dir
-LOCAL_INGEST_DIR = _RUNTIME_CONTEXT.active_vault.local_ingest_dir
-ONLINE_INGEST_DIR = _RUNTIME_CONTEXT.active_vault.online_ingest_dir
-QUEUES_DIR = _RUNTIME_CONTEXT.active_vault.queues_dir
-BATCHES_DIR = _RUNTIME_CONTEXT.active_vault.batches_dir
-SECRETS_DIR = _RUNTIME_CONTEXT.secrets_dir
-MODELS_DIR = _RUNTIME_CONTEXT.models_dir
-WD_TAGS_DIR = _RUNTIME_CONTEXT.active_vault.wd_tags_dir
-THUMBNAILS_DIR = _RUNTIME_CONTEXT.active_vault.thumbnails_dir
-TOPICS_DIR = _RUNTIME_CONTEXT.topics_dir
+    "VAULT_DIR": lambda: get_runtime_context().active_vault.vault_dir,
+    "INPUT_DIR": lambda: get_runtime_context().active_vault.input_dir,
+    "REVIEW_DIR": lambda: get_runtime_context().active_vault.review_dir,
+    "LOCAL_INGEST_DIR": lambda: get_runtime_context().active_vault.local_ingest_dir,
+    "ONLINE_INGEST_DIR": lambda: get_runtime_context().active_vault.online_ingest_dir,
+    "QUEUES_DIR": lambda: get_runtime_context().active_vault.queues_dir,
+    "BATCHES_DIR": lambda: get_runtime_context().active_vault.batches_dir,
+    "SECRETS_DIR": lambda: get_runtime_context().secrets_dir,
+    "MODELS_DIR": lambda: get_runtime_context().models_dir,
+    "WD_TAGS_DIR": lambda: get_runtime_context().active_vault.wd_tags_dir,
+    "THUMBNAILS_DIR": lambda: get_runtime_context().active_vault.thumbnails_dir,
+    "TOPICS_DIR": lambda: get_runtime_context().topics_dir,
 
-OUTPUT_DIR = VAULT_DIR
-ASSETS_DIR = _RUNTIME_CONTEXT.active_vault.assets_dir
-NOTES_DIR = _RUNTIME_CONTEXT.active_vault.notes_dir
+    "OUTPUT_DIR": lambda: get_runtime_context().active_vault.vault_dir,
+    "ASSETS_DIR": lambda: get_runtime_context().active_vault.assets_dir,
+    "NOTES_DIR": lambda: get_runtime_context().active_vault.notes_dir,
 
-DB_PATH = _RUNTIME_CONTEXT.active_vault.db_path
+    "DB_PATH": lambda: get_runtime_context().active_vault.db_path,
 
-LOGS_DIR = _RUNTIME_CONTEXT.active_vault.logs_dir
+    "LOGS_DIR": lambda: get_runtime_context().active_vault.logs_dir,
+}
+
+def __getattr__(name: str):
+    if name in _DYNAMIC_CONSTANTS:
+        return _DYNAMIC_CONSTANTS[name]()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+def __dir__():
+    return sorted(list(globals().keys()) + list(_DYNAMIC_CONSTANTS.keys()))
 
 _CONFIG_CACHE_LOCK = threading.Lock()
 _CONFIG_CACHE_DATA: dict | None = None

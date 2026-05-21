@@ -170,15 +170,27 @@ async def set_workspace_active(body: dict):
 
 def _set_workspace_active_sync(body: dict):
     from workspaces import set_active_workspace, workspace_list
+    from runtime_context import reload_runtime_context
+    from db.search_manager import search_manager
+    from metadata_index import restart_metadata_watchdog
 
     workspace_id = str((body or {}).get("id") or "").strip()
     if not workspace_id:
         raise HTTPException(status_code=400, detail="workspace id is required")
     try:
         registry = set_active_workspace(workspace_id)
+
+        # Dynamic workspace switching runtime updates
+        import os
+        os.environ.pop("LMZ_CONFIG_PATH", None)
+
+        new_ctx = reload_runtime_context()
+        search_manager.reset_all()
+        restart_metadata_watchdog(new_ctx)
+
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-    return {"status": "success", "active": registry["active"], "restart_required": True, "items": workspace_list()}
+    return {"status": "success", "active": registry["active"], "restart_required": False, "items": workspace_list()}
 
 
 @router.post("/api/workspaces/obsidian")

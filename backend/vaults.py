@@ -150,7 +150,17 @@ def set_active_vault(vault_id: str) -> dict:
         raise ValueError(f"vault root does not exist: {root}")
     config["active_vault"] = vault_id
     _write_config(config)
-    return {"status": "success", "active": vault_id, "restart_required": True, "items": vault_list()}
+
+    # Dynamic dynamic-vault switching runtime updates
+    from runtime_context import reload_runtime_context
+    from db.search_manager import search_manager
+    from metadata_index import restart_metadata_watchdog
+
+    new_ctx = reload_runtime_context()
+    search_manager.reset_all()
+    restart_metadata_watchdog(new_ctx)
+
+    return {"status": "success", "active": vault_id, "restart_required": False, "items": vault_list()}
 
 
 def _vault_non_empty(root: Path) -> bool:
@@ -233,53 +243,60 @@ def preview_vault_merge(target_id: str, source_ids: list[str]) -> dict:
 
 
 def merge_vaults(target_id: str, source_ids: list[str]) -> dict:
+    import re
     preview = preview_vault_merge(target_id, source_ids)
     config = _ensure_vault_registry(_read_config())
     vaults = config["vaults"]
     target_root = vault_root(vaults[vault_id_slug(target_id)])
     target_conn = init_database(vault_db_path(target_root))
-    imported = 0
-    skipped = 0
-    columns = [
-        "hash", "original_filename", "file_extension", "mime_type", "size_bytes",
-        "date_added", "source_url", "source_url_norm", "platform", "source_artist",
-        "phash", "audio_hash", "visual_embedding", "width", "height", "storage_id",
-    ]
-    select_sql = f"SELECT {', '.join(columns)} FROM items"
-    insert_sql = f"INSERT INTO items({', '.join(columns)}) VALUES ({', '.join('?' for _ in columns)})"
-    for source_id in [vault_id_slug(value) for value in source_ids]:
-        source_root = vault_root(vaults[source_id])
-        source_db = vault_db_path(source_root)
-        if not source_db.exists():
-            continue
-        source_conn = sqlite3.connect(source_db)
-        try:
-            for row in source_conn.execute(select_sql).fetchall():
-                row = list(row)
-                item_hash = row[0]
-                if target_conn.execute("SELECT 1 FROM items WHERE hash = ?", (item_hash,)).fetchone():
-                    skipped += 1
-                    continue
-                old_storage_id = row[15]
-                new_storage_id = allocate_storage_id(target_conn)
-                row[15] = new_storage_id
-                target_conn.execute(insert_sql, row)
-                ext = row[2] or ""
-                mime_type = row[3] or ""
-                old_paths = _item_paths(source_root, item_hash, old_storage_id, ext, mime_type)
-                new_paths = _item_paths(target_root, item_hash, new_storage_id, ext, mime_type)
-                _copy_if_exists(old_paths["asset"], new_paths["asset"])
-                _copy_if_exists(old_paths["wd"], new_paths["wd"])
-                _copy_if_exists(old_paths["thumb"], new_paths["thumb"])
-                if _copy_if_exists(old_paths["note"], new_paths["note"]):
-                    text = new_paths["note"].read_text(encoding="utf-8", errors="ignore")
-                    text = text.replace(str(old_storage_id), str(new_storage_id), 1)
-                    new_paths["note"].write_text(text, encoding="utf-8")
-                imported += 1
-            target_conn.commit()
-        finally:
-            source_conn.close()
-    target_conn.close()
+    try:
+        imported = 0
+        skipped = 0
+        columns = [
+            "hash", "original_filename", "file_extension", "mime_type", "size_bytes",
+            "date_added", "source_url", "source_url_norm", "platform", "source_artist",
+            "phash", "audio_hash", "visual_embedding", "width", "height", "storage_id",
+        ]
+        select_sql = f"SELECT {', '.join(columns)} FROM items"
+        insert_sql = f"INSERT INTO items({', '.join(columns)}) VALUES ({', '.join('?' for _ in columns)})"
+        for source_id in [vault_id_slug(value) for value in source_ids]:
+            source_root = vault_root(vaults[source_id])
+            source_db = vault_db_path(source_root)
+            if not source_db.exists():
+                continue
+            source_conn = sqlite3.connect(source_db)
+            try:
+                for row in source_conn.execute(select_sql).fetchall():
+                    row = list(row)
+                    item_hash = row[0]
+                    if target_conn.execute("SELECT 1 FROM items WHERE hash = ?", (item_hash,)).fetchone():
+                        skipped += 1
+                        continue
+                    old_storage_id = row[15]
+                    new_storage_id = allocate_storage_id(target_conn)
+                    row[15] = new_storage_id
+                    target_conn.execute(insert_sql, row)
+                    ext = row[2] or ""
+                    mime_type = row[3] or ""
+                    old_paths = _item_paths(source_root, item_hash, old_storage_id, ext, mime_type)
+                    new_paths = _item_paths(target_root, item_hash, new_storage_id, ext, mime_type)
+                    _copy_if_exists(old_paths["asset"], new_paths["asset"])
+                    _copy_if_exists(old_paths["wd"], new_paths["wd"])
+                    _copy_if_exists(old_paths["thumb"], new_paths["thumb"])
+                    if _copy_if_exists(old_paths["note"], new_paths["note"]):
+                        text = new_paths["note"].read_text(encoding="utf-8", errors="ignore")
+                        pattern = re.compile(r"\b" + re.escape(str(old_storage_id)) + r"\b")
+                        text = pattern.sub(str(new_storage_id), text)
+                        new_paths["note"].write_text(text, encoding="utf-8")
+                    imported += 1
+            finally:
+                source_conn.close()
+        target_conn.commit()
+    except Exception:
+        target_conn.rollback()
+        raise
+    finally:
+        target_conn.close()
     preview.update({"status": "success", "imported": imported, "skipped": skipped})
     return preview
 

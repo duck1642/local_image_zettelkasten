@@ -88,6 +88,22 @@
     }
   }
 
+  let currentActiveVault = '';
+  $: if ($config?._runtime?.active_vault) {
+    const nextActive = $config._runtime.active_vault;
+    if (currentActiveVault && currentActiveVault !== nextActive) {
+      uiLog('INFO', `Vault switch detected in VaultView: ${currentActiveVault} -> ${nextActive}. Resetting view states.`);
+      clearSelection();
+      items = [];
+      groupedItems = [];
+      resetGroupsState();
+      nextCursor = null;
+      hasMore = false;
+      fetchItems(false);
+    }
+    currentActiveVault = nextActive;
+  }
+
   function resetGroupsState() {
     groupsById = new Map();
     groupOrder = [];

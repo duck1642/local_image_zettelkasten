@@ -266,13 +266,29 @@ def prune_unused_workspace_metadata(ctx: WorkspaceContext | None = None) -> dict
         usage = _workspace_usage(ctx)
         before = _workspace_counts(conn)
 
+        # Temp table for tags
+        conn.execute("CREATE TEMP TABLE IF NOT EXISTS temp_used_tags (tag_norm TEXT PRIMARY KEY)")
+        conn.execute("DELETE FROM temp_used_tags")
+        if usage["wd_tags"]:
+            conn.executemany(
+                "INSERT OR IGNORE INTO temp_used_tags (tag_norm) VALUES (?)",
+                [(t,) for t in usage["wd_tags"]]
+            )
         conn.execute(
             """
             DELETE FROM wd_tag_dictionary
-            WHERE tag_norm NOT IN ({})
-            """.format(",".join("?" for _ in usage["wd_tags"]) or "''"),
-            tuple(usage["wd_tags"]),
+            WHERE tag_norm NOT IN (SELECT tag_norm FROM temp_used_tags)
+            """
         )
+
+        # Temp table for artists
+        conn.execute("CREATE TEMP TABLE IF NOT EXISTS temp_used_artists (name_norm TEXT PRIMARY KEY)")
+        conn.execute("DELETE FROM temp_used_artists")
+        if usage["artists"]:
+            conn.executemany(
+                "INSERT OR IGNORE INTO temp_used_artists (name_norm) VALUES (?)",
+                [(a,) for a in usage["artists"]]
+            )
 
         deletable_artists = [
             row[0]
@@ -280,18 +296,31 @@ def prune_unused_workspace_metadata(ctx: WorkspaceContext | None = None) -> dict
                 """
                 SELECT artists.id
                 FROM artists
-                WHERE artists.name_norm NOT IN ({})
+                WHERE artists.name_norm NOT IN (SELECT name_norm FROM temp_used_artists)
                   AND TRIM(artists.notes) = ''
                   AND NOT EXISTS (SELECT 1 FROM artist_aliases WHERE artist_aliases.artist_id = artists.id)
                   AND NOT EXISTS (SELECT 1 FROM artist_links WHERE artist_links.artist_id = artists.id)
-                """.format(",".join("?" for _ in usage["artists"]) or "''"),
-                tuple(usage["artists"]),
+                """
             ).fetchall()
         ]
         if deletable_artists:
+            conn.execute("CREATE TEMP TABLE IF NOT EXISTS temp_deletable_artists (id INTEGER PRIMARY KEY)")
+            conn.execute("DELETE FROM temp_deletable_artists")
+            conn.executemany(
+                "INSERT OR IGNORE INTO temp_deletable_artists (id) VALUES (?)",
+                [(d,) for d in deletable_artists]
+            )
             conn.execute(
-                "DELETE FROM artists WHERE id IN ({})".format(",".join("?" for _ in deletable_artists)),
-                tuple(deletable_artists),
+                "DELETE FROM artists WHERE id IN (SELECT id FROM temp_deletable_artists)"
+            )
+
+        # Temp table for platforms
+        conn.execute("CREATE TEMP TABLE IF NOT EXISTS temp_used_platforms (key_norm TEXT PRIMARY KEY)")
+        conn.execute("DELETE FROM temp_used_platforms")
+        if usage["platforms"]:
+            conn.executemany(
+                "INSERT OR IGNORE INTO temp_used_platforms (key_norm) VALUES (?)",
+                [(p,) for p in usage["platforms"]]
             )
 
         deletable_platforms = [
@@ -301,17 +330,21 @@ def prune_unused_workspace_metadata(ctx: WorkspaceContext | None = None) -> dict
                 SELECT platforms.id
                 FROM platforms
                 WHERE platforms.key_norm != 'local'
-                  AND platforms.key_norm NOT IN ({})
+                  AND platforms.key_norm NOT IN (SELECT key_norm FROM temp_used_platforms)
                   AND TRIM(platforms.notes) = ''
                   AND NOT EXISTS (SELECT 1 FROM platform_aliases WHERE platform_aliases.platform_id = platforms.id)
-                """.format(",".join("?" for _ in usage["platforms"]) or "''"),
-                tuple(usage["platforms"]),
+                """
             ).fetchall()
         ]
         if deletable_platforms:
+            conn.execute("CREATE TEMP TABLE IF NOT EXISTS temp_deletable_platforms (id INTEGER PRIMARY KEY)")
+            conn.execute("DELETE FROM temp_deletable_platforms")
+            conn.executemany(
+                "INSERT OR IGNORE INTO temp_deletable_platforms (id) VALUES (?)",
+                [(d,) for d in deletable_platforms]
+            )
             conn.execute(
-                "DELETE FROM platforms WHERE id IN ({})".format(",".join("?" for _ in deletable_platforms)),
-                tuple(deletable_platforms),
+                "DELETE FROM platforms WHERE id IN (SELECT id FROM temp_deletable_platforms)"
             )
 
         conn.commit()

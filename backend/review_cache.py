@@ -68,17 +68,12 @@ def _iter_review_media_files(ctx: WorkspaceContext | None = None) -> list[Path]:
     review_dir = _review_dir(ctx)
     if not review_dir.exists():
         return []
-    allowed = {
-        f".{ext.lstrip('.').lower()}"
-        for ext in get_config(ctx).get("firewall", {}).get("allowed_extensions", [])
-    }
     return sorted(
         [
             p
             for p in review_dir.iterdir()
             if p.is_file()
             and p.suffix.lower() not in [".json", ".md"]
-            and (not allowed or p.suffix.lower() in allowed)
         ]
     )
 
@@ -94,17 +89,28 @@ def _read_sidecar(path: Path) -> dict:
         return {}
 
 
-def _entry_for(path: Path, sidecar: dict | None = None) -> dict:
+def _entry_for(path: Path, sidecar: dict | None = None, ctx: WorkspaceContext | None = None) -> dict:
     sidecar = sidecar if isinstance(sidecar, dict) else _read_sidecar(path)
     state = _normalize_review_state(str(sidecar.get("state") or "pending"))
+    if state in REVIEW_RESOLVED_STATES:
+        state = "pending_cleanup"
     guessed, _ = mimetypes.guess_type(path.name)
+    allowed = {
+        f".{ext.lstrip('.').lower()}"
+        for ext in get_config(ctx).get("firewall", {}).get("allowed_extensions", [])
+    }
+    validation_warning = ""
+    ext = path.suffix.lower()
+    if allowed and ext not in allowed:
+        validation_warning = f"File extension '{ext}' violates firewall allowed extensions."
     return {
         "path": path,
         "sidecar": sidecar,
         "state": state,
         "changed": False,
         "mime_type": guessed or "application/octet-stream",
-        "extension": path.suffix.lower(),
+        "extension": ext,
+        "validation_warning": validation_warning,
     }
 
 
@@ -114,7 +120,7 @@ def _rebuild_unlocked(state: _ReviewCacheState, ctx: WorkspaceContext | None = N
     pending = 0
     cleanup = 0
     for path in _iter_review_media_files(ctx):
-        entry = _entry_for(path)
+        entry = _entry_for(path, ctx=ctx)
         entries[path.name] = entry
         entry_state = entry["state"]
         if _is_pending_state(entry_state):
@@ -220,7 +226,7 @@ def upsert_review_cache_entry(path: Path, sidecar: dict, ctx: WorkspaceContext |
         else:
             state.counts["total"] += 1
 
-        entry = _entry_for(path, sidecar)
+        entry = _entry_for(path, sidecar, ctx=ctx)
         state.entries[path.name] = entry
         entry_state = entry["state"]
         if _is_pending_state(entry_state):

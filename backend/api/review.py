@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from api.common import *
+from api.library import _delete_item_after_replacement
 
 router = APIRouter()
 
@@ -12,22 +13,21 @@ def _iter_review_media_files() -> list[Path]:
     review_dir = _review_dir()
     if not review_dir.exists():
         return []
-    allowed = {
-        f".{ext.lstrip('.').lower()}"
-        for ext in get_config().get("firewall", {}).get("allowed_extensions", [])
-    }
     return sorted(
         [
             p
             for p in review_dir.iterdir()
             if p.is_file()
             and p.suffix.lower() not in [".json", ".md"]
-            and (not allowed or p.suffix.lower() in allowed)
         ]
     )
 
 def _resolve_review_entries() -> list[dict]:
     files = _iter_review_media_files()
+    allowed = {
+        f".{ext.lstrip('.').lower()}"
+        for ext in get_config().get("firewall", {}).get("allowed_extensions", [])
+    }
     entries: list[dict] = []
     for media_path in files:
         sidecar = _read_review_sidecar(media_path)
@@ -40,9 +40,19 @@ def _resolve_review_entries() -> list[dict]:
             changed = True
         raw_state = str(sidecar.get("state") or "pending")
         state = _normalize_review_state(raw_state)
+        if state in REVIEW_RESOLVED_STATES:
+            # The file physically exists in the review directory but has a resolved state.
+            # This is a leftover/ghost file that should have been deleted, so it is pending cleanup.
+            state = "pending_cleanup"
         if raw_state != state or not raw_state:
             sidecar["state"] = state
             changed = True
+        
+        validation_warning = ""
+        ext = media_path.suffix.lower()
+        if allowed and ext not in allowed:
+            validation_warning = f"File extension '{ext}' violates firewall allowed extensions."
+
         entries.append(
             {
                 "path": media_path,
@@ -50,7 +60,8 @@ def _resolve_review_entries() -> list[dict]:
                 "state": state,
                 "changed": changed,
                 "mime_type": _guess_review_mime_type(media_path.name),
-                "extension": media_path.suffix.lower(),
+                "extension": ext,
+                "validation_warning": validation_warning,
             }
         )
 
@@ -124,6 +135,7 @@ def _get_review_items_sync(include_resolved: bool = False):
             "section": _review_section_for_state(entry["state"]),
             "last_action": sidecar.get("last_action") or "",
             "last_cleanup_error": sidecar.get("last_cleanup_error") or "",
+            "validation_warning": entry.get("validation_warning") or "",
         })
     return items
 

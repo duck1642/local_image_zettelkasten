@@ -602,7 +602,7 @@ def test_workspace_api_lists_registers_and_sets_active(monkeypatch, tmp_path):
 
         workspace_id = next(item["id"] for item in added["items"] if item["name"] == "API Obsidian")
         active = web_api._set_workspace_active_sync({"id": workspace_id})
-        assert active["restart_required"] is True
+        assert active["restart_required"] is False
         assert active["active"] == workspace_id
     finally:
         shutil.rmtree(obsidian_vault, ignore_errors=True)
@@ -618,7 +618,7 @@ def test_vault_api_creates_sets_active_and_rejects_active_delete(monkeypatch, tm
     assert Path(second["db_path"]).exists()
 
     active = web_api._set_vault_active_sync({"id": "second-vault"})
-    assert active["restart_required"] is True
+    assert active["restart_required"] is False
     assert active["active"] == "second-vault"
 
     with pytest.raises(HTTPException) as exc:
@@ -834,9 +834,9 @@ def test_review_count_cache_ignores_resolved_variant(monkeypatch, tmp_path):
     count = web_api._get_review_count_sync(include_resolved=True)
     items = web_api._get_review_items_sync(False)
 
-    assert all(item["filename"] != resolved_file.name for item in items)
+    assert len([item for item in items if item["filename"] == resolved_file.name]) == 1
     assert count["pending"] == 1
-    assert count["cleanup"] == 1
+    assert count["cleanup"] == 2
 
 
 def test_delete_item_removes_ram_indexes(monkeypatch, tmp_path):
