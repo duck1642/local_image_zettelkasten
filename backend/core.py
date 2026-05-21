@@ -1,15 +1,18 @@
 ﻿
 from logger import log_ingest_local, log_ingest_online
-from utils import setup_directories, get_config, INPUT_DIR, VAULT_DIR, DB_PATH, REVIEW_DIR, QUEUES_DIR
+from utils import setup_directories, get_config
+from runtime_context import get_runtime_context
 from processor import process_file
 from external_ingestion import ExternalIngestor
 from db.sqlite_operator import init_database
 from db.search_manager import search_manager
+from queue_service import queue_path
 
 def main():
 
     setup_directories()
     config = get_config()
+    ctx = get_runtime_context()
 
 
     conn = init_database()
@@ -19,9 +22,9 @@ def main():
         conn.close()
 
     log_ingest_online('INFO', f"\nLMZ Unified System - Starting")
-    log_ingest_online('INFO', f"Input: {INPUT_DIR}")
-    log_ingest_online('INFO', f"Vault: {VAULT_DIR}")
-    log_ingest_online('INFO', f"DB: {DB_PATH}\n")
+    log_ingest_online('INFO', f"Input: {ctx.active_vault.input_dir}")
+    log_ingest_online('INFO', f"Vault: {ctx.active_vault.vault_dir}")
+    log_ingest_online('INFO', f"DB: {ctx.active_vault.db_path}\n")
 
     stats = {"processed": 0, "skipped": 0, "errors": 0}
 
@@ -32,7 +35,8 @@ def main():
     ]
 
     for filename, skip_val in ingestion_targets:
-        links_file = QUEUES_DIR / filename
+        queue_name = "force" if skip_val else "normal"
+        links_file = queue_path(queue_name, ctx=ctx)
         if links_file.exists():
             mode_str = "FORCE (No Size Check)" if skip_val else "NORMAL"
             log_ingest_online('INFO', f"Found {filename} [{mode_str}]. Starting Ingestion...")
@@ -46,15 +50,17 @@ def main():
 
     log_ingest_local('INFO', f"\nScanning local input folder for remaining files...")
 
-    if not INPUT_DIR.exists():
-        INPUT_DIR.mkdir(parents=True, exist_ok=True)
+    input_dir = ctx.active_vault.input_dir
+    review_dir = ctx.active_vault.review_dir
+    if not input_dir.exists():
+        input_dir.mkdir(parents=True, exist_ok=True)
 
     local_index_queue = []
-    for filepath in sorted(INPUT_DIR.rglob('*')):
+    for filepath in sorted(input_dir.rglob('*')):
         if not filepath.is_file() or filepath.suffix.lower() in ['.md', '.json', '.txt']:
             continue
 
-        if REVIEW_DIR in filepath.parents or filepath.parent == REVIEW_DIR:
+        if review_dir in filepath.parents or filepath.parent == review_dir:
             continue
 
 
@@ -67,7 +73,7 @@ def main():
                 local_index_queue.append(idx_data)
 
             parent = filepath.parent
-            if parent != INPUT_DIR and parent.exists() and not any(parent.iterdir()):
+            if parent != input_dir and parent.exists() and not any(parent.iterdir()):
                 parent.rmdir()
         elif "Duplicate ignored" in message:
             log_ingest_local('INFO', f"{message}")

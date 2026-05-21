@@ -154,6 +154,121 @@ def test_injected_runtime_context_paths_and_databases(monkeypatch, tmp_path):
     assert injected_ctx.workspace_db_path.exists()
 
 
+def injected_context_for(runtime_context, tmp_path: Path):
+    work = tmp_path / "mock-vault"
+    injected_root = tmp_path / "injected-workspace"
+    injected_root.mkdir(exist_ok=True)
+    config = yaml.safe_load((work / "config.yaml").read_text(encoding="utf-8"))
+    config["active_vault"] = "alt"
+    config["vaults"] = {"alt": {"name": "Alt", "root": "data/vaults/alt"}}
+    injected_config = injected_root / "config.yaml"
+    injected_config.write_text(yaml.safe_dump(config, sort_keys=False, allow_unicode=True), encoding="utf-8")
+    return runtime_context.build_runtime_context(injected_config)
+
+
+def test_queue_service_context_isolates_vault_queues(monkeypatch, tmp_path):
+    utils, runtime_context, queue_service = fresh_backend(monkeypatch, tmp_path, "utils", "runtime_context", "queue_service")
+    injected_ctx = injected_context_for(runtime_context, tmp_path)
+
+    queue_service.write_queue("normal", "https://default.example/item\n")
+    queue_service.write_queue("normal", "https://injected.example/item\n", ctx=injected_ctx)
+
+    assert queue_service.read_queue("normal") == "https://default.example/item\n"
+    assert queue_service.read_queue("normal", ctx=injected_ctx) == "https://injected.example/item\n"
+    assert queue_service.queue_path("normal").is_relative_to(utils.QUEUES_DIR)
+    assert queue_service.queue_path("normal", ctx=injected_ctx).is_relative_to(injected_ctx.active_vault.queues_dir)
+    assert queue_service.queue_path("normal") != queue_service.queue_path("normal", ctx=injected_ctx)
+
+
+def test_review_cache_context_isolates_vaults(monkeypatch, tmp_path):
+    utils, runtime_context, review_cache = fresh_backend(monkeypatch, tmp_path, "utils", "runtime_context", "review_cache")
+    injected_ctx = injected_context_for(runtime_context, tmp_path)
+    default_hash = "11" * 32
+    injected_hash = "22" * 32
+    default_file = utils.REVIEW_DIR / "default.jpg"
+    injected_file = injected_ctx.active_vault.review_dir / "injected.jpg"
+    default_file.parent.mkdir(parents=True, exist_ok=True)
+    injected_file.parent.mkdir(parents=True, exist_ok=True)
+    default_file.write_bytes(b"default")
+    injected_file.write_bytes(b"injected")
+    default_file.with_suffix(".jpg.json").write_text(json.dumps({"state": "pending", "file_hash": default_hash}), encoding="utf-8")
+    injected_file.with_suffix(".jpg.json").write_text(json.dumps({"state": "pending", "file_hash": injected_hash}), encoding="utf-8")
+
+    assert review_cache.pending_review_match(default_hash)["file_hash"] == default_hash
+    assert review_cache.pending_review_match(injected_hash) is None
+    assert review_cache.pending_review_match(injected_hash, ctx=injected_ctx)["file_hash"] == injected_hash
+    assert review_cache.pending_review_match(default_hash, ctx=injected_ctx) is None
+
+
+def test_logger_reconfigure_writes_to_context_logs(monkeypatch, tmp_path):
+    runtime_context, lmz_logger = fresh_backend(monkeypatch, tmp_path, "runtime_context", "logger")
+    default_ctx = runtime_context.get_runtime_context()
+    injected_ctx = injected_context_for(runtime_context, tmp_path)
+
+    try:
+        lmz_logger.reconfigure_logging(injected_ctx)
+        lmz_logger.log_system("INFO", "context logger test")
+        log_file = injected_ctx.active_vault.logs_dir / "structured" / "system.jsonl"
+        assert log_file.exists()
+        assert "context logger test" in log_file.read_text(encoding="utf-8")
+    finally:
+        lmz_logger.reconfigure_logging(default_ctx)
+
+
+def test_web_api_dynamic_media_routes_use_active_context_and_block_traversal(monkeypatch, tmp_path):
+    utils, web_api = fresh_backend(monkeypatch, tmp_path, "utils", "web_api")
+    asset = utils.ASSETS_DIR / "aa" / "item.jpg"
+    review = utils.REVIEW_DIR / "review.jpg"
+    asset.parent.mkdir(parents=True, exist_ok=True)
+    review.parent.mkdir(parents=True, exist_ok=True)
+    asset.write_bytes(b"asset")
+    review.write_bytes(b"review")
+
+    assert Path(web_api._file_response_under(utils.ASSETS_DIR, "aa/item.jpg").path) == asset
+    assert Path(web_api._file_response_under(utils.REVIEW_DIR, "review.jpg").path) == review
+    with pytest.raises(HTTPException):
+        web_api._file_response_under(utils.ASSETS_DIR, "../config.yaml")
+
+
+def test_metadata_watchdog_uses_injected_notes_and_wd_dirs(monkeypatch, tmp_path):
+    runtime_context, metadata_index = fresh_backend(monkeypatch, tmp_path, "runtime_context", "metadata_index")
+    injected_ctx = injected_context_for(runtime_context, tmp_path)
+    scheduled: list[tuple[str, bool]] = []
+
+    class FakeHandler:
+        pass
+
+    class FakeObserver:
+        daemon = False
+
+        def schedule(self, handler, path, recursive=False):
+            scheduled.append((path, recursive))
+
+        def start(self):
+            pass
+
+        def stop(self):
+            pass
+
+        def join(self, timeout=None):
+            pass
+
+    monkeypatch.setitem(sys.modules, "watchdog", types.ModuleType("watchdog"))
+    events_module = types.ModuleType("watchdog.events")
+    events_module.FileSystemEventHandler = FakeHandler
+    observers_module = types.ModuleType("watchdog.observers")
+    observers_module.Observer = FakeObserver
+    monkeypatch.setitem(sys.modules, "watchdog.events", events_module)
+    monkeypatch.setitem(sys.modules, "watchdog.observers", observers_module)
+
+    try:
+        assert metadata_index.start_metadata_watchdog(ctx=injected_ctx)["status"] == "started"
+        assert (str(injected_ctx.active_vault.notes_dir), True) in scheduled
+        assert (str(injected_ctx.active_vault.wd_tags_dir), True) in scheduled
+    finally:
+        metadata_index.reset_metadata_watchdog_state(ctx=injected_ctx)
+
+
 def test_workspace_registry_resolves_active_and_env_override(monkeypatch, tmp_path):
     monkeypatch.delenv("LMZ_CONFIG_PATH", raising=False)
     if str(BACKEND) not in sys.path:

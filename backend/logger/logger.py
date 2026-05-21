@@ -1,15 +1,16 @@
+import datetime
+import json
 import logging
 from logging.handlers import RotatingFileHandler
-import json
-import datetime
 from pathlib import Path
-from utils import OUTPUT_DIR, LOGS_DIR, utc_now_str
 
-STRUCTURED_LOGS_DIR = LOGS_DIR / "structured"
-STRUCTURED_LOGS_DIR.mkdir(parents=True, exist_ok=True)
-RAW_LOGS_DIR = LOGS_DIR / "raw"
-RAW_LOGS_DIR.mkdir(parents=True, exist_ok=True)
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+from runtime_context import WorkspaceContext, get_runtime_context
+from utils import utc_now_str
+
+
+RAW_LOGS_DIR = get_runtime_context().active_vault.logs_dir / "raw"
+STRUCTURED_LOGS_DIR = get_runtime_context().active_vault.logs_dir / "structured"
+
 
 class JSONFormatter(logging.Formatter):
     def format(self, record):
@@ -28,48 +29,71 @@ class JSONFormatter(logging.Formatter):
             log_record["exception"] = self.formatException(record.exc_info)
         return json.dumps(log_record)
 
-# 1. System Logger (The Brain / FastAPI)
+
 system_logger = logging.getLogger("lmz_system")
-system_logger.setLevel(logging.INFO)
-sys_handler = RotatingFileHandler(STRUCTURED_LOGS_DIR / "system.jsonl", maxBytes=5*1024*1024, backupCount=2, encoding="utf-8")
-sys_handler.setFormatter(JSONFormatter())
-if not system_logger.handlers: system_logger.addHandler(sys_handler)
-
-# 2. Svelte Logger (The Face / JS Frontend)
 svelte_logger = logging.getLogger("lmz_svelte")
-svelte_logger.setLevel(logging.INFO)
-svelte_handler = RotatingFileHandler(STRUCTURED_LOGS_DIR / "svelte.jsonl", maxBytes=5*1024*1024, backupCount=3, encoding="utf-8")
-svelte_handler.setFormatter(JSONFormatter())
-if not svelte_logger.handlers: svelte_logger.addHandler(svelte_handler)
-
-# 4. Ingestion Loggers (Worker)
 ingest_local_logger = logging.getLogger("lmz_ingest_local")
-ingest_local_logger.setLevel(logging.INFO)
-ingest_local_handler = RotatingFileHandler(STRUCTURED_LOGS_DIR / "ingest_local.jsonl", maxBytes=5*1024*1024, backupCount=3, encoding="utf-8")
-ingest_local_handler.setFormatter(JSONFormatter())
-if not ingest_local_logger.handlers: ingest_local_logger.addHandler(ingest_local_handler)
-
 ingest_online_logger = logging.getLogger("lmz_ingest_online")
-ingest_online_logger.setLevel(logging.INFO)
-ingest_online_handler = RotatingFileHandler(STRUCTURED_LOGS_DIR / "ingest_online.jsonl", maxBytes=5*1024*1024, backupCount=3, encoding="utf-8")
-ingest_online_handler.setFormatter(JSONFormatter())
-if not ingest_online_logger.handlers: ingest_online_logger.addHandler(ingest_online_handler)
-
-# 5. Auth / credential status logger
 auth_logger = logging.getLogger("lmz_auth")
-auth_logger.setLevel(logging.INFO)
-auth_handler = RotatingFileHandler(STRUCTURED_LOGS_DIR / "auth.jsonl", maxBytes=2*1024*1024, backupCount=2, encoding="utf-8")
-auth_handler.setFormatter(JSONFormatter())
-if not auth_logger.handlers: auth_logger.addHandler(auth_handler)
-
-# 6. Review workflow logger
 review_logger = logging.getLogger("lmz_review")
-review_logger.setLevel(logging.INFO)
-review_handler = RotatingFileHandler(STRUCTURED_LOGS_DIR / "review.jsonl", maxBytes=5*1024*1024, backupCount=3, encoding="utf-8")
-review_handler.setFormatter(JSONFormatter())
-if not review_logger.handlers: review_logger.addHandler(review_handler)
+activity_logger = logging.getLogger("lmz_activity")
 
-# --- Helper Functions ---
+_LOGGER_SPECS = {
+    system_logger: ("system.jsonl", 5 * 1024 * 1024, 2),
+    svelte_logger: ("svelte.jsonl", 5 * 1024 * 1024, 3),
+    ingest_local_logger: ("ingest_local.jsonl", 5 * 1024 * 1024, 3),
+    ingest_online_logger: ("ingest_online.jsonl", 5 * 1024 * 1024, 3),
+    auth_logger: ("auth.jsonl", 2 * 1024 * 1024, 2),
+    review_logger: ("review.jsonl", 5 * 1024 * 1024, 3),
+    activity_logger: ("ingestion_audit.jsonl", 5 * 1024 * 1024, 2),
+}
+
+
+def log_dirs(ctx: WorkspaceContext | None = None) -> tuple[Path, Path]:
+    runtime = ctx or get_runtime_context()
+    logs_dir = runtime.active_vault.logs_dir
+    return logs_dir / "raw", logs_dir / "structured"
+
+
+def _remove_owned_handlers(logger: logging.Logger):
+    for handler in list(logger.handlers):
+        if getattr(handler, "_lmz_owned", False):
+            logger.removeHandler(handler)
+            handler.close()
+
+
+def configure_logging(ctx: WorkspaceContext | None = None, force: bool = False):
+    global RAW_LOGS_DIR, STRUCTURED_LOGS_DIR
+
+    RAW_LOGS_DIR, STRUCTURED_LOGS_DIR = log_dirs(ctx)
+    RAW_LOGS_DIR.mkdir(parents=True, exist_ok=True)
+    STRUCTURED_LOGS_DIR.mkdir(parents=True, exist_ok=True)
+    (ctx or get_runtime_context()).active_vault.vault_dir.mkdir(parents=True, exist_ok=True)
+
+    formatter = JSONFormatter()
+    for logger, (filename, max_bytes, backup_count) in _LOGGER_SPECS.items():
+        logger.setLevel(logging.INFO)
+        if force:
+            _remove_owned_handlers(logger)
+        if any(getattr(handler, "_lmz_owned", False) for handler in logger.handlers):
+            continue
+        handler = RotatingFileHandler(
+            STRUCTURED_LOGS_DIR / filename,
+            maxBytes=max_bytes,
+            backupCount=backup_count,
+            encoding="utf-8",
+        )
+        handler.setFormatter(formatter)
+        handler._lmz_owned = True
+        logger.addHandler(handler)
+
+
+def reconfigure_logging(ctx: WorkspaceContext | None = None):
+    configure_logging(ctx, force=True)
+
+
+configure_logging()
+
 
 def _log(logger, level, message, **kwargs):
     exc_info = kwargs.pop("exc_info", None)
@@ -84,36 +108,36 @@ def _log(logger, level, message, **kwargs):
         exc_info=exc_info,
     )
 
+
 def log_system(level, message, **kwargs):
     _log(system_logger, level, message, **kwargs)
+
 
 def log_svelte(level, message, **kwargs):
     _log(svelte_logger, level, message, **kwargs)
 
+
 def log_ingest_local(level, message, **kwargs):
     _log(ingest_local_logger, level, message, **kwargs)
+
 
 def log_ingest_online(level, message, **kwargs):
     _log(ingest_online_logger, level, message, **kwargs)
 
+
 def log_ingest_audit(level, message, **kwargs):
     _log(activity_logger, level, message, **kwargs)
 
+
 def log_auth(level, message, **kwargs):
     _log(auth_logger, level, message, **kwargs)
+
 
 def log_review(level, message, **kwargs):
     _log(review_logger, level, message, **kwargs)
     if str(level or "").upper() in {"WARNING", "ERROR", "CRITICAL"}:
         _log(system_logger, level, message, **kwargs)
 
-# Canonical ingestion audit logger
-activity_logger = logging.getLogger("lmz_activity")
-activity_logger.setLevel(logging.INFO)
-# Canonical ingestion audit stream
-act_handler = RotatingFileHandler(STRUCTURED_LOGS_DIR / "ingestion_audit.jsonl", maxBytes=5*1024*1024, backupCount=2, encoding="utf-8")
-act_handler.setFormatter(JSONFormatter())
-if not activity_logger.handlers: activity_logger.addHandler(act_handler)
 
 def log_activity(
     original_name,
@@ -126,7 +150,8 @@ def log_activity(
     run_id="",
     status="success",
 ):
-    if timestamp_str is None: timestamp_str = utc_now_str()
+    if timestamp_str is None:
+        timestamp_str = utc_now_str()
     extra = {
         "original_name": original_name,
         "vault_id": vault_id,

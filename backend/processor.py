@@ -6,10 +6,11 @@ import secrets
 from pathlib import Path
 from typing import Tuple, Optional
 from utils import (
-    ASSETS_DIR, REVIEW_DIR, calculate_file_hash, calculate_phash,
+    calculate_file_hash, calculate_phash,
     atomic_write_text, flatten_image, get_normalization_color, note_path_for,
     storage_asset_path_for, storage_shard_for_hash, utc_now, utc_now_str
 )
+from runtime_context import get_runtime_context
 from fingerprint import (
     get_audio_fingerprint, get_visual_embedding,
     compare_embeddings, compare_audio_fingerprints
@@ -26,6 +27,9 @@ from logger import log_activity, log_system
 from tagging import tag_media
 from thumbnails import ensure_thumbnail
 from review_cache import pending_review_match as cached_pending_review_match, upsert_review_cache_entry
+
+REVIEW_DIR = get_runtime_context().active_vault.review_dir
+
 
 def _safe_review_name(name: str) -> str:
     invalid = '<>:"/\\|?*'
@@ -49,13 +53,14 @@ def _review_original_name(filepath: Path, metadata: dict) -> str:
     return filepath.name
 
 def _move_to_review(filepath: Path, file_hash: str, metadata: dict, sidecar_fields: dict) -> Path:
-    REVIEW_DIR.mkdir(parents=True, exist_ok=True)
+    review_dir = get_runtime_context().active_vault.review_dir
+    review_dir.mkdir(parents=True, exist_ok=True)
     original_name = _review_original_name(filepath, metadata)
     safe_original_name = _safe_review_name(original_name)
     for _ in range(20):
         review_id = f"{utc_now().strftime('%Y%m%d_%H%M%S')}_{secrets.token_hex(4)}"
         storage_name = f"{review_id}_{file_hash[:8]}_{safe_original_name}"
-        dest_path = REVIEW_DIR / storage_name
+        dest_path = review_dir / storage_name
         sidecar_path = dest_path.with_suffix(dest_path.suffix + ".json")
         if not dest_path.exists() and not sidecar_path.exists():
             break
@@ -347,7 +352,7 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
         shard_folder = storage_shard_for_hash(file_hash)
         new_filename = f"{storage_id}{target_ext}"
 
-        shard_path = ASSETS_DIR / shard_folder
+        shard_path = get_runtime_context().active_vault.assets_dir / shard_folder
         shard_path.mkdir(parents=True, exist_ok=True)
 
         vault_path = storage_asset_path_for(file_hash, storage_id, target_ext, mime_type)

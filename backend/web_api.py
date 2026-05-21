@@ -16,18 +16,18 @@ from collections import Counter
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from db.sqlite_operator import connect_database, init_database, normalize_source_url
 from db.search_manager import search_manager
 from utils import (
-    get_config, ASSETS_DIR, REVIEW_DIR, LOCAL_INGEST_DIR, note_path_for,
+    get_config, note_path_for,
     asset_path_for, calculate_file_hash, asset_url_for, wd_tag_cache_path_for
 )
+from runtime_context import get_runtime_context
 from processor import process_file
-from logger import log_auth, log_ingest_audit, log_ingest_local, log_review, log_svelte, log_system, RAW_LOGS_DIR, STRUCTURED_LOGS_DIR
+from logger import log_auth, log_ingest_audit, log_ingest_local, log_review, log_svelte, log_system, log_dirs
 from md_generator import MANUAL_FRONTMATTER_FIELDS, load_note_frontmatter, load_note_topics, load_note_wd_tags, generate_markdown, normalize_topic_list
 from metadata_index import (
     ensure_metadata_schema,
@@ -46,7 +46,7 @@ from topics import format_topics_for_note, parse_topic_value, parse_topic_values
 from tagging import load_tag_cache, tag_media
 from thumbnails import ThumbnailBusyError, get_or_generate_thumbnail
 from utils import (
-    SECRETS_DIR, TOPICS_DIR, WD_TAGS_DIR, atomic_write_text, get_cookie_auth_status,
+    atomic_write_text, get_cookie_auth_status,
     invalidate_config_cache, utc_now, utc_now_str
 )
 from ingest_control import ONLINE_STOP_AFTER_CURRENT, LOCAL_STOP_AFTER_CURRENT
@@ -76,7 +76,9 @@ from review_cache import (
 class TerminalLogger:
     def __init__(self, filename, original_stream):
         self.terminal = original_stream
-        self.log_path = RAW_LOGS_DIR / filename
+        self.filename = filename
+        raw_logs_dir, _ = log_dirs()
+        self.log_path = raw_logs_dir / filename
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
         self._handle = open(self.log_path, "a", encoding="utf-8")
@@ -123,16 +125,30 @@ ALLOWED_ORIGINS = {
 }
 
 MUTATING_METHODS = {"POST", "PATCH", "DELETE"}
-LOG_FILES = {
-    "system.jsonl": STRUCTURED_LOGS_DIR / "system.jsonl",
-    "svelte.jsonl": STRUCTURED_LOGS_DIR / "svelte.jsonl",
-    "ingest_local.jsonl": STRUCTURED_LOGS_DIR / "ingest_local.jsonl",
-    "ingest_online.jsonl": STRUCTURED_LOGS_DIR / "ingest_online.jsonl",
-    "review.jsonl": STRUCTURED_LOGS_DIR / "review.jsonl",
-    "auth.jsonl": STRUCTURED_LOGS_DIR / "auth.jsonl",
-    "ingestion_audit.jsonl": STRUCTURED_LOGS_DIR / "ingestion_audit.jsonl",
-    "terminal.log": RAW_LOGS_DIR / "terminal.log",
+LOG_FILE_NAMES = {
+    "system.jsonl": ("structured", "system.jsonl"),
+    "svelte.jsonl": ("structured", "svelte.jsonl"),
+    "ingest_local.jsonl": ("structured", "ingest_local.jsonl"),
+    "ingest_online.jsonl": ("structured", "ingest_online.jsonl"),
+    "review.jsonl": ("structured", "review.jsonl"),
+    "auth.jsonl": ("structured", "auth.jsonl"),
+    "ingestion_audit.jsonl": ("structured", "ingestion_audit.jsonl"),
+    "terminal.log": ("raw", "terminal.log"),
 }
+
+
+class _DynamicLogFiles(dict):
+    def __getitem__(self, filename):
+        return _log_file_for(filename)
+
+    def get(self, filename, default=None):
+        try:
+            return _log_file_for(filename)
+        except HTTPException:
+            return default
+
+
+LOG_FILES = _DynamicLogFiles({name: None for name in LOG_FILE_NAMES})
 
 REVIEW_RESOLVED_STATES = {
     "resolved_variant",
@@ -233,7 +249,7 @@ async def startup_search_index():
     await asyncio.to_thread(hydrate_search_index)
 
 def _api_key_path() -> Path:
-    return SECRETS_DIR / ".api_key"
+    return get_runtime_context().secrets_dir / ".api_key"
 
 def _api_key() -> str:
     path = _api_key_path()
@@ -256,9 +272,12 @@ def _require_api_key(request: Request):
         raise HTTPException(status_code=403, detail="Invalid API key")
 
 def _log_file_for(filename: str) -> Path:
-    if filename not in LOG_FILES:
+    spec = LOG_FILE_NAMES.get(filename)
+    if not spec:
         raise HTTPException(status_code=400, detail="Invalid log file")
-    return LOG_FILES[filename]
+    raw_logs_dir, structured_logs_dir = log_dirs()
+    folder = raw_logs_dir if spec[0] == "raw" else structured_logs_dir
+    return folder / spec[1]
 
 def _queue_name(queue_name: str, allow_failed: bool = True) -> str:
     allowed = {"normal", "force", "failed"} if allow_failed else {"normal", "force"}
@@ -269,11 +288,39 @@ def _queue_name(queue_name: str, allow_failed: bool = True) -> str:
 def _review_path(filename: str) -> Path:
     if Path(filename).name != filename:
         raise HTTPException(status_code=400, detail="Invalid review filename")
-    path = (REVIEW_DIR / filename).resolve()
-    review_root = REVIEW_DIR.resolve()
+    review_root = get_runtime_context().active_vault.review_dir.resolve()
+    path = (review_root / filename).resolve()
     if path.parent != review_root:
         raise HTTPException(status_code=400, detail="Invalid review filename")
     return path
+
+
+def _assets_dir() -> Path:
+    return get_runtime_context().active_vault.assets_dir
+
+
+def _review_dir() -> Path:
+    return get_runtime_context().active_vault.review_dir
+
+
+def _local_ingest_dir() -> Path:
+    return get_runtime_context().active_vault.local_ingest_dir
+
+
+def _topics_dir() -> Path:
+    return get_runtime_context().topics_dir
+
+
+def _file_response_under(root: Path, relative_path: str):
+    candidate = (root / relative_path).resolve()
+    root = root.resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError:
+        raise HTTPException(status_code=404)
+    if not candidate.is_file():
+        raise HTTPException(status_code=404)
+    return FileResponse(candidate)
 
 def _review_sidecar_path(path: Path) -> Path:
     return path.with_suffix(path.suffix + ".json")
@@ -569,10 +616,14 @@ async def get_session_key(request: Request):
     _validate_origin(request.headers.get("origin"))
     return {"key": _api_key()}
 
-if ASSETS_DIR.exists():
-    app.mount("/vault", StaticFiles(directory=str(ASSETS_DIR)), name="vault")
-REVIEW_DIR.mkdir(parents=True, exist_ok=True)
-app.mount("/review-assets", StaticFiles(directory=str(REVIEW_DIR)), name="review-assets")
+@app.get("/vault/{asset_path:path}")
+async def serve_vault_asset(asset_path: str):
+    return await asyncio.to_thread(_file_response_under, _assets_dir(), asset_path)
+
+
+@app.get("/review-assets/{asset_path:path}")
+async def serve_review_asset(asset_path: str):
+    return await asyncio.to_thread(_file_response_under, _review_dir(), asset_path)
 
 @app.get("/api/stats")
 async def get_stats():
@@ -997,8 +1048,9 @@ def _topic_library_facets(conn, needle: str, limit: int) -> list[dict]:
         for item in metadata_facets(conn, "topic", needle.casefold(), 10000)
     }
     merged = dict(used)
-    if TOPICS_DIR.exists():
-        for path in TOPICS_DIR.glob("*.md"):
+    topics_dir = _topics_dir()
+    if topics_dir.exists():
+        for path in topics_dir.glob("*.md"):
             label = path.stem
             key = label.casefold()
             if needle and needle not in key:
@@ -1850,7 +1902,7 @@ def _delete_item_after_replacement(item_hash: str):
 
         cleanup_paths = _item_file_paths(item_hash, row[0] or "", row[1] or "", row[2], conn)
         existing_paths = [path for path in cleanup_paths if path.exists()]
-        trash_dir = REVIEW_DIR / ".replace-trash"
+        trash_dir = _review_dir() / ".replace-trash"
         trash_dir.mkdir(parents=True, exist_ok=True)
         moved_paths = []
 
@@ -2086,7 +2138,8 @@ async def clear_all_logs():
 
 def _clear_all_logs_sync():
     try:
-        for folder in [RAW_LOGS_DIR, STRUCTURED_LOGS_DIR]:
+        raw_logs_dir, structured_logs_dir = log_dirs()
+        for folder in [raw_logs_dir, structured_logs_dir]:
             if folder.exists():
                 for f in folder.iterdir():
                     if f.is_file() and (f.suffix == '.log' or f.suffix == '.jsonl'):
@@ -2238,7 +2291,7 @@ def _iter_local_ingest_paths(paths: list[str], stop_event: threading.Event | Non
             continue
         path = Path(text).expanduser()
         if not path.is_absolute():
-            path = (LOCAL_INGEST_DIR / path).resolve()
+            path = (_local_ingest_dir() / path).resolve()
         else:
             path = path.resolve()
         if path.is_file():
@@ -2277,7 +2330,7 @@ def _local_drop_intake_sync(body: LocalIngestDropIntakeRequest):
     for raw in raw_paths:
         try:
             candidate = Path(raw).expanduser()
-            resolved = candidate.resolve() if candidate.is_absolute() else (LOCAL_INGEST_DIR / candidate).resolve()
+            resolved = candidate.resolve() if candidate.is_absolute() else (_local_ingest_dir() / candidate).resolve()
         except Exception:
             skipped.append({"path": raw, "reason": "invalid_path"})
             continue
@@ -2422,7 +2475,7 @@ def _cleanup_local_run_dir(run_dir: Path):
 
 def _run_local_ingest_worker(raw_paths: list[str], defaults: dict, skip_similarity: bool, run_id: str):
     cfg = get_config()
-    run_dir = LOCAL_INGEST_DIR / run_id
+    run_dir = _local_ingest_dir() / run_id
     discovered = 0
     try:
         run_dir.mkdir(parents=True, exist_ok=True)
@@ -2651,7 +2704,8 @@ async def get_review_count(include_resolved: bool = False):
     return await asyncio.to_thread(_get_review_count_sync, include_resolved)
 
 def _iter_review_media_files() -> list[Path]:
-    if not REVIEW_DIR.exists():
+    review_dir = _review_dir()
+    if not review_dir.exists():
         return []
     allowed = {
         f".{ext.lstrip('.').lower()}"
@@ -2660,7 +2714,7 @@ def _iter_review_media_files() -> list[Path]:
     return sorted(
         [
             p
-            for p in REVIEW_DIR.iterdir()
+            for p in review_dir.iterdir()
             if p.is_file()
             and p.suffix.lower() not in [".json", ".md"]
             and (not allowed or p.suffix.lower() in allowed)
@@ -2948,8 +3002,9 @@ def _cleanup_review_resolved_sync():
             _write_review_sidecar(file_path, sidecar)
         log_review("WARNING", "Review cleanup failed", filename=file_path.name, display_name=display_name, state="pending_cleanup", error=err_file or err_sidecar)
 
-    if REVIEW_DIR.exists():
-        for sidecar_path in REVIEW_DIR.glob("*.json"):
+    review_dir = _review_dir()
+    if review_dir.exists():
+        for sidecar_path in review_dir.glob("*.json"):
             resolved_sidecar = sidecar_path.resolve()
             if resolved_sidecar in seen_sidecars:
                 continue
@@ -2984,43 +3039,34 @@ def _strip_config_secrets(config: dict) -> dict:
 
 
 def _config_runtime_info() -> dict:
-    from utils import (
-        ACTIVE_VAULT_ID,
-        ACTIVE_VAULT_NAME,
-        ACTIVE_VAULT_ROOT,
-        CONFIG_PATH,
-        CONFIG_ROOT,
-        DB_PATH,
-        TOPICS_DIR,
-        VAULTS_CONFIGURED,
-    )
     from workspaces import REGISTRY_PATH
 
-    mode = "obsidian" if CONFIG_ROOT.name.casefold() == "lmz" and CONFIG_ROOT.parent != CONFIG_ROOT else "default"
+    ctx = get_runtime_context()
+    active_vault = ctx.active_vault
+    mode = "obsidian" if ctx.root.name.casefold() == "lmz" and ctx.root.parent != ctx.root else "default"
     return {
-        "config_path": str(CONFIG_PATH),
-        "config_root": str(CONFIG_ROOT),
-        "topic_root": str(TOPICS_DIR),
+        "config_path": str(ctx.config_path),
+        "config_root": str(ctx.root),
+        "topic_root": str(ctx.topics_dir),
         "workspace_mode": mode,
         "workspace_label": "Obsidian workspace" if mode == "obsidian" else "Default workspace",
         "workspace_registry": str(REGISTRY_PATH),
-        "active_vault": ACTIVE_VAULT_ID,
-        "active_vault_name": ACTIVE_VAULT_NAME,
-        "active_vault_root": str(ACTIVE_VAULT_ROOT) if ACTIVE_VAULT_ROOT else "",
-        "vaults_configured": bool(VAULTS_CONFIGURED),
-        "db_path": str(DB_PATH),
+        "active_vault": active_vault.id,
+        "active_vault_name": active_vault.name,
+        "active_vault_root": str(active_vault.root) if active_vault.root else "",
+        "vaults_configured": bool(ctx.vaults_configured),
+        "db_path": str(active_vault.db_path),
         "env_override": bool(os.environ.get("LMZ_CONFIG_PATH")),
     }
 
 
 def _load_public_config_sync() -> dict:
-    from utils import CONFIG_PATH
-    import yaml
-    if not CONFIG_PATH.exists():
+    config_path = get_runtime_context().config_path
+    if not config_path.exists():
         config = _strip_config_secrets(get_config())
         config["_runtime"] = _config_runtime_info()
         return config
-    with open(CONFIG_PATH, "r", encoding="utf-8") as handle:
+    with open(config_path, "r", encoding="utf-8") as handle:
         config = yaml.safe_load(handle) or {}
     config = _strip_config_secrets(config)
     config["_runtime"] = _config_runtime_info()
@@ -3036,11 +3082,9 @@ async def update_app_config(new_config: dict):
     return await asyncio.to_thread(_update_app_config_sync, new_config)
 
 def _update_app_config_sync(new_config: dict):
-    from utils import CONFIG_PATH
-    import yaml
     safe_config = _strip_config_secrets(new_config)
     safe_config.pop("_runtime", None)
-    atomic_write_text(CONFIG_PATH, yaml.dump(safe_config, default_flow_style=False, allow_unicode=True))
+    atomic_write_text(get_runtime_context().config_path, yaml.dump(safe_config, default_flow_style=False, allow_unicode=True))
     invalidate_config_cache()
     return {"status": "success"}
 

@@ -10,7 +10,8 @@ from urllib.parse import parse_qs, urljoin, urlparse
 from urllib.request import HTTPCookieProcessor, ProxyHandler, Request, build_opener
 
 from downloaders.media_filter import valid_media_files
-from utils import ONLINE_INGEST_DIR, get_config, get_cookie_auth_status, get_cookie_path
+from runtime_context import get_runtime_context
+from utils import get_config, get_cookie_auth_status, get_cookie_path
 
 
 _AUTH_STATUS_LOGGED = set()
@@ -274,7 +275,7 @@ def inspect_youtube_community(url: str) -> tuple[bool, dict]:
 def _download_community_post(url: str, metadata_info: dict = None) -> tuple[bool, dict]:
     config = get_config()
     url_hash = hashlib.sha256(url.encode()).hexdigest()[:10]
-    session_dir = ONLINE_INGEST_DIR / url_hash
+    session_dir = get_runtime_context().active_vault.online_ingest_dir / url_hash
     session_dir.mkdir(parents=True, exist_ok=True)
 
     try:
@@ -344,7 +345,7 @@ def download_video(url: str, metadata_info: dict = None) -> tuple[bool, dict]:
     _log_auth_status("YouTube", get_cookie_auth_status())
 
     url_hash = hashlib.sha256(url.encode()).hexdigest()[:10]
-    session_dir = ONLINE_INGEST_DIR / url_hash
+    session_dir = get_runtime_context().active_vault.online_ingest_dir / url_hash
     session_dir.mkdir(parents=True, exist_ok=True)
 
     try:

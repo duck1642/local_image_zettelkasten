@@ -4,6 +4,7 @@ from pathlib import Path
 
 from PIL import Image
 from logger import log_system
+from runtime_context import WorkspaceContext, get_runtime_context
 from utils import THUMBNAILS_DIR, asset_path_for, require_storage_id, storage_shard_for_hash
 
 THUMBNAIL_DIR = THUMBNAILS_DIR
@@ -18,28 +19,32 @@ class ThumbnailBusyError(RuntimeError):
     pass
 
 
-def thumbnail_path_for(item_hash: str, storage_id: str) -> Path:
+def _thumbnail_dir(ctx: WorkspaceContext | None = None) -> Path:
+    return (ctx or get_runtime_context()).active_vault.thumbnails_dir
+
+
+def thumbnail_path_for(item_hash: str, storage_id: str, ctx: WorkspaceContext | None = None) -> Path:
     storage_id = require_storage_id(storage_id)
-    return THUMBNAIL_DIR / storage_shard_for_hash(item_hash) / f"{storage_id}.jpg"
+    return _thumbnail_dir(ctx) / storage_shard_for_hash(item_hash) / f"{storage_id}.jpg"
 
 
-def video_thumbnail_path_for(item_hash: str, storage_id: str) -> Path:
+def video_thumbnail_path_for(item_hash: str, storage_id: str, ctx: WorkspaceContext | None = None) -> Path:
     storage_id = require_storage_id(storage_id)
-    return THUMBNAIL_DIR / storage_shard_for_hash(item_hash) / f"{storage_id}_video.jpg"
+    return _thumbnail_dir(ctx) / storage_shard_for_hash(item_hash) / f"{storage_id}_video.jpg"
 
 
-def _expected_thumbnail_path(item_hash: str, mime_type: str | None, storage_id: str) -> Path:
+def _expected_thumbnail_path(item_hash: str, mime_type: str | None, storage_id: str, ctx: WorkspaceContext | None = None) -> Path:
     if (mime_type or "").startswith("video/"):
-        return video_thumbnail_path_for(item_hash, storage_id)
-    return thumbnail_path_for(item_hash, storage_id)
+        return video_thumbnail_path_for(item_hash, storage_id, ctx)
+    return thumbnail_path_for(item_hash, storage_id, ctx)
 
 
 def _thumbnail_is_fresh(thumb_path: Path, asset_path: Path) -> bool:
     return thumb_path.exists() and thumb_path.stat().st_mtime >= asset_path.stat().st_mtime
 
 
-def generate_image_thumbnail(asset_path: Path, item_hash: str, storage_id: str) -> Path:
-    thumb_path = thumbnail_path_for(item_hash, storage_id)
+def generate_image_thumbnail(asset_path: Path, item_hash: str, storage_id: str, ctx: WorkspaceContext | None = None) -> Path:
+    thumb_path = thumbnail_path_for(item_hash, storage_id, ctx)
     thumb_path.parent.mkdir(parents=True, exist_ok=True)
 
     with Image.open(asset_path) as image:
@@ -52,8 +57,8 @@ def generate_image_thumbnail(asset_path: Path, item_hash: str, storage_id: str) 
     return thumb_path
 
 
-def generate_video_thumbnail(asset_path: Path, item_hash: str, storage_id: str) -> Path:
-    thumb_path = video_thumbnail_path_for(item_hash, storage_id)
+def generate_video_thumbnail(asset_path: Path, item_hash: str, storage_id: str, ctx: WorkspaceContext | None = None) -> Path:
+    thumb_path = video_thumbnail_path_for(item_hash, storage_id, ctx)
     thumb_path.parent.mkdir(parents=True, exist_ok=True)
 
     cmd = [
@@ -71,13 +76,13 @@ def generate_video_thumbnail(asset_path: Path, item_hash: str, storage_id: str) 
     return thumb_path
 
 
-def ensure_thumbnail(item_hash: str, extension: str | None, mime_type: str | None, wait: bool = True, storage_id: str | None = None) -> Path | None:
+def ensure_thumbnail(item_hash: str, extension: str | None, mime_type: str | None, wait: bool = True, storage_id: str | None = None, ctx: WorkspaceContext | None = None) -> Path | None:
     storage_id = require_storage_id(storage_id)
-    asset_path = asset_path_for(item_hash, extension, mime_type, storage_id=storage_id)
+    asset_path = asset_path_for(item_hash, extension, mime_type, storage_id=storage_id, ctx=ctx)
     if not asset_path.exists():
         return None
 
-    thumb_path = _expected_thumbnail_path(item_hash, mime_type, storage_id)
+    thumb_path = _expected_thumbnail_path(item_hash, mime_type, storage_id, ctx)
     if _thumbnail_is_fresh(thumb_path, asset_path):
         return thumb_path
 
@@ -85,12 +90,12 @@ def ensure_thumbnail(item_hash: str, extension: str | None, mime_type: str | Non
     if not acquired:
         raise ThumbnailBusyError("thumbnail generation is busy")
     try:
-        thumb_path = _expected_thumbnail_path(item_hash, mime_type, storage_id)
+        thumb_path = _expected_thumbnail_path(item_hash, mime_type, storage_id, ctx)
         if _thumbnail_is_fresh(thumb_path, asset_path):
             return thumb_path
         if (mime_type or "").startswith("video/"):
-            return generate_video_thumbnail(asset_path, item_hash, storage_id)
-        return generate_image_thumbnail(asset_path, item_hash, storage_id)
+            return generate_video_thumbnail(asset_path, item_hash, storage_id, ctx)
+        return generate_image_thumbnail(asset_path, item_hash, storage_id, ctx)
     except Exception as e:
         log_system("ERROR", "Thumbnail generation failed", hash=item_hash, error=str(e))
         return None
@@ -98,11 +103,11 @@ def ensure_thumbnail(item_hash: str, extension: str | None, mime_type: str | Non
         _GENERATION_SEMAPHORE.release()
 
 
-def get_or_generate_thumbnail(item_hash: str, extension: str | None, mime_type: str | None, storage_id: str | None = None) -> Path | None:
-    return ensure_thumbnail(item_hash, extension, mime_type, wait=False, storage_id=storage_id)
+def get_or_generate_thumbnail(item_hash: str, extension: str | None, mime_type: str | None, storage_id: str | None = None, ctx: WorkspaceContext | None = None) -> Path | None:
+    return ensure_thumbnail(item_hash, extension, mime_type, wait=False, storage_id=storage_id, ctx=ctx)
 
 
-def repair_missing_thumbnails(conn, limit: int = 100) -> dict:
+def repair_missing_thumbnails(conn, limit: int = 100, ctx: WorkspaceContext | None = None) -> dict:
     limit = max(1, int(limit or 100))
     generated = 0
     skipped = 0
@@ -115,16 +120,20 @@ def repair_missing_thumbnails(conn, limit: int = 100) -> dict:
         if checked >= limit:
             break
         checked += 1
-        asset_path = asset_path_for(item_hash, extension, mime_type, storage_id=storage_id)
+        asset_path = asset_path_for(item_hash, extension, mime_type, storage_id=storage_id, ctx=ctx)
         if not asset_path.exists():
             skipped += 1
             continue
-        thumb_path = _expected_thumbnail_path(item_hash, mime_type, storage_id)
+        thumb_path = _expected_thumbnail_path(item_hash, mime_type, storage_id, ctx)
         if _thumbnail_is_fresh(thumb_path, asset_path):
             skipped += 1
             continue
         try:
-            if ensure_thumbnail(item_hash, extension, mime_type, wait=True, storage_id=storage_id):
+            if ctx is None:
+                thumb_result = ensure_thumbnail(item_hash, extension, mime_type, wait=True, storage_id=storage_id)
+            else:
+                thumb_result = ensure_thumbnail(item_hash, extension, mime_type, wait=True, storage_id=storage_id, ctx=ctx)
+            if thumb_result:
                 generated += 1
             else:
                 failed += 1

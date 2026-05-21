@@ -11,7 +11,8 @@ from logger import log_system
 from md_generator import normalize_topic_list
 from topics import parse_topic_values
 from tagging import load_tag_cache
-from utils import NOTES_DIR, WD_TAGS_DIR, note_path_for, wd_tag_cache_path_for, utc_now_str
+from runtime_context import WorkspaceContext, get_runtime_context
+from utils import note_path_for, wd_tag_cache_path_for, utc_now_str
 from artists import backfill_artists_from_items
 from platforms import backfill_platforms_from_items
 
@@ -62,6 +63,11 @@ _watchdog_timer: threading.Timer | None = None
 _watchdog_flushing = False
 _watchdog_storage_map: dict[str, str] = {}
 _watchdog_storage_map_lock = threading.Lock()
+_watchdog_ctx: WorkspaceContext | None = None
+
+
+def _ctx(ctx: WorkspaceContext | None = None) -> WorkspaceContext:
+    return ctx or get_runtime_context()
 
 
 def ensure_metadata_schema(conn: sqlite3.Connection):
@@ -1341,11 +1347,12 @@ def start_metadata_repair_worker(full: bool = False, maintenance: bool = False) 
     return payload
 
 
-def _load_watchdog_storage_map():
+def _load_watchdog_storage_map(ctx: WorkspaceContext | None = None):
+    runtime = _ctx(ctx)
     try:
         from db.sqlite_operator import init_database
 
-        conn = init_database()
+        conn = init_database(ctx=runtime)
         try:
             rows = conn.execute(
                 "SELECT storage_id, hash FROM items WHERE storage_id IS NOT NULL AND storage_id != ''"
@@ -1373,6 +1380,7 @@ def _hash_from_metadata_path(path: str | Path) -> str | None:
 
 def _watchdog_flush():
     global _watchdog_timer, _watchdog_flushing
+    runtime = _watchdog_ctx or get_runtime_context()
     with _watchdog_lock:
         hashes = sorted(_watchdog_pending)
         _watchdog_timer = None
@@ -1383,7 +1391,7 @@ def _watchdog_flush():
     try:
         from db.sqlite_operator import init_database
 
-        conn = init_database()
+        conn = init_database(ctx=runtime)
         try:
             for item_hash in hashes:
                 safe_reindex_item_metadata(conn, item_hash, "watchdog")
@@ -1417,8 +1425,11 @@ def _watchdog_queue_hashes(hashes: Iterable[str]):
             _watchdog_timer.start()
 
 
-def start_metadata_watchdog() -> dict:
-    global _watchdog_observer
+def start_metadata_watchdog(ctx: WorkspaceContext | None = None) -> dict:
+    global _watchdog_observer, _watchdog_ctx
+    runtime = _ctx(ctx)
+    notes_dir = runtime.active_vault.notes_dir
+    wd_tags_dir = runtime.active_vault.wd_tags_dir
     with _watchdog_lock:
         if _watchdog_observer is not None:
             return {"status": "already_running"}
@@ -1442,15 +1453,48 @@ def start_metadata_watchdog() -> dict:
         observer = Observer()
         observer.daemon = True
         handler = MetadataEventHandler()
-        NOTES_DIR.mkdir(parents=True, exist_ok=True)
-        WD_TAGS_DIR.mkdir(parents=True, exist_ok=True)
-        observer.schedule(handler, str(NOTES_DIR), recursive=True)
-        observer.schedule(handler, str(WD_TAGS_DIR), recursive=True)
-        _load_watchdog_storage_map()
+        notes_dir.mkdir(parents=True, exist_ok=True)
+        wd_tags_dir.mkdir(parents=True, exist_ok=True)
+        observer.schedule(handler, str(notes_dir), recursive=True)
+        observer.schedule(handler, str(wd_tags_dir), recursive=True)
+        _load_watchdog_storage_map(runtime)
         observer.start()
         _watchdog_observer = observer
-        log_system("INFO", "Metadata watchdog started", notes=str(NOTES_DIR), wd_tags=str(WD_TAGS_DIR))
+        _watchdog_ctx = runtime
+        log_system("INFO", "Metadata watchdog started", notes=str(notes_dir), wd_tags=str(wd_tags_dir))
         return {"status": "started"}
+
+
+def stop_metadata_watchdog(ctx: WorkspaceContext | None = None) -> dict:
+    global _watchdog_observer, _watchdog_timer, _watchdog_flushing, _watchdog_ctx
+    with _watchdog_lock:
+        observer = _watchdog_observer
+        timer = _watchdog_timer
+        _watchdog_observer = None
+        _watchdog_timer = None
+        _watchdog_pending.clear()
+        _watchdog_flushing = False
+        _watchdog_ctx = None
+    if timer is not None:
+        timer.cancel()
+    if observer is None:
+        return {"status": "idle"}
+    try:
+        observer.stop()
+        observer.join(timeout=2)
+    except Exception as exc:
+        log_system("WARNING", "Metadata watchdog stop failed", error=str(exc))
+        return {"status": "error", "error": str(exc)}
+    with _watchdog_storage_map_lock:
+        _watchdog_storage_map.clear()
+    return {"status": "stopped"}
+
+
+def reset_metadata_watchdog_state(ctx: WorkspaceContext | None = None) -> dict:
+    result = stop_metadata_watchdog(ctx)
+    with _watchdog_storage_map_lock:
+        _watchdog_storage_map.clear()
+    return result
 
 
 def metadata_facets(conn: sqlite3.Connection, kind: str, needle: str, limit: int) -> list[dict]:

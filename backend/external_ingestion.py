@@ -8,12 +8,13 @@ import shutil
 import re
 
 from utils import (
-    get_config, QUEUES_DIR, asset_path_for, note_path_for, utc_now_str, wd_tag_cache_path_for
+    get_config, asset_path_for, note_path_for, utc_now_str, wd_tag_cache_path_for
 )
 from db.sqlite_operator import connect_database, normalize_source_url
 from db.search_manager import search_manager
 from processor import process_file
 from logger import log_ingest_audit, log_ingest_online
+from queue_service import queue_path
 from downloaders.gallery_dl_wrapper import download_gallery, inspect_gallery
 from downloaders.yt_dlp_wrapper import download_video, inspect_youtube_community
 import random
@@ -526,7 +527,7 @@ class ExternalIngestor:
 
     def _log_failure(self, url: str, reason: str):
 
-        failure_file = QUEUES_DIR / "failed_links.md"
+        failure_file = queue_path("failed")
         timestamp = utc_now_str()
 
 
