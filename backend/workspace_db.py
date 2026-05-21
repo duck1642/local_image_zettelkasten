@@ -6,11 +6,9 @@ import yaml
 
 from artists import is_placeholder_artist, normalize_artist_name
 from platforms import _seed_known_aliases, _upsert_platform, normalize_platform_key
-from utils import CONFIG_PATH, CONFIG_ROOT, utc_now_str
+from utils import CONFIG_PATH, utc_now_str
 from runtime_context import WorkspaceContext, get_runtime_context
 
-
-WORKSPACE_DB_PATH = CONFIG_ROOT / "data" / "workspace.db"
 _WORKSPACE_SCHEMA_READY_PATHS: set[Path] = set()
 _WORKSPACE_SCHEMA_LOCK = threading.Lock()
 

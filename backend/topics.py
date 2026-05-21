@@ -5,7 +5,7 @@ from pathlib import Path
 import yaml
 
 from runtime_context import WorkspaceContext, get_runtime_context
-from utils import TOPICS_DIR, atomic_write_text, utc_now_str
+from utils import atomic_write_text, utc_now_str
 
 
 MARKDOWN_LINK_RE = re.compile(r"^\s*\[([^\]]+)\]\(([^)]+)\)\s*$")

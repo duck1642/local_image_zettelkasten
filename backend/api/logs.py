@@ -83,14 +83,6 @@ async def post_ui_log(entry: UILogEntry):
 async def open_log_external(filename: str = Query(...)):
     return await asyncio.to_thread(_open_log_external_sync, filename)
 
-def _open_path_external(path: Path):
-    if os.name == 'nt':
-        os.startfile(str(path))
-    else:
-        import subprocess
-        opener = "open" if os.uname().sysname == "Darwin" else "xdg-open"
-        subprocess.call([opener, str(path)])
-
 def _open_log_external_sync(filename: str):
     log_file = _log_file_for(filename)
         

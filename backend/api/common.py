@@ -354,6 +354,15 @@ def _file_response_under(root: Path, relative_path: str):
         raise HTTPException(status_code=404)
     return FileResponse(candidate)
 
+
+def _open_path_external(path: Path):
+    if os.name == 'nt':
+        os.startfile(str(path))
+    else:
+        import subprocess
+        opener = "open" if os.uname().sysname == "Darwin" else "xdg-open"
+        subprocess.call([opener, str(path)])
+
 def _review_sidecar_path(path: Path) -> Path:
     return path.with_suffix(path.suffix + ".json")
 

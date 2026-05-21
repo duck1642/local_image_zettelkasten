@@ -1,4 +1,5 @@
 import asyncio
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -23,22 +24,10 @@ from api.common import (
 from api import ingestion, library, logs, review, runtime
 
 
-app = FastAPI(title="LMZ API")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=sorted(ALLOWED_ORIGINS),
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-
-@app.on_event("startup")
 async def startup_auth_scan():
     await asyncio.to_thread(_scan_auth_status_sync, "startup")
 
 
-@app.on_event("startup")
 async def startup_metadata_index():
     def start_services():
         try:
@@ -52,7 +41,6 @@ async def startup_metadata_index():
     await asyncio.to_thread(start_services)
 
 
-@app.on_event("startup")
 async def startup_search_index():
     def hydrate_search_index():
         conn = init_database()
@@ -61,6 +49,24 @@ async def startup_search_index():
         finally:
             conn.close()
     await asyncio.to_thread(hydrate_search_index)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await startup_auth_scan()
+    await startup_metadata_index()
+    await startup_search_index()
+    yield
+
+
+app = FastAPI(title="LMZ API", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=sorted(ALLOWED_ORIGINS),
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.middleware("http")

@@ -89,16 +89,6 @@ def _get_process_memory_mb_fallback():
     return value / divisor
 
 
-@router.post("/api/auth/scan")
-async def scan_auth_status():
-    statuses = await asyncio.to_thread(_scan_auth_status_sync, "manual")
-    return {"status": "ok", "auth": statuses}
-
-class UILogEntry(BaseModel):
-    level: str
-    message: str
-    extra: dict = None
-
 CONFIG_SECRET_KEYS = {"pixiv_token"}
 
 

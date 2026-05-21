@@ -297,8 +297,11 @@ def reset_database(ctx: WorkspaceContext | None = None):
     finally:
         conn.close()
     _SCHEMA_READY_PATHS.discard(target_path)
-    with init_database(target_path) as conn:
+    conn = init_database(target_path)
+    try:
         conn.commit()
+    finally:
+        conn.close()
 
 def check_duplicate_url(conn: sqlite3.Connection, url: str) -> bool:
 

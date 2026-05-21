@@ -5,9 +5,8 @@ from pathlib import Path
 from PIL import Image
 from logger import log_system
 from runtime_context import WorkspaceContext, get_runtime_context
-from utils import THUMBNAILS_DIR, asset_path_for, require_storage_id, storage_shard_for_hash
+from utils import asset_path_for, require_storage_id, storage_shard_for_hash
 
-THUMBNAIL_DIR = THUMBNAILS_DIR
 TARGET_WIDTH = 600
 MAX_HEIGHT = 800
 JPEG_QUALITY = 80
@@ -21,6 +20,26 @@ class ThumbnailBusyError(RuntimeError):
 
 def _thumbnail_dir(ctx: WorkspaceContext | None = None) -> Path:
     return (ctx or get_runtime_context()).active_vault.thumbnails_dir
+
+
+class _ThumbnailDirProxy:
+    def __fspath__(self):
+        return str(_thumbnail_dir())
+
+    def __str__(self):
+        return str(_thumbnail_dir())
+
+    def __eq__(self, other):
+        return _thumbnail_dir() == Path(other)
+
+    def __truediv__(self, other):
+        return _thumbnail_dir() / other
+
+    def __getattr__(self, name):
+        return getattr(_thumbnail_dir(), name)
+
+
+THUMBNAIL_DIR = _ThumbnailDirProxy()
 
 
 def thumbnail_path_for(item_hash: str, storage_id: str, ctx: WorkspaceContext | None = None) -> Path:
