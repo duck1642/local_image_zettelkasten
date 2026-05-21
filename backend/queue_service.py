@@ -133,5 +133,5 @@ def run_queue(queue: str, ctx: WorkspaceContext | None = None) -> dict:
 
     path = queue_path(queue, ctx)
     skip_validation = queue == "force"
-    ingestor = ExternalIngestor(str(path), skip_validation=skip_validation)
+    ingestor = ExternalIngestor(str(path), skip_validation=skip_validation, ctx=ctx)
     return ingestor.run()

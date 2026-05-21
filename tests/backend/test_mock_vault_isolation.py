@@ -36,7 +36,7 @@ def fresh_backend(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *module_names
     if str(BACKEND) not in sys.path:
         sys.path.insert(0, str(BACKEND))
     for name in list(sys.modules):
-        if name in {"utils", "runtime_context", "web_api", "queue_service", "md_generator", "metadata_index", "processor", "external_ingestion", "thumbnails", "fingerprint", "artists", "platforms", "review_cache", "topics", "vaults", "workspace_db"} or name.startswith(("logger", "db.", "tagging", "downloaders")):
+        if name in {"utils", "runtime_context", "web_api", "queue_service", "md_generator", "metadata_index", "processor", "external_ingestion", "thumbnails", "fingerprint", "artists", "platforms", "review_cache", "topics", "vaults", "workspace_db", "ingest_control"} or name.startswith(("logger", "db.", "tagging", "downloaders")):
             del sys.modules[name]
     return [importlib.import_module(name) for name in module_names]
 
@@ -267,6 +267,226 @@ def test_metadata_watchdog_uses_injected_notes_and_wd_dirs(monkeypatch, tmp_path
         assert (str(injected_ctx.active_vault.wd_tags_dir), True) in scheduled
     finally:
         metadata_index.reset_metadata_watchdog_state(ctx=injected_ctx)
+
+
+def test_search_manager_context_isolates_ram_indexes(monkeypatch, tmp_path):
+    runtime_context, sqlite_operator, search_manager_module = fresh_backend(
+        monkeypatch,
+        tmp_path,
+        "runtime_context",
+        "db.sqlite_operator",
+        "db.search_manager",
+    )
+    default_ctx = runtime_context.get_runtime_context()
+    injected_ctx = injected_context_for(runtime_context, tmp_path)
+    manager = search_manager_module.SearchManager()
+    manager.reset_all()
+    default_phash = "0" * 16
+    injected_phash = "f" * 16
+
+    default_conn = sqlite_operator.init_database(ctx=default_ctx)
+    injected_conn = sqlite_operator.init_database(ctx=injected_ctx)
+    try:
+        default_conn.execute(
+            """
+            INSERT INTO items(hash, storage_id, original_filename, file_extension, mime_type, size_bytes, source_url, source_url_norm, platform, source_artist, phash)
+            VALUES (?, ?, ?, '.jpg', 'image/jpeg', 10, ?, ?, 'local', 'artist', ?)
+            """,
+            ("default-search", "000000000101", "default.jpg", "https://default.test/item", "https://default.test/item", default_phash),
+        )
+        default_conn.commit()
+        injected_conn.execute(
+            """
+            INSERT INTO items(hash, storage_id, original_filename, file_extension, mime_type, size_bytes, source_url, source_url_norm, platform, source_artist, phash)
+            VALUES (?, ?, ?, '.jpg', 'image/jpeg', 10, ?, ?, 'local', 'artist', ?)
+            """,
+            ("injected-search", "000000000102", "injected.jpg", "https://injected.test/item", "https://injected.test/item", injected_phash),
+        )
+        injected_conn.commit()
+
+        manager.hydrate(default_conn, ctx=default_ctx)
+        manager.hydrate(injected_conn, ctx=injected_ctx)
+    finally:
+        default_conn.close()
+        injected_conn.close()
+
+    assert manager.query_image(default_phash, ctx=default_ctx)[0][0] == "default-search"
+    assert manager.query_image(default_phash, ctx=injected_ctx) == []
+    assert manager.query_image(injected_phash, ctx=injected_ctx)[0][0] == "injected-search"
+    assert manager.query_image(injected_phash, ctx=default_ctx) == []
+    assert manager.url_exists("https://default.test/item", ctx=default_ctx)
+    assert not manager.url_exists("https://default.test/item", ctx=injected_ctx)
+
+
+def test_local_ingest_state_and_stop_events_are_context_isolated(monkeypatch, tmp_path):
+    runtime_context, web_api = fresh_backend(monkeypatch, tmp_path, "runtime_context", "web_api")
+    default_ctx = runtime_context.get_runtime_context()
+    injected_ctx = injected_context_for(runtime_context, tmp_path)
+
+    web_api.reset_local_ingest_state(default_ctx)
+    web_api.reset_local_ingest_state(injected_ctx)
+    with web_api.local_ingest_lock(default_ctx):
+        web_api.local_ingest_state(default_ctx)["running"] = True
+        web_api.local_ingest_state(default_ctx)["failed_paths"] = ["default.jpg"]
+    with web_api.local_ingest_lock(injected_ctx):
+        web_api.local_ingest_state(injected_ctx)["running"] = False
+        web_api.local_ingest_state(injected_ctx)["failed_paths"] = ["injected.jpg"]
+
+    web_api.local_ingest_stop_event(default_ctx).set()
+
+    assert web_api._snapshot_local_ingest_state(default_ctx)["running"] is True
+    assert web_api._snapshot_local_ingest_state(injected_ctx)["running"] is False
+    assert web_api._snapshot_local_ingest_state(default_ctx)["failed_paths"] == ["default.jpg"]
+    assert web_api._snapshot_local_ingest_state(injected_ctx)["failed_paths"] == ["injected.jpg"]
+    assert web_api.local_ingest_stop_event(default_ctx).is_set()
+    assert not web_api.local_ingest_stop_event(injected_ctx).is_set()
+
+
+def test_online_stop_event_helper_is_context_isolated(monkeypatch, tmp_path):
+    runtime_context, ingest_control = fresh_backend(monkeypatch, tmp_path, "runtime_context", "ingest_control")
+    default_ctx = runtime_context.get_runtime_context()
+    injected_ctx = injected_context_for(runtime_context, tmp_path)
+
+    ingest_control.clear_stop_flags(default_ctx)
+    ingest_control.clear_stop_flags(injected_ctx)
+    ingest_control.online_stop_event(default_ctx).set()
+
+    assert ingest_control.online_stop_event(default_ctx).is_set()
+    assert not ingest_control.online_stop_event(injected_ctx).is_set()
+
+
+def test_metadata_repair_status_is_context_isolated(monkeypatch, tmp_path):
+    runtime_context, metadata_index = fresh_backend(monkeypatch, tmp_path, "runtime_context", "metadata_index")
+    default_ctx = runtime_context.get_runtime_context()
+    injected_ctx = injected_context_for(runtime_context, tmp_path)
+    default_state = metadata_index._runtime_state(default_ctx)
+    injected_state = metadata_index._runtime_state(injected_ctx)
+
+    with default_state.repair_lock:
+        default_state.repair_running = True
+    with injected_state.repair_lock:
+        injected_state.repair_running = False
+    metadata_index._reset_maintenance_rebuild_job("full", ctx=default_ctx)
+
+    assert metadata_index.metadata_repair_running(default_ctx) is True
+    assert metadata_index.metadata_repair_running(injected_ctx) is False
+    assert metadata_index.maintenance_rebuild_status(default_ctx)["running"] is True
+    assert metadata_index.maintenance_rebuild_status(injected_ctx)["running"] is False
+
+    with default_state.repair_lock:
+        default_state.repair_running = False
+
+
+def test_metadata_repair_worker_uses_captured_context(monkeypatch, tmp_path):
+    runtime_context, sqlite_operator, metadata_index = fresh_backend(
+        monkeypatch,
+        tmp_path,
+        "runtime_context",
+        "db.sqlite_operator",
+        "metadata_index",
+    )
+    injected_ctx = injected_context_for(runtime_context, tmp_path)
+    captured = []
+
+    class FakeConn:
+        def close(self):
+            pass
+
+        def commit(self):
+            pass
+
+    def fake_init_database(ctx=None, db_path=None):
+        captured.append(ctx)
+        return FakeConn()
+
+    monkeypatch.setattr(sqlite_operator, "init_database", fake_init_database)
+    monkeypatch.setattr(metadata_index, "ensure_metadata_schema", lambda conn: None)
+    monkeypatch.setattr(metadata_index, "reindex_stale_metadata_batch", lambda conn, batch_size, allow_scan=False: {"queued": 0, "source": "scan"})
+
+    metadata_index._repair_worker(full=False, maintenance=False, ctx=injected_ctx)
+
+    assert captured == [injected_ctx]
+    assert metadata_index.metadata_repair_running(injected_ctx) is False
+
+
+def test_metadata_watchdog_restart_clears_old_state_and_uses_new_context(monkeypatch, tmp_path):
+    runtime_context, metadata_index = fresh_backend(monkeypatch, tmp_path, "runtime_context", "metadata_index")
+    default_ctx = runtime_context.get_runtime_context()
+    injected_ctx = injected_context_for(runtime_context, tmp_path)
+    scheduled: list[tuple[str, bool]] = []
+
+    class FakeHandler:
+        pass
+
+    class FakeObserver:
+        daemon = False
+
+        def schedule(self, handler, path, recursive=False):
+            scheduled.append((path, recursive))
+
+        def start(self):
+            pass
+
+        def stop(self):
+            pass
+
+        def join(self, timeout=None):
+            pass
+
+    monkeypatch.setitem(sys.modules, "watchdog", types.ModuleType("watchdog"))
+    events_module = types.ModuleType("watchdog.events")
+    events_module.FileSystemEventHandler = FakeHandler
+    observers_module = types.ModuleType("watchdog.observers")
+    observers_module.Observer = FakeObserver
+    monkeypatch.setitem(sys.modules, "watchdog.events", events_module)
+    monkeypatch.setitem(sys.modules, "watchdog.observers", observers_module)
+
+    try:
+        assert metadata_index.start_metadata_watchdog(ctx=default_ctx)["status"] == "started"
+        metadata_index._watchdog_pending.add("old-hash")
+        metadata_index._watchdog_storage_map["old-storage"] = "old-hash"
+        scheduled.clear()
+        assert metadata_index.restart_metadata_watchdog(ctx=injected_ctx)["status"] == "started"
+        assert metadata_index._watchdog_pending == set()
+        assert "old-storage" not in metadata_index._watchdog_storage_map
+        assert metadata_index._watchdog_ctx == injected_ctx
+        assert (str(injected_ctx.active_vault.notes_dir), True) in scheduled
+        assert (str(injected_ctx.active_vault.wd_tags_dir), True) in scheduled
+    finally:
+        metadata_index.reset_metadata_watchdog_state()
+
+
+def test_runtime_switch_preflight_reports_runtime_blockers(monkeypatch, tmp_path):
+    runtime_context, metadata_index, web_api = fresh_backend(monkeypatch, tmp_path, "runtime_context", "metadata_index", "web_api")
+    ctx = runtime_context.get_runtime_context()
+    web_api.reset_local_ingest_state(ctx)
+
+    assert web_api.runtime_switch_preflight(ctx) == {"allowed": True, "blockers": []}
+
+    with web_api.local_ingest_lock(ctx):
+        web_api.local_ingest_state(ctx)["running"] = True
+    result = web_api.runtime_switch_preflight(ctx)
+    assert result["allowed"] is False
+    assert "local_ingest_running" in result["blockers"]
+
+    with web_api.local_ingest_lock(ctx):
+        web_api.local_ingest_state(ctx)["running"] = False
+    state = metadata_index._runtime_state(ctx)
+    with state.repair_lock:
+        state.repair_running = True
+    result = web_api.runtime_switch_preflight(ctx)
+    assert result["allowed"] is False
+    assert "metadata_repair_running" in result["blockers"]
+    with state.repair_lock:
+        state.repair_running = False
+
+    assert web_api.INGESTION_LOCK.acquire(blocking=False)
+    try:
+        result = web_api.runtime_switch_preflight(ctx)
+        assert result["allowed"] is False
+        assert "online_ingest_running" in result["blockers"]
+    finally:
+        web_api.INGESTION_LOCK.release()
 
 
 def test_workspace_registry_resolves_active_and_env_override(monkeypatch, tmp_path):

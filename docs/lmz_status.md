@@ -211,9 +211,10 @@ VSCode-friendly test launchers:
   - done: introduce a runtime context layer for workspace/vault paths while preserving legacy import-time constants.
   - done: make active-vault and workspace DB connection helpers context-aware.
   - done: make queues, review cache, logging, metadata watchdog paths, topics, thumbnails, downloader staging, and local ingest/review path access context-aware.
+  - done: make SearchManager RAM indexes context-aware per active vault DB.
   - done: replace fixed static media mounts with dynamic active-vault asset/review routes.
-  - make search manager and remaining long-lived runtime state switch-aware before adding the public switch endpoint.
-  - split `backend/web_api.py` into routers and service modules after context boundaries are clear.
+  - done: make remaining long-lived ingest/metadata runtime state switch-aware and add backend switch preflight.
+  - done: split `backend/web_api.py` into router modules while preserving the sidecar entrypoint/facade.
   - extract shared metadata maintenance logic for topic/WD rename, delete, hide/ignore, and merge operations.
   - add a frontend runtime/session store that can invalidate Vault, Stats, Inspector, Search, Ingestion, Review, and Logs state on vault/workspace switch.
   - split large frontend Phase C surfaces, especially `StatsView.svelte`, before adding more tag/topic tooling.

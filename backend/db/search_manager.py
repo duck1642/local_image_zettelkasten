@@ -2,11 +2,14 @@
 import sqlite3
 import threading
 import time
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import List, Tuple, Optional
 
 from db.searchers import BKTreeSearcher, URLRegistry, VPTreeSearcher
 from db.sqlite_operator import get_all_phashes, get_all_tiles, get_all_urls, get_all_video_signatures
 from logger import log_system
+from runtime_context import WorkspaceContext, get_runtime_context
 
 def _cosine_dist(v1_bytes: bytes, v2_bytes: bytes) -> float:
 
@@ -29,6 +32,18 @@ def _hamming_dist_audio(fp1_bytes: bytes, fp2_bytes: bytes) -> float:
     sim = compare_audio_fingerprints(fp1_bytes, fp2_bytes)
     return 1.0 - float(sim)
 
+
+@dataclass
+class _SearchIndexState:
+    global_tree: BKTreeSearcher = field(default_factory=BKTreeSearcher)
+    tile_tree: BKTreeSearcher = field(default_factory=BKTreeSearcher)
+    url_registry: URLRegistry = field(default_factory=URLRegistry)
+    video_tree: VPTreeSearcher = field(default_factory=lambda: VPTreeSearcher(_cosine_dist))
+    audio_tree: VPTreeSearcher = field(default_factory=lambda: VPTreeSearcher(_hamming_dist_audio))
+    is_hydrated: bool = False
+    sync_lock: threading.Lock = field(default_factory=threading.Lock)
+    rebuild_lock: threading.Lock = field(default_factory=threading.Lock)
+
 class SearchManager:
 
     _instance = None
@@ -46,23 +61,100 @@ class SearchManager:
         if self._initialized:
             return
 
-        self.global_tree = BKTreeSearcher()
-        self.tile_tree = BKTreeSearcher()
-        self.url_registry = URLRegistry()
-
-
-        self.video_tree = VPTreeSearcher(_cosine_dist)
-        self.audio_tree = VPTreeSearcher(_hamming_dist_audio)
-
-        self.is_hydrated = False
-        self._sync_lock = threading.Lock()
-        self._rebuild_lock = threading.Lock()
+        self._states: dict[Path, _SearchIndexState] = {}
+        self._states_lock = threading.Lock()
         self._initialized = True
 
-    def hydrate(self, conn: sqlite3.Connection):
+    def _db_path_from_conn(self, conn: sqlite3.Connection) -> Path | None:
+        try:
+            rows = conn.execute("PRAGMA database_list").fetchall()
+            for row in rows:
+                if row[1] == "main" and row[2]:
+                    return Path(row[2]).resolve()
+        except Exception:
+            return None
+        return None
 
-        with self._sync_lock:
-            if self.is_hydrated:
+    def _state_key(self, ctx: WorkspaceContext | None = None, conn: sqlite3.Connection | None = None) -> Path:
+        if ctx is not None:
+            return ctx.active_vault.db_path.resolve()
+        if conn is not None:
+            db_path = self._db_path_from_conn(conn)
+            if db_path is not None:
+                return db_path
+        return get_runtime_context().active_vault.db_path.resolve()
+
+    def _state_for(self, ctx: WorkspaceContext | None = None, conn: sqlite3.Connection | None = None) -> _SearchIndexState:
+        key = self._state_key(ctx, conn)
+        with self._states_lock:
+            state = self._states.get(key)
+            if state is None:
+                state = _SearchIndexState()
+                self._states[key] = state
+            return state
+
+    def reset(self, ctx: WorkspaceContext | None = None):
+        key = self._state_key(ctx)
+        with self._states_lock:
+            self._states.pop(key, None)
+
+    def reset_all(self):
+        with self._states_lock:
+            self._states.clear()
+
+    @property
+    def global_tree(self):
+        return self._state_for().global_tree
+
+    @global_tree.setter
+    def global_tree(self, value):
+        self._state_for().global_tree = value
+
+    @property
+    def tile_tree(self):
+        return self._state_for().tile_tree
+
+    @tile_tree.setter
+    def tile_tree(self, value):
+        self._state_for().tile_tree = value
+
+    @property
+    def url_registry(self):
+        return self._state_for().url_registry
+
+    @url_registry.setter
+    def url_registry(self, value):
+        self._state_for().url_registry = value
+
+    @property
+    def video_tree(self):
+        return self._state_for().video_tree
+
+    @video_tree.setter
+    def video_tree(self, value):
+        self._state_for().video_tree = value
+
+    @property
+    def audio_tree(self):
+        return self._state_for().audio_tree
+
+    @audio_tree.setter
+    def audio_tree(self, value):
+        self._state_for().audio_tree = value
+
+    @property
+    def is_hydrated(self):
+        return self._state_for().is_hydrated
+
+    @is_hydrated.setter
+    def is_hydrated(self, value):
+        self._state_for().is_hydrated = bool(value)
+
+    def hydrate(self, conn: sqlite3.Connection, ctx: WorkspaceContext | None = None):
+        state = self._state_for(ctx, conn)
+
+        with state.sync_lock:
+            if state.is_hydrated:
                 return
 
             log_system('INFO', "Hydrating RAM indexes from SQLite...")
@@ -70,37 +162,38 @@ class SearchManager:
 
             urls = get_all_urls(conn)
             for url in urls:
-                self.url_registry.add(url)
+                state.url_registry.add(url)
 
 
             phashes = get_all_phashes(conn)
             for f_hash, phash in phashes:
-                self.global_tree.add(f_hash, phash)
+                state.global_tree.add(f_hash, phash)
 
 
             tiles = get_all_tiles(conn)
             for parent_hash, _, tile_phash in tiles:
-                self.tile_tree.add(parent_hash, tile_phash)
+                state.tile_tree.add(parent_hash, tile_phash)
 
 
             v_sigs = get_all_video_signatures(conn)
             for f_hash, a_hash, v_emb in v_sigs:
                 if a_hash:
-                    self.audio_tree.add(f_hash, a_hash)
+                    state.audio_tree.add(f_hash, a_hash)
                 if v_emb:
-                    self.video_tree.add(f_hash, v_emb)
+                    state.video_tree.add(f_hash, v_emb)
 
 
-            self._rebuild_deferred_indexes_locked("hydrate")
+            self._rebuild_deferred_indexes_locked(state, "hydrate")
 
-            self.is_hydrated = True
+            state.is_hydrated = True
             log_system('INFO', f"Hydration complete: {len(urls)} URLs | {len(phashes)} Images | {len(v_sigs)} Videos indexed in RAM.")
 
-    def query_image(self, phash: str, threshold: int = 5) -> List[Tuple[str, int, str]]:
+    def query_image(self, phash: str, threshold: int = 5, ctx: WorkspaceContext | None = None) -> List[Tuple[str, int, str]]:
+        state = self._state_for(ctx)
 
-        with self._sync_lock:
-            global_snapshot = self.global_tree.snapshot()
-            tile_snapshot = self.tile_tree.snapshot()
+        with state.sync_lock:
+            global_snapshot = state.global_tree.snapshot()
+            tile_snapshot = state.tile_tree.snapshot()
 
         results = []
         global_matches = BKTreeSearcher.query_snapshot(global_snapshot, phash, threshold)
@@ -114,11 +207,12 @@ class SearchManager:
 
         return results
 
-    def query_video(self, audio_hash: bytes, visual_embedding: bytes, ai_threshold: float = 0.08, audio_threshold: float = 0.85) -> List[Tuple[str, float, str]]:
+    def query_video(self, audio_hash: bytes, visual_embedding: bytes, ai_threshold: float = 0.08, audio_threshold: float = 0.85, ctx: WorkspaceContext | None = None) -> List[Tuple[str, float, str]]:
+        state = self._state_for(ctx)
 
-        with self._sync_lock:
-            audio_snapshot = self.audio_tree.snapshot()
-            video_snapshot = self.video_tree.snapshot()
+        with state.sync_lock:
+            audio_snapshot = state.audio_tree.snapshot()
+            video_snapshot = state.video_tree.snapshot()
 
         results = []
 
@@ -139,35 +233,40 @@ class SearchManager:
 
         return results
 
-    def url_exists(self, url: str) -> bool:
+    def url_exists(self, url: str, ctx: WorkspaceContext | None = None) -> bool:
+        state = self._state_for(ctx)
 
-        with self._sync_lock:
-            return self.url_registry.exists(url)
+        with state.sync_lock:
+            return state.url_registry.exists(url)
 
-    def query_global_only(self, phash: str, threshold: int = 5) -> list:
+    def query_global_only(self, phash: str, threshold: int = 5, ctx: WorkspaceContext | None = None) -> list:
+        state = self._state_for(ctx)
 
-        with self._sync_lock:
-            snapshot = self.global_tree.snapshot()
+        with state.sync_lock:
+            snapshot = state.global_tree.snapshot()
         return BKTreeSearcher.query_snapshot(snapshot, phash, threshold)
 
-    def update_indexes(self, file_hash: str, phash: Optional[str], url: Optional[str], tiles: List[Tuple[int, str]] = None, audio_hash: bytes = None, visual_embedding: bytes = None):
+    def update_indexes(self, file_hash: str, phash: Optional[str], url: Optional[str], tiles: List[Tuple[int, str]] = None, audio_hash: bytes = None, visual_embedding: bytes = None, ctx: WorkspaceContext | None = None):
+        state = self._state_for(ctx)
 
         should_rebuild = False
-        with self._sync_lock:
-            self._update_indexes_unlocked(file_hash, phash, url, tiles, audio_hash, visual_embedding)
-            if self._vp_pending_count_locked() >= self.VP_PENDING_REBUILD_THRESHOLD:
+        with state.sync_lock:
+            self._update_indexes_unlocked(state, file_hash, phash, url, tiles, audio_hash, visual_embedding)
+            if self._vp_pending_count_locked(state) >= self.VP_PENDING_REBUILD_THRESHOLD:
                 should_rebuild = True
         if should_rebuild:
-            self._rebuild_deferred_indexes("pending_threshold")
+            self._rebuild_deferred_indexes("pending_threshold", ctx=ctx)
 
-    def update_indexes_batch(self, items: list[dict]):
+    def update_indexes_batch(self, items: list[dict], ctx: WorkspaceContext | None = None):
 
         if not items:
             return
+        state = self._state_for(ctx)
         should_rebuild = False
-        with self._sync_lock:
+        with state.sync_lock:
             for item in items:
                 self._update_indexes_unlocked(
+                    state,
                     item.get("file_hash"),
                     item.get("phash"),
                     item.get("url"),
@@ -176,11 +275,11 @@ class SearchManager:
                     item.get("visual_embedding"),
                 )
             log_system("INFO", "RAM index batch update queued", count=len(items))
-            should_rebuild = self._vp_pending_count_locked() > 0
+            should_rebuild = self._vp_pending_count_locked(state) > 0
         if should_rebuild:
-            self._rebuild_deferred_indexes("batch_update")
+            self._rebuild_deferred_indexes("batch_update", ctx=ctx)
 
-    def remove_indexes_batch(self, items: list[dict]):
+    def remove_indexes_batch(self, items: list[dict], ctx: WorkspaceContext | None = None):
 
         hashes = {str(item.get("hash") or item.get("file_hash") or "").strip() for item in items or []}
         hashes.discard("")
@@ -188,14 +287,15 @@ class SearchManager:
         if not hashes and not urls:
             return {"removed": 0}
 
+        state = self._state_for(ctx)
         should_rebuild = False
-        with self._sync_lock:
-            global_stats = self.global_tree.remove_hashes(hashes)
-            tile_stats = self.tile_tree.remove_hashes(hashes)
-            audio_stats = self.audio_tree.remove_hashes(hashes)
-            video_stats = self.video_tree.remove_hashes(hashes)
+        with state.sync_lock:
+            global_stats = state.global_tree.remove_hashes(hashes)
+            tile_stats = state.tile_tree.remove_hashes(hashes)
+            audio_stats = state.audio_tree.remove_hashes(hashes)
+            video_stats = state.video_tree.remove_hashes(hashes)
             for url in urls:
-                self.url_registry.remove(url)
+                state.url_registry.remove(url)
             should_rebuild = bool(audio_stats.get("deferred") or video_stats.get("deferred"))
 
         removed = sum(
@@ -214,7 +314,10 @@ class SearchManager:
             video_removed=video_stats.get("removed", 0),
         )
         if should_rebuild:
-            self._rebuild_deferred_indexes_async("batch_remove")
+            if ctx is None:
+                self._rebuild_deferred_indexes_async("batch_remove")
+            else:
+                self._rebuild_deferred_indexes_async("batch_remove", ctx=ctx)
         return {
             "removed": removed,
             "hashes": len(hashes),
@@ -225,46 +328,46 @@ class SearchManager:
             "video": video_stats,
         }
 
-    def _rebuild_deferred_indexes_async(self, reason: str):
+    def _rebuild_deferred_indexes_async(self, reason: str, ctx: WorkspaceContext | None = None):
 
         thread = threading.Thread(
             target=self._rebuild_deferred_indexes,
-            args=(reason,),
+            args=(reason, ctx),
             name=f"lmz-vp-rebuild-{reason}",
             daemon=True,
         )
         thread.start()
 
-    def rebuild_deferred_indexes(self):
+    def rebuild_deferred_indexes(self, ctx: WorkspaceContext | None = None):
 
-        self._rebuild_deferred_indexes("explicit")
+        self._rebuild_deferred_indexes("explicit", ctx=ctx)
 
-    def _update_indexes_unlocked(self, file_hash: str, phash: Optional[str], url: Optional[str], tiles: List[Tuple[int, str]] = None, audio_hash: bytes = None, visual_embedding: bytes = None):
+    def _update_indexes_unlocked(self, state: _SearchIndexState, file_hash: str, phash: Optional[str], url: Optional[str], tiles: List[Tuple[int, str]] = None, audio_hash: bytes = None, visual_embedding: bytes = None):
 
         if url:
-            self.url_registry.add(url)
+            state.url_registry.add(url)
         if phash:
-            self.global_tree.add(file_hash, phash)
+            state.global_tree.add(file_hash, phash)
         if tiles:
             for _, tile_phash in tiles:
-                self.tile_tree.add(file_hash, tile_phash)
+                state.tile_tree.add(file_hash, tile_phash)
 
         if audio_hash:
-            self.audio_tree.add(file_hash, audio_hash)
+            state.audio_tree.add(file_hash, audio_hash)
         if visual_embedding:
-            self.video_tree.add(file_hash, visual_embedding)
+            state.video_tree.add(file_hash, visual_embedding)
 
-    def _vp_pending_count_locked(self) -> int:
+    def _vp_pending_count_locked(self, state: _SearchIndexState) -> int:
 
-        return self.audio_tree.pending_count() + self.video_tree.pending_count()
+        return state.audio_tree.pending_count() + state.video_tree.pending_count()
 
-    def _vp_rebuild_needed_locked(self) -> bool:
+    def _vp_rebuild_needed_locked(self, state: _SearchIndexState) -> bool:
 
-        return bool(self.video_tree.rebuild_plan() or self.audio_tree.rebuild_plan())
+        return bool(state.video_tree.rebuild_plan() or state.audio_tree.rebuild_plan())
 
-    def _rebuild_deferred_indexes_locked(self, reason: str):
+    def _rebuild_deferred_indexes_locked(self, state: _SearchIndexState, reason: str):
 
-        for name, tree in (("video", self.video_tree), ("audio", self.audio_tree)):
+        for name, tree in (("video", state.video_tree), ("audio", state.audio_tree)):
             pending = tree.pending_count()
             if pending <= 0 and not tree.dirty:
                 continue
@@ -283,16 +386,17 @@ class SearchManager:
                 rebuild_count=tree.rebuild_count,
             )
 
-    def _rebuild_deferred_indexes(self, reason: str):
+    def _rebuild_deferred_indexes(self, reason: str, ctx: WorkspaceContext | None = None):
+        state = self._state_for(ctx)
 
-        if not self._rebuild_lock.acquire(blocking=False):
+        if not state.rebuild_lock.acquire(blocking=False):
             return
         needs_follow_up = False
         try:
-            with self._sync_lock:
+            with state.sync_lock:
                 plans = [
-                    ("video", self.video_tree, self.video_tree.rebuild_plan()),
-                    ("audio", self.audio_tree, self.audio_tree.rebuild_plan()),
+                    ("video", state.video_tree, state.video_tree.rebuild_plan()),
+                    ("audio", state.audio_tree, state.audio_tree.rebuild_plan()),
                 ]
 
             replacements = []
@@ -305,7 +409,7 @@ class SearchManager:
                 replacements.append((name, tree, plan, replacement, duration_ms))
 
             for name, tree, plan, replacement, duration_ms in replacements:
-                with self._sync_lock:
+                with state.sync_lock:
                     stats = tree.apply_replacement(plan, replacement)
                     pending = tree.pending_count()
                     rebuild_count = tree.rebuild_count
@@ -320,12 +424,12 @@ class SearchManager:
                     duration_ms=duration_ms,
                     rebuild_count=rebuild_count,
                 )
-            with self._sync_lock:
-                needs_follow_up = self._vp_pending_count_locked() >= self.VP_PENDING_REBUILD_THRESHOLD or self._vp_rebuild_needed_locked()
+            with state.sync_lock:
+                needs_follow_up = self._vp_pending_count_locked(state) >= self.VP_PENDING_REBUILD_THRESHOLD or self._vp_rebuild_needed_locked(state)
         finally:
-            self._rebuild_lock.release()
+            state.rebuild_lock.release()
         if needs_follow_up:
-            self._rebuild_deferred_indexes(f"{reason}_followup")
+            self._rebuild_deferred_indexes(f"{reason}_followup", ctx=ctx)
 
 
 search_manager = SearchManager()

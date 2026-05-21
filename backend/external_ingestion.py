@@ -10,6 +10,7 @@ import re
 from utils import (
     get_config, asset_path_for, note_path_for, utc_now_str, wd_tag_cache_path_for
 )
+from runtime_context import WorkspaceContext, get_runtime_context
 from db.sqlite_operator import connect_database, normalize_source_url
 from db.search_manager import search_manager
 from processor import process_file
@@ -18,15 +19,17 @@ from queue_service import queue_path
 from downloaders.gallery_dl_wrapper import download_gallery, inspect_gallery
 from downloaders.yt_dlp_wrapper import download_video, inspect_youtube_community
 import random
-from ingest_control import ONLINE_STOP_AFTER_CURRENT
+from ingest_control import online_stop_event
 
 
 GLOBAL_WORKER_LIMIT: Optional[threading.Semaphore] = None
 
 class ExternalIngestor:
-    def __init__(self, links_file: str, skip_validation: bool = False):
+    def __init__(self, links_file: str, skip_validation: bool = False, ctx: WorkspaceContext | None = None):
+        self.ctx = ctx or get_runtime_context()
         self.links_file = Path(links_file)
-        self.config = get_config()
+        self.config = get_config(self.ctx)
+        self.stop_event = online_stop_event(self.ctx)
         self.fail_log_lock = threading.Lock()
         self.skip_validation = skip_validation
 
@@ -149,7 +152,7 @@ class ExternalIngestor:
             in_flight = {}
 
             for _ in range(num_workers):
-                if ONLINE_STOP_AFTER_CURRENT.is_set():
+                if self.stop_event.is_set():
                     break
                 try:
                     next_url = next(pending_urls)
@@ -177,7 +180,7 @@ class ExternalIngestor:
                     if index_list:
                         plat_index_data.extend(index_list)
 
-                if ONLINE_STOP_AFTER_CURRENT.is_set():
+                if self.stop_event.is_set():
                     continue
 
                 for _ in range(len(done)):
@@ -187,7 +190,7 @@ class ExternalIngestor:
                         break
                     in_flight[executor.submit(self._worker_item, platform, next_url, jitter)] = next_url
 
-            if ONLINE_STOP_AFTER_CURRENT.is_set():
+            if self.stop_event.is_set():
                 for url_left in pending_urls:
                     plat_remaining.append(url_left)
                 log_ingest_online("INFO", "Stop-after-current acknowledged; deferred URLs preserved in source queue", platform=platform, deferred=len(plat_remaining))
@@ -421,7 +424,7 @@ class ExternalIngestor:
         if not shortcode:
             return self._url_complete(url, expected_count)
 
-        conn = connect_database()
+        conn = connect_database() if self.ctx is None else connect_database(ctx=self.ctx)
         try:
             rows = conn.execute(
                 'SELECT hash, file_extension, mime_type, storage_id FROM items WHERE LOWER(source_url) LIKE LOWER(?)',
@@ -450,7 +453,7 @@ class ExternalIngestor:
             conn.close()
 
     def _url_complete(self, url: str, expected_count: int = None) -> bool:
-        conn = connect_database()
+        conn = connect_database() if self.ctx is None else connect_database(ctx=self.ctx)
         try:
             rows = conn.execute(
                 'SELECT hash, file_extension, mime_type, storage_id FROM items WHERE source_url_norm = ?',
@@ -479,7 +482,7 @@ class ExternalIngestor:
             conn.close()
 
     def _rollback_batch(self, batch_data: List[dict]) -> int:
-        conn = connect_database()
+        conn = connect_database() if self.ctx is None else connect_database(ctx=self.ctx)
         rolled_back = 0
         removed_indexes = []
         try:
@@ -527,7 +530,7 @@ class ExternalIngestor:
 
     def _log_failure(self, url: str, reason: str):
 
-        failure_file = queue_path("failed")
+        failure_file = queue_path("failed", ctx=self.ctx)
         timestamp = utc_now_str()
 
 

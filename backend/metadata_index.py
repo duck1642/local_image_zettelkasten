@@ -2,6 +2,7 @@ import json
 import sqlite3
 import threading
 import time
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable
 
@@ -40,22 +41,32 @@ METADATA_SECONDARY_INDEXES = {
     "idx_item_metadata_status": "CREATE INDEX IF NOT EXISTS idx_item_metadata_status ON item_metadata_files(status)",
 }
 
-_repair_lock = threading.Lock()
-_repair_running = False
-_maintenance_rebuild_lock = threading.Lock()
-_maintenance_rebuild_job = {
-    "running": False,
-    "status": "idle",
-    "mode": "",
-    "stage": "",
-    "items_total": 0,
-    "items_done": 0,
-    "errors": 0,
-    "started_at": "",
-    "finished_at": "",
-    "duration_ms": 0.0,
-    "message": "",
-}
+def _new_maintenance_rebuild_job() -> dict:
+    return {
+        "running": False,
+        "status": "idle",
+        "mode": "",
+        "stage": "",
+        "items_total": 0,
+        "items_done": 0,
+        "errors": 0,
+        "started_at": "",
+        "finished_at": "",
+        "duration_ms": 0.0,
+        "message": "",
+    }
+
+
+@dataclass
+class _MetadataRuntimeState:
+    repair_lock: threading.Lock = field(default_factory=threading.Lock)
+    repair_running: bool = False
+    maintenance_rebuild_lock: threading.Lock = field(default_factory=threading.Lock)
+    maintenance_rebuild_job: dict = field(default_factory=_new_maintenance_rebuild_job)
+
+
+_metadata_states_lock = threading.Lock()
+_metadata_states: dict[Path, _MetadataRuntimeState] = {}
 _watchdog_lock = threading.Lock()
 _watchdog_observer = None
 _watchdog_pending: set[str] = set()
@@ -68,6 +79,20 @@ _watchdog_ctx: WorkspaceContext | None = None
 
 def _ctx(ctx: WorkspaceContext | None = None) -> WorkspaceContext:
     return ctx or get_runtime_context()
+
+
+def _ctx_key(ctx: WorkspaceContext | None = None) -> Path:
+    return _ctx(ctx).active_vault.db_path.resolve()
+
+
+def _runtime_state(ctx: WorkspaceContext | None = None) -> _MetadataRuntimeState:
+    key = _ctx_key(ctx)
+    with _metadata_states_lock:
+        state = _metadata_states.get(key)
+        if state is None:
+            state = _MetadataRuntimeState()
+            _metadata_states[key] = state
+        return state
 
 
 def ensure_metadata_schema(conn: sqlite3.Connection):
@@ -969,8 +994,9 @@ def reindex_stale_metadata_batch(conn: sqlite3.Connection, limit: int = REPAIR_B
     }
 
 
-def metadata_index_status(conn: sqlite3.Connection, deep: bool = False) -> dict:
+def metadata_index_status(conn: sqlite3.Connection, deep: bool = False, ctx: WorkspaceContext | None = None) -> dict:
     ensure_metadata_schema(conn)
+    state = _runtime_state(ctx)
     item_count = conn.execute("SELECT COUNT(*) FROM items").fetchone()[0]
     counters = _counter_snapshot(conn)
     indexed_count = counters["indexed"]
@@ -988,7 +1014,7 @@ def metadata_index_status(conn: sqlite3.Connection, deep: bool = False) -> dict:
     stale_count = stale_metadata_count(conn) if deep else None
     return {
         "ready": metadata_index_ready(conn),
-        "repair_running": _repair_running,
+        "repair_running": state.repair_running,
         "items": item_count,
         "indexed": indexed_count or 0,
         "stale": stale_count,
@@ -998,19 +1024,27 @@ def metadata_index_status(conn: sqlite3.Connection, deep: bool = False) -> dict:
         "wd_tags": wd_count or 0,
         "facet_counts": facet_count or 0,
         "dirty": dirty_count or 0,
-        "maintenance_rebuild": maintenance_rebuild_status(),
+        "maintenance_rebuild": maintenance_rebuild_status(ctx),
     }
 
 
-def maintenance_rebuild_status() -> dict:
-    with _maintenance_rebuild_lock:
-        return dict(_maintenance_rebuild_job)
+def maintenance_rebuild_status(ctx: WorkspaceContext | None = None) -> dict:
+    state = _runtime_state(ctx)
+    with state.maintenance_rebuild_lock:
+        return dict(state.maintenance_rebuild_job)
 
 
-def _reset_maintenance_rebuild_job(mode: str):
+def metadata_repair_running(ctx: WorkspaceContext | None = None) -> bool:
+    state = _runtime_state(ctx)
+    with state.repair_lock:
+        return bool(state.repair_running)
+
+
+def _reset_maintenance_rebuild_job(mode: str, ctx: WorkspaceContext | None = None):
     now = _now()
-    with _maintenance_rebuild_lock:
-        _maintenance_rebuild_job.update({
+    state = _runtime_state(ctx)
+    with state.maintenance_rebuild_lock:
+        state.maintenance_rebuild_job.update({
             "running": True,
             "status": "running",
             "mode": mode,
@@ -1025,22 +1059,24 @@ def _reset_maintenance_rebuild_job(mode: str):
         })
 
 
-def _update_maintenance_rebuild_job(**updates):
-    with _maintenance_rebuild_lock:
-        _maintenance_rebuild_job.update(updates)
+def _update_maintenance_rebuild_job(ctx: WorkspaceContext | None = None, **updates):
+    state = _runtime_state(ctx)
+    with state.maintenance_rebuild_lock:
+        state.maintenance_rebuild_job.update(updates)
 
 
-def _finish_maintenance_rebuild_job(status: str, message: str = "", **updates):
+def _finish_maintenance_rebuild_job(status: str, message: str = "", ctx: WorkspaceContext | None = None, **updates):
     finished_at = _now()
-    with _maintenance_rebuild_lock:
-        started_at = _maintenance_rebuild_job.get("started_at") or finished_at
+    state = _runtime_state(ctx)
+    with state.maintenance_rebuild_lock:
+        started_at = state.maintenance_rebuild_job.get("started_at") or finished_at
         try:
             started = time.strptime(str(started_at), "%Y-%m-%d %H:%M:%S")
             finished = time.strptime(finished_at, "%Y-%m-%d %H:%M:%S")
             duration_ms = max(0.0, (time.mktime(finished) - time.mktime(started)) * 1000)
         except Exception:
-            duration_ms = float(_maintenance_rebuild_job.get("duration_ms") or 0.0)
-        _maintenance_rebuild_job.update({
+            duration_ms = float(state.maintenance_rebuild_job.get("duration_ms") or 0.0)
+        state.maintenance_rebuild_job.update({
             "running": False,
             "status": status,
             "stage": status,
@@ -1282,28 +1318,30 @@ def rebuild_all_metadata(
             stages["secondary_index_rebuild"] += (time.perf_counter() - stage_started) * 1000
 
 
-def _repair_worker(full: bool = False, maintenance: bool = False):
-    global _repair_running
+def _repair_worker(full: bool = False, maintenance: bool = False, ctx: WorkspaceContext | None = None):
+    runtime = _ctx(ctx)
+    state = _runtime_state(runtime)
     try:
         from db.sqlite_operator import init_database
 
-        conn = init_database()
+        conn = init_database(ctx=runtime)
         try:
             ensure_metadata_schema(conn)
             log_system("INFO", "Metadata index repair started", full=full)
             if full:
                 if maintenance:
-                    _reset_maintenance_rebuild_job("full")
+                    _reset_maintenance_rebuild_job("full", ctx=runtime)
                 result = rebuild_all_metadata(
                     conn,
                     FULL_REBUILD_BATCH_SIZE,
                     "repair_full",
-                    _update_maintenance_rebuild_job if maintenance else None,
+                    (lambda **updates: _update_maintenance_rebuild_job(ctx=runtime, **updates)) if maintenance else None,
                 )
                 conn.commit()
                 if maintenance:
                     _finish_maintenance_rebuild_job(
                         "completed",
+                        ctx=runtime,
                         indexed=result.get("indexed", 0),
                         errors=result.get("errors", 0),
                         items_done=result.get("indexed", 0) + result.get("errors", 0),
@@ -1321,29 +1359,30 @@ def _repair_worker(full: bool = False, maintenance: bool = False):
             conn.close()
     except Exception as exc:
         if maintenance:
-            _finish_maintenance_rebuild_job("error", str(exc))
+            _finish_maintenance_rebuild_job("error", str(exc), ctx=runtime)
         log_system("WARNING", "Metadata index repair failed", full=full, error=str(exc))
     finally:
-        with _repair_lock:
-            _repair_running = False
+        with state.repair_lock:
+            state.repair_running = False
 
 
-def start_metadata_repair_worker(full: bool = False, maintenance: bool = False) -> dict:
-    global _repair_running
-    with _repair_lock:
-        if _repair_running:
+def start_metadata_repair_worker(full: bool = False, maintenance: bool = False, ctx: WorkspaceContext | None = None) -> dict:
+    runtime = _ctx(ctx)
+    state = _runtime_state(runtime)
+    with state.repair_lock:
+        if state.repair_running:
             payload = {"status": "already_running"}
             if maintenance:
-                payload["maintenance_rebuild"] = maintenance_rebuild_status()
+                payload["maintenance_rebuild"] = maintenance_rebuild_status(runtime)
             return payload
-        _repair_running = True
+        state.repair_running = True
         if maintenance:
-            _reset_maintenance_rebuild_job("full" if full else "stale")
-        thread = threading.Thread(target=_repair_worker, args=(full, maintenance), name="lmz-metadata-index-repair", daemon=True)
+            _reset_maintenance_rebuild_job("full" if full else "stale", ctx=runtime)
+        thread = threading.Thread(target=_repair_worker, args=(full, maintenance, runtime), name="lmz-metadata-index-repair", daemon=True)
         thread.start()
     payload = {"status": "started", "full": full}
     if maintenance:
-        payload["maintenance_rebuild"] = maintenance_rebuild_status()
+        payload["maintenance_rebuild"] = maintenance_rebuild_status(runtime)
     return payload
 
 
@@ -1495,6 +1534,11 @@ def reset_metadata_watchdog_state(ctx: WorkspaceContext | None = None) -> dict:
     with _watchdog_storage_map_lock:
         _watchdog_storage_map.clear()
     return result
+
+
+def restart_metadata_watchdog(ctx: WorkspaceContext | None = None) -> dict:
+    stop_metadata_watchdog()
+    return start_metadata_watchdog(ctx)
 
 
 def metadata_facets(conn: sqlite3.Connection, kind: str, needle: str, limit: int) -> list[dict]:
