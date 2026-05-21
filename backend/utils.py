@@ -11,25 +11,14 @@ from pathlib import Path
 from datetime import datetime, timezone
 from typing import Optional
 
+from runtime_context import WorkspaceContext, get_runtime_context, reload_runtime_context
 
 SRC_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SRC_DIR.parent
-_CONFIG_PATH_ENV = os.environ.get("LMZ_CONFIG_PATH")
-if _CONFIG_PATH_ENV:
-    _config_path_candidate = Path(_CONFIG_PATH_ENV).expanduser()
-    CONFIG_PATH = (_config_path_candidate if _config_path_candidate.is_absolute() else PROJECT_ROOT / _config_path_candidate).resolve()
-    CONFIG_ROOT = CONFIG_PATH.parent
-    if CONFIG_PATH.parent == PROJECT_ROOT / "config":
-        CONFIG_ROOT = PROJECT_ROOT
-else:
-    try:
-        from workspaces import active_workspace_config_path
-        CONFIG_PATH = active_workspace_config_path()
-    except Exception:
-        CONFIG_PATH = PROJECT_ROOT / "config" / "config.yaml"
-    CONFIG_ROOT = PROJECT_ROOT
-    if CONFIG_PATH.parent != PROJECT_ROOT / "config":
-        CONFIG_ROOT = CONFIG_PATH.parent
+
+_RUNTIME_CONTEXT = reload_runtime_context()
+CONFIG_PATH = _RUNTIME_CONTEXT.config_path
+CONFIG_ROOT = _RUNTIME_CONTEXT.root
 
 def _early_load_config() -> dict:
 
@@ -42,8 +31,6 @@ def _early_load_config() -> dict:
     return {}
 
 _config = _early_load_config()
-_paths = _config.get('paths', {})
-_vaults = _config.get('vaults', {}) if isinstance(_config.get('vaults'), dict) else {}
 
 def _slug_vault_id(value: str) -> str:
     cleaned = "".join(ch.casefold() if ch.isalnum() else "-" for ch in str(value or "").strip())
@@ -51,7 +38,8 @@ def _slug_vault_id(value: str) -> str:
 
 def _resolve_path(key: str, default: str) -> Path:
 
-    path_str = _paths.get(key) or default
+    paths = _config.get('paths', {}) if isinstance(_config.get('paths'), dict) else {}
+    path_str = paths.get(key) or default
     p = Path(path_str)
     return p.resolve() if p.is_absolute() else (CONFIG_ROOT / p).resolve()
 
@@ -59,43 +47,35 @@ def _resolve_config_relative(path_str: str) -> Path:
     p = Path(path_str)
     return p.resolve() if p.is_absolute() else (CONFIG_ROOT / p).resolve()
 
-def _active_vault_config() -> tuple[bool, str, str, Path | None]:
-    if not _vaults:
-        raise RuntimeError("config.yaml must define vaults")
-    active_id = _slug_vault_id(str(_config.get("active_vault") or "default"))
-    if active_id not in _vaults:
-        active_id = "default" if "default" in _vaults else sorted(_vaults.keys())[0]
-    entry = _vaults.get(active_id) or {}
-    name = str(entry.get("name") or active_id)
-    root_value = str(entry.get("root") or f"data/vaults/{active_id}")
-    return True, active_id, name, _resolve_config_relative(root_value)
+VAULTS_CONFIGURED = _RUNTIME_CONTEXT.vaults_configured
+ACTIVE_VAULT_ID = _RUNTIME_CONTEXT.active_vault.id
+ACTIVE_VAULT_NAME = _RUNTIME_CONTEXT.active_vault.name
+ACTIVE_VAULT_ROOT = _RUNTIME_CONTEXT.active_vault.root
 
-VAULTS_CONFIGURED, ACTIVE_VAULT_ID, ACTIVE_VAULT_NAME, ACTIVE_VAULT_ROOT = _active_vault_config()
-
-VAULT_DIR = ACTIVE_VAULT_ROOT / "vault"
-INPUT_DIR = ACTIVE_VAULT_ROOT / "input"
-REVIEW_DIR = ACTIVE_VAULT_ROOT / "review"
-LOCAL_INGEST_DIR = ACTIVE_VAULT_ROOT / "local_ingest"
-ONLINE_INGEST_DIR = ACTIVE_VAULT_ROOT / "online_ingest"
-QUEUES_DIR = ACTIVE_VAULT_ROOT / "queues"
-BATCHES_DIR = ACTIVE_VAULT_ROOT / "batches"
-SECRETS_DIR = _resolve_path('secrets', "secrets")
-MODELS_DIR = _resolve_path('models', "data/models")
-WD_TAGS_DIR = ACTIVE_VAULT_ROOT / "wd-tags"
-THUMBNAILS_DIR = ACTIVE_VAULT_ROOT / "ui_cache" / "thumbnails"
-TOPICS_DIR = (CONFIG_ROOT / "data" / "topics").resolve()
+VAULT_DIR = _RUNTIME_CONTEXT.active_vault.vault_dir
+INPUT_DIR = _RUNTIME_CONTEXT.active_vault.input_dir
+REVIEW_DIR = _RUNTIME_CONTEXT.active_vault.review_dir
+LOCAL_INGEST_DIR = _RUNTIME_CONTEXT.active_vault.local_ingest_dir
+ONLINE_INGEST_DIR = _RUNTIME_CONTEXT.active_vault.online_ingest_dir
+QUEUES_DIR = _RUNTIME_CONTEXT.active_vault.queues_dir
+BATCHES_DIR = _RUNTIME_CONTEXT.active_vault.batches_dir
+SECRETS_DIR = _RUNTIME_CONTEXT.secrets_dir
+MODELS_DIR = _RUNTIME_CONTEXT.models_dir
+WD_TAGS_DIR = _RUNTIME_CONTEXT.active_vault.wd_tags_dir
+THUMBNAILS_DIR = _RUNTIME_CONTEXT.active_vault.thumbnails_dir
+TOPICS_DIR = _RUNTIME_CONTEXT.topics_dir
 
 OUTPUT_DIR = VAULT_DIR
-ASSETS_DIR = OUTPUT_DIR / "assets"
-NOTES_DIR = OUTPUT_DIR / "notes"
+ASSETS_DIR = _RUNTIME_CONTEXT.active_vault.assets_dir
+NOTES_DIR = _RUNTIME_CONTEXT.active_vault.notes_dir
 
-DB_PATH = ACTIVE_VAULT_ROOT / "db" / "lmz_main.db"
+DB_PATH = _RUNTIME_CONTEXT.active_vault.db_path
 
-LOGS_DIR = ACTIVE_VAULT_ROOT / "logs"
+LOGS_DIR = _RUNTIME_CONTEXT.active_vault.logs_dir
 
 _CONFIG_CACHE_LOCK = threading.Lock()
 _CONFIG_CACHE_DATA: dict | None = None
-_CONFIG_CACHE_MTIMES: tuple[float | None, float | None] | None = None
+_CONFIG_CACHE_MTIMES: tuple[Path, Path, float | None, float | None] | None = None
 
 EXT_MAP = {
     "image/jpeg": ".jpg",
@@ -117,13 +97,17 @@ def require_storage_id(storage_id: str | None) -> str:
         raise ValueError("storage_id is required for compact storage paths")
     return value
 
-def storage_asset_path_for(item_hash: str, storage_id: str, extension: str | None, mime_type: str | None = None) -> Path:
+def _ctx(ctx: WorkspaceContext | None = None) -> WorkspaceContext:
+    return ctx or get_runtime_context()
+
+
+def storage_asset_path_for(item_hash: str, storage_id: str, extension: str | None, mime_type: str | None = None, ctx: WorkspaceContext | None = None) -> Path:
     storage_id = require_storage_id(storage_id)
     ext = extension or EXT_MAP.get(mime_type or "", ".jpg")
-    return ASSETS_DIR / storage_shard_for_hash(item_hash) / f"{storage_id}{ext}"
+    return _ctx(ctx).active_vault.assets_dir / storage_shard_for_hash(item_hash) / f"{storage_id}{ext}"
 
-def asset_path_for(item_hash: str, extension: str | None, mime_type: str | None, storage_id: str) -> Path:
-    return storage_asset_path_for(item_hash, storage_id, extension, mime_type)
+def asset_path_for(item_hash: str, extension: str | None, mime_type: str | None, storage_id: str, ctx: WorkspaceContext | None = None) -> Path:
+    return storage_asset_path_for(item_hash, storage_id, extension, mime_type, ctx=ctx)
 
 def asset_url_for(item_hash: str, extension: str | None, mime_type: str | None = None, storage_id: str | None = None) -> str:
     storage_id = require_storage_id(storage_id)
@@ -141,37 +125,39 @@ DEFAULT_ALLOWED_MIMES = {
 }
 
 
-def setup_directories():
+def setup_directories(ctx: WorkspaceContext | None = None):
+    runtime = _ctx(ctx)
+    vault = runtime.active_vault
 
     for directory in [
-        INPUT_DIR,
-        REVIEW_DIR,
-        LOCAL_INGEST_DIR,
-        ONLINE_INGEST_DIR,
-        QUEUES_DIR,
-        BATCHES_DIR,
-        MODELS_DIR,
-        WD_TAGS_DIR,
-        THUMBNAILS_DIR,
-        TOPICS_DIR,
-        OUTPUT_DIR,
-        ASSETS_DIR,
-        NOTES_DIR,
-        DB_PATH.parent,
-        LOGS_DIR,
-        SECRETS_DIR,
+        vault.input_dir,
+        vault.review_dir,
+        vault.local_ingest_dir,
+        vault.online_ingest_dir,
+        vault.queues_dir,
+        vault.batches_dir,
+        runtime.models_dir,
+        vault.wd_tags_dir,
+        vault.thumbnails_dir,
+        runtime.topics_dir,
+        vault.vault_dir,
+        vault.assets_dir,
+        vault.notes_dir,
+        vault.db_path.parent,
+        vault.logs_dir,
+        runtime.secrets_dir,
     ]:
         directory.mkdir(parents=True, exist_ok=True)
 
-def note_path_for(file_hash: str, storage_id: str) -> Path:
+def note_path_for(file_hash: str, storage_id: str, ctx: WorkspaceContext | None = None) -> Path:
 
     storage_id = require_storage_id(storage_id)
-    return NOTES_DIR / storage_shard_for_hash(file_hash) / f"{storage_id}.md"
+    return _ctx(ctx).active_vault.notes_dir / storage_shard_for_hash(file_hash) / f"{storage_id}.md"
 
-def wd_tag_cache_path_for(file_hash: str, storage_id: str) -> Path:
+def wd_tag_cache_path_for(file_hash: str, storage_id: str, ctx: WorkspaceContext | None = None) -> Path:
 
     storage_id = require_storage_id(storage_id)
-    return WD_TAGS_DIR / storage_shard_for_hash(file_hash) / f"{storage_id}.json"
+    return _ctx(ctx).active_vault.wd_tags_dir / storage_shard_for_hash(file_hash) / f"{storage_id}.json"
 
 def validate_config_schema(config: dict):
 
@@ -207,9 +193,9 @@ def validate_config_schema(config: dict):
     if errors:
         raise ValueError("Configuration Error in config.yaml: " + "; ".join(errors))
 
-def load_secrets() -> dict:
+def load_secrets(ctx: WorkspaceContext | None = None) -> dict:
 
-    secrets_path = SECRETS_DIR / ".secrets.yaml"
+    secrets_path = _ctx(ctx).secrets_dir / ".secrets.yaml"
     if not secrets_path.exists():
         return {}
     try:
@@ -219,17 +205,19 @@ def load_secrets() -> dict:
     except Exception:
         return {}
 
-def _default_config() -> dict:
+def _default_config(ctx: WorkspaceContext | None = None) -> dict:
+    runtime = _ctx(ctx)
+    vault = runtime.active_vault
     return {
         'paths': {
-            'secrets': str(SECRETS_DIR),
-            'models': str(MODELS_DIR),
+            'secrets': str(runtime.secrets_dir),
+            'models': str(runtime.models_dir),
         },
-        'active_vault': ACTIVE_VAULT_ID or 'default',
+        'active_vault': vault.id or 'default',
         'vaults': {
-            ACTIVE_VAULT_ID or 'default': {
-                'name': ACTIVE_VAULT_NAME or 'Default',
-                'root': str(ACTIVE_VAULT_ROOT or (CONFIG_ROOT / 'data' / 'vaults' / 'default')),
+            vault.id or 'default': {
+                'name': vault.name or 'Default',
+                'root': str(vault.root or (runtime.root / 'data' / 'vaults' / 'default')),
             }
         },
         'ui': {
@@ -258,14 +246,15 @@ def _default_config() -> dict:
         }
     }
 
-def _secrets_path() -> Path:
-    return SECRETS_DIR / ".secrets.yaml"
+def _secrets_path(ctx: WorkspaceContext | None = None) -> Path:
+    return _ctx(ctx).secrets_dir / ".secrets.yaml"
 
-def _config_mtimes() -> tuple[float | None, float | None]:
-    config_mtime = CONFIG_PATH.stat().st_mtime if CONFIG_PATH.exists() else None
-    secrets_path = _secrets_path()
+def _config_mtimes(ctx: WorkspaceContext | None = None) -> tuple[Path, Path, float | None, float | None]:
+    runtime = _ctx(ctx)
+    config_mtime = runtime.config_path.stat().st_mtime if runtime.config_path.exists() else None
+    secrets_path = _secrets_path(runtime)
     secrets_mtime = secrets_path.stat().st_mtime if secrets_path.exists() else None
-    return config_mtime, secrets_mtime
+    return runtime.config_path, secrets_path, config_mtime, secrets_mtime
 
 def invalidate_config_cache():
     global _CONFIG_CACHE_DATA, _CONFIG_CACHE_MTIMES
@@ -273,30 +262,32 @@ def invalidate_config_cache():
         _CONFIG_CACHE_DATA = None
         _CONFIG_CACHE_MTIMES = None
 
-def _load_config_uncached() -> dict:
+def _load_config_uncached(ctx: WorkspaceContext | None = None) -> dict:
+    runtime = _ctx(ctx)
     try:
-        with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
+        with open(runtime.config_path, 'r', encoding='utf-8') as f:
             config = yaml.safe_load(f)
             validate_config_schema(config)
 
-            secrets = load_secrets()
+            secrets = load_secrets(runtime)
             if secrets:
                 if 'external_tools' not in config:
                     config['external_tools'] = {}
                 config['external_tools'].update(secrets)
             return config
     except FileNotFoundError:
-        return _default_config()
+        return _default_config(runtime)
 
-def get_config() -> dict:
+def get_config(ctx: WorkspaceContext | None = None) -> dict:
     global _CONFIG_CACHE_DATA, _CONFIG_CACHE_MTIMES
-    mtimes = _config_mtimes()
+    runtime = _ctx(ctx)
+    mtimes = _config_mtimes(runtime)
     with _CONFIG_CACHE_LOCK:
         if _CONFIG_CACHE_DATA is not None and _CONFIG_CACHE_MTIMES == mtimes:
             return copy.deepcopy(_CONFIG_CACHE_DATA)
 
-    config = _load_config_uncached()
-    refreshed_mtimes = _config_mtimes()
+    config = _load_config_uncached() if ctx is None else _load_config_uncached(runtime)
+    refreshed_mtimes = _config_mtimes(runtime)
     with _CONFIG_CACHE_LOCK:
         _CONFIG_CACHE_DATA = config
         _CONFIG_CACHE_MTIMES = refreshed_mtimes

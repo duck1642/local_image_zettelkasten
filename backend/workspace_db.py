@@ -7,16 +7,22 @@ import yaml
 from artists import is_placeholder_artist, normalize_artist_name
 from platforms import _seed_known_aliases, _upsert_platform, normalize_platform_key
 from utils import CONFIG_PATH, CONFIG_ROOT, utc_now_str
+from runtime_context import WorkspaceContext, get_runtime_context
 
 
 WORKSPACE_DB_PATH = CONFIG_ROOT / "data" / "workspace.db"
-_WORKSPACE_SCHEMA_READY = False
+_WORKSPACE_SCHEMA_READY_PATHS: set[Path] = set()
 _WORKSPACE_SCHEMA_LOCK = threading.Lock()
 
 
-def _workspace_vault_db_paths() -> list[Path]:
+def _ctx(ctx: WorkspaceContext | None = None) -> WorkspaceContext:
+    return ctx or get_runtime_context()
+
+
+def _workspace_vault_db_paths(ctx: WorkspaceContext | None = None) -> list[Path]:
+    runtime = _ctx(ctx)
     try:
-        config = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8")) or {}
+        config = yaml.safe_load(runtime.config_path.read_text(encoding="utf-8")) or {}
     except OSError:
         config = {}
     vaults = config.get("vaults") if isinstance(config.get("vaults"), dict) else {}
@@ -28,7 +34,7 @@ def _workspace_vault_db_paths() -> list[Path]:
         if not root_value:
             continue
         root = Path(root_value)
-        root = root if root.is_absolute() else CONFIG_ROOT / root
+        root = root if root.is_absolute() else runtime.root / root
         db_path = root / "db" / "lmz_main.db"
         if db_path.exists():
             paths.append(db_path.resolve())
@@ -143,12 +149,12 @@ def upsert_wd_dictionary_tags(conn: sqlite3.Connection, tags: list[tuple[str, st
     )
 
 
-def backfill_workspace_metadata(conn: sqlite3.Connection):
+def backfill_workspace_metadata(conn: sqlite3.Connection, ctx: WorkspaceContext | None = None):
     ensure_workspace_schema(conn)
     now = utc_now_str()
     _upsert_platform(conn, "Local")
     _seed_known_aliases(conn)
-    for db_path in _workspace_vault_db_paths():
+    for db_path in _workspace_vault_db_paths(ctx):
         try:
             vault_conn = sqlite3.connect(db_path)
         except sqlite3.Error:
@@ -196,11 +202,11 @@ def backfill_workspace_metadata(conn: sqlite3.Connection):
             vault_conn.close()
 
 
-def rebuild_workspace_metadata() -> dict:
-    conn = connect_workspace_database()
+def rebuild_workspace_metadata(ctx: WorkspaceContext | None = None) -> dict:
+    conn = connect_workspace_database(ctx)
     try:
         before = _workspace_counts(conn)
-        backfill_workspace_metadata(conn)
+        backfill_workspace_metadata(conn, ctx)
         conn.commit()
         after = _workspace_counts(conn)
         return {"status": "success", "before": before, "after": after}
@@ -208,9 +214,9 @@ def rebuild_workspace_metadata() -> dict:
         conn.close()
 
 
-def _workspace_usage() -> dict[str, set[str]]:
+def _workspace_usage(ctx: WorkspaceContext | None = None) -> dict[str, set[str]]:
     usage = {"artists": set(), "platforms": set(), "wd_tags": set()}
-    for db_path in _workspace_vault_db_paths():
+    for db_path in _workspace_vault_db_paths(ctx):
         try:
             vault_conn = sqlite3.connect(db_path)
         except sqlite3.Error:
@@ -256,10 +262,10 @@ def _workspace_counts(conn: sqlite3.Connection) -> dict:
     }
 
 
-def prune_unused_workspace_metadata() -> dict:
-    conn = connect_workspace_database()
+def prune_unused_workspace_metadata(ctx: WorkspaceContext | None = None) -> dict:
+    conn = connect_workspace_database(ctx)
     try:
-        usage = _workspace_usage()
+        usage = _workspace_usage(ctx)
         before = _workspace_counts(conn)
 
         conn.execute(
@@ -322,27 +328,27 @@ def prune_unused_workspace_metadata() -> dict:
         conn.close()
 
 
-def init_workspace_database(db_path: Path | None = None):
-    global _WORKSPACE_SCHEMA_READY
-    target_path = Path(db_path or WORKSPACE_DB_PATH)
+def init_workspace_database(db_path: Path | None = None, ctx: WorkspaceContext | None = None):
+    runtime = _ctx(ctx)
+    target_path = Path(db_path or runtime.workspace_db_path).resolve()
     target_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(target_path, timeout=5)
     conn.execute("PRAGMA journal_mode=WAL;")
     conn.execute("PRAGMA foreign_keys = ON;")
     ensure_workspace_schema(conn)
-    backfill_workspace_metadata(conn)
+    backfill_workspace_metadata(conn, runtime)
     conn.commit()
-    if target_path.resolve() == WORKSPACE_DB_PATH.resolve():
-        _WORKSPACE_SCHEMA_READY = True
+    _WORKSPACE_SCHEMA_READY_PATHS.add(target_path)
     return conn
 
 
-def connect_workspace_database():
-    if not _WORKSPACE_SCHEMA_READY or not WORKSPACE_DB_PATH.exists():
+def connect_workspace_database(ctx: WorkspaceContext | None = None):
+    target_path = _ctx(ctx).workspace_db_path.resolve()
+    if target_path not in _WORKSPACE_SCHEMA_READY_PATHS or not target_path.exists():
         with _WORKSPACE_SCHEMA_LOCK:
-            if not _WORKSPACE_SCHEMA_READY or not WORKSPACE_DB_PATH.exists():
-                return init_workspace_database()
-    conn = sqlite3.connect(WORKSPACE_DB_PATH, timeout=5)
+            if target_path not in _WORKSPACE_SCHEMA_READY_PATHS or not target_path.exists():
+                return init_workspace_database(target_path, ctx)
+    conn = sqlite3.connect(target_path, timeout=5)
     conn.execute("PRAGMA journal_mode=WAL;")
     conn.execute("PRAGMA foreign_keys = ON;")
     return conn

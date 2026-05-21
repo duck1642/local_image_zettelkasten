@@ -36,7 +36,7 @@ def fresh_backend(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *module_names
     if str(BACKEND) not in sys.path:
         sys.path.insert(0, str(BACKEND))
     for name in list(sys.modules):
-        if name in {"utils", "web_api", "queue_service", "md_generator", "metadata_index", "processor", "external_ingestion", "thumbnails", "fingerprint", "artists", "platforms", "review_cache", "topics", "vaults", "workspace_db"} or name.startswith(("logger", "db.", "tagging", "downloaders")):
+        if name in {"utils", "runtime_context", "web_api", "queue_service", "md_generator", "metadata_index", "processor", "external_ingestion", "thumbnails", "fingerprint", "artists", "platforms", "review_cache", "topics", "vaults", "workspace_db"} or name.startswith(("logger", "db.", "tagging", "downloaders")):
             del sys.modules[name]
     return [importlib.import_module(name) for name in module_names]
 
@@ -86,9 +86,16 @@ def write_compact_note(utils, conn, item_hash: str, text: str):
 
 
 def test_config_override_resolves_paths_inside_mock_vault(monkeypatch, tmp_path):
-    (utils,) = fresh_backend(monkeypatch, tmp_path, "utils")
+    utils, runtime_context = fresh_backend(monkeypatch, tmp_path, "utils", "runtime_context")
+    ctx = runtime_context.get_runtime_context()
 
     assert utils.CONFIG_PATH == tmp_path / "mock-vault" / "config.yaml"
+    assert ctx.config_path == utils.CONFIG_PATH
+    assert ctx.root == utils.CONFIG_ROOT
+    assert ctx.active_vault.id == utils.ACTIVE_VAULT_ID
+    assert ctx.active_vault.root == utils.ACTIVE_VAULT_ROOT
+    assert ctx.active_vault.db_path == utils.DB_PATH
+    assert ctx.topics_dir == utils.TOPICS_DIR
     assert utils.VAULT_DIR == tmp_path / "mock-vault" / "data" / "vaults" / "default" / "vault"
     assert utils.DB_PATH == tmp_path / "mock-vault" / "data" / "vaults" / "default" / "db" / "lmz_main.db"
     assert utils.LOCAL_INGEST_DIR == tmp_path / "mock-vault" / "data" / "vaults" / "default" / "local_ingest"
@@ -99,11 +106,59 @@ def test_config_override_resolves_paths_inside_mock_vault(monkeypatch, tmp_path)
     assert str(ROOT / "data") not in str(utils.VAULT_DIR)
 
 
+def test_injected_runtime_context_paths_and_databases(monkeypatch, tmp_path):
+    utils, runtime_context, sqlite_operator, workspace_db = fresh_backend(
+        monkeypatch,
+        tmp_path,
+        "utils",
+        "runtime_context",
+        "db.sqlite_operator",
+        "workspace_db",
+    )
+    work = tmp_path / "mock-vault"
+    injected_root = tmp_path / "injected-workspace"
+    injected_root.mkdir()
+    config = yaml.safe_load((work / "config.yaml").read_text(encoding="utf-8"))
+    config["active_vault"] = "alt"
+    config["vaults"] = {
+        "alt": {
+            "name": "Alt",
+            "root": "data/vaults/alt",
+        }
+    }
+    injected_config = injected_root / "config.yaml"
+    injected_config.write_text(yaml.safe_dump(config, sort_keys=False, allow_unicode=True), encoding="utf-8")
+    injected_ctx = runtime_context.build_runtime_context(injected_config)
+
+    assert injected_ctx.config_path == injected_config
+    assert injected_ctx.root == injected_root
+    assert injected_ctx.active_vault.id == "alt"
+    assert injected_ctx.active_vault.db_path == injected_root / "data" / "vaults" / "alt" / "db" / "lmz_main.db"
+    assert utils.DB_PATH == work / "data" / "vaults" / "default" / "db" / "lmz_main.db"
+    assert utils.note_path_for("ab" * 32, "000000000001", ctx=injected_ctx) == injected_root / "data" / "vaults" / "alt" / "vault" / "notes" / "ab" / "000000000001.md"
+    assert utils.note_path_for("ab" * 32, "000000000001") == work / "data" / "vaults" / "default" / "vault" / "notes" / "ab" / "000000000001.md"
+
+    vault_conn = sqlite_operator.init_database(ctx=injected_ctx)
+    try:
+        assert vault_conn.execute("SELECT COUNT(*) FROM items").fetchone()[0] == 0
+    finally:
+        vault_conn.close()
+    assert injected_ctx.active_vault.db_path.exists()
+    assert utils.DB_PATH.resolve() != injected_ctx.active_vault.db_path.resolve()
+
+    ws_conn = workspace_db.connect_workspace_database(injected_ctx)
+    try:
+        assert ws_conn.execute("SELECT COUNT(*) FROM platforms").fetchone()[0] >= 1
+    finally:
+        ws_conn.close()
+    assert injected_ctx.workspace_db_path.exists()
+
+
 def test_workspace_registry_resolves_active_and_env_override(monkeypatch, tmp_path):
     monkeypatch.delenv("LMZ_CONFIG_PATH", raising=False)
     if str(BACKEND) not in sys.path:
         sys.path.insert(0, str(BACKEND))
-    for name in ["utils", "workspaces"]:
+    for name in ["utils", "runtime_context", "workspaces"]:
         sys.modules.pop(name, None)
     workspaces = importlib.import_module("workspaces")
     registry_path = tmp_path / "workspaces.yaml"
@@ -126,6 +181,7 @@ def test_workspace_registry_resolves_active_and_env_override(monkeypatch, tmp_pa
 
     monkeypatch.setenv("LMZ_CONFIG_PATH", str(FIXTURE / "config.yaml"))
     sys.modules.pop("utils", None)
+    sys.modules.pop("runtime_context", None)
     utils = importlib.import_module("utils")
     assert utils.CONFIG_PATH == FIXTURE / "config.yaml"
 
@@ -154,7 +210,7 @@ def test_obsidian_workspace_setup_creates_lmz_layout_and_resolves_paths(monkeypa
     if str(BACKEND) not in sys.path:
         sys.path.insert(0, str(BACKEND))
     for name in list(sys.modules):
-        if name in {"utils", "db.sqlite_operator", "web_api", "topics", "vaults"} or name.startswith(("logger", "db.", "tagging")):
+        if name in {"utils", "runtime_context", "db.sqlite_operator", "web_api", "topics", "vaults", "metadata_index", "md_generator", "artists", "platforms", "workspace_db", "review_cache"} or name.startswith(("logger", "db.", "tagging")):
             del sys.modules[name]
     utils = importlib.import_module("utils")
     sqlite_operator = importlib.import_module("db.sqlite_operator")

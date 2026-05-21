@@ -24,7 +24,7 @@ def load_generator():
 
 def reset_backend_modules():
     for name in list(sys.modules):
-        if name in {"utils", "web_api", "metadata_index", "md_generator", "thumbnails", "topics", "workspace_db"} or name.startswith(("db.", "logger", "tagging")):
+        if name in {"utils", "runtime_context", "web_api", "metadata_index", "md_generator", "thumbnails", "topics", "workspace_db"} or name.startswith(("db.", "logger", "tagging")):
             del sys.modules[name]
 
 

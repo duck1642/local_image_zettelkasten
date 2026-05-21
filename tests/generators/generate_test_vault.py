@@ -240,7 +240,7 @@ def _config() -> dict:
 
 def _reset_backend_modules():
     for name in list(sys.modules):
-        if name in {"utils", "metadata_index", "md_generator", "thumbnails", "artists", "platforms", "topics"} or name.startswith(("db.", "logger", "tagging")):
+        if name in {"utils", "runtime_context", "metadata_index", "md_generator", "thumbnails", "artists", "platforms", "topics"} or name.startswith(("db.", "logger", "tagging")):
             del sys.modules[name]
 
 

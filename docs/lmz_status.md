@@ -207,6 +207,15 @@ VSCode-friendly test launchers:
 
 ### Phase C - Metadata Workflow Polish / Vault Ops
 
+- Refactor prerequisite sequence:
+  - done: introduce a runtime context layer for workspace/vault paths while preserving legacy import-time constants.
+  - done: make active-vault and workspace DB connection helpers context-aware.
+  - make switch-sensitive services context-aware: search manager, metadata watchdog/repair state, review cache, queues, local ingest state, and logs.
+  - replace fixed static media mounts with dynamic active-vault asset/review routes.
+  - split `backend/web_api.py` into routers and service modules after context boundaries are clear.
+  - extract shared metadata maintenance logic for topic/WD rename, delete, hide/ignore, and merge operations.
+  - add a frontend runtime/session store that can invalidate Vault, Stats, Inspector, Search, Ingestion, Review, and Logs state on vault/workspace switch.
+  - split large frontend Phase C surfaces, especially `StatsView.svelte`, before adding more tag/topic tooling.
 - Tag/topic maintenance:
   - delete topic.
   - rename WD tag.

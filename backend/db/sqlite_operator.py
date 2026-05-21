@@ -5,11 +5,16 @@ from pathlib import Path
 from datetime import datetime
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 from utils import DB_PATH, utc_now_str
+from runtime_context import WorkspaceContext, get_runtime_context
 
-_SCHEMA_READY = False
+_SCHEMA_READY_PATHS: set[Path] = set()
 _SCHEMA_LOCK = threading.Lock()
 STORAGE_ID_WIDTH = 12
 STORAGE_ID_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyz"
+
+
+def _active_db_path(ctx: WorkspaceContext | None = None) -> Path:
+    return (ctx or get_runtime_context()).active_vault.db_path.resolve()
 
 
 def int_to_storage_id(value: int) -> str:
@@ -56,10 +61,8 @@ def normalize_source_url(url: str) -> str:
     query = urlencode(sorted(parse_qsl(parsed.query, keep_blank_values=True)))
     return urlunsplit((scheme, host, path, query, ""))
 
-def init_database(db_path: Path | None = None):
-    global _SCHEMA_READY
-
-    target_path = Path(db_path or DB_PATH)
+def init_database(db_path: Path | None = None, ctx: WorkspaceContext | None = None):
+    target_path = Path(db_path or _active_db_path(ctx)).resolve()
     target_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(target_path, timeout=5)
     cursor = conn.cursor()
@@ -156,17 +159,17 @@ def init_database(db_path: Path | None = None):
     ensure_platform_schema(conn, backfill=False)
 
     conn.commit()
-    if target_path.resolve() == DB_PATH.resolve():
-        _SCHEMA_READY = True
+    _SCHEMA_READY_PATHS.add(target_path)
     return conn
 
 
-def connect_database():
-    if not _SCHEMA_READY or not DB_PATH.exists():
+def connect_database(ctx: WorkspaceContext | None = None):
+    target_path = _active_db_path(ctx)
+    if target_path not in _SCHEMA_READY_PATHS or not target_path.exists():
         with _SCHEMA_LOCK:
-            if not _SCHEMA_READY or not DB_PATH.exists():
-                return init_database()
-    conn = sqlite3.connect(DB_PATH, timeout=5)
+            if target_path not in _SCHEMA_READY_PATHS or not target_path.exists():
+                return init_database(target_path)
+    conn = sqlite3.connect(target_path, timeout=5)
     cursor = conn.cursor()
     cursor.execute('PRAGMA journal_mode=WAL;')
     cursor.execute('PRAGMA foreign_keys = ON;')
@@ -265,9 +268,10 @@ def get_all_video_signatures(conn: sqlite3.Connection) -> list[tuple[str, bytes,
     cursor.execute('SELECT hash, audio_hash, visual_embedding FROM items WHERE audio_hash IS NOT NULL OR visual_embedding IS NOT NULL')
     return cursor.fetchall()
 
-def reset_database():
+def reset_database(ctx: WorkspaceContext | None = None):
 
-    conn = sqlite3.connect(DB_PATH, timeout=5)
+    target_path = _active_db_path(ctx)
+    conn = sqlite3.connect(target_path, timeout=5)
     try:
         cursor = conn.cursor()
         cursor.execute('PRAGMA foreign_keys = ON;')
@@ -292,7 +296,8 @@ def reset_database():
         raise
     finally:
         conn.close()
-    with init_database() as conn:
+    _SCHEMA_READY_PATHS.discard(target_path)
+    with init_database(target_path) as conn:
         conn.commit()
 
 def check_duplicate_url(conn: sqlite3.Connection, url: str) -> bool:
