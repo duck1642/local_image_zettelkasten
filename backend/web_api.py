@@ -1,6 +1,7 @@
 import os
 import sys
 import json
+import sqlite3
 import base64
 import mimetypes
 import asyncio
@@ -10,6 +11,7 @@ import secrets
 import threading
 import copy
 import shutil
+import yaml
 from collections import Counter
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, Query, Request
@@ -28,16 +30,19 @@ from processor import process_file
 from logger import log_auth, log_ingest_audit, log_ingest_local, log_review, log_svelte, log_system, RAW_LOGS_DIR, STRUCTURED_LOGS_DIR
 from md_generator import MANUAL_FRONTMATTER_FIELDS, load_note_frontmatter, load_note_topics, load_note_wd_tags, generate_markdown, normalize_topic_list
 from metadata_index import (
+    ensure_metadata_schema,
     item_core_facet_values,
     indexed_item_metadata,
     metadata_facets,
     metadata_index_ready,
     metadata_index_status,
+    refresh_metadata_index_counters,
     refresh_metadata_facet_counts_for_values,
     safe_reindex_item_metadata,
     start_metadata_repair_worker,
     start_metadata_watchdog,
 )
+from topics import format_topics_for_note, parse_topic_value, parse_topic_values, rename_topic as rename_topic_file, slugify_topic_label
 from tagging import load_tag_cache, tag_media
 from thumbnails import ThumbnailBusyError, get_or_generate_thumbnail
 from utils import (
@@ -590,6 +595,10 @@ class ArtistLinkCreate(BaseModel):
 class ArtistMergeRequest(BaseModel):
     source_artist_ids: list[int]
 
+class TopicRenameRequest(BaseModel):
+    old_label: str
+    new_label: str
+
 @app.get("/api/platforms")
 async def get_platforms(q: str = "", limit: int = 100, scope: str = "all"):
     return await asyncio.to_thread(_get_platforms_sync, q, limit, scope)
@@ -1086,6 +1095,198 @@ def _get_facets_sync(kind: str, q: str = "", limit: int = 100, scope: str = "use
         return {"kind": kind, "items": []}
     finally:
         conn.close()
+
+@app.post("/api/topics/rename")
+async def rename_topic_route(body: TopicRenameRequest):
+    return await asyncio.to_thread(_rename_topic_sync, body.old_label, body.new_label)
+
+def _markdown_frontmatter_bounds(text: str) -> tuple[int, int] | None:
+    stripped = text.lstrip("\ufeff")
+    offset = len(text) - len(stripped)
+    if not stripped.startswith("---"):
+        return None
+    lines = stripped.splitlines(keepends=True)
+    if not lines or lines[0].strip() != "---":
+        return None
+    cursor = offset + len(lines[0])
+    for line in lines[1:]:
+        next_cursor = cursor + len(line)
+        if line.strip() == "---":
+            return offset, next_cursor
+        cursor = next_cursor
+    return None
+
+def _topic_norm(value: str) -> str:
+    return str(value or "").strip().casefold()
+
+def _vault_note_path(vault_root: Path, item_hash: str, storage_id: str) -> Path:
+    return vault_root / "vault" / "notes" / (str(item_hash or "")[:2] or "00") / f"{storage_id}.md"
+
+def _replace_note_topics(note_path: Path, old_slug: str, old_norms: set[str], new_label: str) -> tuple[bool, int, list[str]]:
+    text = note_path.read_text(encoding="utf-8")
+    bounds = _markdown_frontmatter_bounds(text)
+    if bounds is None:
+        frontmatter = {}
+        body = text
+    else:
+        start, end = bounds
+        frontmatter_text = text[start:end].split("---", 2)[1]
+        frontmatter = yaml.safe_load(frontmatter_text) or {}
+        body = text[end:]
+    raw_topics = normalize_topic_list(frontmatter.get("topics"))
+    updated_topics: list[str] = []
+    changed = False
+    legacy_plain_refs = 0
+    old_rel = f"{old_slug}.md".casefold()
+    old_key = f"rel:{old_rel}"
+    for raw in raw_topics:
+        entry = parse_topic_value(raw, note_path)
+        topic_key = str(entry.get("topic_key") or "").casefold()
+        topic_rel = str(entry.get("topic_rel") or "").casefold()
+        label_norm = _topic_norm(entry.get("label") or "")
+        raw_norm = _topic_norm(raw)
+        linked_match = topic_key == old_key or topic_rel == old_rel
+        plain_match = topic_key.startswith("plain:") and (label_norm in old_norms or raw_norm in old_norms)
+        if linked_match or plain_match:
+            updated_topics.append(new_label)
+            changed = True
+            if plain_match and not linked_match:
+                legacy_plain_refs += 1
+        else:
+            updated_topics.append(raw)
+    if not changed:
+        return False, 0, raw_topics
+    formatted_topics = format_topics_for_note(updated_topics, note_path)
+    frontmatter["topics"] = formatted_topics
+    fm_text = yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=True)
+    note_path.write_text(f"---\n{fm_text}---\n{body}", encoding="utf-8")
+    return True, legacy_plain_refs, formatted_topics
+
+def _refresh_item_topic_rows(conn: sqlite3.Connection, item_hash: str, storage_id: str, note_path: Path, formatted_topics: list[str]):
+    ensure_metadata_schema(conn)
+    entries = parse_topic_values(formatted_topics, note_path)
+    conn.execute("DELETE FROM item_topics WHERE item_hash = ?", (item_hash,))
+    conn.executemany(
+        "INSERT OR IGNORE INTO item_topics(item_hash, topic, topic_norm, topic_rel, topic_key) VALUES (?, ?, ?, ?, ?)",
+        [
+            (
+                item_hash,
+                entry["label"],
+                _topic_norm(entry["label"]),
+                entry["topic_rel"],
+                entry["topic_key"],
+            )
+            for entry in entries
+            if entry.get("label")
+        ],
+    )
+    try:
+        stat = note_path.stat()
+        conn.execute(
+            """
+            INSERT INTO item_metadata_files(
+                item_hash, storage_id, note_path, note_mtime_ns, note_size,
+                wd_path, wd_mtime_ns, wd_size, indexed_at, status, error
+            )
+            VALUES (?, ?, ?, ?, ?, '', NULL, NULL, ?, 'ok', '')
+            ON CONFLICT(item_hash) DO UPDATE SET
+                storage_id = excluded.storage_id,
+                note_path = excluded.note_path,
+                note_mtime_ns = excluded.note_mtime_ns,
+                note_size = excluded.note_size,
+                indexed_at = excluded.indexed_at,
+                status = 'ok',
+                error = ''
+            """,
+            (item_hash, storage_id, str(note_path), int(stat.st_mtime_ns), int(stat.st_size), utc_now_str()),
+        )
+    except OSError:
+        pass
+
+def _rename_topic_sync(old_label: str, new_label: str):
+    old_slug = slugify_topic_label(old_label)
+    new_slug = slugify_topic_label(new_label)
+    old_norms = {_topic_norm(old_label), _topic_norm(old_slug)}
+    new_norm = _topic_norm(new_slug)
+    try:
+        rename_result = rename_topic_file(old_label, new_label)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except FileExistsError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    from vaults import vault_list
+
+    old_rel = f"{old_slug}.md"
+    old_key = f"rel:{old_rel}".casefold()
+    old_topic_norms = sorted(norm for norm in old_norms if norm)
+    notes_rewritten = 0
+    legacy_plain_refs_rewritten = 0
+    vaults_touched: list[str] = []
+    errors: list[dict] = []
+
+    for vault in vault_list():
+        db_path = Path(vault["db_path"])
+        vault_root = Path(vault["root"])
+        if not db_path.exists():
+            continue
+        conn = init_database(db_path)
+        try:
+            ensure_metadata_schema(conn)
+            placeholders = ",".join("?" for _ in old_topic_norms)
+            rows = conn.execute(
+                f"""
+                SELECT DISTINCT items.hash, items.storage_id
+                FROM item_topics
+                JOIN items ON items.hash = item_topics.item_hash
+                WHERE item_topics.topic_key = ?
+                   OR item_topics.topic_rel = ?
+                   OR item_topics.topic_norm IN ({placeholders})
+                """,
+                (old_key, old_rel, *old_topic_norms),
+            ).fetchall()
+            touched_this_vault = False
+            for item_hash, storage_id in rows:
+                if not storage_id:
+                    continue
+                note_path = _vault_note_path(vault_root, item_hash, storage_id)
+                if not note_path.exists():
+                    errors.append({"vault": vault["id"], "hash": item_hash, "error": "note missing"})
+                    continue
+                try:
+                    changed, legacy_count, formatted_topics = _replace_note_topics(note_path, old_slug, old_norms, new_label)
+                    if not changed:
+                        continue
+                    _refresh_item_topic_rows(conn, item_hash, storage_id, note_path, formatted_topics)
+                    notes_rewritten += 1
+                    legacy_plain_refs_rewritten += legacy_count
+                    touched_this_vault = True
+                except Exception as exc:
+                    errors.append({"vault": vault["id"], "hash": item_hash, "error": str(exc)})
+            if touched_this_vault:
+                refresh_metadata_facet_counts_for_values(conn, {("topic", norm) for norm in old_norms | {new_norm}})
+                refresh_metadata_index_counters(conn)
+                vaults_touched.append(vault["id"])
+            conn.commit()
+        except sqlite3.Error as exc:
+            conn.rollback()
+            errors.append({"vault": vault["id"], "error": str(exc)})
+        finally:
+            conn.close()
+
+    return {
+        "status": "partial" if errors else "success",
+        "old_label": str(old_label or "").strip(),
+        "new_label": str(new_label or "").strip(),
+        "old_path": str(rename_result["old_path"]),
+        "new_path": str(rename_result["new_path"]),
+        "vaults_touched": vaults_touched,
+        "notes_rewritten": notes_rewritten,
+        "legacy_plain_refs_rewritten": legacy_plain_refs_rewritten,
+        "errors": errors,
+    }
 
 @app.get("/api/thumbnails/{item_hash}")
 async def get_thumbnail(item_hash: str):

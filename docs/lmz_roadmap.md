@@ -174,6 +174,7 @@ Build a practical desktop interface for vault management, add local AI tagging, 
 
 - Replaced the broken Flet/PySide direction with a Tauri + Svelte desktop UI backed by FastAPI.
 - Removed old PySide UI code, `gui.py`, PySide dependencies.
+- Renamed the Python source root from `src/` to `backend/`.
 - Added a Svelte vault with virtualized masonry/grid layouts, grouped source URL tiles, infinite loading, and command-driven media/sort filters.
 - Added a Svelte inspector for metadata editing, source URL group navigation, copy/delete/open actions, and clickable WD suggestions.
 - Added toggleable and resizable inspector behavior.
@@ -182,15 +183,18 @@ Build a practical desktop interface for vault management, add local AI tagging, 
 - Added wide/fullscreen grouped-media filmstrip core logic.
 - Added markdown queue ingestion workbench with Normal/Force/Failed queues, save/open/retry/clear actions, live URL counts, and ingestion locking.
 - Added Svelte Review, Settings, and Logs views.
-- Added a read-only Stats view for WD tag, artist, platform, and topic counts.
+- Added Stats view for WD tag, artist, platform, and topic counts.
+- Added Stats topic/WD multi-select handoff into Vault search.
+- Added artist editing, alias/link management, and merge workflow in Stats.
 - Split logs into raw terminal output and structured JSONL streams.
 - Added readable and raw log display modes in the UI.
 - Added a reusable local WD tagging service with local model storage under `data/models/`.
-- Added detailed WD tag cache, now stored under compact `data/wd-tags/{hash[:2]}/{storage_id}.json` paths.
+- Added detailed WD tag cache, now stored under active-vault compact `wd-tags/{hash[:2]}/{storage_id}.json` paths.
 - Added distilled WD fields to markdown frontmatter.
 - Added image and video WD tagging; videos use sampled frame tagging and merged suggestions.
 - Kept manual topics separate from WD tags.
 - Added a disposable SQLite metadata index for topic/WD queries while keeping markdown/YAML as source of truth.
+- Added precomputed metadata facet counts for topic/WD/artist/platform counters and suggestions.
 - Added compact `storage_id` runtime storage paths while preserving SHA256 hashes as public/API identity.
 - Added a metadata index rebuild maintenance tool for status, stale repair, and full persistent metadata rebuilds.
 - Hardened local API mutating endpoints with a local session key and allowlisted origins.
@@ -201,7 +205,6 @@ Build a practical desktop interface for vault management, add local AI tagging, 
 - Replaced unsafe `INSERT OR REPLACE` DB writes.
 - Added indexed `source_url_norm` duplicate checks.
 - Shared gallery-dl/yt-dlp valid media filtering.
-- Renamed the Python source root from `src/` to `backend/`.
 - Centralized frontend API, asset, and SSE URL construction.
 - Fixed command-triggered layout saves to use authenticated API requests.
 - Added shared infinite-scroll loading for masonry and grid vault layouts.
@@ -212,17 +215,19 @@ Build a practical desktop interface for vault management, add local AI tagging, 
 - Added a PyInstaller sidecar build path for production Tauri packaging.
 - Replaced sidecar startup panics with logged errors.
 - Added a practical Tauri CSP for local backend/media access.
+- Added Settings maintenance actions for auth scan, metadata rebuild, review cleanup, workspace metadata rebuild, and workspace metadata prune.
+- Added config cache with mtime invalidation after Settings writes.
+- Added log stream heartbeats, truncate/rotation handling, tail-on-connect, and bounded frontend reconnects.
+- Added native drag-and-drop preflight into Local Ingestion.
+- Added review workflow hardening for keep/variant/replace/delete/cleanup and restart-safe pending sidecars.
+- Added mock-vault and generated-vault Playwright/backend validation harnesses.
 
 ### Still In Progress / Needs Refinement
 
-- Virtual masonry/grid renderers need continued real-vault validation for long-scroll stability, video unmounting, grouped-media state, and zoom behavior.
-- Inspector resize works, but separator/handle alignment still needs polish.
-- Fullscreen zoom/pan works at core level, but interaction details still need refinement.
-- Wide/fullscreen filmstrip works at core level, but sizing, animation, and thumbnail ergonomics still need refinement.
-- RAM tracker works, but footer formatting and polling behavior still need refinement.
+- Virtual masonry/grid renderers passed generated-vault and headed Tauri performance runs, but still need continued real-vault validation.
+- Fullscreen zoom/pan and wide/fullscreen filmstrip work, but can still use UI polish.
 - GIFs ingest and preserve originals, but vault/inspector previews are still static first-frame thumbnails and tagging/dedupe inspect only the first frame.
 - Search/index hydration still bulk-loads runtime signatures into RAM.
-- `get_config()` still reparses YAML often; caching needs explicit invalidation.
 - Video frame sampling now uses one ffmpeg subprocess per sampled batch; embedding/tagging still depends on sampled original frames.
 - YouTube community posts still fail/retry if one expected image fails.
 - Existing `source_url_norm` values are backfilled lazily on DB init, not through a standalone migration tool.
@@ -230,26 +235,41 @@ Build a practical desktop interface for vault management, add local AI tagging, 
 
 ---
 
-## Phase 9 — UI Refinement, Search Scaling, Config Cache, and Runtime Cleanup
+## Phase 9 — Stability, Performance Harnesses, and Knowledge Metadata
 
 ### Task
 
-Finish the active Tauri/Svelte vault experience, validate the virtual renderer path, scale search/facet handling, and remove the remaining deferred runtime debt.
+Stabilize the Tauri/Svelte app at large-vault scale, add repeatable generated-vault/performance validation, and build the workspace metadata foundation for artists, platforms, topics, and WD tag dictionaries.
 
-### Planned
+### Completed So Far
 
-- Polish inspector resize UI, especially the separator/resize-handle alignment.
-- Refine fullscreen zoom/pan and grouped-media filmstrip behavior.
-- Decide whether GIFs should remain static in vault tiles or get animation-aware preview/tagging behavior.
-- Validate virtual masonry/grid against large real vault sessions.
-- Add a faster topic/WD facet cache for Stats and dropdown suggestions.
-- Add context-aware search suggestions after reviewing similar programs.
-- Add deliberate config caching with safe invalidation when Settings writes `config.yaml`.
-- Add a proper source URL normalization maintenance tool for existing databases.
-- Reduce search hydration memory pressure with batching or a persistent index strategy.
-- Further optimize video embedding/tagging around sampled frame reuse.
-- Decide and implement a video hover preview strategy: file-size cap, backend preview clip endpoint, or animated thumbnail.
-- Validate compact storage paths and metadata rebuild behavior on the real vault.
+- Added deterministic generated-vault generator under `tests/generators/`.
+- Added generated configs, DB rows, notes, assets, thumbnails, review fixtures, logs, and manifests isolated under ignored `tests/generated/`.
+- Added generated-scale Playwright tests for layout switching, filtering, grouped media, mixed image/video handling, cursor pagination, and overlap checks.
+- Added headed Tauri WebView performance harness and split perf commands under `tests/perf/`.
+- Added RAM tracking to perf runs.
+- Validated generated vaults at `800`, `10k`, and `50k`; `100k` remains deferred until needed.
+- Added realistic WD tag generation and validation for generated vaults.
+- Added cached metadata counters, dirty queue, and bulk full metadata rebuild path.
+- Added precomputed facet counts for topic, WD, artist, and platform interactive counters.
+- Added stage timing and fast default maintenance rebuild behavior.
+- Added artist/platform exact-first filtering and indexed paging support.
+- Added workspace DB `data/workspace.db` for shared artist, platform, and WD tag dictionaries.
+- Added shared topic library under `data/topics/`.
+- Added topic file creation/reuse, relative topic links in notes, and legacy plain topic parsing.
+- Added workspace chooser, Obsidian workspace setup, and restart-based workspace selection.
+- Added multiple vault support under `data/vaults/<vault_id>/`.
+- Added per-workspace shared metadata with active-vault usage counts.
+- Added topic rename from Stats Topics, backed by `POST /api/topics/rename`, rewriting linked/plain refs across all registered vaults.
+
+### Still Deferred
+
+- Topic delete, WD tag rename/delete, and optional tag/topic merge.
+- Live workspace/vault switching without restart.
+- Cleanup old compatibility paths after more real-vault use.
+- Proper source URL normalization maintenance tool.
+- Reduce RAM search hydration pressure with batching or persistent indexes if needed.
+- Decide video hover preview strategy.
 - Validate production Tauri sidecar packaging on a clean machine.
 
 ---

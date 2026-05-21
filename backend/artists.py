@@ -220,6 +220,8 @@ def list_artists(conn: sqlite3.Connection, q: str = "", limit: int = 100, used_o
                OR artists.id IN (SELECT artist_id FROM artist_aliases WHERE alias_norm LIKE ?)
         """
         params.extend([f"%{needle}%", f"%{needle}%"])
+    query_limit = "" if used_only else "LIMIT ?"
+    query_params = tuple(params) if used_only else (*params, limit)
     rows = conn.execute(
         f"""
         SELECT
@@ -232,9 +234,9 @@ def list_artists(conn: sqlite3.Connection, q: str = "", limit: int = 100, used_o
         FROM artists
         {where}
         ORDER BY artists.name COLLATE NOCASE ASC
-        LIMIT ?
+        {query_limit}
         """,
-        (*params, limit),
+        query_params,
     ).fetchall()
     counts = _active_artist_counts(item_conn or conn, conn, rows)
     items = [

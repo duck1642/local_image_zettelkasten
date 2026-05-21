@@ -21,6 +21,29 @@ def topic_file_path_for_label(label: str) -> Path:
     return TOPICS_DIR / f"{slugify_topic_label(label)}.md"
 
 
+def rename_topic(old_label: str, new_label: str) -> dict:
+    clean_old = str(old_label or "").strip()
+    clean_new = str(new_label or "").strip()
+    if not clean_old:
+        raise ValueError("old topic label is required")
+    if not clean_new:
+        raise ValueError("new topic label is required")
+    old_path = topic_file_path_for_label(old_label).resolve()
+    new_path = topic_file_path_for_label(new_label).resolve()
+    topics_root = TOPICS_DIR.resolve()
+    if old_path.parent != topics_root or new_path.parent != topics_root:
+        raise ValueError("topic path must stay inside topic root")
+    if not old_path.exists():
+        raise FileNotFoundError(f"topic not found: {old_path.name}")
+    if old_path == new_path:
+        return {"old_path": old_path, "new_path": new_path, "renamed": False}
+    if new_path.exists():
+        raise FileExistsError(f"topic already exists: {new_path.name}")
+    new_path.parent.mkdir(parents=True, exist_ok=True)
+    old_path.rename(new_path)
+    return {"old_path": old_path, "new_path": new_path, "renamed": True}
+
+
 def _frontmatter_bounds(text: str) -> tuple[int, int] | None:
     stripped = text.lstrip("\ufeff")
     offset = len(text) - len(stripped)

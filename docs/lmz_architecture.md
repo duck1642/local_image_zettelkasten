@@ -6,7 +6,7 @@ Local Media Zettelkasten (LMZ) is a local media archive and zettelkasten system 
 
 It ingests local files and external URLs, validates media, stores original assets under compact storage IDs while keeping SHA256 as item identity, indexes runtime metadata in SQLite, generates Obsidian-compatible markdown notes, keeps local WD tag reports in sharded JSON cache files, and exposes a Tauri/Svelte desktop UI through a local FastAPI backend.
 
-Runtime state stays outside source code under root-level `data/`, `logs/`, and `secrets/`.
+Runtime state stays outside source code under a workspace root. Default mode uses the repo root as the workspace. Obsidian mode uses `<ObsidianVault>/lmz/` as the workspace.
 
 ## Product Domains
 
@@ -30,9 +30,10 @@ LMZ
 
 The archive truth layer.
 
-- Asset storage under `data/vault/assets/`.
-- Markdown note generation under `data/vault/notes/`.
+- Per-vault asset storage under `data/vaults/<vault_id>/vault/assets/`.
+- Per-vault markdown note generation under `data/vaults/<vault_id>/vault/notes/`.
 - SQLite item rows and compact `storage_id` ownership.
+- Workspace/vault registry and restart-based selection.
 - Item update/delete behavior.
 - Metadata ownership rules between SQLite, Markdown/YAML, and WD JSON caches.
 - Backup, migration, import/export, and vault health concerns.
@@ -68,6 +69,8 @@ The knowledge layer built on top of stored media.
 - Manual topics.
 - WD rating, character tags, and general WD tags.
 - Tag counts and facet data.
+- Shared workspace metadata dictionaries.
+- Shared topic note library under `data/topics/`.
 - Tag maintenance: rename, delete, hide/ignore, merge.
 - Promote WD tag to manual topic.
 - Artist database, aliases, platform handles, source links, and artist counts.
@@ -120,7 +123,7 @@ How the app starts, runs, and ships.
 - Tauri sidecar lifecycle.
 - API key and local-only CORS/origin behavior.
 - Config and secrets paths.
-- Multiple vault selection/switching.
+- Workspace registry and restart-based workspace/vault switching.
 - Production sidecar and Tauri packaging.
 - Port binding and runtime coordination.
 
@@ -155,7 +158,9 @@ local_media_zettelkasten/
   README.md
   config/
     config.yaml
+    workspaces.example.yaml
   backend/
+    artists.py
     core.py
     web_api.py
     external_ingestion.py
@@ -163,11 +168,17 @@ local_media_zettelkasten/
     ingest_control.py
     md_generator.py
     metadata_index.py
+    platforms.py
     processor.py
     queue_service.py
+    review_cache.py
     thumbnails.py
+    topics.py
     utils.py
     validators.py
+    vaults.py
+    workspaces.py
+    workspace_db.py
     db/
     downloaders/
     logs/
@@ -212,23 +223,28 @@ local_media_zettelkasten/
       mock-vault/
     *.bat
   data/
-    input/
-    local_ingest/
-    online_ingest/
-    review/
-    queues/
-    batches/
-    vault/
-      assets/
-      notes/
-    db/
+    workspace.db
+    topics/
+    vaults/
+      default/
+        input/
+        local_ingest/
+        online_ingest/
+        review/
+        queues/
+        batches/
+        vault/
+          assets/
+          notes/
+        db/
+          lmz_main.db
+        wd-tags/
+        ui_cache/
+          thumbnails/
+        logs/
+          raw/
+          structured/
     models/
-    wd-tags/
-    ui_cache/
-      thumbnails/
-  logs/
-    raw/
-    structured/
   secrets/
   backups/
   docs/
@@ -236,9 +252,11 @@ local_media_zettelkasten/
 
 ## Entry Points
 
+- `start-lmz.bat` prompts for a registered workspace before startup.
 - `python dev.py` launches the development stack.
 - `python main.py` runs CLI ingestion.
 - `lmz` runs the installed CLI entry point.
+- `LMZ_CONFIG_PATH=<workspace>/config.yaml` overrides the workspace registry.
 - `cd frontend; npm run build:sidecar` builds the production Tauri sidecar.
 - `cd frontend; npm run tauri build` builds the desktop app after the sidecar exists.
 
@@ -269,21 +287,63 @@ backend/processor.py
         +--> optional local WD tagging
         |
         v
-data/vault/assets + data/vault/notes + data/db/lmz_main.db + data/wd-tags
+workspace data/topics + active vault assets/notes/db/wd-tags
 ```
 
 FastAPI startup hydrates the RAM search indexes from SQLite so UI-driven local ingest and review flows have the same duplicate-search baseline as CLI ingestion.
 
 ## Storage Model
 
+### Workspaces And Vaults
+
+LMZ has one active workspace and one active vault at runtime.
+
+```text
+<workspace>/
+  config.yaml
+  data/
+    workspace.db
+    topics/
+    vaults/<vault_id>/
+      vault/assets/
+      vault/notes/
+      db/lmz_main.db
+      review/
+      wd-tags/
+      ui_cache/thumbnails/
+      logs/
+      queues/
+      batches/
+      input/
+      local_ingest/
+      online_ingest/
+```
+
+Workspace-level data:
+
+- `data/workspace.db`: shared artist, platform, and WD tag dictionaries.
+- `data/topics/`: shared topic markdown files.
+
+Vault-level data:
+
+- `db/lmz_main.db`: item rows and active-vault usage/index tables.
+- `vault/assets/`, `vault/notes/`: original media and item notes.
+- `review/`, `wd-tags/`, thumbnails, logs, queues, and ingest staging.
+
+The workspace registry lives at `config/workspaces.yaml` locally and is not intended for git because it may contain absolute paths. `config/workspaces.example.yaml` is the committed template. Runtime switching is restart-based; no live workspace/vault switching is expected yet.
+
+Obsidian mode is the same layout under `<ObsidianVault>/lmz/`.
+
+### Item Storage
+
 Items are identified by SHA256 `hash`; physical filenames use the DB-owned compact `storage_id`.
 
 ```text
-data/vault/assets/{hash[:2]}/{storage_id}.{ext}
-data/vault/notes/{hash[:2]}/{storage_id}.md
-data/wd-tags/{hash[:2]}/{storage_id}.json
-data/ui_cache/thumbnails/{hash[:2]}/{storage_id}.jpg
-data/ui_cache/thumbnails/{hash[:2]}/{storage_id}_video.jpg
+data/vaults/<vault_id>/vault/assets/{hash[:2]}/{storage_id}.{ext}
+data/vaults/<vault_id>/vault/notes/{hash[:2]}/{storage_id}.md
+data/vaults/<vault_id>/wd-tags/{hash[:2]}/{storage_id}.json
+data/vaults/<vault_id>/ui_cache/thumbnails/{hash[:2]}/{storage_id}.jpg
+data/vaults/<vault_id>/ui_cache/thumbnails/{hash[:2]}/{storage_id}_video.jpg
 ```
 
 Markdown asset links are relative to sharded notes:
@@ -292,13 +352,16 @@ Markdown asset links are relative to sharded notes:
 ../../assets/{hash[:2]}/{storage_id}.{ext}
 ```
 
-Metadata ownership:
+### Metadata Ownership
 
-- SQLite: runtime asset/index metadata plus disposable derived topic/WD query indexes.
+- Active-vault SQLite: item identity/source fields, runtime asset metadata, and disposable derived usage/index tables.
+- Workspace SQLite: shared artist, platform, and WD tag dictionaries.
 - `items.hash`: permanent logical/API identity.
 - `items.storage_id`: internal physical filename identity.
 - Markdown frontmatter: source of truth for manual `topics`, distilled `wd_rating`, `wd_character_tags`, and `wd_tags`.
+- Markdown mirrors SQLite-owned artist/platform/source/date fields for readability.
 - WD JSON cache: detailed local WD tag report, including scores and frame-level video tag data. Used as fallback only when YAML has no WD fields.
+- Topic markdown files under `data/topics/`: shared topic library. Item notes store relative links to these files when topics are created or saved through LMZ.
 
 Derived SQLite metadata rows are rebuildable and are not the source of truth.
 
@@ -345,6 +408,30 @@ Used for SQL-backed topic/WD filters, facets, and suggestions.
 | `item_topics` | Derived topic rows |
 | `item_wd_tags` | Derived WD rating/character/general tag rows |
 
+`item_topics` stores both legacy plain topics and linked topic identity:
+
+| Column | Meaning |
+| --- | --- |
+| `topic` | Display label |
+| `topic_norm` | Normalized label for filtering |
+| `topic_rel` | Relative topic file path under `data/topics/`, when linked |
+| `topic_key` | Stable identity: `rel:<path>` for linked topics or `plain:<norm>` for legacy strings |
+
+### Workspace metadata DB
+
+`data/workspace.db` is shared by all vaults in a workspace.
+
+| Table | Meaning |
+| --- | --- |
+| `artists` | Canonical artist/person records |
+| `artist_aliases` | Alternate names mapped to an artist |
+| `artist_links` | Platform links and handles for artists |
+| `platforms` | Canonical platform labels |
+| `platform_aliases` | Alternate platform keys mapped to a platform |
+| `wd_tag_dictionary` | Workspace-wide known WD tags |
+
+Usage remains vault-local. Stats `Used` counts active-vault usage; Stats `All` merges active-vault counts with workspace-wide dictionaries/topic files.
+
 ## Backend API
 
 `backend/web_api.py` is the local FastAPI service used by the frontend.
@@ -363,6 +450,11 @@ Core API areas:
 - Review workflow: review count, review item list, review actions.
 - Review cleanup: `/api/review/cleanup`.
 - Config: `/api/config`.
+- Workspaces: `/api/workspaces`, `/api/workspaces/active`, `/api/workspaces/obsidian`.
+- Vaults: `/api/vaults`, `/api/vaults/active`, vault rename/delete/merge endpoints.
+- Workspace metadata maintenance: `/api/workspace-metadata/rebuild`, `/api/workspace-metadata/prune`.
+- Artist/platform dictionaries: `/api/artists`, `/api/platforms`, artist detail/edit/alias/link/merge endpoints.
+- Topic rename: `/api/topics/rename`.
 
 Security and runtime constraints:
 
@@ -372,7 +464,7 @@ Security and runtime constraints:
 - Queue/log/review path inputs are allowlisted or root-checked.
 - Local drag-drop paths are preflighted by the backend before they are staged into Local Ingestion.
 - Blocking filesystem/SQLite work is routed through thread helpers on main API paths.
-- Static vault/review assets are served from local runtime folders.
+- Static vault/review assets are served from active-vault runtime folders.
 - Frontend API calls go through `frontend/src/lib/api.ts`.
 - `config/config.yaml` stores non-secret runtime settings. `secrets/.secrets.yaml` stores external-service credentials such as Pixiv refresh token and cookie path overrides.
 
@@ -391,9 +483,9 @@ Top-level structure:
 - `MediaFocus.svelte`: wide/fullscreen media view, grouped navigation, filmstrip, fullscreen zoom/pan.
 - `Ingestion.svelte`: markdown queue editor, queue runner, local ingest staging, and drag-drop intake target.
 - `ReviewView.svelte`: duplicate/review workflow.
-- `StatsView.svelte`: facet-count browsing.
+- `StatsView.svelte`: facet-count browsing, topic/WD selection handoff, artist editing/merge, topic rename.
 - `LogsView.svelte`: structured/raw log viewer.
-- `SettingsView.svelte`: config editing.
+- `SettingsView.svelte`: config editing, workspace/vault selection, maintenance actions.
 
 Shared frontend infrastructure:
 
@@ -487,11 +579,19 @@ Filter semantics:
 
 Facet counts:
 
-- Artist/platform counts come from SQLite.
-- Topic counts come from the SQLite metadata index after initial backfill.
-- WD tag counts come from the SQLite metadata index after initial backfill.
+- Artist/platform counts are active-vault usage counts joined to workspace dictionaries.
+- Topic counts come from active-vault metadata index; `All` also reads shared `data/topics/*.md`.
+- WD tag counts come from active-vault metadata index; `All` also reads `workspace.db.wd_tag_dictionary`.
 - Before initial backfill completes, topic/WD filters skip disk scans and start metadata repair.
 - `/api/facets` powers the Stats view and search dropdown counts.
+
+Topic behavior:
+
+- New/saved manual topics create or reuse `data/topics/<slug>.md`.
+- Item notes store relative Markdown links to topic files.
+- Legacy plain topic strings remain readable and indexable.
+- Topic rename is explicit from Stats Topics via the `...` action and `POST /api/topics/rename`.
+- Topic rename changes the shared topic file name and rewrites linked/plain topic refs across all registered vaults.
 
 ## Media Focus
 
@@ -511,11 +611,27 @@ Refinement still expected:
 - Filmstrip sizing and animation polish.
 - GIF animation policy in vault/inspector previews.
 
+## Workspace And Vault Management
+
+Workspace selection happens before startup.
+
+- `config/workspaces.yaml` stores registered workspaces and active workspace.
+- `LMZ_CONFIG_PATH` overrides the registry.
+- `start-lmz.bat` can prompt for the workspace.
+- Settings can register Obsidian workspaces and mark a workspace active for next restart.
+
+Each workspace has a `config.yaml` with one active vault:
+
+- `active_vault`: active vault id.
+- `vaults`: registered vaults and their roots.
+
+Vault switching is restart-based. Settings can create, rename, delete, and mark vaults active for next restart. Vault merge imports source vault items into a target vault by allocating new destination `storage_id` values and copying assets/notes/cache files.
+
 ## Ingestion Integrity
 
 External ingestion is platform-aware and batch-safe for multi-media posts.
 
-Local ingestion stages files under `data/local_ingest/{run_id}/` before processing. Native drag/drop first calls the backend drop-intake preflight endpoint, then switches the UI to Local Ingestion with accepted paths staged for manual start. Re-dropping a file already pending in Review is guarded by the review sidecar hash and is reported as already pending instead of inserting or creating another review copy.
+Local ingestion stages files under the active vault's `local_ingest/{run_id}/` before processing. Native drag/drop first calls the backend drop-intake preflight endpoint, then switches the UI to Local Ingestion with accepted paths staged for manual start. Re-dropping a file already pending in Review is guarded by the review sidecar hash and is reported as already pending instead of inserting or creating another review copy.
 
 Protected batch platforms:
 
@@ -537,7 +653,7 @@ Platform specifics:
 
 ## Review Workflow
 
-Review quarantine stores the media file under `data/review/` plus a sidecar JSON file next to it.
+Review quarantine stores the media file under the active vault's `review/` folder plus a sidecar JSON file next to it.
 
 Sidecar responsibilities:
 
@@ -596,8 +712,8 @@ Local WD tagging lives under `backend/tagging/`.
 Behavior:
 
 - Public API: `tag_media(media_path, item_hash=None, config=None, storage_id=None)`.
-- Model files live under `data/models/`.
-- Detailed cache lives under `data/wd-tags/{hash[:2]}/{storage_id}.json`.
+- Model files live under workspace `data/models/`.
+- Detailed cache lives under active vault `wd-tags/{hash[:2]}/{storage_id}.json`.
 - Markdown notes receive distilled WD fields.
 - Images are tagged directly.
 - Videos are tagged by sampling frames and merging results.
@@ -616,7 +732,7 @@ Current behavior:
 
 ## Logging
 
-Logs live under root-level `logs/`.
+Logs live under the active vault's `logs/` folder.
 
 Current layout:
 
@@ -651,6 +767,9 @@ Known packaging caveat:
 - Keep runtime data out of source.
 - Keep credentials under `secrets/`.
 - Keep `backups/` and `docs/` local/ignored.
+- Keep runtime workspace configs and `config/workspaces.yaml` untracked.
+- Keep active-vault data isolated under `data/vaults/<vault_id>/`.
+- Keep workspace metadata dictionaries shared per workspace, not per vault.
 - Keep source URL provenance stable.
 - Keep markdown/YAML as the source of truth for manual topics and WD tags.
 - Keep SQLite topic/WD rows disposable and rebuildable.

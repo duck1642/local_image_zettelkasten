@@ -25,15 +25,18 @@ lmz
 - Tauri shell: `frontend/src-tauri/`.
 - Backend API: `backend/web_api.py`.
 - Ingestion CLI: `backend/core.py`, launched by `main.py` or `lmz`.
-- Runtime DB: `data/db/lmz_main.db`.
-- Vault assets: `data/vault/assets/{hash[:2]}/{storage_id}.{ext}`.
-- Vault notes: `data/vault/notes/{hash[:2]}/{storage_id}.md`.
-- WD tag cache: `data/wd-tags/{hash[:2]}/{storage_id}.json`.
-- Thumbnails: `data/ui_cache/thumbnails/{hash[:2]}/{storage_id}.jpg`.
-- Review quarantine: `data/review/`.
-- Local ingest staging: `paths.local_ingest`, fallback `paths.input/local`.
-- Online ingest staging: `paths.online_ingest`, fallback `paths.input/online`.
-- Logs: `logs/raw/`, `logs/structured/`.
+- Workspace DB: `data/workspace.db`.
+- Shared topic library: `data/topics/`.
+- Active vault root: `data/vaults/<active_vault>/`.
+- Vault DB: `data/vaults/<active_vault>/db/lmz_main.db`.
+- Vault assets: `data/vaults/<active_vault>/vault/assets/{hash[:2]}/{storage_id}.{ext}`.
+- Vault notes: `data/vaults/<active_vault>/vault/notes/{hash[:2]}/{storage_id}.md`.
+- WD tag cache: `data/vaults/<active_vault>/wd-tags/{hash[:2]}/{storage_id}.json`.
+- Thumbnails: `data/vaults/<active_vault>/ui_cache/thumbnails/{hash[:2]}/{storage_id}.jpg`.
+- Review quarantine: `data/vaults/<active_vault>/review/`.
+- Local ingest staging: `data/vaults/<active_vault>/local_ingest/`.
+- Online ingest staging: `data/vaults/<active_vault>/online_ingest/`.
+- Logs: `data/vaults/<active_vault>/logs/raw/`, `data/vaults/<active_vault>/logs/structured/`.
 - Secrets: `secrets/`.
 
 ## Working Areas
@@ -102,173 +105,22 @@ VSCode-friendly test launchers:
   - Repeated `t:` and `#` use AND.
   - Plain text terms use AND.
 
-## Phase B Current Process
+## Current Commands
 
-- Phase B core is mostly implemented.
-- SQLite-owned identity is active:
-  - `items.source_artist`, `items.platform`, `items.source_url`, file metadata, and storage identity are SQLite-owned.
-  - Markdown mirrors artist/platform/source/date fields for readability.
-  - normal metadata reindex no longer silently imports Markdown artist/platform/date back into SQLite.
-  - topics and WD tags remain Markdown/index-owned.
-- Artist knowledge layer is active:
-  - artist tables, aliases, links, notes, kinds, backfill, resolver, rename, and merge are implemented.
-  - Stats Artists panel supports compact editing and explicit merge.
-  - local ingestion uses artist autocomplete to avoid duplicate artist names.
-- Platform dictionary foundation is active:
-  - platform tables/backfill/API exist.
-  - local ingestion uses platform dropdown.
-  - full platform maintenance panel is deferred until browser-extension/platform parsing is clearer.
-- Stats metadata browsing is active:
-  - topic, WD tag, artist, and platform counts use metadata facet counts.
-  - topic and WD tag panels support selection and `Filter Vault`.
-  - selected topic/WD tags hand off into the normal Vault search query.
-- Inspector metadata visibility is active:
-  - topic and WD tag chips show global counts.
-  - artist remains editable.
-  - platform/source URL remain read-only.
-- Remaining Phase B work:
-  - tag/topic rename.
-  - tag/topic deletion.
-  - promote WD tag to manual topic.
-  - likely implemented from Stats topic/WD panels, with backend endpoints that rewrite affected notes and refresh metadata indexes/facets.
-  - platform panel refinement remains deferred to browser-extension phase.
-- Current commands include:
-  - `/masonry`, `/grid`.
-  - `/zoom-in`, `/zoom-out`.
-  - `/toggle-inspector`.
-  - `/ram-track`.
-  - `/scan-auth`.
-  - `/cleanup-review`.
-  - `/sort-newest`, `/sort-oldest`, `/sort-artist`.
-  - `/media-all`, `/media-image`, `/media-video`.
+- `/masonry`, `/grid`.
+- `/zoom-in`, `/zoom-out`.
+- `/toggle-inspector`.
+- `/ram-track`.
+- `/scan-auth`.
+- `/cleanup-review`.
+- `/sort-newest`, `/sort-oldest`, `/sort-artist`.
+- `/media-all`, `/media-image`, `/media-video`.
 
 ## Done Tasks
 
-- Project renamed to Local Media Zettelkasten / LMZ.
-- Python source root renamed from `src/` to `backend/`.
-- Old full-DOM masonry/grid renderers archived; virtualized renderers are active.
-- Layout/zoom config writes use the shared frontend config store.
-- Vault header simplified; sort/media/layout/zoom actions moved to commands.
-- Auth status scan implemented:
-  - startup scan.
-  - `/api/auth/scan`.
-  - `/scan-auth`.
-  - auth log dropdown.
-  - secret values are not logged.
-- Auth config cleanup:
-  - `cookies_path` uses relative `secrets/cookies.txt`.
-  - Pixiv token loads from `secrets/.secrets.yaml`.
-  - `/api/config` strips secret keys.
-  - relative cookie paths resolve from project root.
-- RAM tracker implemented:
-  - `/api/system/memory`.
-  - footer display.
-  - persisted `/ram-track`.
-- Fullscreen media zoom/pan implemented.
-- Wide/fullscreen grouped-media filmstrip implemented.
-- Inspector toggle and resize implemented.
-- Vault search header split from inspector column.
-- Top vault `Add Files` button removed.
-- Frontend mojibake and unused default assets cleaned up.
-- Svelte accessibility warnings cleared in latest reviewed pass.
-- Renderer performance fixes:
-  - no `will-change` layer spam.
-  - `translate3d(...)` positioning.
-  - grid row-math visibility.
-  - batched/log-gated summaries.
-  - safer media MIME helpers.
-  - cleanup for timers/SSE/fetches.
-- Virtual renderer validation:
-  - automated large-vault Playwright checks cover `10k` and `100k` masonry/grid.
-  - generated-vault tests cover masonry/grid scrolling, cursor pagination, grouped media controls, mixed image/video handling, and overlap checks.
-  - headed Tauri perf runs cover bounded mounted tile/video counts during scroll at `10k` and `50k`.
-- Backend hardening:
-  - session key for mutating API calls.
-  - local-only CORS restrictions.
-  - path validation for queue/log/review endpoints.
-  - bulk delete API.
-  - safe delete ordering.
-  - review count endpoint.
-  - sidecar build path.
-  - practical Tauri CSP.
-- Review workflow hardening:
-  - `keep` defers without DB ingest.
-  - `variant` ingests with duplicate bypass.
-  - `replace` ingests first, deletes old target after.
-  - cleanup failures route to `pending_cleanup`.
-  - Cleanup section added.
-  - `/api/review/cleanup` retries cleanup and removes orphan sidecars.
-  - image/video compare panes render.
-  - review asset/action URLs encode filenames.
-  - unique review storage names avoid collisions.
-  - clean startup always mounts `/review-assets`.
-  - App Logs includes `review.jsonl`.
-- Review smoke follow-ups fixed:
-  - `/api/review` tuple-unpack crash.
-  - review logging argument collision.
-  - false failure after successful variant commit.
-  - best-effort retry cleanup after variant ingest.
-- Local ingestion safety:
-  - originals are staged before processing.
-  - originals are not moved into review.
-  - double-start guard set before worker scheduling.
-  - retry preserves defaults and `skip_similarity`.
-  - status exposes `phase`, `run_id`, `scanned`, `staged`.
-  - backend results capped to last 500.
-  - folder expansion streams in the worker instead of pre-sorting/materializing the tree.
-- Online queue safety:
-  - `as_completed` import fixed.
-  - deferred and crash-preserved URLs remain in queues.
-  - stop-after-current keeps not-yet-started URLs.
-  - worker/platform crashes are logged and preserved.
-  - queue rewrite logs original/removed/remaining counts.
-- Metadata/index performance:
-  - disposable SQLite metadata index for topics and WD tags.
-  - startup repair, watchdog reindex, status endpoint, rebuild endpoint.
-  - topic/WD filters, facets, suggestions, and detail metadata read through index after initial backfill.
-  - legacy YAML/cache fallback remains before index readiness.
-- Query/render hot path fixes:
-  - SQLite indexes for date/hash, artist/date/hash, platform, source artist, MIME/date, source URL.
-  - artist-sort cursor pagination fixed.
-  - renderer no longer builds full visual hash arrays.
-  - masonry visible lookup uses bounded binary-search scanning.
-- VP-tree indexing:
-  - video/audio signatures append to pending items.
-  - queries search built tree plus pending signatures.
-  - batch updates rebuild once after batch.
-- Recent validation-finding fixes:
-  - vault grouping rebuilds from updated item lists.
-  - masonry cache keeps geometry but refreshes current group data.
-  - fullscreen pan state resets after drag and when zoom returns to 1.
-  - production API startup retry handles delayed sidecar readiness.
-  - ingest paths honor `paths.local_ingest` and `paths.online_ingest`.
-- Mock-vault validation harness:
-  - isolated fixture lives under `tests/fixtures/mock-vault/`.
-  - frontend Playwright mocks API/media/review/RAM without touching the real vault.
-  - backend pytest uses `LMZ_CONFIG_PATH` and temp fixture copies.
-  - batch launchers live under `tests/` for VSCode terminal use.
-  - `source_url` and platform are read-only in Inspector; artist remains editable.
-  - mock-vault tests cover artist edit refresh, source/platform read-only behavior, masonry stale-data prevention, fullscreen pan/backdrop behavior, review filename encoding, video path rendering, and RAM unavailable state.
-- Generated test-vault harness:
-  - deterministic generator lives under `tests/generators/`.
-  - generated vaults default to ignored `tests/generated/NNN-name/` folders.
-  - generated config, DB rows, notes, assets, thumbnails, review fixtures, logs, and manifest stay isolated.
-  - backend smoke tests validate generated vault consistency and `LMZ_CONFIG_PATH` isolation.
-  - Playwright generated-scale test covers generated manifest API mocks, filtering, layout switching, and synthetic video handling.
-- Phase A generated-vault/performance harness:
-  - generated configs use isolated log and thumbnail paths.
-  - headed Tauri WebView performance harness and split perf commands were added.
-  - perf commands write structured JSON results under ignored `tests/perf-results/`.
-  - generated-vault runs passed at `800`, `10k`, and `50k`; `100k` remains deferred until needed.
-- Metadata/search optimization:
-  - metadata status uses cached counters instead of live counts over large metadata tables.
-  - `metadata_dirty_queue` lets stale repair process known changed items before fallback stale scans.
-  - full metadata rebuild has a bulk path for metadata rows, topic rows, WD rows, and facet counts.
-  - generated vault indexing and maintenance full rebuild use the bulk path.
-  - artist/platform facets use `metadata_facet_counts`.
-  - artist/platform filters use exact-first normalized matching, then partial fallback.
-  - normalized and normalized/date indexes support artist/platform filter paging.
-  - artist/platform facet counts refresh after item metadata updates and full rebuilds.
+- Historical completed work has been moved to `docs/lmz_roadmap.md`, mainly Phase 8 and Phase 9.
+- Current operational completion checkpoints remain below under `Done But Needs Check`.
+
 ## Current Test Results
 
 ### Phase A Generated-Vault Performance Findings
@@ -339,39 +191,38 @@ VSCode-friendly test launchers:
 
 ## Deferred / Will Do Later
 
-### Phase B - Remaining Knowledge Tools
+### Search/index improvements
+
+- persistent search/facet tables beyond current derived metadata index if needed for scale.
+- search chips.
+- Search/index scaling:
+  - RAM hydration still bulk-loads pHash, tile, URL, and video signatures.
+
+### Source metadata maintenance
+
+- source URL normalization migration tool.
+- normalization is active in runtime paths (`source_url_norm` is written on ingest/update).
+- existing rows are backfilled lazily by `init_database()`.
+- no standalone migration/maintenance tool exists yet.
+
+### Phase C - Metadata Workflow Polish / Vault Ops
 
 - Tag/topic maintenance:
-  - rename topic.
   - delete topic.
   - rename WD tag.
   - delete WD tag.
-  - promote WD tag to manual topic.
+  - topic merge if real use shows it is needed.
+  - hide/ignore WD tag if noisy WD data becomes a problem.
   - implement as explicit UI actions from Stats topic/WD panels.
-  - backend should rewrite affected Markdown frontmatter, refresh metadata index/facet counts, and preserve existing API search semantics.
-- Later tag tools:
-  - hide/ignore WD tag.
-  - merge tags/topics if real use shows it is needed.
+  - backend should rewrite affected Markdown frontmatter, refresh metadata indexes/facets, and preserve existing API search semantics.
+- Inspector/Stats metadata workflow polish:
   - richer Inspector tag editing if Stats-only workflow feels insufficient.
-- Platform maintenance:
-  - full platform panel is deferred until browser extension ingestion clarifies platform names, aliases, and URL parsing behavior.
-- Search/index improvements:
-  - persistent search/facet tables beyond current derived metadata index if needed for scale.
-  - search chips.
-  - Search/index scaling:
-    - RAM hydration still bulk-loads pHash, tile, URL, and video signatures.
-- Source metadata maintenance:
-  - source URL normalization migration tool.
-  - normalization is active in runtime paths (`source_url_norm` is written on ingest/update).
-  - existing rows are backfilled lazily by `init_database()`.
-  - no standalone migration/maintenance tool exists yet.
-
-### Phase C - Vault Ops
+  - search chips if the current text query handoff becomes hard to scan.
 
 - Multiple vault support:
-  - support switching/selecting vault configs for testing and normal usage.
-  - keep vaults isolated through config/runtime roots.
-  - merge/split/separate vault operations are useful later but should not be rushed.
+  - live workspace/vault switching after current restart-based switching is stable.
+  - merge/split/separate vault operations after more real-vault use.
+  - cleanup old compatibility paths after default + Obsidian + generated vaults are stable.
 - Vault health/maintenance:
   - orphan/ghost checks.
   - backup/export/import flows.
@@ -398,6 +249,9 @@ VSCode-friendly test launchers:
   - Firefox after the Chromium flow is stable.
   - capture URLs/media from the active page and send them to the LMZ queue/API.
   - handle API/session auth and local backend targeting carefully.
+- Platform maintenance:
+  - full platform panel after browser extension ingestion clarifies platform names, aliases, and URL parsing behavior.
+  - platform alias/import tools after browser extension data flow is known.
 
 ### Final Phase - Runtime / Packaging Hardening
 
@@ -417,18 +271,29 @@ VSCode-friendly test launchers:
 ## Done But Needs Check
 
 - Phase B - Knowledge tools core:
-  - artist dictionary schema/API added inside the vault SQLite DB.
-  - artist backfill from existing item artists skips placeholder identity values.
-  - artist aliases, links, notes, and rigid kind values are implemented.
-  - artist rename updates matching item snapshots, regenerates Markdown mirrors, and refreshes metadata facets.
+  - SQLite-owned identity is active for `items.source_artist`, `items.platform`, `items.source_url`, file metadata, and storage identity.
+  - Markdown mirrors artist/platform/source/date fields for readability.
+  - normal metadata reindex no longer silently imports Markdown artist/platform/date back into SQLite.
+  - topics and WD tags remain Markdown/index-owned.
+  - workspace-level metadata DB is active for shared artists, platforms, and WD tag dictionaries.
+  - shared topic library is active under `data/topics/`.
+  - artist backfill/resolver skips placeholder identity values.
+  - artist aliases, links, notes, rigid kind values, rename, and merge are implemented.
   - artist merge keeps selected artist as canonical, moves aliases/links, appends source notes, rewrites affected items/notes, and deletes source artist rows.
-  - platform dictionary schema/API/backfill added as foundation.
+  - platform dictionary/backfill/API are implemented as shared workspace metadata.
   - local ingest artist autocomplete and platform dropdown are wired.
   - Stats Artists panel is implemented with resizable split view.
   - Stats topic/WD panels support multi-select filtering into Vault search.
-  - Stats/Inspector show topic and WD counts through facet/index data.
-  - remaining Phase B scope is tag/topic maintenance: rename, delete, and promote WD tag to topic.
-  - needs real-vault smoke for artist rename/merge, local ingest artist autocomplete, platform dropdown, Stats filtering handoff, and Inspector counts.
+  - Stats `Used`/`All` modes work for Topics, Artists, Platforms, and WD Tags against active-vault usage plus workspace-wide libraries.
+  - Stats and Inspector show topic and WD counts through facet/index data.
+  - Inspector supports per-item draft topic/WD editing, WD-tag removal, and promote WD tag to manual topic.
+  - topic files are created/reused on save, notes store relative links, and legacy plain topics remain readable/indexable.
+  - Obsidian workspace mode uses `<ObsidianVault>/lmz/` with the same relative workspace/vault layout.
+  - workspace chooser and workspace registry are implemented; env `LMZ_CONFIG_PATH` still overrides registry.
+  - multiple vault support is implemented with per-workspace shared metadata and per-vault DB/assets/review/logs/cache folders.
+  - topic rename is implemented from Stats Topics via explicit `...` action and backend `POST /api/topics/rename`.
+  - topic rename updates shared topic file paths and rewrites linked/legacy topic refs across all registered vaults.
+  - needs real-vault smoke for artist rename/merge, local ingest artist autocomplete, platform dropdown, Stats filtering handoff, Inspector edits/counts, topic rename, workspace switching, and multi-vault isolation.
 
 - Phase A - Stability V1:
   - implementation is considered finished.

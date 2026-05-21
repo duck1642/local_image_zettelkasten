@@ -85,6 +85,12 @@
   let mergeSearchTimer: number | null = null;
   let selectedTopics: string[] = [];
   let selectedWdTags: string[] = [];
+  let topicRenameOpen = false;
+  let topicRenameOld = '';
+  let topicRenameNew = '';
+  let topicRenameBusy = false;
+  let topicRenameResult = '';
+  let topicRenameError = '';
 
   const placeholderArtistNorms = new Set(['', 'unknown', 'local', 'none', 'n/a', 'na', 'null']);
   const letterFilters = ['all', '#', ...'abcdefghijklmnopqrstuvwxyz'.split('')];
@@ -319,6 +325,49 @@
     selectedWdTags = selectedWdTags.includes(value)
       ? selectedWdTags.filter((item) => item !== value)
       : [...selectedWdTags, value];
+  }
+
+  function openTopicRename(value: string) {
+    topicRenameOpen = true;
+    topicRenameOld = value;
+    topicRenameNew = value;
+    topicRenameResult = '';
+    topicRenameError = '';
+  }
+
+  function closeTopicRename() {
+    if (topicRenameBusy) return;
+    topicRenameOpen = false;
+    topicRenameOld = '';
+    topicRenameNew = '';
+    topicRenameResult = '';
+    topicRenameError = '';
+  }
+
+  async function confirmTopicRename() {
+    if (!topicRenameOld || !topicRenameNew.trim()) return;
+    topicRenameBusy = true;
+    topicRenameResult = '';
+    topicRenameError = '';
+    try {
+      const response = await apiFetch('/api/topics/rename', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ old_label: topicRenameOld, new_label: topicRenameNew.trim() })
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload?.detail || `HTTP ${response.status}`);
+      const vaultCount = Array.isArray(payload?.vaults_touched) ? payload.vaults_touched.length : 0;
+      topicRenameResult = `Renamed ${payload.old_label} -> ${payload.new_label}; updated ${payload.notes_rewritten || 0} notes across ${vaultCount} vaults.`;
+      selectedTopics = selectedTopics.map((topic) => topic === topicRenameOld ? String(payload.new_label || topicRenameNew.trim()) : topic);
+      await loadFacets();
+      uiLog('INFO', 'Topic renamed', { old_label: topicRenameOld, new_label: topicRenameNew.trim(), notes: payload.notes_rewritten });
+    } catch (err) {
+      topicRenameError = `Failed to rename topic: ${String(err)}`;
+      uiLog('ERROR', 'Failed to rename topic', { old_label: topicRenameOld, new_label: topicRenameNew, error: String(err) });
+    } finally {
+      topicRenameBusy = false;
+    }
   }
 
   function clearFacetSelection() {
@@ -769,9 +818,11 @@
         {:else}
           <div class="chip-cloud">
             {#each visibleItems as item}
+              <div class="stat-chip-wrap">
               <button
                 type="button"
                 class="stat-chip"
+                class:has-action={activeKind === 'topic'}
                 class:selected={isFacetSelected(activeKind, item.value)}
                 aria-pressed={isFacetSelected(activeKind, item.value)}
                 title={`${item.value} (${item.count})`}
@@ -780,6 +831,18 @@
                 <span class="value">{isFacetSelected(activeKind, item.value) ? `✓ ${item.value}` : item.value}</span>
                 <span class="chip-count">{item.count}</span>
               </button>
+              {#if activeKind === 'topic'}
+                <button
+                  type="button"
+                  class="chip-action"
+                  title={`Rename ${item.value}`}
+                  aria-label={`Rename ${item.value}`}
+                  on:click={() => openTopicRename(item.value)}
+                >
+                  ...
+                </button>
+              {/if}
+              </div>
             {/each}
           </div>
         {/if}
@@ -794,6 +857,41 @@
     <div class="filter-actions">
       <button type="button" on:click={clearFacetSelection}>Clear</button>
       <button type="button" class="primary" on:click={filterVaultFromSelection}>Filter Vault</button>
+    </div>
+  </div>
+{/if}
+
+{#if topicRenameOpen}
+  <div class="modal-backdrop" role="presentation">
+    <div class="rename-modal" role="dialog" aria-modal="true" aria-labelledby="topic-rename-title" tabindex="-1">
+      <div class="modal-header">
+        <div>
+          <h4 id="topic-rename-title">Rename Topic</h4>
+          <span class="muted">Renames the shared topic file and updates references in all vaults.</span>
+        </div>
+        <button type="button" on:click={closeTopicRename} disabled={topicRenameBusy}>Close</button>
+      </div>
+
+      <div class="detail-grid">
+        <label for="topic-old">Old</label>
+        <input id="topic-old" value={topicRenameOld} readonly />
+        <label for="topic-new">New</label>
+        <input id="topic-new" bind:value={topicRenameNew} disabled={topicRenameBusy} />
+      </div>
+
+      {#if topicRenameError}
+        <div class="empty-state error">{topicRenameError}</div>
+      {/if}
+      {#if topicRenameResult}
+        <div class="empty-state success">{topicRenameResult}</div>
+      {/if}
+
+      <div class="modal-actions">
+        <button type="button" on:click={closeTopicRename} disabled={topicRenameBusy}>Cancel</button>
+        <button type="button" class="primary" on:click={confirmTopicRename} disabled={topicRenameBusy || !topicRenameNew.trim()}>
+          {topicRenameBusy ? 'Renaming...' : 'Rename'}
+        </button>
+      </div>
     </div>
   </div>
 {/if}
@@ -966,6 +1064,13 @@
     padding: 12px;
   }
 
+  .stat-chip-wrap {
+    display: inline-grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    max-width: 100%;
+    min-width: 0;
+  }
+
   .stat-chip {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
@@ -981,6 +1086,28 @@
     font-size: 13px;
     line-height: 1.15;
     overflow: hidden;
+  }
+
+  .stat-chip.has-action {
+    border-radius: 6px 0 0 6px;
+    border-right: 0;
+  }
+
+  .chip-action {
+    width: 28px;
+    min-width: 28px;
+    padding: 0;
+    border-radius: 0 6px 6px 0;
+    border: 1px solid var(--border-dim);
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-muted);
+    font-weight: 700;
+  }
+
+  .chip-action:hover {
+    background: rgba(31, 111, 235, 0.22);
+    border-color: rgba(31, 111, 235, 0.75);
+    color: var(--text-bright);
   }
 
   .stat-chip:hover {
@@ -1078,6 +1205,10 @@
 
   .empty-state.error {
     color: var(--accent-danger);
+  }
+
+  .empty-state.success {
+    color: var(--accent-success, #7ee787);
   }
 
   .artist-layout {
@@ -1279,7 +1410,8 @@
     padding: 24px;
   }
 
-  .merge-modal {
+  .merge-modal,
+  .rename-modal {
     width: min(760px, 100%);
     max-height: min(720px, calc(100vh - 48px));
     display: flex;
@@ -1290,6 +1422,10 @@
     background: var(--bg-panel);
     padding: 16px;
     box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
+  }
+
+  .rename-modal {
+    width: min(560px, 100%);
   }
 
   .modal-header,

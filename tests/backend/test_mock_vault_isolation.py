@@ -2108,6 +2108,121 @@ def test_metadata_index_parses_linked_and_legacy_topics(monkeypatch, tmp_path):
     conn.close()
 
 
+def test_workspace_topic_rename_updates_linked_legacy_and_cross_vault_refs(monkeypatch, tmp_path):
+    utils, sqlite_operator, metadata_index, web_api, topics, vaults = fresh_backend(
+        monkeypatch,
+        tmp_path,
+        "utils",
+        "db.sqlite_operator",
+        "metadata_index",
+        "web_api",
+        "topics",
+        "vaults",
+    )
+    vaults.create_vault("Second")
+    vault_items = {item["id"]: item for item in vaults.vault_list()}
+    second_root = Path(vault_items["second"]["root"])
+    second_db = Path(vault_items["second"]["db_path"])
+
+    linked_hash = "a7" * 32
+    legacy_hash = "a8" * 32
+    second_hash = "a9" * 32
+    linked_conn = insert_mock_item(sqlite_operator, linked_hash, date_added="2026-01-01 00:00:01")
+    linked_conn.close()
+    legacy_conn = insert_mock_item(sqlite_operator, legacy_hash, date_added="2026-01-01 00:00:02")
+    legacy_storage = storage_id_for(legacy_conn, legacy_hash)
+    write_compact_note(utils, legacy_conn, legacy_hash, "---\ntopics:\n  - Old Topic\n---\n")
+    metadata_index.reindex_item_metadata(legacy_conn, legacy_hash)
+    legacy_conn.commit()
+    legacy_conn.close()
+
+    web_api._update_item_sync(linked_hash, web_api.ItemUpdate(topics=["Old Topic"]))
+    old_topic = utils.TOPICS_DIR / "old_topic.md"
+    old_topic.write_text("---\ncreated_at: old\n---\n\npersonal notes stay\n", encoding="utf-8")
+
+    second_conn = sqlite_operator.init_database(second_db)
+    second_storage = sqlite_operator.allocate_storage_id(second_conn)
+    second_conn.execute(
+        """
+        INSERT INTO items(hash, storage_id, original_filename, file_extension, mime_type, size_bytes, date_added, source_url, source_url_norm, platform, source_artist, phash)
+        VALUES (?, ?, ?, '.jpg', 'image/jpeg', 10, '2026-01-01 00:00:03', '', '', 'local', 'DB Artist', '')
+        """,
+        (second_hash, second_storage, f"{second_hash}.jpg"),
+    )
+    second_note = second_root / "vault" / "notes" / second_hash[:2] / f"{second_storage}.md"
+    second_note.parent.mkdir(parents=True, exist_ok=True)
+    second_link = topics.topic_markdown_link("Old Topic", second_note)
+    second_note.write_text(f"---\ntopics:\n  - '{second_link}'\n---\n", encoding="utf-8")
+    metadata_index.ensure_metadata_schema(second_conn)
+    for entry in topics.parse_topic_values([second_link], second_note):
+        second_conn.execute(
+            "INSERT INTO item_topics(item_hash, topic, topic_norm, topic_rel, topic_key) VALUES (?, ?, ?, ?, ?)",
+            (second_hash, entry["label"], entry["label"].casefold(), entry["topic_rel"], entry["topic_key"]),
+        )
+    second_conn.commit()
+    second_conn.close()
+
+    ready_conn = sqlite_operator.init_database()
+    metadata_index._set_metadata_index_ready(ready_conn, True)
+    ready_conn.commit()
+    ready_conn.close()
+
+    result = web_api._rename_topic_sync("Old Topic", "New Topic")
+
+    assert result["status"] == "success"
+    assert set(result["vaults_touched"]) == {"default", "second"}
+    assert result["notes_rewritten"] == 3
+    assert result["legacy_plain_refs_rewritten"] == 1
+    assert not old_topic.exists()
+    new_topic = utils.TOPICS_DIR / "new_topic.md"
+    assert new_topic.exists()
+    assert "personal notes stay" in new_topic.read_text(encoding="utf-8")
+
+    conn = sqlite_operator.init_database()
+    linked_storage = storage_id_for(conn, linked_hash)
+    linked_data = frontmatter_from_markdown(utils.note_path_for(linked_hash, linked_storage).read_text(encoding="utf-8"))
+    legacy_data = frontmatter_from_markdown(utils.note_path_for(legacy_hash, legacy_storage).read_text(encoding="utf-8"))
+    rows = conn.execute("SELECT item_hash, topic, topic_norm, topic_rel, topic_key FROM item_topics ORDER BY item_hash").fetchall()
+    new_items = web_api._get_items_sync(None, None, "newest", "all", [], [], [], ["new_topic"], [], [], None, 25)
+    old_items = web_api._get_items_sync(None, None, "newest", "all", [], [], [], ["old_topic"], [], [], None, 25)
+    all_topics = web_api._get_facets_sync("topic", "", 50, "all")["items"]
+    conn.close()
+
+    assert linked_data["topics"] == ["[new_topic](../../../../../topics/new_topic.md)"]
+    assert legacy_data["topics"] == ["[new_topic](../../../../../topics/new_topic.md)"]
+    assert rows == [
+        (linked_hash, "new_topic", "new_topic", "new_topic.md", "rel:new_topic.md"),
+        (legacy_hash, "new_topic", "new_topic", "new_topic.md", "rel:new_topic.md"),
+    ]
+    assert [item["hash"] for item in new_items["items"]] == [legacy_hash, linked_hash]
+    assert old_items["items"] == []
+    assert "new_topic" in {item["value"] for item in all_topics}
+    assert "old_topic" not in {item["value"] for item in all_topics}
+
+    second_conn = sqlite3.connect(second_db)
+    try:
+        second_rows = second_conn.execute("SELECT topic, topic_norm, topic_rel, topic_key FROM item_topics WHERE item_hash = ?", (second_hash,)).fetchall()
+    finally:
+        second_conn.close()
+    assert second_rows == [("new_topic", "new_topic", "new_topic.md", "rel:new_topic.md")]
+    assert "[new_topic](" in second_note.read_text(encoding="utf-8")
+
+
+def test_workspace_topic_rename_rejects_missing_and_existing_target(monkeypatch, tmp_path):
+    utils, web_api = fresh_backend(monkeypatch, tmp_path, "utils", "web_api")
+    (utils.TOPICS_DIR / "old_topic.md").parent.mkdir(parents=True, exist_ok=True)
+    (utils.TOPICS_DIR / "old_topic.md").write_text("---\n---\n", encoding="utf-8")
+    (utils.TOPICS_DIR / "new_topic.md").write_text("---\n---\n", encoding="utf-8")
+
+    with pytest.raises(HTTPException) as conflict:
+        web_api._rename_topic_sync("Old Topic", "New Topic")
+    assert conflict.value.status_code == 409
+
+    with pytest.raises(HTTPException) as missing:
+        web_api._rename_topic_sync("Missing Topic", "Other Topic")
+    assert missing.value.status_code == 404
+
+
 def test_metadata_facets_no_match_uses_built_count_table_without_scan(monkeypatch, tmp_path):
     metadata_index, = fresh_backend(monkeypatch, tmp_path, "metadata_index")
 
@@ -3240,3 +3355,32 @@ def test_multi_vault_shared_workspace_metadata(monkeypatch, tmp_path):
     finally:
         ws_conn.close()
 
+
+def test_artist_used_scope_filters_before_limit(monkeypatch, tmp_path):
+    sqlite_operator, workspace_db, web_api = fresh_backend(
+        monkeypatch,
+        tmp_path,
+        "db.sqlite_operator",
+        "workspace_db",
+        "web_api",
+    )
+
+    conn = insert_mock_item(sqlite_operator, "u1" * 32, artist="Zzz Used Artist")
+    conn.close()
+
+    ws_conn = workspace_db.connect_workspace_database()
+    try:
+        for index in range(80):
+            ws_conn.execute(
+                """
+                INSERT OR IGNORE INTO artists(name, name_norm, kind, notes, created_at, updated_at)
+                VALUES (?, ?, 'artist', '', '2026-01-01 00:00:00', '2026-01-01 00:00:00')
+                """,
+                (f"Aaa Unused {index:03d}", f"aaa unused {index:03d}"),
+            )
+        ws_conn.commit()
+    finally:
+        ws_conn.close()
+
+    used_artists = web_api._get_artists_sync("", 20, "used")["items"]
+    assert [artist["name"] for artist in used_artists] == ["Zzz Used Artist"]
