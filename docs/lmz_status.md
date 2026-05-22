@@ -207,22 +207,8 @@ VSCode-friendly test launchers:
 
 ### Phase C - Metadata Workflow Polish / Vault Ops
 
-- Refactor prerequisite sequence:
-  - done: introduce a runtime context layer for workspace/vault paths while preserving legacy import-time constants.
-  - done: make active-vault and workspace DB connection helpers context-aware.
-  - done: make queues, review cache, logging, metadata watchdog paths, topics, thumbnails, downloader staging, and local ingest/review path access context-aware.
-  - done: make SearchManager RAM indexes context-aware per active vault DB.
-  - done: replace fixed static media mounts with dynamic active-vault asset/review routes.
-  - done: make remaining long-lived ingest/metadata runtime state switch-aware and add backend switch preflight.
-  - done: split `backend/web_api.py` into router modules while preserving the sidecar entrypoint/facade.
-  - done: extract shared metadata maintenance logic for topic/WD rename, delete, and merge operations. WD hide/ignore remains a schema/UI decision.
-  - done: add a frontend runtime/session store that can invalidate Vault, Stats, Inspector, Search, Ingestion, Review, and Logs state on vault/workspace switch.
-  - done: split large frontend Phase C surfaces, especially `StatsView.svelte`, before adding more tag/topic tooling.
 - Tag/topic maintenance:
-  - done: expose backend API routes for topic delete/merge and WD tag rename/delete.
-  - done: implement explicit Stats topic/WD actions for topic delete/merge and WD tag rename/delete.
   - hide/ignore WD tag if noisy WD data becomes a problem.
-  - done: backend rewrites affected Markdown frontmatter, refreshes metadata indexes/facets, and preserves existing API search semantics.
 - Inspector/Stats metadata workflow polish:
   - richer Inspector tag editing if Stats-only workflow feels insufficient.
   - search chips if the current text query handoff becomes hard to scan.
@@ -275,6 +261,22 @@ VSCode-friendly test launchers:
   - one failed expected image can still keep the post retryable.
 
 ## Done But Needs Check
+
+- Phase C prerequisites and tag/topic maintenance:
+  - runtime context layer is implemented for workspace/vault paths while preserving legacy import-time constants.
+  - active-vault and workspace DB connection helpers are context-aware.
+  - queues, review cache, logging, metadata watchdog paths, topics, thumbnails, downloader staging, and local ingest/review path access are context-aware.
+  - SearchManager RAM indexes are context-aware per active vault DB.
+  - fixed static media mounts were replaced with dynamic active-vault asset/review routes.
+  - remaining long-lived ingest/metadata runtime state is switch-aware and backend switch preflight is implemented.
+  - `backend/web_api.py` is split into router modules while preserving the sidecar entrypoint/facade.
+  - shared metadata maintenance logic exists for topic/WD rename, delete, and merge operations.
+  - frontend runtime/session store invalidates Vault, Stats, Inspector, Search, Ingestion, Review, and Logs state on vault/workspace switch.
+  - large frontend Phase C surfaces were split, especially `StatsView.svelte`.
+  - backend API routes are exposed for topic delete/merge and WD tag rename/delete.
+  - Stats topic/WD panels expose explicit actions for topic delete/merge and WD tag rename/delete.
+  - backend rewrites affected Markdown frontmatter, refreshes metadata indexes/facets, and preserves existing API search semantics.
+  - targeted backend and mock-vault frontend tests pass; needs real-vault smoke for dynamic workspace/vault switching, Stats metadata actions, and metadata maintenance rollback behavior.
 
 - Phase B - Knowledge tools core:
   - SQLite-owned identity is active for `items.source_artist`, `items.platform`, `items.source_url`, file metadata, and storage identity.

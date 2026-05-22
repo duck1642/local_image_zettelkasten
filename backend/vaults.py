@@ -5,7 +5,8 @@ from pathlib import Path
 import yaml
 
 from db.sqlite_operator import allocate_storage_id, init_database
-from utils import CONFIG_PATH, CONFIG_ROOT, atomic_write_text, utc_now_str
+from runtime_context import WorkspaceContext, get_runtime_context
+from utils import atomic_write_text
 
 
 VAULT_LOCAL_DIRS = (
@@ -30,20 +31,33 @@ def vault_id_slug(value: str) -> str:
     return "-".join(part for part in cleaned.split("-") if part) or "vault"
 
 
-def _read_config() -> dict:
-    if not CONFIG_PATH.exists():
+def _ctx(ctx: WorkspaceContext | None = None) -> WorkspaceContext:
+    return ctx or get_runtime_context()
+
+
+def _config_path(ctx: WorkspaceContext | None = None) -> Path:
+    return _ctx(ctx).config_path
+
+
+def _config_root(ctx: WorkspaceContext | None = None) -> Path:
+    return _ctx(ctx).root
+
+
+def _read_config(ctx: WorkspaceContext | None = None) -> dict:
+    config_path = _config_path(ctx)
+    if not config_path.exists():
         return {}
-    data = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8")) or {}
+    data = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
     return data if isinstance(data, dict) else {}
 
 
-def _write_config(config: dict):
-    atomic_write_text(CONFIG_PATH, yaml.safe_dump(config, sort_keys=False, allow_unicode=True))
+def _write_config(config: dict, ctx: WorkspaceContext | None = None):
+    atomic_write_text(_config_path(ctx), yaml.safe_dump(config, sort_keys=False, allow_unicode=True))
 
 
-def _resolve_config_path(path: str | Path) -> Path:
+def _resolve_config_path(path: str | Path, ctx: WorkspaceContext | None = None) -> Path:
     value = Path(path)
-    return value.resolve() if value.is_absolute() else (CONFIG_ROOT / value).resolve()
+    return value.resolve() if value.is_absolute() else (_config_root(ctx) / value).resolve()
 
 
 def _default_vault_entry() -> dict:
@@ -64,8 +78,8 @@ def _has_vault_registry(config: dict) -> bool:
     return isinstance(config.get("vaults"), dict) and bool(config.get("vaults"))
 
 
-def vault_root(entry: dict) -> Path:
-    return _resolve_config_path(entry.get("root") or "data/vaults/default")
+def vault_root(entry: dict, ctx: WorkspaceContext | None = None) -> Path:
+    return _resolve_config_path(entry.get("root") or "data/vaults/default", ctx)
 
 
 def vault_db_path(root: Path) -> Path:
@@ -80,12 +94,12 @@ def create_vault_layout(root: Path, initialize_db: bool = True):
         conn.close()
 
 
-def vault_list() -> list[dict]:
-    config = _ensure_vault_registry(_read_config())
+def vault_list(ctx: WorkspaceContext | None = None) -> list[dict]:
+    config = _ensure_vault_registry(_read_config(ctx))
     active = str(config.get("active_vault") or "default")
     items = []
     for vault_id, entry in sorted(config.get("vaults", {}).items()):
-        root = vault_root(entry)
+        root = vault_root(entry, ctx)
         db_path = vault_db_path(root)
         item_count = 0
         if db_path.exists():
@@ -99,7 +113,7 @@ def vault_list() -> list[dict]:
             "id": vault_id,
             "name": str(entry.get("name") or vault_id),
             "root": str(root),
-            "config_root": str(CONFIG_ROOT),
+            "config_root": str(_config_root(ctx)),
             "active": vault_id == active,
             "exists": root.exists(),
             "db_path": str(db_path),
@@ -108,27 +122,27 @@ def vault_list() -> list[dict]:
     return items
 
 
-def active_vault_id() -> str:
-    config = _ensure_vault_registry(_read_config())
+def active_vault_id(ctx: WorkspaceContext | None = None) -> str:
+    config = _ensure_vault_registry(_read_config(ctx))
     return str(config.get("active_vault") or "default")
 
 
-def create_vault(name: str, vault_id: str | None = None) -> dict:
-    config = _ensure_vault_registry(_read_config())
+def create_vault(name: str, vault_id: str | None = None, ctx: WorkspaceContext | None = None) -> dict:
+    config = _ensure_vault_registry(_read_config(ctx))
     vaults = config["vaults"]
     clean_id = vault_id_slug(vault_id or name)
     if clean_id in vaults:
         raise ValueError(f"vault already exists: {clean_id}")
     entry = {"name": str(name or clean_id).strip() or clean_id, "root": f"data/vaults/{clean_id}"}
-    root = vault_root(entry)
+    root = vault_root(entry, ctx)
     create_vault_layout(root, initialize_db=True)
     vaults[clean_id] = entry
-    _write_config(config)
-    return {"status": "success", "vault": clean_id, "items": vault_list()}
+    _write_config(config, ctx)
+    return {"status": "success", "vault": clean_id, "items": vault_list(ctx)}
 
 
-def rename_vault(vault_id: str, name: str) -> dict:
-    config = _ensure_vault_registry(_read_config())
+def rename_vault(vault_id: str, name: str, ctx: WorkspaceContext | None = None) -> dict:
+    config = _ensure_vault_registry(_read_config(ctx))
     vault_id = vault_id_slug(vault_id)
     if vault_id not in config["vaults"]:
         raise KeyError(f"vault not found: {vault_id}")
@@ -136,20 +150,20 @@ def rename_vault(vault_id: str, name: str) -> dict:
     if not clean_name:
         raise ValueError("vault name is required")
     config["vaults"][vault_id]["name"] = clean_name
-    _write_config(config)
-    return {"status": "success", "items": vault_list()}
+    _write_config(config, ctx)
+    return {"status": "success", "items": vault_list(ctx)}
 
 
-def set_active_vault(vault_id: str) -> dict:
-    config = _ensure_vault_registry(_read_config())
+def set_active_vault(vault_id: str, ctx: WorkspaceContext | None = None) -> dict:
+    config = _ensure_vault_registry(_read_config(ctx))
     vault_id = vault_id_slug(vault_id)
     if vault_id not in config["vaults"]:
         raise KeyError(f"vault not found: {vault_id}")
-    root = vault_root(config["vaults"][vault_id])
+    root = vault_root(config["vaults"][vault_id], ctx)
     if not root.exists():
         raise ValueError(f"vault root does not exist: {root}")
     config["active_vault"] = vault_id
-    _write_config(config)
+    _write_config(config, ctx)
 
     # Dynamic dynamic-vault switching runtime updates
     from runtime_context import reload_runtime_context
@@ -170,21 +184,21 @@ def _vault_non_empty(root: Path) -> bool:
     return False
 
 
-def delete_vault(vault_id: str, confirm: bool = False) -> dict:
-    config = _ensure_vault_registry(_read_config())
+def delete_vault(vault_id: str, confirm: bool = False, ctx: WorkspaceContext | None = None) -> dict:
+    config = _ensure_vault_registry(_read_config(ctx))
     vault_id = vault_id_slug(vault_id)
     if vault_id == str(config.get("active_vault") or "default"):
         raise ValueError("cannot delete active vault")
     if vault_id not in config["vaults"]:
         raise KeyError(f"vault not found: {vault_id}")
-    root = vault_root(config["vaults"][vault_id])
+    root = vault_root(config["vaults"][vault_id], ctx)
     if root.exists() and _vault_non_empty(root) and not confirm:
         raise ValueError("vault is not empty; pass confirm=true")
     if root.exists():
         shutil.rmtree(root)
     del config["vaults"][vault_id]
-    _write_config(config)
-    return {"status": "success", "items": vault_list()}
+    _write_config(config, ctx)
+    return {"status": "success", "items": vault_list(ctx)}
 
 
 def _copy_if_exists(source: Path, target: Path) -> bool:
@@ -206,8 +220,8 @@ def _item_paths(root: Path, item_hash: str, storage_id: str, ext: str, mime_type
     }
 
 
-def preview_vault_merge(target_id: str, source_ids: list[str]) -> dict:
-    config = _ensure_vault_registry(_read_config())
+def preview_vault_merge(target_id: str, source_ids: list[str], ctx: WorkspaceContext | None = None) -> dict:
+    config = _ensure_vault_registry(_read_config(ctx))
     vaults = config["vaults"]
     target_id = vault_id_slug(target_id)
     sources = [vault_id_slug(value) for value in source_ids]
@@ -217,7 +231,7 @@ def preview_vault_merge(target_id: str, source_ids: list[str]) -> dict:
         raise ValueError("target cannot be a source")
     if target_id not in vaults:
         raise KeyError(f"vault not found: {target_id}")
-    target_db = vault_db_path(vault_root(vaults[target_id]))
+    target_db = vault_db_path(vault_root(vaults[target_id], ctx))
     target_hashes = set()
     if target_db.exists():
         conn = sqlite3.connect(target_db)
@@ -227,7 +241,7 @@ def preview_vault_merge(target_id: str, source_ids: list[str]) -> dict:
     for source_id in sources:
         if source_id not in vaults:
             raise KeyError(f"vault not found: {source_id}")
-        source_db = vault_db_path(vault_root(vaults[source_id]))
+        source_db = vault_db_path(vault_root(vaults[source_id], ctx))
         rows = []
         if source_db.exists():
             conn = sqlite3.connect(source_db)
@@ -242,12 +256,12 @@ def preview_vault_merge(target_id: str, source_ids: list[str]) -> dict:
     return payload
 
 
-def merge_vaults(target_id: str, source_ids: list[str]) -> dict:
+def merge_vaults(target_id: str, source_ids: list[str], ctx: WorkspaceContext | None = None) -> dict:
     import re
-    preview = preview_vault_merge(target_id, source_ids)
-    config = _ensure_vault_registry(_read_config())
+    preview = preview_vault_merge(target_id, source_ids, ctx)
+    config = _ensure_vault_registry(_read_config(ctx))
     vaults = config["vaults"]
-    target_root = vault_root(vaults[vault_id_slug(target_id)])
+    target_root = vault_root(vaults[vault_id_slug(target_id)], ctx)
     target_conn = init_database(vault_db_path(target_root))
     try:
         imported = 0
@@ -260,7 +274,7 @@ def merge_vaults(target_id: str, source_ids: list[str]) -> dict:
         select_sql = f"SELECT {', '.join(columns)} FROM items"
         insert_sql = f"INSERT INTO items({', '.join(columns)}) VALUES ({', '.join('?' for _ in columns)})"
         for source_id in [vault_id_slug(value) for value in source_ids]:
-            source_root = vault_root(vaults[source_id])
+            source_root = vault_root(vaults[source_id], ctx)
             source_db = vault_db_path(source_root)
             if not source_db.exists():
                 continue
@@ -301,17 +315,17 @@ def merge_vaults(target_id: str, source_ids: list[str]) -> dict:
     return preview
 
 
-def migrate_legacy_layout(copy: bool = True, overwrite: bool = False) -> dict:
-    raw_config = _read_config()
+def migrate_legacy_layout(copy: bool = True, overwrite: bool = False, ctx: WorkspaceContext | None = None) -> dict:
+    raw_config = _read_config(ctx)
     paths = raw_config.get("paths", {}) if isinstance(raw_config.get("paths"), dict) else {}
     config = _ensure_vault_registry(raw_config)
-    target_root = vault_root(config["vaults"]["default"])
+    target_root = vault_root(config["vaults"]["default"], ctx)
     if target_root.exists() and any(target_root.iterdir()) and not overwrite:
         raise ValueError(f"default vault already exists: {target_root}")
     create_vault_layout(target_root, initialize_db=False)
 
     def source_dir_for(key: str, fallback: str, parent_of_file: bool = False) -> Path:
-        source = _resolve_config_path(paths.get(key) or fallback)
+        source = _resolve_config_path(paths.get(key) or fallback, ctx)
         return source.parent if parent_of_file else source
 
     mappings = {
@@ -339,5 +353,5 @@ def migrate_legacy_layout(copy: bool = True, overwrite: bool = False) -> dict:
             shutil.move(str(source), str(target))
         copied.append({"from": str(source), "to": str(target)})
     create_vault_layout(target_root, initialize_db=True)
-    _write_config(config)
+    _write_config(config, ctx)
     return {"status": "success", "target": str(target_root), "copied": copied}

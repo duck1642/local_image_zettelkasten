@@ -161,3 +161,63 @@ def test_dynamic_workspace_switching(monkeypatch, tmp_path):
     # Assert runtime context and utils updated dynamically to Workspace 2!
     assert runtime_context.get_runtime_context().config_path == ws2_config
     assert utils.DB_PATH == ws2_dir / "data" / "vaults" / "default" / "db" / "lmz_main.db"
+
+
+def test_vault_list_uses_current_runtime_workspace_after_switch(monkeypatch, tmp_path):
+    mock_registry_yaml = tmp_path / "workspaces.yaml"
+    utils, runtime_context, workspaces, vaults, runtime_api = fresh_backend(
+        monkeypatch,
+        tmp_path,
+        "utils",
+        "runtime_context",
+        "workspaces",
+        "vaults",
+        "api.runtime",
+    )
+    monkeypatch.delenv("LMZ_CONFIG_PATH", raising=False)
+    monkeypatch.setattr(workspaces, "REGISTRY_PATH", mock_registry_yaml)
+
+    ws1_dir = tmp_path / "workspace_1"
+    ws2_dir = tmp_path / "workspace_2"
+    ws1_dir.mkdir()
+    ws2_dir.mkdir()
+    ws1_config = ws1_dir / "config.yaml"
+    ws2_config = ws2_dir / "config.yaml"
+    ws1_config.write_text(
+        yaml.safe_dump({
+            "active_vault": "default",
+            "vaults": {"default": {"name": "Default", "root": "data/vaults/default"}},
+        }),
+        encoding="utf-8",
+    )
+    ws2_config.write_text(
+        yaml.safe_dump({
+            "active_vault": "default",
+            "vaults": {
+                "default": {"name": "Default", "root": "data/vaults/default"},
+                "second": {"name": "Second", "root": "data/vaults/second"},
+            },
+        }),
+        encoding="utf-8",
+    )
+    for root in (
+        ws1_dir / "data" / "vaults" / "default",
+        ws2_dir / "data" / "vaults" / "default",
+        ws2_dir / "data" / "vaults" / "second",
+    ):
+        (root / "db").mkdir(parents=True, exist_ok=True)
+        (root / "vault" / "notes").mkdir(parents=True, exist_ok=True)
+        (root / "wd-tags").mkdir(parents=True, exist_ok=True)
+
+    workspaces.register_workspace("Workspace 1", ws1_config, workspace_id="ws1", set_active=True)
+    workspaces.register_workspace("Workspace 2", ws2_config, workspace_id="ws2", set_active=False)
+    runtime_context.reload_runtime_context()
+
+    assert [item["id"] for item in vaults.vault_list()] == ["default"]
+
+    runtime_api._set_workspace_active_sync({"id": "ws2"})
+
+    listed = vaults.vault_list()
+    assert [item["id"] for item in listed] == ["default", "second"]
+    assert {Path(item["root"]).parent.parent for item in listed} == {ws2_dir / "data"}
+    assert runtime_api._get_vaults_sync()["active"] == "default"
