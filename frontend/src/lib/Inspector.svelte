@@ -429,7 +429,7 @@
                       <span class="tag-unsaved">*</span>
                   {/if}
                   <button class="chip-remove" type="button" title="Remove topic" on:click={(event) => { stopChipRemove(event); removeDraftTopic(tag); }}>
-                      <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                      <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
                   </button>
               </span>
           {/each}
@@ -452,7 +452,7 @@
                         <span class="tag-count">{countFor(fullItem.wd_tag_counts, draftWdRating)}</span>
                     {/if}
                     <button class="chip-remove" type="button" title="Remove WD tag" on:click={(event) => { stopChipRemove(event); removeDraftWdTag('rating', draftWdRating); }}>
-                        <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                        <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
                     </button>
                 </span>
             {:else}
@@ -470,7 +470,7 @@
                         <span class="tag-count">{countFor(fullItem.wd_tag_counts, tag)}</span>
                     {/if}
                     <button class="chip-remove" type="button" title="Remove WD tag" on:click={(event) => { stopChipRemove(event); removeDraftWdTag('character', tag); }}>
-                        <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                        <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
                     </button>
                 </span>
             {/each}
@@ -489,7 +489,7 @@
                         <span class="tag-count">{countFor(fullItem.wd_tag_counts, tag)}</span>
                     {/if}
                     <button class="chip-remove" type="button" title="Remove WD tag" on:click={(event) => { stopChipRemove(event); removeDraftWdTag('general', tag); }}>
-                        <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                        <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
                     </button>
                 </span>
             {/each}
@@ -625,7 +625,6 @@
       border: 1px solid var(--border-dim);
       user-select: none;
       overflow: hidden;
-      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
       gap: 4px;
   }
 
@@ -653,7 +652,6 @@
       padding: 0 6px;
       margin-left: 0;
       margin-right: 6px;
-      transition: all 0.2s ease;
   }
 
   .tag-unsaved {
@@ -678,7 +676,7 @@
       color: var(--text-muted);
       cursor: pointer;
       opacity: 0;
-      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+      transition: none !important;
   }
 
   /* Svelte-safe tag chip expansion on hover */
@@ -689,6 +687,7 @@
       background: rgba(255, 255, 255, 0.05);
       border-left: 1px solid rgba(255, 255, 255, 0.08);
       color: var(--text-muted);
+      transition: none !important;
   }
 
   /* Expand right-side margin of count when remove button is hidden, compress when shown */

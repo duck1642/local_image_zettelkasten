@@ -110,7 +110,6 @@ body.artist-list-resizing {
     border: 1px solid var(--border-dim);
     border-radius: 6px;
     background: rgba(255, 255, 255, 0.05);
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
     overflow: hidden;
   }
 
@@ -179,7 +178,6 @@ body.artist-list-resizing {
     padding: 0 6px;
     margin-left: 0;
     margin-right: 8px;
-    transition: all 0.2s ease;
   }
 
   .stat-chip-wrap:hover .chip-count {
@@ -223,7 +221,6 @@ body.artist-list-resizing {
     overflow: hidden;
     max-width: 0;
     opacity: 0;
-    transition: max-width 0.25s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease;
     height: 100%;
   }
 
@@ -248,8 +245,6 @@ body.artist-list-resizing {
     background: transparent;
     color: var(--text-muted);
     cursor: pointer;
-    transition: all 0.2s ease;
-  }
 
   .chip-action.action-rename:hover {
     color: #58a6ff;
