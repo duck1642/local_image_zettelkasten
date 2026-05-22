@@ -213,11 +213,6 @@
     letterFilter = value;
   }
 
-  function isFacetSelected(kind: FacetKind, value: string) {
-    if (kind === 'topic') return selectedTopics.includes(value);
-    if (kind === 'wd_tag') return selectedWdTags.includes(value);
-    return false;
-  }
 
   function toggleFacetSelection(kind: FacetKind, value: string) {
     if (!isSelectableFacet(kind)) return;
@@ -649,7 +644,8 @@
       {visibleItems}
       {loading}
       {error}
-      {isFacetSelected}
+      {selectedTopics}
+      {selectedWdTags}
       onToggleFacet={toggleFacetSelection}
       onOpenMetadataAction={openMetadataAction}
     />

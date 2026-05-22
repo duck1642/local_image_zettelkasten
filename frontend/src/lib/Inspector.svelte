@@ -428,7 +428,9 @@
                   {#if isUnsavedTopic(tag)}
                       <span class="tag-unsaved">*</span>
                   {/if}
-                  <button class="chip-remove" type="button" title="Remove topic" on:click={(event) => { stopChipRemove(event); removeDraftTopic(tag); }}>x</button>
+                  <button class="chip-remove" type="button" title="Remove topic" on:click={(event) => { stopChipRemove(event); removeDraftTopic(tag); }}>
+                      <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                  </button>
               </span>
           {/each}
           {#if !draftTopics || draftTopics.length === 0}
@@ -449,7 +451,9 @@
                     {#if countFor(fullItem.wd_tag_counts, draftWdRating)}
                         <span class="tag-count">{countFor(fullItem.wd_tag_counts, draftWdRating)}</span>
                     {/if}
-                    <button class="chip-remove" type="button" title="Remove WD tag" on:click={(event) => { stopChipRemove(event); removeDraftWdTag('rating', draftWdRating); }}>x</button>
+                    <button class="chip-remove" type="button" title="Remove WD tag" on:click={(event) => { stopChipRemove(event); removeDraftWdTag('rating', draftWdRating); }}>
+                        <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                    </button>
                 </span>
             {:else}
                 <div class="value-text">No rating</div>
@@ -465,7 +469,9 @@
                     {#if countFor(fullItem.wd_tag_counts, tag)}
                         <span class="tag-count">{countFor(fullItem.wd_tag_counts, tag)}</span>
                     {/if}
-                    <button class="chip-remove" type="button" title="Remove WD tag" on:click={(event) => { stopChipRemove(event); removeDraftWdTag('character', tag); }}>x</button>
+                    <button class="chip-remove" type="button" title="Remove WD tag" on:click={(event) => { stopChipRemove(event); removeDraftWdTag('character', tag); }}>
+                        <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                    </button>
                 </span>
             {/each}
             {#if !draftWdCharacters || draftWdCharacters.length === 0}
@@ -482,7 +488,9 @@
                     {#if countFor(fullItem.wd_tag_counts, tag)}
                         <span class="tag-count">{countFor(fullItem.wd_tag_counts, tag)}</span>
                     {/if}
-                    <button class="chip-remove" type="button" title="Remove WD tag" on:click={(event) => { stopChipRemove(event); removeDraftWdTag('general', tag); }}>x</button>
+                    <button class="chip-remove" type="button" title="Remove WD tag" on:click={(event) => { stopChipRemove(event); removeDraftWdTag('general', tag); }}>
+                        <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                    </button>
                 </span>
             {/each}
             {#if !draftWdGeneral || draftWdGeneral.length === 0}
@@ -606,61 +614,153 @@
   .tags-list { display: flex; flex-wrap: wrap; gap: 6px; }
 
   .tag-chip {
-      padding: 0;
-      border-radius: 4px;
+      display: inline-flex;
+      align-items: center;
+      height: 26px;
+      border-radius: 6px;
       font-size: 11px;
       font-weight: 600;
-      background: var(--bg-hover);
+      background: rgba(255, 255, 255, 0.05);
       color: var(--text-main);
       border: 1px solid var(--border-dim);
       user-select: none;
-      display: inline-flex;
-      align-items: stretch;
       overflow: hidden;
-      line-height: 1.2;
-      position: relative;
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+      gap: 4px;
   }
 
   .tag-chip.clickable { cursor: pointer; }
-  .tag-label { padding: 3px 7px; }
-  .tag-count {
-      min-width: 22px;
-      padding: 3px 6px;
-      background: rgba(255,255,255,0.08);
-      color: var(--text-bright);
-      text-align: right;
-      border-left: 1px solid rgba(255,255,255,0.06);
+
+  .tag-label {
+      display: flex;
+      align-items: center;
+      padding: 0 0 0 8px;
+      height: 100%;
   }
-  .tag-unsaved { padding: 3px 3px 3px 0; color: var(--accent-warning); }
+
+  /* Symmetrical even-even layout matching stats view chip counters */
+  .tag-count {
+      display: inline-grid;
+      place-items: center;
+      line-height: 1;
+      color: var(--text-muted);
+      background: rgba(255, 255, 255, 0.08);
+      border-radius: 10px;
+      font-size: 10px;
+      font-weight: 600;
+      min-width: 18px;
+      height: 18px;
+      padding: 0 6px;
+      margin-left: 0;
+      margin-right: 6px;
+      transition: all 0.2s ease;
+  }
+
+  .tag-unsaved {
+      display: flex;
+      align-items: center;
+      padding: 0;
+      margin-right: 2px;
+      color: var(--accent-warning);
+      font-size: 12px;
+      font-weight: bold;
+  }
+
+  /* Slide-out removal button using clean SVG graphics */
   .chip-remove {
+      display: inline-grid;
+      place-items: center;
       width: 0;
-      min-width: 0;
+      height: 100%;
       padding: 0;
       border: 0;
-      border-left: 1px solid transparent;
-      border-radius: 0;
-      opacity: 0;
-      overflow: hidden;
-      background: rgba(255,255,255,0.08);
+      background: transparent;
       color: var(--text-muted);
-      font-size: 11px;
       cursor: pointer;
-      transition: opacity 0.12s ease, width 0.12s ease, padding 0.12s ease;
+      opacity: 0;
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   }
+
+  /* Svelte-safe tag chip expansion on hover */
   .tag-chip:hover .chip-remove,
   .tag-chip:focus-within .chip-remove {
-      width: 18px;
-      padding: 3px 5px;
+      width: 24px;
       opacity: 1;
-      border-left-color: rgba(255,255,255,0.08);
+      background: rgba(255, 255, 255, 0.05);
+      border-left: 1px solid rgba(255, 255, 255, 0.08);
+      color: var(--text-muted);
   }
-  .chip-remove:hover { color: var(--accent-danger); background: rgba(248, 81, 73, 0.12); }
 
-  .tag-chip:hover { border-color: var(--border-hover); background: var(--bg-main); }
+  /* Expand right-side margin of count when remove button is hidden, compress when shown */
+  .tag-chip:hover .tag-count,
+  .tag-chip:focus-within .tag-count {
+      margin-right: 0;
+  }
 
-  .tag-chip.topic { color: var(--accent-purple); border-color: var(--accent-purple); background: rgba(163, 113, 247, 0.1); }
-  .tag-chip.rating { color: var(--accent-warning); }
-  .tag-chip.character { color: var(--accent-primary); }
+  .chip-remove:hover {
+      background: rgba(248, 81, 73, 0.15) !important;
+      color: var(--accent-danger) !important;
+  }
+
+  /* Categories Hover & Color Harmonies */
+  .tag-chip:hover {
+      border-color: rgba(255, 255, 255, 0.2);
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--text-bright);
+  }
+
+  .tag-chip:hover .tag-count {
+      color: var(--text-bright);
+      background: rgba(255, 255, 255, 0.15);
+  }
+
+  /* Topics (Purple) */
+  .tag-chip.topic {
+      color: var(--accent-purple);
+      border-color: rgba(163, 113, 247, 0.4);
+      background: rgba(163, 113, 247, 0.07);
+  }
+
+  .tag-chip.topic:hover {
+      border-color: var(--accent-purple);
+      background: rgba(163, 113, 247, 0.12);
+  }
+
+  /* Ratings (Warning Orange) */
+  .tag-chip.rating {
+      color: var(--accent-warning);
+      border-color: rgba(240, 139, 44, 0.35);
+      background: rgba(240, 139, 44, 0.07);
+  }
+
+  .tag-chip.rating:hover {
+      border-color: var(--accent-warning);
+      background: rgba(240, 139, 44, 0.12);
+  }
+
+  /* Character Tags (Accent Blue) */
+  .tag-chip.character {
+      color: var(--accent-primary);
+      border-color: rgba(31, 111, 235, 0.35);
+      background: rgba(31, 111, 235, 0.07);
+  }
+
+  .tag-chip.character:hover {
+      border-color: var(--accent-primary);
+      background: rgba(31, 111, 235, 0.12);
+  }
+
+  /* Visual/General Tags (Dim Gray) */
+  .tag-chip.visual {
+      color: var(--text-main);
+      border-color: var(--border-dim);
+      background: rgba(255, 255, 255, 0.04);
+  }
+
+  .tag-chip.visual:hover {
+      border-color: rgba(255, 255, 255, 0.25);
+      background: rgba(255, 255, 255, 0.08);
+  }
 
   .sub-section {
     margin-top: 5px;
