@@ -29,6 +29,8 @@
   let draftWdGeneral: string[] = [];
   let isDirty = false;
   let loading = false;
+  let loadingTimeout: any = null;
+  let showLoadingIndicator = false;
   let tagging = false;
   let abortController: AbortController | null = null;
   let lastLoadedHash: string | null = null;
@@ -57,21 +59,48 @@
     if (abortController) abortController.abort();
     abortController = new AbortController();
     const signal = abortController.signal;
-    fullItem = null;
+    
+    if (loadingTimeout) {
+      clearTimeout(loadingTimeout);
+      loadingTimeout = null;
+    }
+    
     loading = true;
+    showLoadingIndicator = false;
+    
+    // Only trigger loading overlay and clear details if it takes longer than 200ms
+    loadingTimeout = setTimeout(() => {
+      showLoadingIndicator = true;
+      fullItem = null;
+    }, 200);
+
     try {
         const res = await apiFetch(`/api/items/${hash}`, { signal });
         if (!res.ok) throw new Error('API error');
-        fullItem = await res.json();
+        const detail = await res.json();
 
-        applyLoadedDetails(fullItem);
+        if (loadingTimeout) {
+          clearTimeout(loadingTimeout);
+          loadingTimeout = null;
+        }
+        showLoadingIndicator = false;
+
+        applyLoadedDetails(detail);
         lastLoadedHash = hash;
     } catch (e: any) {
         if (e.name !== 'AbortError') {
+            if (loadingTimeout) {
+              clearTimeout(loadingTimeout);
+              loadingTimeout = null;
+            }
+            showLoadingIndicator = false;
+            fullItem = null;
             uiLog('ERROR', 'Failed to load item details', { hash, error: String(e) });
         }
     } finally {
-        if (!signal.aborted) loading = false;
+        if (!signal.aborted) {
+            loading = false;
+        }
     }
   }
 
@@ -93,6 +122,11 @@
 
   function clearDetails(abort = false) {
     if (abort) abortController?.abort();
+    if (loadingTimeout) {
+      clearTimeout(loadingTimeout);
+      loadingTimeout = null;
+    }
+    showLoadingIndicator = false;
     fullItem = null;
     artist = '';
     savedArtist = '';
@@ -355,7 +389,7 @@
         <p>No item selected</p>
     </div>
   {:else}
-    {#if loading}
+    {#if showLoadingIndicator}
       <div class="loading-overlay">
           <p>Loading details...</p>
       </div>
