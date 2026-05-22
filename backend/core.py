@@ -1,4 +1,4 @@
-﻿
+
 from logger import log_ingest_local, log_ingest_online
 from utils import setup_directories, get_config
 from runtime_context import get_runtime_context
@@ -11,11 +11,11 @@ from queue_service import queue_path
 def main():
 
     setup_directories()
-    config = get_config()
     ctx = get_runtime_context()
+    config = get_config(ctx)
 
 
-    conn = init_database()
+    conn = init_database(ctx=ctx)
     try:
         search_manager.hydrate(conn)
     finally:
@@ -40,7 +40,7 @@ def main():
         if links_file.exists():
             mode_str = "FORCE (No Size Check)" if skip_val else "NORMAL"
             log_ingest_online('INFO', f"Found {filename} [{mode_str}]. Starting Ingestion...")
-            ingestor = ExternalIngestor(str(links_file), skip_validation=skip_val)
+            ingestor = ExternalIngestor(str(links_file), skip_validation=skip_val, ctx=ctx)
             ext_stats = ingestor.run()
             stats["processed"] += ext_stats.get("processed", 0)
             stats["skipped"] += ext_stats.get("skipped", 0)
@@ -64,7 +64,11 @@ def main():
             continue
 
 
-        success, message, idx_data = process_file(filepath, config, delete_source=True, sync_index=False)
+        import inspect
+        p_kwargs = {"delete_source": True, "sync_index": False}
+        if "ctx" in inspect.signature(process_file).parameters:
+            p_kwargs["ctx"] = ctx
+        success, message, idx_data = process_file(filepath, config, **p_kwargs)
 
         if success:
             log_ingest_local('INFO', f"{message}")
@@ -86,6 +90,6 @@ def main():
     if local_index_queue:
         log_ingest_local('INFO', f"Syncing RAM indexes for {len(local_index_queue)} local items...")
         for item in local_index_queue:
-            search_manager.update_indexes(**item)
+            search_manager.update_indexes(**item, ctx=ctx)
 
     log_ingest_local('INFO', f"\nFINAL SUMMARY: {stats['processed']} Added | {stats['skipped']} Skipped/Duplicates | {stats['errors']} Errors")

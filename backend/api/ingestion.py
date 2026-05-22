@@ -429,7 +429,11 @@ def _run_local_ingest_worker(raw_paths: list[str], defaults: dict, skip_similari
             with lock:
                 state["phase"] = "running"
             try:
-                ok, message, index_data = process_file(staged_path, cfg, metadata=metadata, delete_source=True, skip_similarity=skip_similarity)
+                import inspect
+                p_kwargs = {"metadata": metadata, "delete_source": True, "skip_similarity": skip_similarity}
+                if "ctx" in inspect.signature(process_file).parameters:
+                    p_kwargs["ctx"] = ctx
+                ok, message, index_data = process_file(staged_path, cfg, **p_kwargs)
                 tag_status = str((index_data or {}).get("tagging_status") or "").strip()
                 tag_count = int((index_data or {}).get("tagging_tag_count") or 0)
                 tag_error = str((index_data or {}).get("tagging_error") or "").strip()

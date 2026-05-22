@@ -304,8 +304,11 @@ def rewrite_topic_refs_across_workspace(old_label: str, new_label: str | None, c
                 refresh_metadata_index_counters(conn)
                 result.mark_touched(str(vault["id"]))
             conn.commit()
-        except sqlite3.Error as exc:
-            conn.rollback()
+        except Exception as exc:
+            try:
+                conn.rollback()
+            except Exception as rollback_err:
+                result.errors.append({"vault": vault["id"], "error": f"Database rollback failed: {rollback_err}"})
             _restore_note_snapshots(note_snapshots, result, str(vault["id"]))
             result.errors.append({"vault": vault["id"], "error": str(exc)})
         finally:
@@ -336,8 +339,18 @@ def delete_topic_across_workspace(label: str, ctx: WorkspaceContext | None = Non
     topic_path = topic_file_path_for_label(clean, ctx)
     if not topic_path.exists():
         raise FileNotFoundError(f"topic not found: {topic_path.name}")
+
+    saved_content = topic_path.read_text(encoding="utf-8")
     topic_path.unlink()
-    maintenance = rewrite_topic_refs_across_workspace(clean, None, ctx=ctx)
+
+    try:
+        maintenance = rewrite_topic_refs_across_workspace(clean, None, ctx=ctx)
+        if maintenance.errors:
+            topic_path.write_text(saved_content, encoding="utf-8")
+    except Exception:
+        topic_path.write_text(saved_content, encoding="utf-8")
+        raise
+
     payload = maintenance.as_dict()
     payload.update({"label": clean, "path": str(topic_path)})
     return payload
@@ -356,8 +369,18 @@ def merge_topic_across_workspace(source_label: str, target_label: str, ctx: Work
         raise FileNotFoundError(f"topic not found: {source_path.name}")
     if not target_path.exists():
         raise FileNotFoundError(f"target topic not found: {target_path.name}")
+
+    saved_content = source_path.read_text(encoding="utf-8")
     source_path.unlink()
-    maintenance = rewrite_topic_refs_across_workspace(clean_source, clean_target, ctx=ctx)
+
+    try:
+        maintenance = rewrite_topic_refs_across_workspace(clean_source, clean_target, ctx=ctx)
+        if maintenance.errors:
+            source_path.write_text(saved_content, encoding="utf-8")
+    except Exception:
+        source_path.write_text(saved_content, encoding="utf-8")
+        raise
+
     payload = maintenance.as_dict()
     payload.update({"source_label": clean_source, "target_label": clean_target, "source_path": str(source_path)})
     return payload
@@ -511,8 +534,11 @@ def rewrite_wd_tags_across_workspace(tag: str, transform: Callable[[str], str | 
                 refresh_metadata_index_counters(conn)
                 result.mark_touched(str(vault["id"]))
             conn.commit()
-        except sqlite3.Error as exc:
-            conn.rollback()
+        except Exception as exc:
+            try:
+                conn.rollback()
+            except Exception as rollback_err:
+                result.errors.append({"vault": vault["id"], "error": f"Database rollback failed: {rollback_err}"})
             _restore_note_snapshots(note_snapshots, result, str(vault["id"]))
             result.errors.append({"vault": vault["id"], "error": str(exc)})
         finally:

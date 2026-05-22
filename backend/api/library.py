@@ -1077,8 +1077,8 @@ def _delete_item_row(cursor, conn, item_hash: str, remove_indexes: bool = True):
     log_system("INFO", f"Deleted item {item_hash}")
     return {"hash": item_hash, "status": "deleted", "cleanup_errors": cleanup_errors, "index": index_payload}
 
-def _delete_item_after_replacement(item_hash: str):
-    conn = init_database()
+def _delete_item_after_replacement(item_hash: str, ctx: WorkspaceContext | None = None):
+    conn = init_database(ctx=ctx)
     cursor = conn.cursor()
     try:
         cursor.execute("SELECT file_extension, mime_type, storage_id, source_url FROM items WHERE hash = ?", (item_hash,))
@@ -1086,9 +1086,9 @@ def _delete_item_after_replacement(item_hash: str):
         if not row:
             return {"hash": item_hash, "status": "missing", "cleanup_errors": []}
 
-        cleanup_paths = _item_file_paths(item_hash, row[0] or "", row[1] or "", row[2], conn)
+        cleanup_paths = _item_file_paths(item_hash, row[0] or "", row[1] or "", row[2], conn, ctx=ctx)
         existing_paths = [path for path in cleanup_paths if path.exists()]
-        trash_dir = _review_dir() / ".replace-trash"
+        trash_dir = _review_dir(ctx) / ".replace-trash"
         trash_dir.mkdir(parents=True, exist_ok=True)
         moved_paths = []
 
@@ -1116,7 +1116,7 @@ def _delete_item_after_replacement(item_hash: str):
         try:
             cursor.execute("DELETE FROM items WHERE hash = ?", (item_hash,))
             conn.commit()
-            search_manager.remove_indexes_batch([{"hash": item_hash, "source_url": row[3] or ""}])
+            search_manager.remove_indexes_batch([{"hash": item_hash, "source_url": row[3] or ""}], ctx=ctx)
         except Exception as exc:
             conn.rollback()
             cleanup_errors = [{"hash": item_hash, "path": "database", "error": str(exc)}]

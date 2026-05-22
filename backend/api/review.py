@@ -144,6 +144,8 @@ async def review_action(filename: str, action: str):
     return await asyncio.to_thread(_review_action_sync, filename, action)
 
 def _review_action_sync(filename: str, action: str):
+    ctx = get_runtime_context()
+    cfg = get_config(ctx)
     if action not in {"delete", "keep", "variant", "replace"}:
         raise HTTPException(status_code=400, detail="Invalid review action")
     file_path = _review_path(filename)
@@ -202,7 +204,7 @@ def _review_action_sync(filename: str, action: str):
             message = "Replace target is missing. Item kept pending."
             log_review("WARNING", "Review replace warning", action=action, filename=filename, display_name=display_name, detail=message)
             return {"status": "warning", "action": action, "message": message}
-        conn = connect_database()
+        conn = connect_database(ctx=ctx)
         try:
             target_exists = bool(conn.execute("SELECT 1 FROM items WHERE hash = ?", (target_hash,)).fetchone())
         finally:
@@ -211,16 +213,22 @@ def _review_action_sync(filename: str, action: str):
             message = "Replace target no longer exists in DB. Item kept pending."
             log_review("WARNING", "Review replace warning", action=action, filename=filename, display_name=display_name, target_hash=target_hash, detail=message)
             return {"status": "warning", "action": action, "message": message}
-        replacement_manual_fields = _manual_frontmatter_for_hash(target_hash)
-        replacement_identity_fields = _sqlite_identity_for_hash(target_hash)
+        replacement_manual_fields = _manual_frontmatter_for_hash(target_hash, ctx=ctx)
+        replacement_identity_fields = _sqlite_identity_for_hash(target_hash, ctx=ctx)
 
     try:
+        import inspect
+        p_kwargs = {
+            "metadata": metadata,
+            "delete_source": True,
+            "skip_similarity": True,
+        }
+        if "ctx" in inspect.signature(process_file).parameters:
+            p_kwargs["ctx"] = ctx
         ok, process_message, idx_data = process_file(
             file_path,
-            get_config(),
-            metadata=metadata,
-            delete_source=True,
-            skip_similarity=True,
+            cfg,
+            **p_kwargs
         )
     except Exception as exc:
         log_review("ERROR", "Review action failed", action=action, filename=filename, display_name=display_name, target_hash=target_hash, error=str(exc))
@@ -238,7 +246,7 @@ def _review_action_sync(filename: str, action: str):
             preserve_error = "replacement hash was not returned by processor"
         else:
             try:
-                _apply_manual_frontmatter_to_item(new_hash, replacement_manual_fields, replacement_identity_fields)
+                _apply_manual_frontmatter_to_item(new_hash, replacement_manual_fields, replacement_identity_fields, ctx=ctx)
             except Exception as exc:
                 preserve_error = str(exc)
                 log_review("ERROR", "Review replace metadata preservation failed", action=action, filename=filename, display_name=display_name, target_hash=target_hash, new_hash=new_hash, error=preserve_error)
@@ -267,7 +275,11 @@ def _review_action_sync(filename: str, action: str):
         return {"status": "warning", "action": action, "message": message, "error": preserve_error}
 
     if action == "replace":
-        replace_result = _delete_item_after_replacement(target_hash)
+        import inspect
+        del_kwargs = {}
+        if "ctx" in inspect.signature(_delete_item_after_replacement).parameters:
+            del_kwargs["ctx"] = ctx
+        replace_result = _delete_item_after_replacement(target_hash, **del_kwargs)
         if replace_result["status"] != "deleted":
             error_text = "; ".join(str(item.get("error", "")) for item in replace_result.get("cleanup_errors", []) if item.get("error"))
             message = "Replacement ingested, but old target cleanup failed. Both vault items are kept."

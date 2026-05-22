@@ -327,20 +327,20 @@ def _review_path(filename: str) -> Path:
     return path
 
 
-def _assets_dir() -> Path:
-    return get_runtime_context().active_vault.assets_dir
+def _assets_dir(ctx: WorkspaceContext | None = None) -> Path:
+    return (ctx or get_runtime_context()).active_vault.assets_dir
 
 
-def _review_dir() -> Path:
-    return get_runtime_context().active_vault.review_dir
+def _review_dir(ctx: WorkspaceContext | None = None) -> Path:
+    return (ctx or get_runtime_context()).active_vault.review_dir
 
 
-def _local_ingest_dir() -> Path:
-    return get_runtime_context().active_vault.local_ingest_dir
+def _local_ingest_dir(ctx: WorkspaceContext | None = None) -> Path:
+    return (ctx or get_runtime_context()).active_vault.local_ingest_dir
 
 
-def _topics_dir() -> Path:
-    return get_runtime_context().topics_dir
+def _topics_dir(ctx: WorkspaceContext | None = None) -> Path:
+    return (ctx or get_runtime_context()).topics_dir
 
 
 def _file_response_under(root: Path, relative_path: str):
@@ -532,8 +532,8 @@ def _review_db_has_hashes(hashes: list[str]) -> set[str]:
     finally:
         conn.close()
 
-def _manual_frontmatter_for_hash(item_hash: str) -> dict:
-    conn = connect_database()
+def _manual_frontmatter_for_hash(item_hash: str, ctx: WorkspaceContext | None = None) -> dict:
+    conn = connect_database(ctx=ctx)
     try:
         row = conn.execute("SELECT storage_id FROM items WHERE hash = ?", (item_hash,)).fetchone()
         if not row or not row[0]:
@@ -547,8 +547,8 @@ def _manual_frontmatter_for_hash(item_hash: str) -> dict:
         if field in frontmatter
     }
 
-def _sqlite_identity_for_hash(item_hash: str) -> dict:
-    conn = connect_database()
+def _sqlite_identity_for_hash(item_hash: str, ctx: WorkspaceContext | None = None) -> dict:
+    conn = connect_database(ctx=ctx)
     try:
         row = conn.execute(
             "SELECT source_artist, platform, source_url, date_added FROM items WHERE hash = ?",
@@ -565,11 +565,11 @@ def _sqlite_identity_for_hash(item_hash: str) -> dict:
     finally:
         conn.close()
 
-def _apply_manual_frontmatter_to_item(item_hash: str, manual_fields: dict, identity_fields: dict | None = None):
+def _apply_manual_frontmatter_to_item(item_hash: str, manual_fields: dict, identity_fields: dict | None = None, ctx: WorkspaceContext | None = None):
     if not manual_fields and not identity_fields:
         return
-    conn = init_database()
-    workspace_conn = connect_workspace_database()
+    conn = init_database(ctx=ctx)
+    workspace_conn = connect_workspace_database(ctx=ctx)
     try:
         identity_fields = identity_fields or {}
         if identity_fields:
@@ -595,7 +595,7 @@ def _apply_manual_frontmatter_to_item(item_hash: str, manual_fields: dict, ident
         row = conn.execute("SELECT storage_id FROM items WHERE hash = ?", (item_hash,)).fetchone()
         if not row or not row[0]:
             raise RuntimeError(f"item {item_hash} is missing storage_id")
-        note_path = note_path_for(item_hash, row[0])
+        note_path = note_path_for(item_hash, row[0], ctx=ctx)
         note_path.parent.mkdir(parents=True, exist_ok=True)
         atomic_write_text(note_path, md_content)
         safe_reindex_item_metadata(conn, item_hash, "review_replace_preserve")
@@ -609,13 +609,13 @@ def _apply_manual_frontmatter_to_item(item_hash: str, manual_fields: dict, ident
         conn.close()
         workspace_conn.close()
 
-def _item_file_paths(item_hash: str, extension: str, mime_type: str, storage_id: str | None, conn=None) -> list[Path]:
+def _item_file_paths(item_hash: str, extension: str, mime_type: str, storage_id: str | None, conn=None, ctx: WorkspaceContext | None = None) -> list[Path]:
     if not storage_id:
         raise RuntimeError(f"item {item_hash} is missing storage_id")
     return [
-        asset_path_for(item_hash, extension, mime_type, storage_id=storage_id),
-        note_path_for(item_hash, storage_id=storage_id),
-        wd_tag_cache_path_for(item_hash, storage_id=storage_id),
+        asset_path_for(item_hash, extension, mime_type, storage_id=storage_id, ctx=ctx),
+        note_path_for(item_hash, storage_id=storage_id, ctx=ctx),
+        wd_tag_cache_path_for(item_hash, storage_id=storage_id, ctx=ctx),
     ]
 
 def _tail_lines(path: Path, count: int = 150) -> list[str]:

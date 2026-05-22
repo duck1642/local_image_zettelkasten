@@ -971,7 +971,7 @@ def test_local_worker_reports_wd_tagging_status_for_started_paths(monkeypatch, t
     source = tmp_path / "drop_ok.jpg"
     source.write_bytes(b"fake image")
 
-    def fake_process_file(path, config, metadata=None, delete_source=False, skip_similarity=False):
+    def fake_process_file(path, config, metadata=None, delete_source=False, skip_similarity=False, **kwargs):
         if delete_source:
             Path(path).unlink()
         return True, "Success: drop_ok.jpg -> item.jpg", {
@@ -1451,7 +1451,7 @@ def test_manage_review_uses_quarantine_sidecar_for_artist(monkeypatch, tmp_path)
     sidecar.write_text(json.dumps({"metadata": {"artist": "Sidecar Artist"}}), encoding="utf-8")
     captured = {}
 
-    def fake_process_file(file_path, config, metadata=None, delete_source=False, skip_similarity=False):
+    def fake_process_file(file_path, config, metadata=None, delete_source=False, skip_similarity=False, **kwargs):
         captured["metadata"] = metadata
         if delete_source:
             file_path.unlink()
@@ -1510,7 +1510,7 @@ def test_review_replace_preserves_old_sqlite_identity_and_manual_indexed_metadat
     review_file.write_bytes(b"replacement")
     review_file.with_suffix(".jpg.json").write_text(json.dumps({"best_match": old_hash, "metadata": {"artist": "New Artist"}}), encoding="utf-8")
 
-    def fake_process_file(path, config, metadata=None, delete_source=False, skip_similarity=False, sync_index=True):
+    def fake_process_file(path, config, metadata=None, delete_source=False, skip_similarity=False, sync_index=True, **kwargs):
         conn = insert_mock_item(sqlite_operator, new_hash, artist="New Artist", date_added="2026-02-02 00:00:00")
         new_storage_id = storage_id_for(conn, new_hash)
         md = web_api.generate_markdown(conn, new_hash)
@@ -1523,7 +1523,7 @@ def test_review_replace_preserves_old_sqlite_identity_and_manual_indexed_metadat
         return True, "ok", {"file_hash": new_hash}
 
     monkeypatch.setattr(web_api, "process_file", fake_process_file)
-    monkeypatch.setattr(web_api, "_delete_item_after_replacement", lambda target_hash: {"hash": target_hash, "status": "deleted", "cleanup_errors": []})
+    monkeypatch.setattr(web_api, "_delete_item_after_replacement", lambda target_hash, **kwargs: {"hash": target_hash, "status": "deleted", "cleanup_errors": []})
 
     result = web_api._review_action_sync("replacement.jpg", "replace")
     conn = sqlite_operator.init_database()
@@ -3825,7 +3825,7 @@ def test_local_ingest_worker_emits_local_and_audit_logs(monkeypatch, tmp_path):
     local_calls = []
     audit_calls = []
 
-    def fake_process_file(path, config, metadata=None, delete_source=False, skip_similarity=False):
+    def fake_process_file(path, config, metadata=None, delete_source=False, skip_similarity=False, **kwargs):
         assert metadata["ingest_type"] == "local"
         assert metadata["run_id"] == "run-local"
         if delete_source:

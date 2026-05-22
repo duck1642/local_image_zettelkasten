@@ -1,4 +1,4 @@
-﻿
+
 from pathlib import Path
 from typing import List, Optional, Dict, Tuple
 from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED, as_completed
@@ -91,7 +91,7 @@ class ExternalIngestor:
             if batch_index_queue:
                 log_ingest_online('INFO', f"Syncing RAM indexes for {len(batch_index_queue)} new items...")
                 try:
-                    search_manager.update_indexes_batch(batch_index_queue)
+                    search_manager.update_indexes_batch(batch_index_queue, ctx=self.ctx)
                 except Exception as sync_e:
                     log_ingest_online("ERROR", "RAM Sync failed during batch finalization", error=str(sync_e))
 
@@ -345,12 +345,18 @@ class ExternalIngestor:
                     process_metadata = dict(result['metadata'])
                     process_metadata.setdefault("ingest_type", "online")
                     process_metadata.setdefault("run_id", self.links_file.stem)
+                    import inspect
+                    p_kwargs = {
+                        "metadata": process_metadata,
+                        "delete_source": True,
+                        "sync_index": False,
+                    }
+                    if "ctx" in inspect.signature(process_file).parameters:
+                        p_kwargs["ctx"] = self.ctx
                     process_success, msg, idx_data = process_file(
                         target_file,
                         self.config,
-                        metadata=process_metadata,
-                        delete_source=True,
-                        sync_index=False
+                        **p_kwargs
                     )
 
                     if process_success:
@@ -436,7 +442,7 @@ class ExternalIngestor:
 
             missing_assets = []
             for file_hash, file_extension, mime_type, storage_id in rows:
-                asset_path = asset_path_for(file_hash, file_extension, mime_type, storage_id=storage_id)
+                asset_path = asset_path_for(file_hash, file_extension, mime_type, storage_id=storage_id, ctx=self.ctx)
                 if not asset_path.exists():
                     missing_assets.append(file_hash)
 
@@ -465,7 +471,7 @@ class ExternalIngestor:
 
             missing_assets = []
             for file_hash, file_extension, mime_type, storage_id in rows:
-                asset_path = asset_path_for(file_hash, file_extension, mime_type, storage_id=storage_id)
+                asset_path = asset_path_for(file_hash, file_extension, mime_type, storage_id=storage_id, ctx=self.ctx)
                 if not asset_path.exists():
                     missing_assets.append(file_hash)
 
@@ -504,22 +510,22 @@ class ExternalIngestor:
                 removed_indexes.append({"hash": file_hash, "source_url": source_url})
 
                 if file_extension:
-                    asset_path = asset_path_for(file_hash, file_extension, mime_type, storage_id=storage_id)
+                    asset_path = asset_path_for(file_hash, file_extension, mime_type, storage_id=storage_id, ctx=self.ctx)
                     if asset_path.exists():
                         asset_path.unlink()
 
                 if storage_id:
-                    note_path = note_path_for(file_hash, storage_id=storage_id)
+                    note_path = note_path_for(file_hash, storage_id=storage_id, ctx=self.ctx)
                     if note_path.exists():
                         note_path.unlink()
-                    wd_path = wd_tag_cache_path_for(file_hash, storage_id=storage_id)
+                    wd_path = wd_tag_cache_path_for(file_hash, storage_id=storage_id, ctx=self.ctx)
                     if wd_path.exists():
                         wd_path.unlink()
 
                 rolled_back += 1
 
             conn.commit()
-            search_manager.remove_indexes_batch(removed_indexes)
+            search_manager.remove_indexes_batch(removed_indexes, ctx=self.ctx)
             return rolled_back
         except Exception as e:
             conn.rollback()
