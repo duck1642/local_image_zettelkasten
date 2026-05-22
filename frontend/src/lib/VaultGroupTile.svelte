@@ -87,7 +87,6 @@
     margin-bottom: 12px;
     break-inside: avoid;
     cursor: pointer;
-    transition: border-color 0.1s, background 0.1s;
     display: flex;
     flex-direction: column;
     content-visibility: auto;
@@ -100,9 +99,7 @@
 
   .tile-group:hover { border-color: var(--border-hover); }
   .tile-group.selected {
-    border-color: #f0b429;
-    background: rgba(240, 180, 41, 0.08);
-    box-shadow: 0 0 0 2px rgba(240, 180, 41, 0.35);
+    border-color: #58a6ff;
   }
 
   .media-stack { position: relative; width: 100%; background: #000; min-height: 100px; display: flex; align-items: center; justify-content: center; }
@@ -160,4 +157,14 @@
 
   .hash { color: var(--text-muted); font-family: monospace; }
   .artist { color: var(--accent-purple); font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60%; text-align: right; }
+
+  .tile-group.selected .info {
+    background: rgba(31, 111, 235, 0.15);
+  }
+  .tile-group.selected .hash {
+    color: #79c0ff;
+  }
+  .tile-group.selected .artist {
+    color: #58a6ff;
+  }
 </style>
