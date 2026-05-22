@@ -245,6 +245,7 @@ body.artist-list-resizing {
     background: transparent;
     color: var(--text-muted);
     cursor: pointer;
+  }
 
   .chip-action.action-rename:hover {
     color: #58a6ff;

@@ -144,11 +144,21 @@
     return !savedTopics.some((topic) => topic.toLocaleLowerCase() === key);
   }
 
+  function isTagPromoted(value: string) {
+    if (!value) return false;
+    const key = value.toLocaleLowerCase();
+    return draftTopics.some((topic) => topic.toLocaleLowerCase() === key) &&
+           !savedTopics.some((topic) => topic.toLocaleLowerCase() === key);
+  }
+
   function promoteWdToTopic(value: string) {
     const clean = String(value || '').trim();
     if (!clean) return;
     const key = clean.toLocaleLowerCase();
-    if (draftTopics.some((topic) => topic.toLocaleLowerCase() === key)) return;
+    if (draftTopics.some((topic) => topic.toLocaleLowerCase() === key)) {
+      removeDraftTopic(clean);
+      return;
+    }
     draftTopics = [...draftTopics, clean];
     topics = draftTopics;
   }
@@ -420,13 +430,21 @@
       <label class="section-label">My Topics</label>
       <div class="tags-list">
           {#each (draftTopics || []) as tag}
-              <span class="tag-chip topic">
+              <!-- svelte-ignore a11y-no-noninteractive-tabindex -->
+              <!-- svelte-ignore a11y-no-noninteractive-element-to-interactive-role -->
+              <span 
+                  class="tag-chip topic" 
+                  class:promoted={isUnsavedTopic(tag)}
+                  class:clickable={isUnsavedTopic(tag)}
+                  role={isUnsavedTopic(tag) ? "button" : undefined}
+                  tabindex={isUnsavedTopic(tag) ? 0 : undefined}
+                  title={isUnsavedTopic(tag) ? "Click to revert topic promotion" : undefined}
+                  on:click={() => { if (isUnsavedTopic(tag)) removeDraftTopic(tag); }}
+                  on:keydown={(event) => { if (isUnsavedTopic(tag) && (event.key === 'Enter' || event.key === ' ')) removeDraftTopic(tag); }}
+              >
                   <span class="tag-label">{tag}</span>
                   {#if countFor(fullItem.topic_counts, tag)}
                       <span class="tag-count">{countFor(fullItem.topic_counts, tag)}</span>
-                  {/if}
-                  {#if isUnsavedTopic(tag)}
-                      <span class="tag-unsaved">*</span>
                   {/if}
                   <button class="chip-remove" type="button" title="Remove topic" on:click={(event) => { stopChipRemove(event); removeDraftTopic(tag); }}>
                       <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
@@ -446,7 +464,7 @@
         <span class="muted-title">Rating</span>
         <div class="tags-list">
             {#if draftWdRating}
-                <span class="tag-chip rating clickable" role="button" tabindex="0" title="Promote to topic" on:click={() => promoteWdToTopic(draftWdRating)} on:keydown={(event) => { if (event.key === 'Enter' || event.key === ' ') promoteWdToTopic(draftWdRating); }}>
+                <span class="tag-chip rating clickable" class:promoted={isTagPromoted(draftWdRating)} role="button" tabindex="0" title="Promote to topic" on:click={() => promoteWdToTopic(draftWdRating)} on:keydown={(event) => { if (event.key === 'Enter' || event.key === ' ') promoteWdToTopic(draftWdRating); }}>
                     <span class="tag-label">{draftWdRating}</span>
                     {#if countFor(fullItem.wd_tag_counts, draftWdRating)}
                         <span class="tag-count">{countFor(fullItem.wd_tag_counts, draftWdRating)}</span>
@@ -464,7 +482,7 @@
         <span class="muted-title">Character Tags</span>
         <div class="tags-list">
             {#each (draftWdCharacters || []) as tag}
-                <span class="tag-chip character clickable" role="button" tabindex="0" title="Promote to topic" on:click={() => promoteWdToTopic(tag)} on:keydown={(event) => { if (event.key === 'Enter' || event.key === ' ') promoteWdToTopic(tag); }}>
+                <span class="tag-chip character clickable" class:promoted={isTagPromoted(tag)} role="button" tabindex="0" title="Promote to topic" on:click={() => promoteWdToTopic(tag)} on:keydown={(event) => { if (event.key === 'Enter' || event.key === ' ') promoteWdToTopic(tag); }}>
                     <span class="tag-label">{tag}</span>
                     {#if countFor(fullItem.wd_tag_counts, tag)}
                         <span class="tag-count">{countFor(fullItem.wd_tag_counts, tag)}</span>
@@ -483,7 +501,7 @@
         <span class="muted-title">Visual Tags</span>
         <div class="tags-list">
             {#each (draftWdGeneral || []) as tag}
-                <span class="tag-chip visual clickable" role="button" tabindex="0" title="Promote to topic" on:click={() => promoteWdToTopic(tag)} on:keydown={(event) => { if (event.key === 'Enter' || event.key === ' ') promoteWdToTopic(tag); }}>
+                <span class="tag-chip visual clickable" class:promoted={isTagPromoted(tag)} role="button" tabindex="0" title="Promote to topic" on:click={() => promoteWdToTopic(tag)} on:keydown={(event) => { if (event.key === 'Enter' || event.key === ' ') promoteWdToTopic(tag); }}>
                     <span class="tag-label">{tag}</span>
                     {#if countFor(fullItem.wd_tag_counts, tag)}
                         <span class="tag-count">{countFor(fullItem.wd_tag_counts, tag)}</span>
@@ -650,19 +668,11 @@
       min-width: 18px;
       height: 18px;
       padding: 0 6px;
-      margin-left: 0;
-      margin-right: 6px;
+      margin-left: 4px;
+      margin-right: 2px;
   }
 
-  .tag-unsaved {
-      display: flex;
-      align-items: center;
-      padding: 0;
-      margin-right: 2px;
-      color: var(--accent-warning);
-      font-size: 12px;
-      font-weight: bold;
-  }
+
 
   /* Slide-out removal button using clean SVG graphics */
   .chip-remove {
@@ -677,6 +687,7 @@
       cursor: pointer;
       opacity: 0;
       transition: none !important;
+      border-radius: 0 !important;
   }
 
   /* Svelte-safe tag chip expansion on hover */
@@ -684,7 +695,6 @@
   .tag-chip:focus-within .chip-remove {
       width: 24px;
       opacity: 1;
-      background: rgba(255, 255, 255, 0.05);
       border-left: 1px solid rgba(255, 255, 255, 0.08);
       color: var(--text-muted);
       transition: none !important;
@@ -759,6 +769,83 @@
   .tag-chip.visual:hover {
       border-color: rgba(255, 255, 255, 0.25);
       background: rgba(255, 255, 255, 0.08);
+  }
+
+  /* ================= Promoted / Unsaved Draft Highlights ================= */
+  /* Topic Draft (Purple) */
+  .tag-chip.topic.promoted {
+      background: var(--accent-purple) !important;
+      border-color: #c9a0ff !important;
+      color: #ffffff !important;
+  }
+  .tag-chip.topic.promoted .tag-count {
+      background: #ffffff !important;
+      color: var(--accent-purple) !important;
+  }
+  .tag-chip.topic.promoted .chip-remove {
+      color: rgba(255, 255, 255, 0.7) !important;
+      border-left: 1px solid rgba(255, 255, 255, 0.25) !important;
+  }
+  .tag-chip.topic.promoted .chip-remove:hover {
+      background: rgba(255, 255, 255, 0.15) !important;
+      color: #ffffff !important;
+  }
+
+  /* Rating Suggestion (Orange) */
+  .tag-chip.rating.promoted {
+      background: var(--accent-warning) !important;
+      border-color: #ffb454 !important;
+      color: #ffffff !important;
+  }
+  .tag-chip.rating.promoted .tag-count {
+      background: #ffffff !important;
+      color: var(--accent-warning) !important;
+  }
+  .tag-chip.rating.promoted .chip-remove {
+      color: rgba(255, 255, 255, 0.7) !important;
+      border-left: 1px solid rgba(255, 255, 255, 0.25) !important;
+  }
+  .tag-chip.rating.promoted .chip-remove:hover {
+      background: rgba(255, 255, 255, 0.15) !important;
+      color: #ffffff !important;
+  }
+
+  /* Character Suggestion (Blue) */
+  .tag-chip.character.promoted {
+      background: var(--accent-primary) !important;
+      border-color: #58a6ff !important;
+      color: #ffffff !important;
+  }
+  .tag-chip.character.promoted .tag-count {
+      background: #ffffff !important;
+      color: var(--accent-primary) !important;
+  }
+  .tag-chip.character.promoted .chip-remove {
+      color: rgba(255, 255, 255, 0.7) !important;
+      border-left: 1px solid rgba(255, 255, 255, 0.25) !important;
+  }
+  .tag-chip.character.promoted .chip-remove:hover {
+      background: rgba(255, 255, 255, 0.15) !important;
+      color: #ffffff !important;
+  }
+
+  /* Visual/General Suggestion (Dim Gray/Slate) */
+  .tag-chip.visual.promoted {
+      background: #8b949e !important;
+      border-color: #c9d1d9 !important;
+      color: #0d1117 !important;
+  }
+  .tag-chip.visual.promoted .tag-count {
+      background: #0d1117 !important;
+      color: #8b949e !important;
+  }
+  .tag-chip.visual.promoted .chip-remove {
+      color: rgba(13, 17, 23, 0.7) !important;
+      border-left: 1px solid rgba(13, 17, 23, 0.2) !important;
+  }
+  .tag-chip.visual.promoted .chip-remove:hover {
+      background: rgba(13, 17, 23, 0.1) !important;
+      color: #0d1117 !important;
   }
 
   .sub-section {
