@@ -2,6 +2,7 @@
   import { onMount, onDestroy, tick } from 'svelte';
   import { log as uiLog } from './logger';
   import { apiFetch, apiUrl } from './api';
+  import { runtimeSessionKey } from './runtimeStore';
 
   interface LogEntry {
     id?: number;
@@ -24,8 +25,15 @@
   let reconnectAttempts = 0;
   let logContainer: HTMLElement;
   let searchText = '';
+  let currentRuntimeSessionKey = '';
   const RECONNECT_BASE_MS = 800;
   const RECONNECT_MAX_MS = 8000;
+  $: if ($runtimeSessionKey) {
+    if (currentRuntimeSessionKey && currentRuntimeSessionKey !== $runtimeSessionKey) {
+      reconnectForRuntimeSwitch();
+    }
+    currentRuntimeSessionKey = $runtimeSessionKey;
+  }
 
   // Level filter: all on except DEBUG by default
   let levelFilters: Record<string, boolean> = {
@@ -155,6 +163,19 @@
         eventSource?.close();
         scheduleReconnect();
     };
+  }
+
+  function reconnectForRuntimeSwitch() {
+    if (reconnectTimer !== null) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+    eventSource?.close();
+    eventSource = null;
+    logs = [];
+    logIdCounter = 0;
+    reconnectAttempts = 0;
+    connectToLogs();
   }
 
   function isNearBottom(node: HTMLElement) {

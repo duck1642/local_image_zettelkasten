@@ -29,6 +29,12 @@ export function setQueueStats(next: QueueStats) {
   });
 }
 
+export function clearSharedStats() {
+  queueStats.set(initialQueueStats);
+  reviewCount.set(0);
+  reviewStats.set(initialReviewStats);
+}
+
 export async function refreshQueueStats() {
   try {
     const response = await apiFetch('/api/queue-stats');

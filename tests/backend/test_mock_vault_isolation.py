@@ -36,7 +36,7 @@ def fresh_backend(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *module_names
     if str(BACKEND) not in sys.path:
         sys.path.insert(0, str(BACKEND))
     for name in list(sys.modules):
-        if name in {"utils", "runtime_context", "web_api", "queue_service", "md_generator", "metadata_index", "processor", "external_ingestion", "thumbnails", "fingerprint", "artists", "platforms", "review_cache", "topics", "vaults", "workspace_db", "ingest_control"} or name.startswith(("logger", "db.", "tagging", "downloaders")):
+        if name in {"utils", "runtime_context", "web_api", "queue_service", "md_generator", "metadata_index", "metadata_maintenance", "processor", "external_ingestion", "thumbnails", "fingerprint", "artists", "platforms", "review_cache", "topics", "vaults", "workspace_db", "ingest_control"} or name.startswith(("logger", "db.", "tagging", "downloaders")):
             del sys.modules[name]
     return [importlib.import_module(name) for name in module_names]
 
@@ -624,6 +624,66 @@ def test_vault_api_creates_sets_active_and_rejects_active_delete(monkeypatch, tm
     with pytest.raises(HTTPException) as exc:
         web_api._delete_vault_sync("second-vault", confirm=True)
     assert exc.value.status_code == 400
+
+
+def test_active_workspace_and_vault_switches_are_preflight_guarded(monkeypatch, tmp_path):
+    web_api, vaults, workspaces = fresh_backend(monkeypatch, tmp_path, "web_api", "vaults", "workspaces")
+    registry_path = tmp_path / "workspaces.yaml"
+    monkeypatch.setattr(workspaces, "REGISTRY_PATH", registry_path)
+    obsidian_vault = (Path(tempfile.gettempdir()) / f"lmz-switch-guard-test-{time.time_ns()}").resolve()
+    try:
+        created = web_api._create_vault_sync({"name": "Guard Target"})
+        assert any(item["id"] == "guard-target" for item in created["items"])
+        added = web_api._add_obsidian_workspace_sync({"path": str(obsidian_vault), "name": "Guard Workspace"})
+        workspace_id = next(item["id"] for item in added["items"] if item["name"] == "Guard Workspace")
+
+        ctx = web_api.get_runtime_context()
+        with web_api.local_ingest_lock(ctx):
+            web_api.local_ingest_state(ctx)["running"] = True
+        try:
+            blocker = web_api._runtime_switch_blocker()
+            assert blocker is not None
+            assert blocker.status_code == 409
+            payload = json.loads(blocker.body.decode("utf-8"))
+            assert payload["detail"] == "Runtime switch blocked"
+            assert "local_ingest_running" in payload["blockers"]
+
+            with pytest.raises(HTTPException) as vault_exc:
+                web_api._set_vault_active_sync({"id": "guard-target"})
+            assert vault_exc.value.status_code == 409
+            assert "local_ingest_running" in vault_exc.value.detail["blockers"]
+
+            with pytest.raises(HTTPException) as workspace_exc:
+                web_api._set_workspace_active_sync({"id": workspace_id})
+            assert workspace_exc.value.status_code == 409
+            assert "local_ingest_running" in workspace_exc.value.detail["blockers"]
+        finally:
+            with web_api.local_ingest_lock(ctx):
+                web_api.local_ingest_state(ctx)["running"] = False
+
+        assert web_api.INGESTION_LOCK.acquire(blocking=False)
+        try:
+            blocker = web_api._runtime_switch_blocker()
+            payload = json.loads(blocker.body.decode("utf-8"))
+            assert blocker.status_code == 409
+            assert "online_ingest_running" in payload["blockers"]
+        finally:
+            web_api.INGESTION_LOCK.release()
+
+        metadata_index = importlib.import_module("metadata_index")
+        state = metadata_index._runtime_state(ctx)
+        with state.repair_lock:
+            state.repair_running = True
+        try:
+            blocker = web_api._runtime_switch_blocker()
+            payload = json.loads(blocker.body.decode("utf-8"))
+            assert blocker.status_code == 409
+            assert "metadata_repair_running" in payload["blockers"]
+        finally:
+            with state.repair_lock:
+                state.repair_running = False
+    finally:
+        shutil.rmtree(obsidian_vault, ignore_errors=True)
 
 
 def test_vault_merge_reallocates_storage_ids_and_keeps_source(monkeypatch, tmp_path):
@@ -2612,6 +2672,166 @@ def test_workspace_topic_rename_rejects_missing_and_existing_target(monkeypatch,
     with pytest.raises(HTTPException) as missing:
         web_api._rename_topic_sync("Missing Topic", "Other Topic")
     assert missing.value.status_code == 404
+
+
+def test_metadata_maintenance_wd_tag_rename_and_delete_rewrites_notes(monkeypatch, tmp_path):
+    utils, sqlite_operator, metadata_index, web_api = fresh_backend(
+        monkeypatch,
+        tmp_path,
+        "utils",
+        "db.sqlite_operator",
+        "metadata_index",
+        "web_api",
+    )
+    item_a = "e1" * 32
+    item_b = "e2" * 32
+    conn = insert_mock_item(sqlite_operator, item_a)
+    storage_a = storage_id_for(conn, item_a)
+    note_a = utils.note_path_for(item_a, storage_a)
+    note_a.parent.mkdir(parents=True, exist_ok=True)
+    note_a.write_text(
+        "---\nwd_rating: safe\nwd_character_tags:\n  - Shared\n  - Keep Character\nwd_tags:\n  - Shared\n  - Keep General\n---\nbody\n",
+        encoding="utf-8",
+    )
+    metadata_index.reindex_item_metadata(conn, item_a)
+    conn.commit()
+    conn.close()
+
+    conn = insert_mock_item(sqlite_operator, item_b)
+    storage_b = storage_id_for(conn, item_b)
+    note_b = utils.note_path_for(item_b, storage_b)
+    note_b.parent.mkdir(parents=True, exist_ok=True)
+    note_b.write_text("---\nwd_tags:\n  - Shared\n  - Other\n---\nbody\n", encoding="utf-8")
+    metadata_index.reindex_item_metadata(conn, item_b)
+    conn.commit()
+    conn.close()
+
+    renamed = web_api._rename_wd_tag_sync("Shared", "Renamed", tag_type="general")
+
+    assert renamed["status"] == "success"
+    assert renamed["notes_rewritten"] == 2
+    data_a = frontmatter_from_markdown(note_a.read_text(encoding="utf-8"))
+    data_b = frontmatter_from_markdown(note_b.read_text(encoding="utf-8"))
+    assert data_a["wd_character_tags"] == ["Shared", "Keep Character"]
+    assert data_a["wd_tags"] == ["Renamed", "Keep General"]
+    assert data_b["wd_tags"] == ["Renamed", "Other"]
+
+    deleted = web_api._delete_wd_tag_sync("Renamed")
+
+    assert deleted["status"] == "success"
+    assert deleted["notes_rewritten"] == 2
+    data_a = frontmatter_from_markdown(note_a.read_text(encoding="utf-8"))
+    data_b = frontmatter_from_markdown(note_b.read_text(encoding="utf-8"))
+    assert data_a["wd_character_tags"] == ["Shared", "Keep Character"]
+    assert data_a["wd_tags"] == ["Keep General"]
+    assert data_b["wd_tags"] == ["Other"]
+
+    conn = sqlite_operator.init_database()
+    try:
+        rows = conn.execute("SELECT tag_type, tag FROM item_wd_tags ORDER BY item_hash, tag_type, tag").fetchall()
+        facets = metadata_index.metadata_facets(conn, "wd_tag", "", 20)
+    finally:
+        conn.close()
+    assert ("general", "Renamed") not in rows
+    assert ("character", "Shared") in rows
+    assert "Renamed" not in {item["value"] for item in facets}
+
+
+def test_metadata_maintenance_topic_delete_and_merge_routes_rewrite_notes(monkeypatch, tmp_path):
+    utils, sqlite_operator, metadata_index, web_api = fresh_backend(
+        monkeypatch,
+        tmp_path,
+        "utils",
+        "db.sqlite_operator",
+        "metadata_index",
+        "web_api",
+    )
+    merge_hash = "e3" * 32
+    delete_hash = "e4" * 32
+    conn = insert_mock_item(sqlite_operator, merge_hash)
+    conn.close()
+    conn = insert_mock_item(sqlite_operator, delete_hash)
+    conn.close()
+
+    web_api._update_item_sync(merge_hash, web_api.ItemUpdate(topics=["Source Topic"]))
+    web_api._update_item_sync(delete_hash, web_api.ItemUpdate(topics=["Delete Topic"]))
+    (utils.TOPICS_DIR / "target_topic.md").write_text("---\ncreated_at: target\n---\n", encoding="utf-8")
+
+    merged = web_api._merge_topic_sync("Source Topic", "Target Topic")
+
+    assert merged["status"] == "success"
+    assert merged["notes_rewritten"] == 1
+    assert not (utils.TOPICS_DIR / "source_topic.md").exists()
+    assert (utils.TOPICS_DIR / "target_topic.md").exists()
+
+    conn = sqlite_operator.init_database()
+    try:
+        merge_storage = storage_id_for(conn, merge_hash)
+        merge_data = frontmatter_from_markdown(utils.note_path_for(merge_hash, merge_storage).read_text(encoding="utf-8"))
+        merge_rows = conn.execute("SELECT topic FROM item_topics WHERE item_hash = ?", (merge_hash,)).fetchall()
+    finally:
+        conn.close()
+    assert merge_data["topics"] == ["[target_topic](../../../../../topics/target_topic.md)"]
+    assert merge_rows == [("target_topic",)]
+
+    deleted = web_api._delete_topic_sync("Delete Topic")
+
+    assert deleted["status"] == "success"
+    assert deleted["notes_rewritten"] == 1
+    assert not (utils.TOPICS_DIR / "delete_topic.md").exists()
+    conn = sqlite_operator.init_database()
+    try:
+        delete_storage = storage_id_for(conn, delete_hash)
+        delete_data = frontmatter_from_markdown(utils.note_path_for(delete_hash, delete_storage).read_text(encoding="utf-8"))
+        delete_rows = conn.execute("SELECT topic FROM item_topics WHERE item_hash = ?", (delete_hash,)).fetchall()
+    finally:
+        conn.close()
+    assert delete_data["topics"] == []
+    assert delete_rows == []
+
+
+def test_metadata_maintenance_restores_notes_when_db_commit_fails(monkeypatch, tmp_path):
+    utils, sqlite_operator, metadata_index, metadata_maintenance = fresh_backend(
+        monkeypatch,
+        tmp_path,
+        "utils",
+        "db.sqlite_operator",
+        "metadata_index",
+        "metadata_maintenance",
+    )
+    item_hash = "e5" * 32
+    conn = insert_mock_item(sqlite_operator, item_hash)
+    storage_id = storage_id_for(conn, item_hash)
+    note_path = utils.note_path_for(item_hash, storage_id)
+    original_text = "---\nwd_tags:\n  - Shared\n---\nbody\n"
+    note_path.parent.mkdir(parents=True, exist_ok=True)
+    note_path.write_text(original_text, encoding="utf-8")
+    metadata_index.reindex_item_metadata(conn, item_hash)
+    conn.commit()
+    conn.close()
+
+    real_init_database = metadata_maintenance.init_database
+
+    class CommitFailConnection:
+        def __init__(self, inner):
+            self.inner = inner
+
+        def __getattr__(self, name):
+            return getattr(self.inner, name)
+
+        def commit(self):
+            raise sqlite3.OperationalError("forced commit failure")
+
+    def failing_init_database(*args, **kwargs):
+        return CommitFailConnection(real_init_database(*args, **kwargs))
+
+    monkeypatch.setattr(metadata_maintenance, "init_database", failing_init_database)
+
+    result = metadata_maintenance.rename_wd_tag_across_workspace("Shared", "Renamed")
+
+    assert result["status"] == "partial"
+    assert "forced commit failure" in str(result["errors"])
+    assert note_path.read_text(encoding="utf-8") == original_text
 
 
 def test_metadata_facets_no_match_uses_built_count_table_without_scan(monkeypatch, tmp_path):

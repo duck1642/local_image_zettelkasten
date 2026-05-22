@@ -1,4 +1,5 @@
 from fastapi import APIRouter
+from fastapi.responses import JSONResponse
 
 from api.common import *
 
@@ -165,7 +166,33 @@ def _get_workspaces_sync():
 
 @router.post("/api/workspaces/active")
 async def set_workspace_active(body: dict):
+    blocked = await asyncio.to_thread(_runtime_switch_blocker)
+    if blocked:
+        return blocked
     return await asyncio.to_thread(_set_workspace_active_sync, body)
+
+
+def _runtime_switch_blocker():
+    from api.ingestion import runtime_switch_preflight
+
+    preflight = runtime_switch_preflight()
+    if preflight.get("allowed"):
+        return None
+    return JSONResponse(
+        status_code=409,
+        content={"detail": "Runtime switch blocked", "blockers": list(preflight.get("blockers") or [])},
+    )
+
+
+def _ensure_runtime_switch_allowed():
+    from api.ingestion import runtime_switch_preflight
+
+    preflight = runtime_switch_preflight()
+    if not preflight.get("allowed"):
+        raise HTTPException(
+            status_code=409,
+            detail={"detail": "Runtime switch blocked", "blockers": list(preflight.get("blockers") or [])},
+        )
 
 
 def _set_workspace_active_sync(body: dict):
@@ -174,6 +201,7 @@ def _set_workspace_active_sync(body: dict):
     from db.search_manager import search_manager
     from metadata_index import restart_metadata_watchdog
 
+    _ensure_runtime_switch_allowed()
     workspace_id = str((body or {}).get("id") or "").strip()
     if not workspace_id:
         raise HTTPException(status_code=400, detail="workspace id is required")
@@ -271,12 +299,16 @@ def _rename_vault_sync(vault_id: str, body: dict):
 
 @router.post("/api/vaults/active")
 async def set_vault_active(body: dict):
+    blocked = await asyncio.to_thread(_runtime_switch_blocker)
+    if blocked:
+        return blocked
     return await asyncio.to_thread(_set_vault_active_sync, body)
 
 
 def _set_vault_active_sync(body: dict):
     from vaults import set_active_vault
 
+    _ensure_runtime_switch_allowed()
     vault_id = str((body or {}).get("id") or "").strip()
     if not vault_id:
         raise HTTPException(status_code=400, detail="vault id is required")

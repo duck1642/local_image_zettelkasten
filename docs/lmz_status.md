@@ -1,6 +1,6 @@
   # LMZ Current Status
 
-Last updated: 2026-05-20
+Last updated: 2026-05-22
 
 ## Current Status
 
@@ -215,17 +215,14 @@ VSCode-friendly test launchers:
   - done: replace fixed static media mounts with dynamic active-vault asset/review routes.
   - done: make remaining long-lived ingest/metadata runtime state switch-aware and add backend switch preflight.
   - done: split `backend/web_api.py` into router modules while preserving the sidecar entrypoint/facade.
-  - extract shared metadata maintenance logic for topic/WD rename, delete, hide/ignore, and merge operations.
-  - add a frontend runtime/session store that can invalidate Vault, Stats, Inspector, Search, Ingestion, Review, and Logs state on vault/workspace switch.
-  - split large frontend Phase C surfaces, especially `StatsView.svelte`, before adding more tag/topic tooling.
+  - done: extract shared metadata maintenance logic for topic/WD rename, delete, and merge operations. WD hide/ignore remains a schema/UI decision.
+  - done: add a frontend runtime/session store that can invalidate Vault, Stats, Inspector, Search, Ingestion, Review, and Logs state on vault/workspace switch.
+  - done: split large frontend Phase C surfaces, especially `StatsView.svelte`, before adding more tag/topic tooling.
 - Tag/topic maintenance:
-  - delete topic.
-  - rename WD tag.
-  - delete WD tag.
-  - topic merge if real use shows it is needed.
+  - done: expose backend API routes for topic delete/merge and WD tag rename/delete.
+  - done: implement explicit Stats topic/WD actions for topic delete/merge and WD tag rename/delete.
   - hide/ignore WD tag if noisy WD data becomes a problem.
-  - implement as explicit UI actions from Stats topic/WD panels.
-  - backend should rewrite affected Markdown frontmatter, refresh metadata indexes/facets, and preserve existing API search semantics.
+  - done: backend rewrites affected Markdown frontmatter, refreshes metadata indexes/facets, and preserves existing API search semantics.
 - Inspector/Stats metadata workflow polish:
   - richer Inspector tag editing if Stats-only workflow feels insufficient.
   - search chips if the current text query handoff becomes hard to scan.
@@ -269,8 +266,6 @@ VSCode-friendly test launchers:
 - Dynamic sidecar port coordination:
   - startup handshake/API base/CSP/lifecycle.
   - remove fixed `localhost:8000` assumptions from frontend/Tauri runtime paths.
-- FastAPI lifecycle cleanup:
-  - replace deprecated `@app.on_event(...)` startup hooks with lifespan handlers.
 - Packaging-time security checks.
 - Clean-machine release validation.
 

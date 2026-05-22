@@ -4,6 +4,7 @@
   import { config, configDirty, configLoading, configSaving, loadConfig, saveCurrentConfig, updateConfig } from './configStore';
   import { log as uiLog } from './logger';
   import { apiFetch } from './api';
+  import { handleRuntimeSwitch } from './runtimeStore';
 
   type MaintenanceAction = 'auth' | 'metadata' | 'workspaceMetadata' | 'workspacePrune' | 'review';
   let maintenanceBusy: Record<MaintenanceAction, boolean> = {
@@ -114,9 +115,8 @@
       } else {
         workspaceRestartRequired = false;
         workspaceResult = 'Workspace switched dynamically!';
-        await loadConfig(true);
-        const { refreshSharedStats } = await import('./statsStore');
-        await refreshSharedStats();
+        await handleRuntimeSwitch(payload);
+        await Promise.all([loadWorkspaces(), loadVaults()]);
       }
       uiLog('INFO', 'Workspace active changed', { id });
     } catch (error) {
@@ -210,9 +210,8 @@
       } else {
         vaultRestartRequired = false;
         vaultResult = 'Vault switched dynamically!';
-        await loadConfig(true);
-        const { refreshSharedStats } = await import('./statsStore');
-        await refreshSharedStats();
+        await handleRuntimeSwitch(payload);
+        await Promise.all([loadWorkspaces(), loadVaults()]);
       }
       uiLog('INFO', 'Vault active changed', { id });
     } catch (error) {

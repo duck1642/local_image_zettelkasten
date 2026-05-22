@@ -4,6 +4,7 @@
   import { log as uiLog } from './logger';
   import { apiFetch, apiUrl } from './api';
   import { queueStats, refreshQueueStats, setQueueStats } from './statsStore';
+  import { runtimeSessionKey } from './runtimeStore';
 
   type IngestMode = 'online' | 'local';
   type QueueName = 'normal' | 'force' | 'failed';
@@ -81,6 +82,7 @@
     finished_at: null
   };
   let localStatusTimer: number | null = null;
+  let currentRuntimeSessionKey = '';
 
   $: counts = $queueStats;
   $: readyCount = (counts.normal || 0) + (counts.force || 0);
@@ -91,6 +93,12 @@
     }
     if (localDefaults.platform) values.add(localDefaults.platform);
     platformSelectOptions = [...values];
+  }
+  $: if ($runtimeSessionKey) {
+    if (currentRuntimeSessionKey && currentRuntimeSessionKey !== $runtimeSessionKey) {
+      resetForRuntimeSwitch();
+    }
+    currentRuntimeSessionKey = $runtimeSessionKey;
   }
 
   function nextLogReconnectDelayMs() {
@@ -133,6 +141,51 @@
       logSource?.close();
       scheduleMonitorReconnect();
     };
+  }
+
+  function emptyLocalStatus(): LocalStatus {
+    return {
+      running: false,
+      phase: 'idle',
+      run_id: null,
+      scanned: 0,
+      staged: 0,
+      queued: 0,
+      processed: 0,
+      summary: { ingested: 0, review: 0, failed: 0, duplicate: 0 },
+      results: [],
+      failed_paths: [],
+      started_at: null,
+      finished_at: null
+    };
+  }
+
+  function resetForRuntimeSwitch() {
+    if (parseTimer !== null) {
+      clearTimeout(parseTimer);
+      parseTimer = null;
+    }
+    if (artistOptionsTimer !== null) {
+      clearTimeout(artistOptionsTimer);
+      artistOptionsTimer = null;
+    }
+    stopLocalStatusPolling();
+    queueContent = '';
+    isDirty = false;
+    running = false;
+    localPaths = [];
+    localStatus = emptyLocalStatus();
+    monitorLogs = [];
+    monitorLogIdCounter = 0;
+    artistOptions = [];
+    platformOptions = [];
+    localDefaults = { artist: '', platform: 'Local', source_url: '' };
+    loadQueue(currentQueue);
+    fetchStats();
+    refreshLocalStatus();
+    loadArtistOptions('');
+    loadPlatformOptions();
+    connectMonitor();
   }
 
   function isNearBottom(node: HTMLElement) {

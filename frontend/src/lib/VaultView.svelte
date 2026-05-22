@@ -20,6 +20,7 @@
   import { updateSelection } from './selection';
   import { watchIntersection, watchResize, type ObserverCleanup } from './observers';
   import { toggleRamTracking } from './ramStore';
+  import { runtimeSessionKey } from './runtimeStore';
   import GridRenderer from './renderers/grid/GridRenderer.svelte';
   import MasonryRenderer from './renderers/masonry/MasonryRenderer.svelte';
   import Inspector from './Inspector.svelte';
@@ -88,26 +89,37 @@
     }
   }
 
-  let currentActiveVault = '';
-  $: if ($config?._runtime?.active_vault) {
-    const nextActive = $config._runtime.active_vault;
-    if (currentActiveVault && currentActiveVault !== nextActive) {
-      uiLog('INFO', `Vault switch detected in VaultView: ${currentActiveVault} -> ${nextActive}. Resetting view states.`);
-      clearSelection();
-      items = [];
-      groupedItems = [];
-      resetGroupsState();
-      nextCursor = null;
-      hasMore = false;
-      fetchItems(false);
+  let currentRuntimeSessionKey = '';
+  $: if ($runtimeSessionKey) {
+    if (currentRuntimeSessionKey && currentRuntimeSessionKey !== $runtimeSessionKey) {
+      resetForRuntimeSwitch($runtimeSessionKey);
     }
-    currentActiveVault = nextActive;
+    currentRuntimeSessionKey = $runtimeSessionKey;
   }
 
   function resetGroupsState() {
     groupsById = new Map();
     groupOrder = [];
     hashIndex = new Map();
+  }
+
+  function resetForRuntimeSwitch(sessionKey: string) {
+    uiLog('INFO', 'Runtime switch detected in VaultView; resetting view state', { sessionKey });
+    clearSelection();
+    activeFilters = emptyFilters();
+    currentSort = 'newest';
+    currentMediaType = 'all';
+    focusMode = 'normal';
+    focusStartTime = 0;
+    groupIndexes = {};
+    items = [];
+    groupedItems = [];
+    stats = { total_items: 0 };
+    resetGroupsState();
+    nextCursor = null;
+    hasMore = false;
+    if (layoutHostEl) layoutHostEl.scrollTop = 0;
+    fetchItems(false);
   }
 
   function groupKeyForItem(item: VaultItem) {

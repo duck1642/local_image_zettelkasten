@@ -3,6 +3,7 @@
   import { apiFetch, apiUrl } from './api';
   import { log as uiLog } from './logger';
   import { refreshReviewCount } from './statsStore';
+  import { runtimeSessionKey } from './runtimeStore';
 
   interface ReviewItem {
     filename: string;
@@ -36,6 +37,7 @@
   let loading = true;
   let acting = false;
   let mediaMounted = true;
+  let currentRuntimeSessionKey = '';
 
   const VIDEO_EXTENSIONS = new Set(['.mp4', '.webm', '.ogv', '.mov', '.m4v', '.avi', '.mkv']);
 
@@ -44,6 +46,12 @@
   $: current = items.find((item) => item.filename === selectedFilename) || pendingItems[0] || cleanupItems[0];
   $: currentSectionItems = current?.section === 'cleanup' ? cleanupItems : pendingItems;
   $: currentSectionIndex = current ? currentSectionItems.findIndex((item) => item.filename === current.filename) : -1;
+  $: if ($runtimeSessionKey) {
+    if (currentRuntimeSessionKey && currentRuntimeSessionKey !== $runtimeSessionKey) {
+      resetForRuntimeSwitch();
+    }
+    currentRuntimeSessionKey = $runtimeSessionKey;
+  }
 
   function extFromUrl(url: string) {
     const clean = (url || '').split('?')[0].split('#')[0];
@@ -104,6 +112,14 @@
     } finally {
       loading = false;
     }
+  }
+
+  function resetForRuntimeSwitch() {
+    items = [];
+    selectedFilename = '';
+    acting = false;
+    mediaMounted = false;
+    loadReview();
   }
 
   async function handleAction(action: 'keep' | 'delete' | 'variant' | 'replace') {

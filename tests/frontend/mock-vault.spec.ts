@@ -443,6 +443,96 @@ async function installMockVaultApi(
     return fulfillJson(route, { status: 'success', action: 'keep', message: 'mock action ok' });
   });
   await page.route('**/api/review', async (route) => fulfillJson(route, reviewItems));
+  await page.route('**/api/topics/**', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const payload = JSON.parse(request.postData() || '{}');
+    if (url.pathname === '/api/topics/rename' && request.method() === 'POST') {
+      const oldLabel = String(payload.old_label || '');
+      const newLabel = String(payload.new_label || '');
+      let notes = 0;
+      items = items.map((item) => {
+        const topics = Array.isArray(item.topics) ? item.topics as string[] : [];
+        if (!topics.includes(oldLabel)) return item;
+        notes += 1;
+        return { ...item, topics: topics.map((topic) => topic === oldLabel ? newLabel : topic) };
+      });
+      return fulfillJson(route, { status: 'success', old_label: oldLabel, new_label: newLabel, vaults_touched: ['default'], notes_rewritten: notes, legacy_plain_refs_rewritten: 0, errors: [] });
+    }
+    if (url.pathname === '/api/topics/delete' && request.method() === 'POST') {
+      const label = String(payload.label || '');
+      let notes = 0;
+      items = items.map((item) => {
+        const topics = Array.isArray(item.topics) ? item.topics as string[] : [];
+        if (!topics.includes(label)) return item;
+        notes += 1;
+        return { ...item, topics: topics.filter((topic) => topic !== label) };
+      });
+      return fulfillJson(route, { status: 'success', label, vaults_touched: ['default'], notes_rewritten: notes, errors: [] });
+    }
+    if (url.pathname === '/api/topics/merge' && request.method() === 'POST') {
+      const sourceLabel = String(payload.source_label || '');
+      const targetLabel = String(payload.target_label || '');
+      let notes = 0;
+      items = items.map((item) => {
+        const topics = Array.isArray(item.topics) ? item.topics as string[] : [];
+        if (!topics.includes(sourceLabel)) return item;
+        notes += 1;
+        return { ...item, topics: [...new Set(topics.map((topic) => topic === sourceLabel ? targetLabel : topic))] };
+      });
+      return fulfillJson(route, { status: 'success', source_label: sourceLabel, target_label: targetLabel, vaults_touched: ['default'], notes_rewritten: notes, errors: [] });
+    }
+    return fulfillJson(route, { detail: 'not found' }, 404);
+  });
+  await page.route('**/api/wd-tags/**', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const payload = JSON.parse(request.postData() || '{}');
+    const matchType = String(payload.tag_type || '');
+    const rewriteWd = (oldTag: string, newTag: string | null) => {
+      let notes = 0;
+      items = items.map((item) => {
+        const wd = item.wd_tags as { rating?: string; characters?: string[]; general?: string[] } | undefined;
+        if (!wd) return item;
+        let changed = false;
+        const nextWd = { ...wd };
+        if ((!matchType || matchType === 'rating') && wd.rating === oldTag) {
+          nextWd.rating = newTag || '';
+          changed = true;
+        }
+        if (!matchType || matchType === 'character') {
+          const characters = Array.isArray(wd.characters) ? wd.characters : [];
+          if (characters.includes(oldTag)) {
+            nextWd.characters = newTag ? [...new Set(characters.map((tag) => tag === oldTag ? newTag : tag))] : characters.filter((tag) => tag !== oldTag);
+            changed = true;
+          }
+        }
+        if (!matchType || matchType === 'general') {
+          const general = Array.isArray(wd.general) ? wd.general : [];
+          if (general.includes(oldTag)) {
+            nextWd.general = newTag ? [...new Set(general.map((tag) => tag === oldTag ? newTag : tag))] : general.filter((tag) => tag !== oldTag);
+            changed = true;
+          }
+        }
+        if (!changed) return item;
+        notes += 1;
+        return { ...item, wd_tags: nextWd };
+      });
+      return notes;
+    };
+    if (url.pathname === '/api/wd-tags/rename' && request.method() === 'POST') {
+      const oldTag = String(payload.old_tag || '');
+      const newTag = String(payload.new_tag || '');
+      const notes = rewriteWd(oldTag, newTag);
+      return fulfillJson(route, { status: 'success', old_tag: oldTag, new_tag: newTag, tag_type: payload.tag_type || null, vaults_touched: ['default'], notes_rewritten: notes, errors: [] });
+    }
+    if (url.pathname === '/api/wd-tags/delete' && request.method() === 'POST') {
+      const tag = String(payload.tag || '');
+      const notes = rewriteWd(tag, null);
+      return fulfillJson(route, { status: 'success', tag, tag_type: payload.tag_type || null, vaults_touched: ['default'], notes_rewritten: notes, errors: [] });
+    }
+    return fulfillJson(route, { detail: 'not found' }, 404);
+  });
   await page.route('**/api/facets**', async (route) => {
     const kind = new URL(route.request().url()).searchParams.get('kind') || 'artist';
     const key = kind === 'wd_tag' ? 'wd_tag' : kind;
@@ -855,8 +945,8 @@ test('settings registers and activates workspaces for next restart', async ({ pa
   });
   await page.getByRole('button', { name: /Settings/ }).click();
 
-  await expect(page.getByText('Default')).toBeVisible();
-  await page.getByRole('button', { name: 'Use on Restart' }).click();
+  await expect(page.getByText('Default').first()).toBeVisible();
+  await page.getByRole('button', { name: 'Activate' }).click();
   await expect(page.getByText('Restart required to use the selected workspace.')).toBeVisible();
 
   await page.getByPlaceholder('Obsidian vault path').fill('F:/Archive/Main');
@@ -1026,9 +1116,9 @@ test('stats sort toggles between popularity and alphabetical', async ({ page }) 
   await page.getByRole('button', { name: 'Alphabetical' }).click();
   await expect(page.locator('.artist-row .value').first()).toHaveText('Mock Group B');
   await page.getByRole('button', { name: 'Platforms' }).click();
-  await expect(page.locator('.stats-row .value').first()).toHaveText('local');
+  await expect(page.locator('.stats-row .value').first()).toHaveText('Local');
   await page.getByRole('button', { name: 'Popularity' }).click();
-  await expect(page.locator('.stats-row .value').first()).toHaveText('pixiv');
+  await expect(page.locator('.stats-row .value').first()).toHaveText('Local');
 });
 
 test('stats letter filter applies to artists and tag chips but not platforms', async ({ page }) => {
@@ -1085,4 +1175,35 @@ test('stats selected topics and wd tags filter the vault', async ({ page }) => {
     url.searchParams.getAll('wd_tag').includes('mock_tag')
   );
   expect(filteredRequest).toBeTruthy();
+});
+
+test('stats metadata actions update topic and wd facets', async ({ page }) => {
+  await openMockVault(page);
+  await page.getByRole('button', { name: /Stats/ }).click();
+
+  await page.getByRole('button', { name: 'WD Tags' }).click();
+  await expect(page.locator('.stat-chip').filter({ hasText: 'mock_tag' })).toBeVisible();
+  await page.getByLabel('Rename mock_tag').click();
+  await page.getByLabel('New').fill('renamed_tag');
+  await page.getByRole('button', { name: 'Rename', exact: true }).click();
+  await expect(page.locator('.stat-chip').filter({ hasText: 'renamed_tag' })).toBeVisible();
+  await expect(page.locator('.stat-chip').filter({ hasText: 'mock_tag' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Close' }).click();
+
+  await page.getByLabel('Delete renamed_tag').click();
+  await page.getByRole('button', { name: 'Delete', exact: true }).click();
+  await expect(page.locator('.stat-chip').filter({ hasText: 'renamed_tag' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Close' }).click();
+
+  await page.getByRole('button', { name: 'Topics' }).click();
+  await expect(page.locator('.stat-chip').filter({ hasText: 'group-topic' })).toBeVisible();
+  await page.getByLabel('Merge group-topic').click();
+  await page.getByLabel('Target').fill('mock-topic');
+  await page.getByRole('button', { name: 'Merge', exact: true }).click();
+  await expect(page.locator('.stat-chip').filter({ hasText: 'group-topic' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Close' }).click();
+
+  await page.getByLabel('Delete mock-topic').click();
+  await page.getByRole('button', { name: 'Delete', exact: true }).click();
+  await expect(page.locator('.stat-chip').filter({ hasText: 'mock-topic' })).toHaveCount(0);
 });

@@ -4,6 +4,7 @@
   import { emptyFilters, getActiveSegment as findActiveSegment, hasActiveFilters, parseSearchQuery } from './search';
   import { apiFetch } from './api';
   import { log as uiLog } from './logger';
+  import { runtimeSessionKey } from './runtimeStore';
 
   const dispatch = createEventDispatcher();
   export let externalQuery: { id: string; query: string } | null = null;
@@ -37,9 +38,16 @@
   let measureCanvas: HTMLCanvasElement | null = null;
   let measureContext: CanvasRenderingContext2D | null = null;
   let appliedExternalQueryId = '';
+  let currentRuntimeSessionKey = '';
 
   $: if (externalQuery && externalQuery.id !== appliedExternalQueryId) {
     applyExternalQuery(externalQuery.id, externalQuery.query);
+  }
+  $: if ($runtimeSessionKey) {
+    if (currentRuntimeSessionKey && currentRuntimeSessionKey !== $runtimeSessionKey) {
+      clearSearch();
+    }
+    currentRuntimeSessionKey = $runtimeSessionKey;
   }
 
   function emitFilters(immediate = false) {

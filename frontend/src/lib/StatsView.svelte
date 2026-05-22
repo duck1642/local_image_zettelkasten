@@ -1,55 +1,62 @@
 <script lang="ts">
   import { createEventDispatcher, onMount } from 'svelte';
-  import { apiFetch } from './api';
   import { log as uiLog } from './logger';
-
-  type FacetKind = 'wd_tag' | 'artist' | 'platform' | 'topic';
-  type StatsSortMode = 'popularity' | 'alphabetical';
-  type StatsScopeMode = 'used' | 'all';
-  type FacetItem = { value: string; count: number };
-  type FilterVaultPayload = { topics: string[]; wd_tags: string[] };
-  type ArtistListItem = { id: number; name: string; kind: string; item_count: number; link_count: number; alias_count: number };
-  type ArtistAlias = { id: number; alias: string; alias_norm: string };
-  type ArtistLink = { id: number; platform: string; url: string; handle: string; is_primary: boolean };
-  type PlatformListItem = { id: number; key_norm: string; display_name: string; kind: string; item_count: number; alias_count: number };
-  type ArtistMergePreview = {
-    target: { id: number; name: string };
-    sources: Array<{ id: number; name: string }>;
-    affected_items: number;
-    aliases: {
-      add: Array<{ value: string }>;
-      move: Array<{ value: string }>;
-      duplicates: Array<{ value: string; reason: string }>;
-      conflicts: Array<{ value: string; reason: string }>;
-    };
-    links: {
-      move: Array<{ url: string }>;
-      duplicates: Array<{ url: string }>;
-    };
-    notes_appended: number;
-    source_artists_deleted: number;
-    target_detail?: ArtistDetail;
-    merged?: boolean;
-  };
+  import { runtimeSessionKey } from './runtimeStore';
+  import './stats/stats.css';
+  import ArtistMergeModal from './stats/ArtistMergeModal.svelte';
+  import ArtistStatsPanel from './stats/ArtistStatsPanel.svelte';
+  import FacetStatsPanel from './stats/FacetStatsPanel.svelte';
+  import MetadataActionModal from './stats/MetadataActionModal.svelte';
+  import StatsControls from './stats/StatsControls.svelte';
+  import StatsFilterBar from './stats/StatsFilterBar.svelte';
+  import {
+    addArtistAlias,
+    addArtistLink,
+    deleteArtistAlias,
+    deleteArtistLink,
+    deleteTopic,
+    deleteWdTag,
+    fetchArtistDetail,
+    fetchArtistPlaceholders,
+    fetchArtists,
+    fetchFacets,
+    fetchMergeCandidates,
+    fetchPlatformFacets,
+    fetchPlatformOptions,
+    mergeArtists,
+    mergeTopic,
+    previewArtistMerge,
+    renameTopic,
+    renameWdTag,
+    saveArtistDetail
+  } from './stats/statsApi';
+  import {
+    filterArtistsByLetter,
+    filterFacetsByLetter,
+    isPlaceholderArtist,
+    isSelectableFacet,
+    normalizeArtistListWidth,
+    sortArtistItems,
+    sortFacetItems
+  } from './stats/statsUtils';
+  import {
+    letterFilters,
+    statsKinds,
+    type ArtistDetail,
+    type ArtistDraft,
+    type ArtistLinkDraft,
+    type ArtistListItem,
+    type ArtistMergePreview,
+    type FacetItem,
+    type FacetKind,
+    type FilterVaultPayload,
+    type MetadataActionKind,
+    type PlatformListItem,
+    type StatsScopeMode,
+    type StatsSortMode
+  } from './stats/types';
 
   const dispatch = createEventDispatcher<{ filterVault: FilterVaultPayload }>();
-  type ArtistDetail = {
-    id: number;
-    name: string;
-    name_norm: string;
-    kind: string;
-    notes: string;
-    item_count: number;
-    aliases: ArtistAlias[];
-    links: ArtistLink[];
-  };
-
-  const kinds: { label: string; value: FacetKind }[] = [
-    { label: 'WD Tags', value: 'wd_tag' },
-    { label: 'Artists', value: 'artist' },
-    { label: 'Platforms', value: 'platform' },
-    { label: 'Topics', value: 'topic' }
-  ];
 
   let activeKind: FacetKind = 'wd_tag';
   let sortMode: StatsSortMode = 'popularity';
@@ -61,9 +68,9 @@
   let placeholderArtists: FacetItem[] = [];
   let selectedArtistId: number | null = null;
   let selectedArtist: ArtistDetail | null = null;
-  let artistDraft = { name: '', kind: 'artist', notes: '' };
+  let artistDraft: ArtistDraft = { name: '', kind: 'artist', notes: '' };
   let newAlias = '';
-  let newLink = { platform: '', url: '', handle: '' };
+  let newLink: ArtistLinkDraft = { platform: '', url: '', handle: '' };
   let platformOptions: PlatformListItem[] = [];
   let linkPlatformOptions: string[] = [];
   let loading = false;
@@ -85,15 +92,17 @@
   let mergeSearchTimer: number | null = null;
   let selectedTopics: string[] = [];
   let selectedWdTags: string[] = [];
-  let topicRenameOpen = false;
-  let topicRenameOld = '';
-  let topicRenameNew = '';
-  let topicRenameBusy = false;
-  let topicRenameResult = '';
-  let topicRenameError = '';
-
-  const placeholderArtistNorms = new Set(['', 'unknown', 'local', 'none', 'n/a', 'na', 'null']);
-  const letterFilters = ['all', '#', ...'abcdefghijklmnopqrstuvwxyz'.split('')];
+  let metadataActionOpen = false;
+  let metadataActionKind: FacetKind = 'topic';
+  let metadataAction: MetadataActionKind = 'rename';
+  let metadataActionValue = '';
+  let metadataActionNewValue = '';
+  let metadataActionTargetValue = '';
+  let metadataActionTagType = '';
+  let metadataActionBusy = false;
+  let metadataActionResult = '';
+  let metadataActionError = '';
+  let currentRuntimeSessionKey = '';
 
   $: showLetterFilter = activeKind === 'artist' || activeKind === 'topic' || activeKind === 'wd_tag';
   $: showScopeFilter = activeKind === 'artist' || activeKind === 'platform' || activeKind === 'topic' || activeKind === 'wd_tag';
@@ -103,46 +112,6 @@
   $: selectedTopicCount = selectedTopics.length;
   $: selectedWdTagCount = selectedWdTags.length;
   $: selectedFacetCount = selectedTopicCount + selectedWdTagCount;
-
-  function firstBucket(value: string) {
-    const first = String(value || '').trim().charAt(0).toLowerCase();
-    return first >= 'a' && first <= 'z' ? first : '#';
-  }
-
-  function matchesLetter(value: string, activeLetter: string) {
-    return activeLetter === 'all' || firstBucket(value) === activeLetter;
-  }
-
-  function filterFacetsByLetter(values: FacetItem[], enabled: boolean, activeLetter: string) {
-    if (!enabled || activeLetter === 'all') return values;
-    return values.filter((item) => matchesLetter(item.value, activeLetter));
-  }
-
-  function filterArtistsByLetter(values: ArtistListItem[], enabled: boolean, activeLetter: string) {
-    if (!enabled || activeLetter === 'all') return values;
-    return values.filter((artist) => matchesLetter(artist.name, activeLetter));
-  }
-
-  function sortFacetItems(values: FacetItem[]) {
-    const sorted = [...values];
-    if (sortMode === 'alphabetical') {
-      sorted.sort((a, b) => a.value.localeCompare(b.value, undefined, { sensitivity: 'base' }));
-      return sorted;
-    }
-    sorted.sort((a, b) => b.count - a.count || a.value.localeCompare(b.value, undefined, { sensitivity: 'base' }));
-    return sorted;
-  }
-
-  function sortArtistItems(values: ArtistListItem[]) {
-    const sorted = [...values];
-    if (sortMode === 'alphabetical') {
-      sorted.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
-      return sorted;
-    }
-    sorted.sort((a, b) => b.item_count - a.item_count || a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
-    return sorted;
-  }
-
   $: {
     const values = new Set<string>();
     for (const platform of platformOptions) {
@@ -154,65 +123,30 @@
     if (newLink.platform) values.add(newLink.platform);
     linkPlatformOptions = [...values];
   }
+  $: if ($runtimeSessionKey) {
+    if (currentRuntimeSessionKey && currentRuntimeSessionKey !== $runtimeSessionKey) {
+      resetForRuntimeSwitch();
+    }
+    currentRuntimeSessionKey = $runtimeSessionKey;
+  }
 
   async function loadPlatformOptions() {
     try {
-      const response = await apiFetch('/api/platforms?limit=200');
-      if (!response.ok) throw new Error(`Platform request failed: ${response.status}`);
-      const data = await response.json();
-      platformOptions = Array.isArray(data.items) ? data.items : [];
+      platformOptions = await fetchPlatformOptions();
     } catch (err) {
       uiLog('ERROR', 'Failed to load platform options', { error: String(err) });
     }
   }
 
   async function loadArtistDetail(id: number, seq = requestSeq) {
-    const response = await apiFetch(`/api/artists/${id}`);
+    const detail = await fetchArtistDetail(id);
     if (seq !== requestSeq) return;
-    if (!response.ok) throw new Error(`Artist detail failed: ${response.status}`);
-    selectedArtist = await response.json();
+    selectedArtist = detail;
     artistDraft = {
-      name: selectedArtist?.name || '',
-      kind: selectedArtist?.kind || 'artist',
-      notes: selectedArtist?.notes || ''
+      name: detail.name || '',
+      kind: detail.kind || 'artist',
+      notes: detail.notes || ''
     };
-  }
-
-  async function loadMergeCandidates() {
-    if (!selectedArtist) return;
-    mergeError = '';
-    try {
-      const params = new URLSearchParams({ q: mergeSearch.trim(), limit: '100' });
-      const response = await apiFetch(`/api/artists?${params.toString()}`);
-      if (!response.ok) throw new Error(`Artist request failed: ${response.status}`);
-      const data = await response.json();
-      mergeCandidates = (Array.isArray(data.items) ? data.items : []).filter((artist: ArtistListItem) => artist.id !== selectedArtist?.id);
-    } catch (err) {
-      mergeError = `Failed to load merge candidates: ${String(err)}`;
-      uiLog('ERROR', 'Failed to load merge candidates', { error: String(err) });
-    }
-  }
-
-  async function refreshMergePreview() {
-    if (!selectedArtist || selectedMergeSourceIds.length === 0) {
-      mergePreview = null;
-      return;
-    }
-    mergeError = '';
-    try {
-      const response = await apiFetch(`/api/artists/${selectedArtist.id}/merge-preview`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ source_artist_ids: selectedMergeSourceIds })
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload?.detail || `HTTP ${response.status}`);
-      mergePreview = payload as ArtistMergePreview;
-    } catch (err) {
-      mergePreview = null;
-      mergeError = `Failed to preview merge: ${String(err)}`;
-      uiLog('ERROR', 'Failed to preview artist merge', { error: String(err) });
-    }
   }
 
   async function loadFacets() {
@@ -221,22 +155,13 @@
     error = '';
     try {
       if (activeKind === 'artist') {
-        const params = new URLSearchParams({ q: searchText.trim(), limit: '200', scope: scopeMode });
-        const facetParams = new URLSearchParams({ kind: 'artist', q: searchText.trim(), limit: '200' });
-        const [response, facetResponse] = await Promise.all([
-          apiFetch(`/api/artists?${params.toString()}`),
-          apiFetch(`/api/facets?${facetParams.toString()}`)
+        const [artistData, facetData] = await Promise.all([
+          fetchArtists(searchText, scopeMode),
+          fetchArtistPlaceholders(searchText)
         ]);
         if (seq !== requestSeq) return;
-        if (!response.ok) throw new Error(`Artist request failed: ${response.status}`);
-        if (!facetResponse.ok) throw new Error(`Artist placeholder request failed: ${facetResponse.status}`);
-        const data = await response.json();
-        const facetData = await facetResponse.json();
-        if (seq !== requestSeq) return;
-        artists = sortArtistItems((Array.isArray(data.items) ? data.items : [])
-          .filter((artist: ArtistListItem) => !placeholderArtistNorms.has(String(artist.name || '').trim().toLowerCase())));
-        placeholderArtists = sortFacetItems((Array.isArray(facetData.items) ? facetData.items : [])
-          .filter((item: FacetItem) => placeholderArtistNorms.has(String(item.value || '').trim().toLowerCase())));
+        artists = sortArtistItems(artistData.filter((artist) => !isPlaceholderArtist(artist.name)), sortMode);
+        placeholderArtists = sortFacetItems(facetData.filter((item) => isPlaceholderArtist(item.value)), sortMode);
         if (!selectedArtistId || !artists.some((artist) => artist.id === selectedArtistId)) {
           selectedArtistId = artists[0]?.id ?? null;
         }
@@ -245,30 +170,14 @@
         return;
       }
       if (activeKind === 'platform') {
-        const params = new URLSearchParams({ q: searchText.trim(), limit: '200', scope: scopeMode });
-        const response = await apiFetch(`/api/platforms?${params.toString()}`);
+        const nextItems = await fetchPlatformFacets(searchText, scopeMode);
         if (seq !== requestSeq) return;
-        if (!response.ok) throw new Error(`Platform request failed: ${response.status}`);
-        const data = await response.json();
-        if (seq !== requestSeq) return;
-        items = sortFacetItems((Array.isArray(data.items) ? data.items : []).map((platform: PlatformListItem) => ({
-          value: platform.display_name,
-          count: platform.item_count
-        })));
+        items = sortFacetItems(nextItems, sortMode);
         return;
       }
-      const params = new URLSearchParams({
-        kind: activeKind,
-        q: searchText.trim(),
-        limit: '200',
-        scope: activeKind === 'topic' || activeKind === 'wd_tag' ? scopeMode : 'used'
-      });
-      const response = await apiFetch(`/api/facets?${params.toString()}`);
+      const nextItems = await fetchFacets(activeKind, searchText, scopeMode);
       if (seq !== requestSeq) return;
-      if (!response.ok) throw new Error(`Facet request failed: ${response.status}`);
-      const data = await response.json();
-      if (seq !== requestSeq) return;
-      items = sortFacetItems(Array.isArray(data.items) ? data.items : []);
+      items = sortFacetItems(nextItems, sortMode);
     } catch (err) {
       if (seq !== requestSeq) return;
       error = 'Failed to load stats';
@@ -288,11 +197,11 @@
   function setSortMode(mode: StatsSortMode) {
     sortMode = mode;
     if (activeKind === 'artist') {
-      artists = sortArtistItems(artists);
-      placeholderArtists = sortFacetItems(placeholderArtists);
+      artists = sortArtistItems(artists, sortMode);
+      placeholderArtists = sortFacetItems(placeholderArtists, sortMode);
       return;
     }
-    items = sortFacetItems(items);
+    items = sortFacetItems(items, sortMode);
   }
 
   function setScopeMode(mode: StatsScopeMode) {
@@ -302,10 +211,6 @@
 
   function setLetterFilter(value: string) {
     letterFilter = value;
-  }
-
-  function isSelectableFacet(kind: FacetKind) {
-    return kind === 'topic' || kind === 'wd_tag';
   }
 
   function isFacetSelected(kind: FacetKind, value: string) {
@@ -327,52 +232,115 @@
       : [...selectedWdTags, value];
   }
 
-  function openTopicRename(value: string) {
-    topicRenameOpen = true;
-    topicRenameOld = value;
-    topicRenameNew = value;
-    topicRenameResult = '';
-    topicRenameError = '';
+  function openMetadataAction(kind: FacetKind, action: MetadataActionKind, value: string) {
+    metadataActionOpen = true;
+    metadataActionKind = kind;
+    metadataAction = action;
+    metadataActionValue = value;
+    metadataActionNewValue = action === 'rename' ? value : '';
+    metadataActionTargetValue = '';
+    metadataActionTagType = '';
+    metadataActionResult = '';
+    metadataActionError = '';
   }
 
-  function closeTopicRename() {
-    if (topicRenameBusy) return;
-    topicRenameOpen = false;
-    topicRenameOld = '';
-    topicRenameNew = '';
-    topicRenameResult = '';
-    topicRenameError = '';
+  function closeMetadataAction() {
+    if (metadataActionBusy) return;
+    metadataActionOpen = false;
+    metadataActionValue = '';
+    metadataActionNewValue = '';
+    metadataActionTargetValue = '';
+    metadataActionTagType = '';
+    metadataActionResult = '';
+    metadataActionError = '';
   }
 
-  async function confirmTopicRename() {
-    if (!topicRenameOld || !topicRenameNew.trim()) return;
-    topicRenameBusy = true;
-    topicRenameResult = '';
-    topicRenameError = '';
+  function replaceSelectedValue(values: string[], oldValue: string, newValue: string) {
+    const next = values.map((value) => value === oldValue ? newValue : value);
+    return [...new Set(next.filter(Boolean))];
+  }
+
+  function emitSelectionUpdateIfNeeded() {
+    if (selectedTopics.length === 0 && selectedWdTags.length === 0) return;
+    dispatch('filterVault', { topics: selectedTopics, wd_tags: selectedWdTags });
+  }
+
+  async function confirmMetadataAction() {
+    if (!metadataActionValue) return;
+    metadataActionBusy = true;
+    metadataActionResult = '';
+    metadataActionError = '';
     try {
-      const response = await apiFetch('/api/topics/rename', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ old_label: topicRenameOld, new_label: topicRenameNew.trim() })
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload?.detail || `HTTP ${response.status}`);
+      let payload: any;
+      if (metadataActionKind === 'topic' && metadataAction === 'rename') {
+        payload = await renameTopic(metadataActionValue, metadataActionNewValue);
+        selectedTopics = replaceSelectedValue(selectedTopics, metadataActionValue, String(payload.new_label || metadataActionNewValue.trim()));
+      } else if (metadataActionKind === 'topic' && metadataAction === 'merge') {
+        payload = await mergeTopic(metadataActionValue, metadataActionTargetValue);
+        selectedTopics = replaceSelectedValue(selectedTopics, metadataActionValue, String(payload.target_label || metadataActionTargetValue.trim()));
+      } else if (metadataActionKind === 'topic') {
+        payload = await deleteTopic(metadataActionValue);
+        selectedTopics = selectedTopics.filter((topic) => topic !== metadataActionValue);
+      } else if (metadataAction === 'rename') {
+        payload = await renameWdTag(metadataActionValue, metadataActionNewValue, metadataActionTagType);
+        selectedWdTags = replaceSelectedValue(selectedWdTags, metadataActionValue, String(payload.new_tag || metadataActionNewValue.trim()));
+      } else {
+        payload = await deleteWdTag(metadataActionValue, metadataActionTagType);
+        selectedWdTags = selectedWdTags.filter((tag) => tag !== metadataActionValue);
+      }
       const vaultCount = Array.isArray(payload?.vaults_touched) ? payload.vaults_touched.length : 0;
-      topicRenameResult = `Renamed ${payload.old_label} -> ${payload.new_label}; updated ${payload.notes_rewritten || 0} notes across ${vaultCount} vaults.`;
-      selectedTopics = selectedTopics.map((topic) => topic === topicRenameOld ? String(payload.new_label || topicRenameNew.trim()) : topic);
+      metadataActionResult = `Updated ${payload.notes_rewritten || 0} notes across ${vaultCount} vaults.`;
       await loadFacets();
-      uiLog('INFO', 'Topic renamed', { old_label: topicRenameOld, new_label: topicRenameNew.trim(), notes: payload.notes_rewritten });
+      emitSelectionUpdateIfNeeded();
+      uiLog('INFO', 'Metadata maintenance action completed', {
+        kind: metadataActionKind,
+        action: metadataAction,
+        value: metadataActionValue,
+        notes: payload.notes_rewritten
+      });
     } catch (err) {
-      topicRenameError = `Failed to rename topic: ${String(err)}`;
-      uiLog('ERROR', 'Failed to rename topic', { old_label: topicRenameOld, new_label: topicRenameNew, error: String(err) });
+      metadataActionError = `Failed to update metadata: ${String(err)}`;
+      uiLog('ERROR', 'Failed metadata maintenance action', {
+        kind: metadataActionKind,
+        action: metadataAction,
+        value: metadataActionValue,
+        error: String(err)
+      });
     } finally {
-      topicRenameBusy = false;
+      metadataActionBusy = false;
     }
   }
 
   function clearFacetSelection() {
     selectedTopics = [];
     selectedWdTags = [];
+  }
+
+  function resetForRuntimeSwitch() {
+    requestSeq += 1;
+    if (debounceTimer !== null) {
+      clearTimeout(debounceTimer);
+      debounceTimer = null;
+    }
+    closeMergeModal();
+    closeMetadataAction();
+    searchText = '';
+    letterFilter = 'all';
+    items = [];
+    artists = [];
+    placeholderArtists = [];
+    selectedArtistId = null;
+    selectedArtist = null;
+    artistDraft = { name: '', kind: 'artist', notes: '' };
+    newAlias = '';
+    newLink = { platform: '', url: '', handle: '' };
+    platformOptions = [];
+    selectedTopics = [];
+    selectedWdTags = [];
+    error = '';
+    loading = false;
+    loadPlatformOptions();
+    loadFacets();
   }
 
   function filterVaultFromSelection() {
@@ -401,6 +369,32 @@
   function handleSearchInput() {
     if (debounceTimer !== null) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(loadFacets, 200);
+  }
+
+  async function loadMergeCandidates() {
+    if (!selectedArtist) return;
+    mergeError = '';
+    try {
+      mergeCandidates = await fetchMergeCandidates(mergeSearch, selectedArtist.id);
+    } catch (err) {
+      mergeError = `Failed to load merge candidates: ${String(err)}`;
+      uiLog('ERROR', 'Failed to load merge candidates', { error: String(err) });
+    }
+  }
+
+  async function refreshMergePreview() {
+    if (!selectedArtist || selectedMergeSourceIds.length === 0) {
+      mergePreview = null;
+      return;
+    }
+    mergeError = '';
+    try {
+      mergePreview = await previewArtistMerge(selectedArtist.id, selectedMergeSourceIds);
+    } catch (err) {
+      mergePreview = null;
+      mergeError = `Failed to preview merge: ${String(err)}`;
+      uiLog('ERROR', 'Failed to preview artist merge', { error: String(err) });
+    }
   }
 
   function openMergeModal() {
@@ -436,10 +430,6 @@
       ? selectedMergeSourceIds.filter((sourceId) => sourceId !== id)
       : [...selectedMergeSourceIds, id];
     await refreshMergePreview();
-  }
-
-  function normalizeArtistListWidth(width: number) {
-    return Math.max(220, Math.min(520, Math.round(width)));
   }
 
   function startArtistResize(event: PointerEvent) {
@@ -479,14 +469,7 @@
     artistSaving = true;
     error = '';
     try {
-      const response = await apiFetch(`/api/artists/${selectedArtist.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(artistDraft)
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload?.detail || `HTTP ${response.status}`);
-      const updated = payload as ArtistDetail;
+      const updated = await saveArtistDetail(selectedArtist.id, artistDraft);
       selectedArtist = updated;
       await loadFacets();
       uiLog('INFO', 'Artist updated', { id: updated.id, name: updated.name });
@@ -503,13 +486,7 @@
     artistSaving = true;
     error = '';
     try {
-      const response = await apiFetch(`/api/artists/${selectedArtist.id}/aliases`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ alias: newAlias.trim() })
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload?.detail || `HTTP ${response.status}`);
+      await addArtistAlias(selectedArtist.id, newAlias);
       newAlias = '';
       await loadArtistDetail(selectedArtist.id);
       await loadFacets();
@@ -526,8 +503,7 @@
     artistSaving = true;
     error = '';
     try {
-      const response = await apiFetch(`/api/artists/${selectedArtist.id}/aliases/${aliasId}`, { method: 'DELETE' });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      await deleteArtistAlias(selectedArtist.id, aliasId);
       await loadArtistDetail(selectedArtist.id);
       await loadFacets();
     } catch (err) {
@@ -544,14 +520,7 @@
     mergeBusy = true;
     mergeError = '';
     try {
-      const response = await apiFetch(`/api/artists/${selectedArtist.id}/merge`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ source_artist_ids: selectedMergeSourceIds })
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload?.detail || `HTTP ${response.status}`);
-      const merged = payload as ArtistMergePreview;
+      const merged = await mergeArtists(selectedArtist.id, selectedMergeSourceIds);
       if (merged.target_detail) {
         selectedArtist = merged.target_detail;
         artistDraft = {
@@ -578,17 +547,7 @@
     artistSaving = true;
     error = '';
     try {
-      const response = await apiFetch(`/api/artists/${selectedArtist.id}/links`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          platform: newLink.platform.trim(),
-          url: newLink.url.trim(),
-          handle: newLink.handle.trim()
-        })
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload?.detail || `HTTP ${response.status}`);
+      await addArtistLink(selectedArtist.id, newLink);
       newLink = { platform: '', url: '', handle: '' };
       await loadArtistDetail(selectedArtist.id);
       await loadFacets();
@@ -605,8 +564,7 @@
     artistSaving = true;
     error = '';
     try {
-      const response = await apiFetch(`/api/artists/${selectedArtist.id}/links/${linkId}`, { method: 'DELETE' });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      await deleteArtistLink(selectedArtist.id, linkId);
       await loadArtistDetail(selectedArtist.id);
       await loadFacets();
     } catch (err) {
@@ -643,875 +601,95 @@
     <span class="muted">{activeKind === 'artist' ? visibleArtists.length + visiblePlaceholderArtists.length : visibleItems.length} values</span>
   </div>
 
-  <div class="kind-tabs">
-    {#each kinds as kind}
-      <button type="button" class:active={activeKind === kind.value} on:click={() => setKind(kind.value)}>
-        {kind.label}
-      </button>
-    {/each}
-  </div>
-
-  <div class="stats-controls">
-    {#if showScopeFilter}
-      <span class="muted">View</span>
-      <div class="scope-tabs">
-        <button type="button" class:active={scopeMode === 'used'} on:click={() => setScopeMode('used')}>
-          Used
-        </button>
-        <button type="button" class:active={scopeMode === 'all'} on:click={() => setScopeMode('all')}>
-          All
-        </button>
-      </div>
-    {/if}
-    <span class="muted">Sort</span>
-    <div class="sort-tabs">
-      <button type="button" class:active={sortMode === 'popularity'} on:click={() => setSortMode('popularity')}>
-        Popularity
-      </button>
-      <button type="button" class:active={sortMode === 'alphabetical'} on:click={() => setSortMode('alphabetical')}>
-        Alphabetical
-      </button>
-    </div>
-  </div>
-
-  {#if showLetterFilter}
-    <div class="letter-tabs" aria-label="First character filter">
-      {#each letterFilters as letter}
-        <button type="button" class:active={letterFilter === letter} on:click={() => setLetterFilter(letter)}>
-          {letter === 'all' ? 'All' : letter.toUpperCase()}
-        </button>
-      {/each}
-    </div>
-  {/if}
-
-  <input
-    class="stats-search"
-    type="text"
-    bind:value={searchText}
-    on:input={handleSearchInput}
-    placeholder="Search stats..."
+  <StatsControls
+    kinds={statsKinds}
+    {activeKind}
+    {sortMode}
+    {scopeMode}
+    bind:letterFilter
+    bind:searchText
+    {letterFilters}
+    {showLetterFilter}
+    {showScopeFilter}
+    onKind={setKind}
+    onSort={setSortMode}
+    onScope={setScopeMode}
+    onLetter={setLetterFilter}
+    onSearchInput={handleSearchInput}
   />
 
   {#if activeKind === 'artist'}
-    <div class="artist-layout">
-      <div class="artist-list" style={`width: ${artistListWidth}px;`}>
-        {#if loading && visibleArtists.length === 0}
-          <div class="empty-state">Loading...</div>
-        {:else if visibleArtists.length === 0}
-          <div class="empty-state">No artists</div>
-        {:else}
-          <div class="artist-group-label">Known Artists</div>
-          {#each visibleArtists as artist}
-            <button type="button" class="artist-row" class:active={selectedArtistId === artist.id} on:click={() => selectArtist(artist.id)}>
-              <span class="value" title={artist.name}>{artist.name}</span>
-              <span class="artist-meta">{artist.item_count} items - {artist.link_count} links</span>
-            </button>
-          {/each}
-        {/if}
-        {#if visiblePlaceholderArtists.length > 0}
-          <div class="artist-group-label">Placeholders</div>
-          {#each visiblePlaceholderArtists as artist}
-            <div class="artist-row placeholder-row">
-              <span class="value" title={artist.value}>{artist.value}</span>
-              <span class="artist-meta">{artist.count} items - read only</span>
-            </div>
-          {/each}
-        {/if}
-      </div>
-      <button
-        type="button"
-        class="artist-resize-handle"
-        class:active={isResizingArtistList}
-        aria-label="Resize artist list"
-        on:pointerdown={startArtistResize}
-        on:keydown={handleArtistResizeKeydown}
-      ></button>
-
-      <div class="artist-detail">
-        {#if error}
-          <div class="empty-state error">{error}</div>
-        {/if}
-        {#if selectedArtist}
-          <div class="detail-header">
-            <div>
-              <h4>{selectedArtist.name}</h4>
-              <span class="muted">{selectedArtist.item_count} items - {selectedArtist.kind}</span>
-            </div>
-            <button type="button" on:click={saveArtist} disabled={artistSaving}>{artistSaving ? 'Saving...' : 'Save'}</button>
-          </div>
-
-          <div class="detail-grid">
-            <label for="artist-name">Name</label>
-            <input id="artist-name" bind:value={artistDraft.name} />
-            <label for="artist-kind">Kind</label>
-            <select id="artist-kind" bind:value={artistDraft.kind}>
-              <option value="artist">artist</option>
-              <option value="real_person">real_person</option>
-              <option value="brand">brand</option>
-              <option value="other">other</option>
-            </select>
-            <label for="artist-notes">Notes</label>
-            <textarea id="artist-notes" bind:value={artistDraft.notes} rows="3"></textarea>
-          </div>
-
-          <div class="detail-section">
-            <h5>Links</h5>
-            {#each selectedArtist.links as link}
-              <div class="editable-row">
-                <span>{link.platform}</span>
-                <a href={link.url} target="_blank" rel="noreferrer">{link.handle || link.url}</a>
-                <button type="button" on:click={() => deleteLink(link.id)} disabled={artistSaving}>Remove</button>
-              </div>
-            {/each}
-            <div class="add-row link-add-row">
-              <select bind:value={newLink.platform} aria-label="Link platform">
-                <option value="">platform</option>
-                {#each linkPlatformOptions as platform}
-                  <option value={platform}>{platform}</option>
-                {/each}
-              </select>
-              <input bind:value={newLink.url} placeholder="url" />
-              <input bind:value={newLink.handle} placeholder="handle" />
-              <button type="button" on:click={addLink} disabled={artistSaving}>Add</button>
-            </div>
-          </div>
-
-          <div class="detail-section">
-            <h5>Aliases</h5>
-            <div class="alias-list">
-              {#each selectedArtist.aliases as alias}
-                <span class="alias-chip">
-                  {alias.alias}
-                  <button type="button" on:click={() => deleteAlias(alias.id)} disabled={artistSaving}>x</button>
-                </span>
-              {/each}
-            </div>
-            <div class="add-row">
-              <input bind:value={newAlias} placeholder="New alias" />
-              <button type="button" on:click={addAlias} disabled={artistSaving}>Add Alias</button>
-            </div>
-            <button type="button" class="merge-button" on:click={openMergeModal} disabled={artistSaving}>
-              Merge Other Artists Into This
-            </button>
-          </div>
-        {:else if !loading}
-          <div class="empty-state">Select an artist</div>
-        {/if}
-      </div>
-    </div>
+    <ArtistStatsPanel
+      {visibleArtists}
+      {visiblePlaceholderArtists}
+      bind:selectedArtistId
+      bind:selectedArtist
+      bind:artistDraft
+      bind:newAlias
+      bind:newLink
+      {linkPlatformOptions}
+      {loading}
+      {error}
+      {artistSaving}
+      {artistListWidth}
+      {isResizingArtistList}
+      onSelectArtist={selectArtist}
+      onStartResize={startArtistResize}
+      onResizeKeydown={handleArtistResizeKeydown}
+      onSaveArtist={saveArtist}
+      onAddAlias={addAlias}
+      onDeleteAlias={deleteAlias}
+      onAddLink={addLink}
+      onDeleteLink={deleteLink}
+      onOpenMerge={openMergeModal}
+    />
   {:else}
-    <div class="stats-list">
-      {#if loading}
-        <div class="empty-state">Loading...</div>
-      {:else if error}
-        <div class="empty-state error">{error}</div>
-      {:else if visibleItems.length === 0}
-        <div class="empty-state">No values</div>
-      {:else}
-        {#if activeKind === 'platform'}
-          {#each visibleItems as item}
-            <div class="stats-row">
-              <span class="value" title={item.value}>{item.value}</span>
-              <span class="count">{item.count}</span>
-            </div>
-          {/each}
-        {:else}
-          <div class="chip-cloud">
-            {#each visibleItems as item}
-              <div class="stat-chip-wrap">
-              <button
-                type="button"
-                class="stat-chip"
-                class:has-action={activeKind === 'topic'}
-                class:selected={isFacetSelected(activeKind, item.value)}
-                aria-pressed={isFacetSelected(activeKind, item.value)}
-                title={`${item.value} (${item.count})`}
-                on:click={() => toggleFacetSelection(activeKind, item.value)}
-              >
-                <span class="value">{isFacetSelected(activeKind, item.value) ? `✓ ${item.value}` : item.value}</span>
-                <span class="chip-count">{item.count}</span>
-              </button>
-              {#if activeKind === 'topic'}
-                <button
-                  type="button"
-                  class="chip-action"
-                  title={`Rename ${item.value}`}
-                  aria-label={`Rename ${item.value}`}
-                  on:click={() => openTopicRename(item.value)}
-                >
-                  ...
-                </button>
-              {/if}
-              </div>
-            {/each}
-          </div>
-        {/if}
-      {/if}
-    </div>
+    <FacetStatsPanel
+      {activeKind}
+      {visibleItems}
+      {loading}
+      {error}
+      {isFacetSelected}
+      onToggleFacet={toggleFacetSelection}
+      onOpenMetadataAction={openMetadataAction}
+    />
   {/if}
 </div>
 
-{#if selectedFacetCount > 0}
-  <div class="stats-filter-bar">
-    <span>{selectedFacetCount} selected · {selectedTopicCount} topics · {selectedWdTagCount} WD tags</span>
-    <div class="filter-actions">
-      <button type="button" on:click={clearFacetSelection}>Clear</button>
-      <button type="button" class="primary" on:click={filterVaultFromSelection}>Filter Vault</button>
-    </div>
-  </div>
-{/if}
-
-{#if topicRenameOpen}
-  <div class="modal-backdrop" role="presentation">
-    <div class="rename-modal" role="dialog" aria-modal="true" aria-labelledby="topic-rename-title" tabindex="-1">
-      <div class="modal-header">
-        <div>
-          <h4 id="topic-rename-title">Rename Topic</h4>
-          <span class="muted">Renames the shared topic file and updates references in all vaults.</span>
-        </div>
-        <button type="button" on:click={closeTopicRename} disabled={topicRenameBusy}>Close</button>
-      </div>
-
-      <div class="detail-grid">
-        <label for="topic-old">Old</label>
-        <input id="topic-old" value={topicRenameOld} readonly />
-        <label for="topic-new">New</label>
-        <input id="topic-new" bind:value={topicRenameNew} disabled={topicRenameBusy} />
-      </div>
-
-      {#if topicRenameError}
-        <div class="empty-state error">{topicRenameError}</div>
-      {/if}
-      {#if topicRenameResult}
-        <div class="empty-state success">{topicRenameResult}</div>
-      {/if}
-
-      <div class="modal-actions">
-        <button type="button" on:click={closeTopicRename} disabled={topicRenameBusy}>Cancel</button>
-        <button type="button" class="primary" on:click={confirmTopicRename} disabled={topicRenameBusy || !topicRenameNew.trim()}>
-          {topicRenameBusy ? 'Renaming...' : 'Rename'}
-        </button>
-      </div>
-    </div>
-  </div>
-{/if}
-
-{#if mergeOpen && selectedArtist}
-  <div class="modal-backdrop" role="presentation">
-    <div class="merge-modal" role="dialog" aria-modal="true" aria-labelledby="artist-merge-title" tabindex="-1">
-      <div class="modal-header">
-        <div>
-          <h4 id="artist-merge-title">Merge Into {selectedArtist.name}</h4>
-          <span class="muted">Selected sources will be absorbed into this artist.</span>
-        </div>
-        <button type="button" on:click={closeMergeModal} disabled={mergeBusy}>Close</button>
-      </div>
-
-      <input
-        class="stats-search"
-        type="text"
-        bind:value={mergeSearch}
-        on:input={handleMergeSearchInput}
-        placeholder="Search source artists..."
-      />
-
-      {#if mergeError}
-        <div class="empty-state error">{mergeError}</div>
-      {/if}
-
-      <div class="merge-source-list">
-        {#each mergeCandidates as artist}
-          <button
-            type="button"
-            class="merge-source-row"
-            class:active={selectedMergeSourceIds.includes(artist.id)}
-            on:click={() => toggleMergeSource(artist.id)}
-          >
-            <span class="value">{artist.name}</span>
-            <span class="artist-meta">{artist.item_count} items - {artist.link_count} links</span>
-          </button>
-        {/each}
-      </div>
-
-      <div class="merge-preview">
-        <h5>Preview</h5>
-        {#if mergePreview}
-          <div class="preview-grid">
-            <span>Affected items</span><strong>{mergePreview.affected_items}</strong>
-            <span>Aliases added/moved</span><strong>{mergePreview.aliases.add.length + mergePreview.aliases.move.length}</strong>
-            <span>Alias conflicts skipped</span><strong>{mergePreview.aliases.conflicts.length}</strong>
-            <span>Links moved</span><strong>{mergePreview.links.move.length}</strong>
-            <span>Duplicate links skipped</span><strong>{mergePreview.links.duplicates.length}</strong>
-            <span>Notes appended</span><strong>{mergePreview.notes_appended}</strong>
-          </div>
-        {:else}
-          <div class="empty-state">Select source artists to preview merge impact.</div>
-        {/if}
-      </div>
-
-      <div class="modal-actions">
-        <button type="button" on:click={closeMergeModal} disabled={mergeBusy}>Cancel</button>
-        <button type="button" class="danger-button" on:click={confirmMerge} disabled={mergeBusy || selectedMergeSourceIds.length === 0}>
-          {mergeBusy ? 'Merging...' : 'Merge into target'}
-        </button>
-      </div>
-    </div>
-  </div>
-{/if}
-
-<style>
-  :global(body.artist-list-resizing) {
-    cursor: col-resize;
-    user-select: none;
-  }
-
-  :global(body.artist-list-resizing *) {
-    cursor: col-resize !important;
-    user-select: none;
-  }
-
-  .stats-container {
-    flex-grow: 1;
-    padding: 25px;
-    background: var(--bg-main);
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
-  }
-
-  .stats-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-  }
-
-  h3 {
-    color: var(--text-bright);
-    margin: 0;
-  }
-
-  .muted {
-    color: var(--text-muted);
-    font-size: 12px;
-  }
-
-  .kind-tabs {
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-  }
-
-  .stats-controls {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-
-  .sort-tabs,
-  .scope-tabs {
-    display: flex;
-    gap: 6px;
-  }
-
-  .letter-tabs {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
-    align-items: center;
-  }
-
-  .letter-tabs button {
-    min-width: 30px;
-    padding: 5px 7px;
-    font-size: 12px;
-  }
-
-  .kind-tabs button.active,
-  .sort-tabs button.active,
-  .scope-tabs button.active,
-  .letter-tabs button.active {
-    background: var(--accent-primary);
-    border-color: var(--accent-primary);
-    color: white;
-  }
-
-  .stats-search {
-    width: 100%;
-    max-width: 520px;
-  }
-
-  .stats-list,
-  .artist-list,
-  .artist-detail {
-    border: 1px solid var(--border-dim);
-    border-radius: 8px;
-    background: var(--bg-panel);
-    overflow-y: auto;
-    min-height: 0;
-  }
-
-  .stats-list {
-    flex-grow: 1;
-  }
-
-  .chip-cloud {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    align-content: flex-start;
-    padding: 12px;
-  }
-
-  .stat-chip-wrap {
-    display: inline-grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    max-width: 100%;
-    min-width: 0;
-  }
-
-  .stat-chip {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-items: center;
-    gap: 0;
-    max-width: 100%;
-    min-width: 0;
-    border: 1px solid var(--border-dim);
-    border-radius: 6px;
-    background: rgba(255, 255, 255, 0.07);
-    color: var(--text-main);
-    padding: 0;
-    font-size: 13px;
-    line-height: 1.15;
-    overflow: hidden;
-  }
-
-  .stat-chip.has-action {
-    border-radius: 6px 0 0 6px;
-    border-right: 0;
-  }
-
-  .chip-action {
-    width: 28px;
-    min-width: 28px;
-    padding: 0;
-    border-radius: 0 6px 6px 0;
-    border: 1px solid var(--border-dim);
-    background: rgba(255, 255, 255, 0.05);
-    color: var(--text-muted);
-    font-weight: 700;
-  }
-
-  .chip-action:hover {
-    background: rgba(31, 111, 235, 0.22);
-    border-color: rgba(31, 111, 235, 0.75);
-    color: var(--text-bright);
-  }
-
-  .stat-chip:hover {
-    background: rgba(31, 111, 235, 0.22);
-    border-color: rgba(31, 111, 235, 0.75);
-  }
-
-  .stat-chip.selected {
-    background: rgba(31, 111, 235, 0.26);
-    border-color: var(--accent-primary);
-    box-shadow: inset 0 0 0 1px rgba(31, 111, 235, 0.45);
-  }
-
-  .stats-row {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 16px;
-    align-items: center;
-    padding: 9px 12px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  }
-
-  .stats-row:last-child {
-    border-bottom: 0;
-  }
-
-  .value {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    color: var(--text-main);
-  }
-
-  .chip-count {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--text-bright);
-    background: rgba(255, 255, 255, 0.13);
-    border-radius: 0 4px 4px 0;
-    min-width: 24px;
-    height: 100%;
-    padding: 3px 5px;
-    text-align: center;
-    font-variant-numeric: tabular-nums;
-  }
-
-  .stat-chip .value {
-    padding: 4px 7px;
-  }
-
-  .count {
-    text-align: right;
-    color: var(--text-muted);
-    font-variant-numeric: tabular-nums;
-  }
-
-  .stats-filter-bar {
-    position: fixed;
-    left: 50%;
-    bottom: 42px;
-    transform: translateX(-50%);
-    z-index: 900;
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    padding: 8px 10px 8px 12px;
-    border: 1px solid var(--border-dim);
-    border-radius: 8px;
-    background: var(--bg-panel);
-    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.42);
-    color: var(--text-main);
-    font-size: 12px;
-  }
-
-  .filter-actions {
-    display: flex;
-    gap: 8px;
-  }
-
-  .filter-actions button {
-    padding: 6px 10px;
-  }
-
-  .filter-actions .primary {
-    background: var(--accent-primary);
-    border-color: var(--accent-primary);
-    color: white;
-  }
-
-  .empty-state {
-    padding: 24px;
-    color: var(--text-muted);
-  }
-
-  .empty-state.error {
-    color: var(--accent-danger);
-  }
-
-  .empty-state.success {
-    color: var(--accent-success, #7ee787);
-  }
-
-  .artist-layout {
-    display: flex;
-    min-height: 0;
-    flex-grow: 1;
-  }
-
-  .artist-list {
-    flex: 0 0 auto;
-  }
-
-  .artist-resize-handle {
-    width: 14px;
-    flex: 0 0 14px;
-    cursor: col-resize;
-    border: 0;
-    border-radius: 0;
-    background: linear-gradient(
-      90deg,
-      transparent 0,
-      transparent 6px,
-      var(--border-dim) 6px,
-      var(--border-dim) 7px,
-      transparent 7px
-    );
-    padding: 0;
-    margin: 0 4px;
-    position: relative;
-    z-index: 20;
-  }
-
-  .artist-resize-handle:hover,
-  .artist-resize-handle.active {
-    background: linear-gradient(
-      90deg,
-      transparent 0,
-      transparent 6px,
-      var(--accent-primary) 6px,
-      var(--accent-primary) 7px,
-      transparent 7px
-    );
-  }
-
-  .artist-group-label {
-    padding: 8px 12px 6px;
-    color: var(--text-muted);
-    font-size: 11px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-    background: rgba(255, 255, 255, 0.02);
-  }
-
-  .artist-row {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: 3px;
-    width: 100%;
-    padding: 10px 12px;
-    border: 0;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-    border-radius: 0;
-    background: transparent;
-    text-align: left;
-  }
-
-  .artist-row.active,
-  .artist-row:hover {
-    background: rgba(31, 111, 235, 0.16);
-  }
-
-  .placeholder-row {
-    cursor: default;
-    opacity: 0.74;
-  }
-
-  .placeholder-row:hover {
-    background: transparent;
-  }
-
-  .artist-meta {
-    color: var(--text-muted);
-    font-size: 11px;
-  }
-
-  .artist-detail {
-    padding: 14px;
-    flex: 1 1 auto;
-  }
-
-  .detail-header {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 12px;
-    margin-bottom: 16px;
-  }
-
-  .detail-header h4 {
-    margin: 0 0 4px 0;
-    color: var(--text-bright);
-  }
-
-  .detail-grid {
-    display: grid;
-    grid-template-columns: 80px minmax(0, 1fr);
-    gap: 10px 12px;
-    align-items: center;
-  }
-
-  input,
-  select,
-  textarea {
-    width: 100%;
-    box-sizing: border-box;
-    background: var(--bg-main);
-    border: 1px solid var(--border-dim);
-    border-radius: 6px;
-    color: var(--text-main);
-    padding: 8px 10px;
-    font-size: 13px;
-  }
-
-  textarea {
-    resize: vertical;
-    min-height: 70px;
-  }
-
-  .detail-section {
-    margin-top: 18px;
-  }
-
-  .detail-section h5 {
-    margin: 0 0 8px 0;
-    color: var(--text-bright);
-    font-size: 13px;
-  }
-
-  .editable-row,
-  .add-row {
-    display: grid;
-    grid-template-columns: 90px minmax(0, 1fr) auto;
-    gap: 8px;
-    align-items: center;
-    margin-bottom: 8px;
-  }
-
-  .editable-row a {
-    color: var(--text-main);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .link-add-row {
-    grid-template-columns: 120px minmax(0, 1fr) 120px auto;
-  }
-
-  .alias-list {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-bottom: 8px;
-  }
-
-  .alias-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 4px 8px;
-    border: 1px solid var(--border-dim);
-    border-radius: 6px;
-    color: var(--text-main);
-    background: var(--bg-main);
-  }
-
-  .alias-chip button {
-    padding: 0 4px;
-    border: 0;
-    background: transparent;
-    color: var(--text-muted);
-  }
-
-  .merge-button {
-    margin-top: 8px;
-    width: 100%;
-  }
-
-  .modal-backdrop {
-    position: fixed;
-    inset: 0;
-    z-index: 1000;
-    background: rgba(1, 4, 9, 0.72);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 24px;
-  }
-
-  .merge-modal,
-  .rename-modal {
-    width: min(760px, 100%);
-    max-height: min(720px, calc(100vh - 48px));
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
-    border: 1px solid var(--border-dim);
-    border-radius: 8px;
-    background: var(--bg-panel);
-    padding: 16px;
-    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
-  }
-
-  .rename-modal {
-    width: min(560px, 100%);
-  }
-
-  .modal-header,
-  .modal-actions {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 12px;
-  }
-
-  .modal-header h4 {
-    margin: 0 0 4px 0;
-    color: var(--text-bright);
-  }
-
-  .merge-source-list {
-    min-height: 120px;
-    max-height: 220px;
-    overflow-y: auto;
-    border: 1px solid var(--border-dim);
-    border-radius: 6px;
-  }
-
-  .merge-source-row {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 12px;
-    width: 100%;
-    padding: 9px 10px;
-    border: 0;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-    border-radius: 0;
-    background: transparent;
-    text-align: left;
-  }
-
-  .merge-source-row.active,
-  .merge-source-row:hover {
-    background: rgba(31, 111, 235, 0.16);
-  }
-
-  .merge-preview {
-    border: 1px solid var(--border-dim);
-    border-radius: 6px;
-    padding: 12px;
-    min-height: 120px;
-  }
-
-  .merge-preview h5 {
-    margin: 0 0 10px 0;
-    color: var(--text-bright);
-  }
-
-  .preview-grid {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 8px 16px;
-    color: var(--text-main);
-  }
-
-  .preview-grid strong {
-    font-variant-numeric: tabular-nums;
-  }
-
-  .danger-button {
-    border-color: var(--accent-danger);
-    color: var(--accent-danger);
-  }
-
-  @media (max-width: 820px) {
-    .artist-layout {
-      display: grid;
-      grid-template-columns: 1fr;
-      gap: 14px;
-    }
-
-    .artist-list {
-      width: auto !important;
-    }
-
-    .artist-resize-handle {
-      display: none;
-    }
-
-    .link-add-row {
-      grid-template-columns: 1fr;
-    }
-  }
-</style>
+<StatsFilterBar
+  {selectedFacetCount}
+  {selectedTopicCount}
+  {selectedWdTagCount}
+  onClear={clearFacetSelection}
+  onFilterVault={filterVaultFromSelection}
+/>
+
+<MetadataActionModal
+  open={metadataActionOpen}
+  kind={metadataActionKind}
+  action={metadataAction}
+  value={metadataActionValue}
+  bind:newValue={metadataActionNewValue}
+  bind:targetValue={metadataActionTargetValue}
+  bind:tagType={metadataActionTagType}
+  busy={metadataActionBusy}
+  result={metadataActionResult}
+  error={metadataActionError}
+  onClose={closeMetadataAction}
+  onConfirm={confirmMetadataAction}
+/>
+
+<ArtistMergeModal
+  open={mergeOpen}
+  {selectedArtist}
+  bind:mergeSearch
+  {mergeCandidates}
+  {selectedMergeSourceIds}
+  {mergePreview}
+  {mergeBusy}
+  {mergeError}
+  onSearchInput={handleMergeSearchInput}
+  onToggleSource={toggleMergeSource}
+  onConfirm={confirmMerge}
+  onClose={closeMergeModal}
+/>

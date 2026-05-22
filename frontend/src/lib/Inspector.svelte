@@ -5,6 +5,7 @@
   import { log as uiLog } from './logger';
   import { apiFetch, apiUrl } from './api';
   import { isImageMedia, isVideoMedia } from './media';
+  import { runtimeSessionKey } from './runtimeStore';
 
   export let item: VaultItem | null = null;
   export let group: { id: string, items: VaultItem[] } | null = null;
@@ -31,14 +32,18 @@
   let tagging = false;
   let abortController: AbortController | null = null;
   let lastLoadedHash: string | null = null;
+  let currentRuntimeSessionKey = '';
 
   let videoElement: HTMLVideoElement | undefined;
 
   $: if (item) {
       if (item.hash !== lastLoadedHash) loadFullDetails(item.hash);
   } else {
-      fullItem = null;
-      lastLoadedHash = null;
+      clearDetails();
+  }
+  $: if ($runtimeSessionKey) {
+      if (currentRuntimeSessionKey && currentRuntimeSessionKey !== $runtimeSessionKey) clearDetails(true);
+      currentRuntimeSessionKey = $runtimeSessionKey;
   }
 
   $: currentIndex = group ? group.items.findIndex(i => i.hash === item?.hash) : 0;
@@ -84,6 +89,27 @@
       result.push(clean);
     }
     return result;
+  }
+
+  function clearDetails(abort = false) {
+    if (abort) abortController?.abort();
+    fullItem = null;
+    artist = '';
+    savedArtist = '';
+    sourceUrl = '';
+    platform = '';
+    topics = [];
+    savedTopics = [];
+    draftTopics = [];
+    savedWdRating = '';
+    draftWdRating = '';
+    savedWdCharacters = [];
+    draftWdCharacters = [];
+    savedWdGeneral = [];
+    draftWdGeneral = [];
+    loading = false;
+    tagging = false;
+    lastLoadedHash = null;
   }
 
   function sameStringList(a: string[], b: string[]) {
