@@ -212,6 +212,10 @@ VSCode-friendly test launchers:
 - Inspector/Stats metadata workflow polish:
   - richer Inspector tag editing if Stats-only workflow feels insufficient.
   - search chips if the current text query handoff becomes hard to scan.
+  - **RAM Tracker Precision (Ecosystem footprint vs V8 heap)**:
+    - The current RAM tracker footer only measures V8 JS VM heap (`performance.memory.usedJSHeapSize`) in the frontend and a single Python process RSS in the backend.
+    - It completely misses WebView2 processes (`msedgewebview2.exe` hosting DOM, styles, compositing, decoders, graphics buffer allocations), Tauri's Rust main host process (`app.exe`/`LMZ.exe`), and active backend utility subprocesses (`ffmpeg`, `gallery-dl`, `yt-dlp`).
+    - **Remediation Plan**: Refactor `_get_system_memory_sync` in `backend/api/runtime.py` to aggregate the full application process tree using `psutil`. Automatically sum the parent Tauri process (`app.exe`/`LMZ.exe`), all its recursive child processes (WebView2 host/renderers, active subprocesses), and the current Python backend process to calculate a true, 100% accurate system RAM footprint.
 
 - Multiple vault support:
   - live workspace/vault switching after current restart-based switching is stable.
