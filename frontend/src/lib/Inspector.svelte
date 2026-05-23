@@ -1107,15 +1107,18 @@
       display: inline-grid;
       place-items: center;
       width: 0;
-      height: 100%;
-      padding: 0;
-      border: 0;
+      height: 24px !important;
+      align-self: stretch !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      border: none !important;
       background: transparent;
       color: var(--text-muted);
       cursor: pointer;
       opacity: 0;
       transition: none !important;
       border-radius: 0 !important;
+      box-sizing: border-box !important;
   }
 
   /* Slide-out rename button using clean SVG graphics */
@@ -1123,15 +1126,18 @@
       display: inline-grid;
       place-items: center;
       width: 0;
-      height: 100%;
-      padding: 0;
-      border: 0;
+      height: 24px !important;
+      align-self: stretch !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      border: none !important;
       background: transparent;
       color: var(--text-muted);
       cursor: pointer;
       opacity: 0;
       transition: none !important;
       border-radius: 0 !important;
+      box-sizing: border-box !important;
   }
 
   /* Svelte-safe tag chip expansion on hover */
@@ -1139,7 +1145,8 @@
   .tag-chip:focus-within .chip-remove {
       width: 24px;
       opacity: 1;
-      border-left: 1px solid rgba(255, 255, 255, 0.08);
+      border: none !important;
+      border-left: 1px solid rgba(255, 255, 255, 0.08) !important;
       color: var(--text-muted);
       transition: none !important;
   }
@@ -1148,9 +1155,16 @@
   .tag-chip:focus-within .chip-rename {
       width: 24px;
       opacity: 1;
-      border-left: 1px solid rgba(255, 255, 255, 0.08);
+      border: none !important;
+      border-left: 1px solid rgba(255, 255, 255, 0.08) !important;
       color: var(--text-muted);
       transition: none !important;
+  }
+
+  /* Cancel flexbox gap between adjacent action buttons to keep highlights perfectly seamless */
+  .tag-chip:hover .chip-rename + .chip-remove,
+  .tag-chip:focus-within .chip-rename + .chip-remove {
+      margin-left: -4px !important;
   }
 
   /* Expand right-side margin of count when remove button is hidden, compress when shown */
@@ -1162,11 +1176,17 @@
   .chip-remove:hover {
       background: rgba(248, 81, 73, 0.15) !important;
       color: var(--accent-danger) !important;
+      height: 24px !important;
+      border: none !important;
+      border-left: 1px solid rgba(255, 255, 255, 0.08) !important;
   }
 
   .chip-rename:hover {
       background: rgba(255, 255, 255, 0.08) !important;
       color: var(--accent-primary) !important;
+      height: 24px !important;
+      border: none !important;
+      border-left: 1px solid rgba(255, 255, 255, 0.08) !important;
   }
 
   /* Categories Hover & Color Harmonies */
@@ -1242,20 +1262,30 @@
   }
   .tag-chip.topic.promoted .chip-remove {
       color: rgba(255, 255, 255, 0.7) !important;
+      border: none !important;
       border-left: 1px solid rgba(255, 255, 255, 0.25) !important;
+      height: 24px !important;
   }
   .tag-chip.topic.promoted .chip-remove:hover {
       background: rgba(255, 255, 255, 0.15) !important;
       color: #ffffff !important;
+      border: none !important;
+      border-left: 1px solid rgba(255, 255, 255, 0.25) !important;
+      height: 24px !important;
   }
 
   .tag-chip.topic.promoted .chip-rename {
       color: rgba(255, 255, 255, 0.7) !important;
+      border: none !important;
       border-left: 1px solid rgba(255, 255, 255, 0.25) !important;
+      height: 24px !important;
   }
   .tag-chip.topic.promoted .chip-rename:hover {
       background: rgba(255, 255, 255, 0.15) !important;
       color: #ffffff !important;
+      border: none !important;
+      border-left: 1px solid rgba(255, 255, 255, 0.25) !important;
+      height: 24px !important;
   }
 
   /* Rating Suggestion (Orange) */
@@ -1270,11 +1300,16 @@
   }
   .tag-chip.rating.promoted .chip-remove {
       color: rgba(255, 255, 255, 0.7) !important;
+      border: none !important;
       border-left: 1px solid rgba(255, 255, 255, 0.25) !important;
+      height: 24px !important;
   }
   .tag-chip.rating.promoted .chip-remove:hover {
       background: rgba(255, 255, 255, 0.15) !important;
       color: #ffffff !important;
+      border: none !important;
+      border-left: 1px solid rgba(255, 255, 255, 0.25) !important;
+      height: 24px !important;
   }
 
   /* Character Suggestion (Blue) */
@@ -1289,11 +1324,16 @@
   }
   .tag-chip.character.promoted .chip-remove {
       color: rgba(255, 255, 255, 0.7) !important;
+      border: none !important;
       border-left: 1px solid rgba(255, 255, 255, 0.25) !important;
+      height: 24px !important;
   }
   .tag-chip.character.promoted .chip-remove:hover {
       background: rgba(255, 255, 255, 0.15) !important;
       color: #ffffff !important;
+      border: none !important;
+      border-left: 1px solid rgba(255, 255, 255, 0.25) !important;
+      height: 24px !important;
   }
 
   /* Visual/General Suggestion (Dim Gray/Slate) */
@@ -1308,11 +1348,16 @@
   }
   .tag-chip.visual.promoted .chip-remove {
       color: rgba(13, 17, 23, 0.7) !important;
+      border: none !important;
       border-left: 1px solid rgba(13, 17, 23, 0.2) !important;
+      height: 24px !important;
   }
   .tag-chip.visual.promoted .chip-remove:hover {
       background: rgba(13, 17, 23, 0.1) !important;
       color: #0d1117 !important;
+      border: none !important;
+      border-left: 1px solid rgba(13, 17, 23, 0.2) !important;
+      height: 24px !important;
   }
 
   .sub-section {
