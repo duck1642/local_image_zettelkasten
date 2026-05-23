@@ -94,6 +94,49 @@ body.artist-list-resizing {
     flex-grow: 1;
   }
 
+  .topic-create-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .topic-create-bar input {
+    width: 220px;
+    max-width: 100%;
+    height: 28px;
+    padding: 4px 8px;
+    font-size: 12px;
+    background: var(--bg-input);
+    border: 1px solid var(--border-dim);
+  }
+
+  .topic-create-bar button {
+    display: inline-grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 700;
+  }
+
+  .topic-create-toggle {
+    color: var(--accent-purple);
+    border-color: rgba(163, 113, 247, 0.45);
+    background: rgba(163, 113, 247, 0.08);
+  }
+
+  .topic-create-toggle:hover {
+    border-color: var(--accent-purple);
+    background: rgba(163, 113, 247, 0.14);
+  }
+
+  .topic-create-error {
+    color: var(--accent-danger);
+    font-size: 12px;
+  }
+
   .chip-cloud {
     display: flex;
     flex-wrap: wrap;
@@ -617,5 +660,4 @@ body.artist-list-resizing {
       grid-template-columns: 1fr;
     }
   }
-
 

@@ -139,6 +139,15 @@ export async function renameTopic(oldLabel: string, newLabel: string) {
   return await jsonOrThrow(response, `HTTP ${response.status}`);
 }
 
+export async function createTopic(label: string) {
+  const response = await apiFetch('/api/topics', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ label: label.trim() })
+  });
+  return await jsonOrThrow(response, `HTTP ${response.status}`);
+}
+
 export async function deleteTopic(label: string) {
   const response = await apiFetch('/api/topics/delete', {
     method: 'POST',

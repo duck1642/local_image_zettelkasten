@@ -207,21 +207,16 @@ VSCode-friendly test launchers:
 
 ### Phase C - Metadata Workflow Polish / Vault Ops
 
-1. Metadata editing core:
-   - add topics from Inspector.
-   - add topics from Stats.
-   - create/reuse shared topic files under `data/topics/`.
-   - refresh item notes, metadata index, facet counts, and frontend state after edits.
-2. RAM tracker precision:
+1. RAM tracker precision:
    - The current RAM tracker footer only measures V8 JS VM heap (`performance.memory.usedJSHeapSize`) in the frontend and a single Python process RSS in the backend.
    - It completely misses WebView2 processes (`msedgewebview2.exe` hosting DOM, styles, compositing, decoders, graphics buffer allocations), Tauri's Rust main host process (`app.exe`/`LMZ.exe`), and active backend utility subprocesses (`ffmpeg`, `gallery-dl`, `yt-dlp`).
    - Refactor `_get_system_memory_sync` in `backend/api/runtime.py` to aggregate the full application process tree using `psutil`. Automatically sum the parent Tauri process (`app.exe`/`LMZ.exe`), all its recursive child processes (WebView2 host/renderers, active subprocesses), and the current Python backend process to calculate the real app RAM footprint.
-3. Vault operations:
+2. Vault operations:
    - verify current live workspace/vault switching code paths.
    - trace and remove old compatibility path usage after default, Obsidian, and generated vault modes are stable.
    - harden vault rename, delete, and merge flows.
    - defer split/separate vault flows until the real workflow is clearer.
-4. Vault health read-only audit:
+3. Vault health read-only audit:
    - report DB rows missing assets or notes.
    - report orphaned assets or notes with no DB row.
    - report bad/missing `storage_id` values and path mismatches.
@@ -231,7 +226,7 @@ VSCode-friendly test launchers:
    - report broken topic links and unused topic files.
    - report review sidecar/media mismatches.
    - report workspace dictionary drift against active-vault usage.
-5. Vault health targeted repairs:
+4. Vault health targeted repairs:
    - repair derived data only after read-only audit output is trusted.
    - rebuild thumbnails.
    - rebuild metadata index and facet counts.
@@ -239,13 +234,13 @@ VSCode-friendly test launchers:
    - reconcile review sidecars.
    - quarantine orphan assets/notes where needed.
    - require explicit action for destructive deletes.
-6. Backup/export/import:
+5. Backup/export/import:
    - add active-vault backup flow.
    - add vault export/import package flow.
    - consider automatic pre-delete and pre-merge backups.
-7. Optional metadata maintenance:
+6. Optional metadata maintenance:
    - hide/ignore WD tags only if noisy WD data becomes a real UX problem.
-8. Optional UX polish:
+7. Optional UX polish:
    - search chips if the current text query handoff becomes hard to scan.
    - richer Inspector tag editing beyond the required topic add flow.
 
@@ -290,6 +285,16 @@ VSCode-friendly test launchers:
 ## Done But Needs Check
 
 - Phase C prerequisites and tag/topic maintenance:
+  - Inspector topic workflow is implemented:
+    - add manual topics from Inspector through a compact `+` input.
+    - reuse existing topics from an Inspector dropdown backed by all topic facets.
+    - rename topics from Inspector using the shared topic maintenance modal/API.
+    - topic edits remain draft-only until item metadata save.
+  - Stats topic creation is implemented:
+    - `POST /api/topics` creates/reuses shared topic files under `data/topics/`.
+    - Stats Topics exposes a compact `+` create flow.
+    - newly created unused topics appear in `All` topic scope and are selectable later from Inspector.
+  - item metadata save lock timeout was fixed by skipping redundant workspace WD dictionary sync during item patch and review replacement preserve reindex paths.
   - runtime context layer is implemented for workspace/vault paths while preserving legacy import-time constants.
   - active-vault and workspace DB connection helpers are context-aware.
   - queues, review cache, logging, metadata watchdog paths, topics, thumbnails, downloader staging, and local ingest/review path access are context-aware.

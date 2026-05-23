@@ -9,6 +9,7 @@ from metadata_maintenance import (
     rename_wd_tag_across_workspace,
     rewrite_metadata_notes_for_hashes,
 )
+from topics import ensure_topic_file, slugify_topic_label
 
 router = APIRouter()
 
@@ -36,6 +37,9 @@ class ArtistMergeRequest(BaseModel):
 class TopicRenameRequest(BaseModel):
     old_label: str
     new_label: str
+
+class TopicCreateRequest(BaseModel):
+    label: str
 
 class TopicDeleteRequest(BaseModel):
     label: str
@@ -469,6 +473,22 @@ def _get_facets_sync(kind: str, q: str = "", limit: int = 100, scope: str = "use
 @router.post("/api/topics/rename")
 async def rename_topic_route(body: TopicRenameRequest):
     return await asyncio.to_thread(_rename_topic_sync, body.old_label, body.new_label)
+
+@router.post("/api/topics")
+async def create_topic_route(body: TopicCreateRequest):
+    return await asyncio.to_thread(_create_topic_sync, body.label)
+
+def _create_topic_sync(label: str):
+    clean = str(label or "").strip()
+    if not clean:
+        raise HTTPException(status_code=400, detail="topic label is required")
+    path = ensure_topic_file(clean)
+    return {
+        "status": "success",
+        "label": path.stem,
+        "slug": slugify_topic_label(clean),
+        "path": str(path),
+    }
 
 def _rename_topic_sync(old_label: str, new_label: str):
     try:

@@ -12,6 +12,7 @@
   import {
     addArtistAlias,
     addArtistLink,
+    createTopic,
     deleteArtistAlias,
     deleteArtistLink,
     deleteTopic,
@@ -102,6 +103,10 @@
   let metadataActionBusy = false;
   let metadataActionResult = '';
   let metadataActionError = '';
+  let topicCreateOpen = false;
+  let topicCreateValue = '';
+  let topicCreateBusy = false;
+  let topicCreateError = '';
   let currentRuntimeSessionKey = '';
 
   $: showLetterFilter = activeKind === 'artist' || activeKind === 'topic' || activeKind === 'wd_tag';
@@ -260,6 +265,61 @@
     dispatch('filterVault', { topics: selectedTopics, wd_tags: selectedWdTags });
   }
 
+  function normalizeTopicLabel(value: string) {
+    const cleaned = String(value || '')
+      .trim()
+      .toLocaleLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+      .replace(/_+/g, '_');
+    return cleaned || 'topic';
+  }
+
+  function openTopicCreate() {
+    topicCreateOpen = true;
+    topicCreateValue = '';
+    topicCreateError = '';
+  }
+
+  function closeTopicCreate() {
+    if (topicCreateBusy) return;
+    topicCreateOpen = false;
+    topicCreateValue = '';
+    topicCreateError = '';
+  }
+
+  async function confirmTopicCreate() {
+    if (!topicCreateValue.trim() || topicCreateBusy) return;
+    const label = normalizeTopicLabel(topicCreateValue);
+    topicCreateBusy = true;
+    topicCreateError = '';
+    try {
+      const payload = await createTopic(label);
+      scopeMode = 'all';
+      letterFilter = 'all';
+      await loadFacets();
+      topicCreateOpen = false;
+      topicCreateValue = '';
+      topicCreateError = '';
+      uiLog('INFO', 'Topic created from stats', { label: payload.label || label });
+    } catch (err) {
+      topicCreateError = `Failed to create topic: ${String(err)}`;
+      uiLog('ERROR', 'Failed to create topic from stats', { label, error: String(err) });
+    } finally {
+      topicCreateBusy = false;
+    }
+  }
+
+  function handleTopicCreateKeydown(event: KeyboardEvent) {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      confirmTopicCreate();
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      closeTopicCreate();
+    }
+  }
+
   async function confirmMetadataAction() {
     if (!metadataActionValue) return;
     metadataActionBusy = true;
@@ -332,6 +392,7 @@
     platformOptions = [];
     selectedTopics = [];
     selectedWdTags = [];
+    closeTopicCreate();
     error = '';
     loading = false;
     loadPlatformOptions();
@@ -639,6 +700,26 @@
       onOpenMerge={openMergeModal}
     />
   {:else}
+    {#if activeKind === 'topic'}
+      <div class="topic-create-bar">
+        {#if topicCreateOpen}
+          <input
+            type="text"
+            bind:value={topicCreateValue}
+            placeholder="Topic"
+            disabled={topicCreateBusy}
+            on:keydown={handleTopicCreateKeydown}
+          />
+          <button type="button" title="Create topic" aria-label="Create topic" disabled={topicCreateBusy || !topicCreateValue.trim()} on:click={confirmTopicCreate}>+</button>
+          <button type="button" title="Cancel" aria-label="Cancel" disabled={topicCreateBusy} on:click={closeTopicCreate}>x</button>
+          {#if topicCreateError}
+            <span class="topic-create-error">{topicCreateError}</span>
+          {/if}
+        {:else}
+          <button class="topic-create-toggle" type="button" title="Create topic" aria-label="Create topic" on:click={openTopicCreate}>+</button>
+        {/if}
+      </div>
+    {/if}
     <FacetStatsPanel
       {activeKind}
       {visibleItems}
