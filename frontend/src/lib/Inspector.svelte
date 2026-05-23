@@ -6,6 +6,8 @@
   import { apiFetch, apiUrl } from './api';
   import { isImageMedia, isVideoMedia } from './media';
   import { runtimeSessionKey } from './runtimeStore';
+  import MetadataActionModal from './stats/MetadataActionModal.svelte';
+  import { renameTopic } from './stats/statsApi';
 
   export let item: VaultItem | null = null;
   export let group: { id: string, items: VaultItem[] } | null = null;
@@ -38,6 +40,82 @@
   let abortController: AbortController | null = null;
   let lastLoadedHash: string | null = null;
   let currentRuntimeSessionKey = '';
+
+  // Topic Rename Modal State
+  let renameModalOpen = false;
+  let renameModalValue = '';
+  let renameModalNewValue = '';
+  let renameModalBusy = false;
+  let renameModalResult = '';
+  let renameModalError = '';
+
+  function openRenameTopicModal(topic: string) {
+    renameModalOpen = true;
+    renameModalValue = topic;
+    renameModalNewValue = topic;
+    renameModalBusy = false;
+    renameModalResult = '';
+    renameModalError = '';
+  }
+
+  function closeRenameTopicModal() {
+    if (renameModalBusy) return;
+    renameModalOpen = false;
+    renameModalValue = '';
+    renameModalNewValue = '';
+    renameModalResult = '';
+    renameModalError = '';
+  }
+
+  async function confirmRenameTopic() {
+    if (!renameModalValue || !renameModalNewValue.trim()) return;
+    renameModalBusy = true;
+    renameModalResult = '';
+    renameModalError = '';
+    try {
+      const payload = await renameTopic(renameModalValue, renameModalNewValue);
+      const newLabel = String(payload.new_label || renameModalNewValue.trim());
+      
+      // Update draftTopics, savedTopics, topics in local state
+      draftTopics = draftTopics.map((t) => t === renameModalValue ? newLabel : t);
+      savedTopics = savedTopics.map((t) => t === renameModalValue ? newLabel : t);
+      topics = [...draftTopics];
+      
+      // If fullItem holds details, refresh counts or update fullItem.topics
+      if (fullItem && Array.isArray(fullItem.topics)) {
+        fullItem.topics = fullItem.topics.map((t: string) => t === renameModalValue ? newLabel : t);
+        if (fullItem.topic_counts) {
+          const count = fullItem.topic_counts[renameModalValue];
+          delete fullItem.topic_counts[renameModalValue];
+          if (count !== undefined) {
+            fullItem.topic_counts[newLabel] = count;
+          }
+        }
+      }
+      
+      const vaultCount = Array.isArray(payload?.vaults_touched) ? payload.vaults_touched.length : 0;
+      renameModalResult = `Renamed topic across ${payload.notes_rewritten || 0} notes in ${vaultCount} vaults.`;
+      
+      // Log maintenance action
+      uiLog('INFO', 'Topic renamed from inspector', {
+        oldValue: renameModalValue,
+        newValue: newLabel,
+        notes: payload.notes_rewritten
+      });
+      
+      // Dispatch global refresh events
+      window.dispatchEvent(new CustomEvent('lmz:refresh', { detail: { tab: 'stats' } }));
+      window.dispatchEvent(new CustomEvent('lmz:refresh', { detail: { tab: 'vault' } }));
+    } catch (err) {
+      renameModalError = `Failed to rename topic: ${String(err)}`;
+      uiLog('ERROR', 'Failed to rename topic from inspector', {
+        value: renameModalValue,
+        error: String(err)
+      });
+    } finally {
+      renameModalBusy = false;
+    }
+  }
 
   let videoElement: HTMLVideoElement | undefined;
 
@@ -200,10 +278,23 @@
     return cleaned || 'topic';
   }
 
+  function isAlreadyTopic(value: string) {
+    if (!value) return false;
+    const clean = normalizeTopicLabel(value);
+    const key = clean.toLocaleLowerCase();
+    return savedTopics.some((topic) => topic.toLocaleLowerCase() === key);
+  }
+
   function promoteWdToTopic(value: string) {
     const clean = normalizeTopicLabel(value);
     if (!clean) return;
     const key = clean.toLocaleLowerCase();
+    
+    // Guard: If this normalized name is already a saved topic, do nothing.
+    if (savedTopics.some((topic) => topic.toLocaleLowerCase() === key)) {
+      return;
+    }
+    
     if (draftTopics.some((topic) => topic.toLocaleLowerCase() === key)) {
       removeDraftTopic(clean);
       return;
@@ -546,6 +637,9 @@
                   {#if countFor(fullItem.topic_counts, tag)}
                       <span class="tag-count">{countFor(fullItem.topic_counts, tag)}</span>
                   {/if}
+                  <button class="chip-rename" type="button" title="Rename topic" on:click|stopPropagation={() => openRenameTopicModal(tag)}>
+                      <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+                  </button>
                   <button class="chip-remove" type="button" title="Remove topic" on:click={(event) => { stopChipRemove(event); removeDraftTopic(tag); }}>
                       <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
                   </button>
@@ -564,7 +658,7 @@
         <span class="muted-title">Rating</span>
         <div class="tags-list">
             {#if draftWdRating}
-                <span class="tag-chip rating clickable" class:promoted={isTagPromoted(draftWdRating)} role="button" tabindex="0" title="Promote to topic" on:click={() => promoteWdToTopic(draftWdRating)} on:keydown={(event) => { if (event.key === 'Enter' || event.key === ' ') promoteWdToTopic(draftWdRating); }}>
+                <span class="tag-chip rating" class:clickable={!isAlreadyTopic(draftWdRating)} class:promoted={isTagPromoted(draftWdRating)} role="button" tabindex="0" title={isAlreadyTopic(draftWdRating) ? "Already a topic" : "Promote to topic"} on:click={() => promoteWdToTopic(draftWdRating)} on:keydown={(event) => { if (event.key === 'Enter' || event.key === ' ') promoteWdToTopic(draftWdRating); }}>
                     <span class="tag-label">{draftWdRating}</span>
                     {#if countFor(fullItem.wd_tag_counts, draftWdRating)}
                         <span class="tag-count">{countFor(fullItem.wd_tag_counts, draftWdRating)}</span>
@@ -582,7 +676,7 @@
         <span class="muted-title">Character Tags</span>
         <div class="tags-list">
             {#each (draftWdCharacters || []) as tag}
-                <span class="tag-chip character clickable" class:promoted={isTagPromoted(tag)} role="button" tabindex="0" title="Promote to topic" on:click={() => promoteWdToTopic(tag)} on:keydown={(event) => { if (event.key === 'Enter' || event.key === ' ') promoteWdToTopic(tag); }}>
+                <span class="tag-chip character" class:clickable={!isAlreadyTopic(tag)} class:promoted={isTagPromoted(tag)} role="button" tabindex="0" title={isAlreadyTopic(tag) ? "Already a topic" : "Promote to topic"} on:click={() => promoteWdToTopic(tag)} on:keydown={(event) => { if (event.key === 'Enter' || event.key === ' ') promoteWdToTopic(tag); }}>
                     <span class="tag-label">{tag}</span>
                     {#if countFor(fullItem.wd_tag_counts, tag)}
                         <span class="tag-count">{countFor(fullItem.wd_tag_counts, tag)}</span>
@@ -601,7 +695,7 @@
         <span class="muted-title">Visual Tags</span>
         <div class="tags-list">
             {#each (draftWdGeneral || []) as tag}
-                <span class="tag-chip visual clickable" class:promoted={isTagPromoted(tag)} role="button" tabindex="0" title="Promote to topic" on:click={() => promoteWdToTopic(tag)} on:keydown={(event) => { if (event.key === 'Enter' || event.key === ' ') promoteWdToTopic(tag); }}>
+                <span class="tag-chip visual" class:clickable={!isAlreadyTopic(tag)} class:promoted={isTagPromoted(tag)} role="button" tabindex="0" title={isAlreadyTopic(tag) ? "Already a topic" : "Promote to topic"} on:click={() => promoteWdToTopic(tag)} on:keydown={(event) => { if (event.key === 'Enter' || event.key === ' ') promoteWdToTopic(tag); }}>
                     <span class="tag-label">{tag}</span>
                     {#if countFor(fullItem.wd_tag_counts, tag)}
                         <span class="tag-count">{countFor(fullItem.wd_tag_counts, tag)}</span>
@@ -633,6 +727,19 @@
     </div>
     {/if}
   {/if}
+
+  <MetadataActionModal
+    open={renameModalOpen}
+    kind="topic"
+    action="rename"
+    value={renameModalValue}
+    bind:newValue={renameModalNewValue}
+    busy={renameModalBusy}
+    result={renameModalResult}
+    error={renameModalError}
+    onClose={closeRenameTopicModal}
+    onConfirm={confirmRenameTopic}
+  />
 </aside>
 
 <style>
@@ -835,9 +942,34 @@
       border-radius: 0 !important;
   }
 
+  /* Slide-out rename button using clean SVG graphics */
+  .chip-rename {
+      display: inline-grid;
+      place-items: center;
+      width: 0;
+      height: 100%;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      color: var(--text-muted);
+      cursor: pointer;
+      opacity: 0;
+      transition: none !important;
+      border-radius: 0 !important;
+  }
+
   /* Svelte-safe tag chip expansion on hover */
   .tag-chip:hover .chip-remove,
   .tag-chip:focus-within .chip-remove {
+      width: 24px;
+      opacity: 1;
+      border-left: 1px solid rgba(255, 255, 255, 0.08);
+      color: var(--text-muted);
+      transition: none !important;
+  }
+
+  .tag-chip:hover .chip-rename,
+  .tag-chip:focus-within .chip-rename {
       width: 24px;
       opacity: 1;
       border-left: 1px solid rgba(255, 255, 255, 0.08);
@@ -854,6 +986,11 @@
   .chip-remove:hover {
       background: rgba(248, 81, 73, 0.15) !important;
       color: var(--accent-danger) !important;
+  }
+
+  .chip-rename:hover {
+      background: rgba(255, 255, 255, 0.08) !important;
+      color: var(--accent-primary) !important;
   }
 
   /* Categories Hover & Color Harmonies */
@@ -932,6 +1069,15 @@
       border-left: 1px solid rgba(255, 255, 255, 0.25) !important;
   }
   .tag-chip.topic.promoted .chip-remove:hover {
+      background: rgba(255, 255, 255, 0.15) !important;
+      color: #ffffff !important;
+  }
+
+  .tag-chip.topic.promoted .chip-rename {
+      color: rgba(255, 255, 255, 0.7) !important;
+      border-left: 1px solid rgba(255, 255, 255, 0.25) !important;
+  }
+  .tag-chip.topic.promoted .chip-rename:hover {
       background: rgba(255, 255, 255, 0.15) !important;
       color: #ffffff !important;
   }
