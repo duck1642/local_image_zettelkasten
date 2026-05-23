@@ -598,7 +598,7 @@ def _apply_manual_frontmatter_to_item(item_hash: str, manual_fields: dict, ident
         note_path = note_path_for(item_hash, row[0], ctx=ctx)
         note_path.parent.mkdir(parents=True, exist_ok=True)
         atomic_write_text(note_path, md_content)
-        safe_reindex_item_metadata(conn, item_hash, "review_replace_preserve")
+        safe_reindex_item_metadata(conn, item_hash, "review_replace_preserve", update_workspace_wd=False)
         workspace_conn.commit()
         conn.commit()
     except Exception:

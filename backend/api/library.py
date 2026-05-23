@@ -1026,7 +1026,7 @@ def _update_item_sync(item_hash: str, update: ItemUpdate):
             note_path = note_path_for(item_hash, row[0])
             note_path.parent.mkdir(parents=True, exist_ok=True)
             atomic_write_text(note_path, md_content)
-            safe_reindex_item_metadata(conn, item_hash, "item_patch")
+            safe_reindex_item_metadata(conn, item_hash, "item_patch", update_workspace_wd=False)
             current_core_facets = item_core_facet_values(conn, item_hash)
             refresh_metadata_facet_counts_for_values(conn, previous_core_facets | current_core_facets)
             workspace_conn.commit()

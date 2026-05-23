@@ -709,7 +709,12 @@ def dirty_metadata_hashes(conn: sqlite3.Connection, limit: int | None = None) ->
     return [row[0] for row in conn.execute(sql, params).fetchall()]
 
 
-def reindex_item_metadata(conn: sqlite3.Connection, item_hash: str, update_facets: bool = True) -> dict:
+def reindex_item_metadata(
+    conn: sqlite3.Connection,
+    item_hash: str,
+    update_facets: bool = True,
+    update_workspace_wd: bool = True,
+) -> dict:
     ensure_metadata_schema(conn)
     storage_id = _item_storage_id(conn, item_hash)
     if storage_id is None:
@@ -752,7 +757,7 @@ def reindex_item_metadata(conn: sqlite3.Connection, item_hash: str, update_facet
         """,
         wd_insert_rows,
     )
-    if wd_insert_rows:
+    if wd_insert_rows and update_workspace_wd:
         try:
             from workspace_db import connect_workspace_database, upsert_wd_dictionary_tags
             workspace_conn = connect_workspace_database()
@@ -865,11 +870,17 @@ def safe_reindex_item_metadata(
     context: str = "",
     update_facets: bool = True,
     update_dirty_queue: bool = True,
+    update_workspace_wd: bool = True,
 ) -> dict:
     if update_dirty_queue:
         enqueue_metadata_dirty(conn, item_hash, context or "reindex")
     try:
-        return reindex_item_metadata(conn, item_hash, update_facets=update_facets)
+        return reindex_item_metadata(
+            conn,
+            item_hash,
+            update_facets=update_facets,
+            update_workspace_wd=update_workspace_wd,
+        )
     except Exception as exc:
         try:
             mark_metadata_index_error(conn, item_hash, str(exc))
