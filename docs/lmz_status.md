@@ -207,24 +207,47 @@ VSCode-friendly test launchers:
 
 ### Phase C - Metadata Workflow Polish / Vault Ops
 
-- Tag/topic maintenance:
-  - hide/ignore WD tag if noisy WD data becomes a problem.
-- Inspector/Stats metadata workflow polish:
-  - richer Inspector tag editing if Stats-only workflow feels insufficient.
-  - search chips if the current text query handoff becomes hard to scan.
-  - **RAM Tracker Precision (Ecosystem footprint vs V8 heap)**:
-    - The current RAM tracker footer only measures V8 JS VM heap (`performance.memory.usedJSHeapSize`) in the frontend and a single Python process RSS in the backend.
-    - It completely misses WebView2 processes (`msedgewebview2.exe` hosting DOM, styles, compositing, decoders, graphics buffer allocations), Tauri's Rust main host process (`app.exe`/`LMZ.exe`), and active backend utility subprocesses (`ffmpeg`, `gallery-dl`, `yt-dlp`).
-    - **Remediation Plan**: Refactor `_get_system_memory_sync` in `backend/api/runtime.py` to aggregate the full application process tree using `psutil`. Automatically sum the parent Tauri process (`app.exe`/`LMZ.exe`), all its recursive child processes (WebView2 host/renderers, active subprocesses), and the current Python backend process to calculate a true, 100% accurate system RAM footprint.
-
-- Multiple vault support:
-  - live workspace/vault switching after current restart-based switching is stable.
-  - merge/split/separate vault operations after more real-vault use.
-  - cleanup old compatibility paths after default + Obsidian + generated vaults are stable.
-- Vault health/maintenance:
-  - orphan/ghost checks.
-  - backup/export/import flows.
-  - periodic SHA256 re-verification.
+1. Metadata editing core:
+   - add topics from Inspector.
+   - add topics from Stats.
+   - create/reuse shared topic files under `data/topics/`.
+   - refresh item notes, metadata index, facet counts, and frontend state after edits.
+2. RAM tracker precision:
+   - The current RAM tracker footer only measures V8 JS VM heap (`performance.memory.usedJSHeapSize`) in the frontend and a single Python process RSS in the backend.
+   - It completely misses WebView2 processes (`msedgewebview2.exe` hosting DOM, styles, compositing, decoders, graphics buffer allocations), Tauri's Rust main host process (`app.exe`/`LMZ.exe`), and active backend utility subprocesses (`ffmpeg`, `gallery-dl`, `yt-dlp`).
+   - Refactor `_get_system_memory_sync` in `backend/api/runtime.py` to aggregate the full application process tree using `psutil`. Automatically sum the parent Tauri process (`app.exe`/`LMZ.exe`), all its recursive child processes (WebView2 host/renderers, active subprocesses), and the current Python backend process to calculate the real app RAM footprint.
+3. Vault operations:
+   - verify current live workspace/vault switching code paths.
+   - trace and remove old compatibility path usage after default, Obsidian, and generated vault modes are stable.
+   - harden vault rename, delete, and merge flows.
+   - defer split/separate vault flows until the real workflow is clearer.
+4. Vault health read-only audit:
+   - report DB rows missing assets or notes.
+   - report orphaned assets or notes with no DB row.
+   - report bad/missing `storage_id` values and path mismatches.
+   - report SHA256 hash mismatches.
+   - report stale, missing, or orphaned thumbnail and WD cache files.
+   - report stale/ghost metadata index rows.
+   - report broken topic links and unused topic files.
+   - report review sidecar/media mismatches.
+   - report workspace dictionary drift against active-vault usage.
+5. Vault health targeted repairs:
+   - repair derived data only after read-only audit output is trusted.
+   - rebuild thumbnails.
+   - rebuild metadata index and facet counts.
+   - prune orphan cache files.
+   - reconcile review sidecars.
+   - quarantine orphan assets/notes where needed.
+   - require explicit action for destructive deletes.
+6. Backup/export/import:
+   - add active-vault backup flow.
+   - add vault export/import package flow.
+   - consider automatic pre-delete and pre-merge backups.
+7. Optional metadata maintenance:
+   - hide/ignore WD tags only if noisy WD data becomes a real UX problem.
+8. Optional UX polish:
+   - search chips if the current text query handoff becomes hard to scan.
+   - richer Inspector tag editing beyond the required topic add flow.
 
 ### Phase D - UI Polish
 

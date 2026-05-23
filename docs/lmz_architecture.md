@@ -33,7 +33,7 @@ The archive truth layer.
 - Per-vault asset storage under `data/vaults/<vault_id>/vault/assets/`.
 - Per-vault markdown note generation under `data/vaults/<vault_id>/vault/notes/`.
 - SQLite item rows and compact `storage_id` ownership.
-- Workspace/vault registry and restart-based selection.
+- Workspace/vault registry and runtime active-context selection.
 - Item update/delete behavior.
 - Metadata ownership rules between SQLite, Markdown/YAML, and WD JSON caches.
 - Backup, migration, import/export, and vault health concerns.
@@ -123,7 +123,7 @@ How the app starts, runs, and ships.
 - Tauri sidecar lifecycle.
 - API key and local-only CORS/origin behavior.
 - Config and secrets paths.
-- Workspace registry and restart-based workspace/vault switching.
+- Workspace registry and guarded runtime workspace/vault switching.
 - Production sidecar and Tauri packaging.
 - Port binding and runtime coordination.
 
@@ -167,6 +167,7 @@ local_media_zettelkasten/
     fingerprint.py
     ingest_control.py
     md_generator.py
+    metadata_maintenance.py
     metadata_index.py
     platforms.py
     processor.py
@@ -179,6 +180,14 @@ local_media_zettelkasten/
     vaults.py
     workspaces.py
     workspace_db.py
+    api/
+      app.py
+      common.py
+      runtime.py
+      ingestion.py
+      library.py
+      logs.py
+      review.py
     db/
     downloaders/
     logs/
@@ -205,10 +214,23 @@ local_media_zettelkasten/
         media.ts
         observers.ts
         ramStore.ts
+        runtimeStore.ts
         search.ts
         selection.ts
         statsStore.ts
         types.ts
+        stats/
+          statsApi.ts
+          statsUtils.ts
+          types.ts
+          StatsControls.svelte
+          FacetStatsPanel.svelte
+          ArtistStatsPanel.svelte
+          ArtistDetailPanel.svelte
+          ArtistMergeModal.svelte
+          MetadataActionModal.svelte
+          StatsFilterBar.svelte
+          stats.css
         renderers/
           masonry/
           grid/
@@ -330,7 +352,7 @@ Vault-level data:
 - `vault/assets/`, `vault/notes/`: original media and item notes.
 - `review/`, `wd-tags/`, thumbnails, logs, queues, and ingest staging.
 
-The workspace registry lives at `config/workspaces.yaml` locally and is not intended for git because it may contain absolute paths. `config/workspaces.example.yaml` is the committed template. Runtime switching is restart-based; no live workspace/vault switching is expected yet.
+The workspace registry lives at `config/workspaces.yaml` locally and is not intended for git because it may contain absolute paths. `config/workspaces.example.yaml` is the committed template. Runtime switching is supported through guarded Settings/API flows: active ingest and metadata repair state block switches, then runtime context, search state, metadata watchdogs, and frontend session state are invalidated for the new workspace/vault.
 
 Obsidian mode is the same layout under `<ObsidianVault>/lmz/`.
 
@@ -364,6 +386,8 @@ Markdown asset links are relative to sharded notes:
 - Topic markdown files under `data/topics/`: shared topic library. Item notes store relative links to these files when topics are created or saved through LMZ.
 
 Derived SQLite metadata rows are rebuildable and are not the source of truth.
+
+Metadata maintenance that rewrites topic/WD frontmatter is centralized in `backend/metadata_maintenance.py`. It handles topic rename/delete/merge and WD tag rename/delete across registered vaults, refreshes metadata index/facet rows, and uses best-effort note/topic-file restore when a DB or filesystem step fails mid-operation.
 
 ## SQLite Model
 
@@ -434,7 +458,17 @@ Usage remains vault-local. Stats `Used` counts active-vault usage; Stats `All` m
 
 ## Backend API
 
-`backend/web_api.py` is the local FastAPI service used by the frontend.
+`backend/web_api.py` remains the stable sidecar/import entrypoint for `uvicorn web_api:app`, tests, and PyInstaller. The FastAPI app and routes live under `backend/api/`:
+
+- `api/app.py`: app creation, lifespan startup, middleware, root route, dynamic media routes, router inclusion.
+- `api/common.py`: shared auth, runtime path helpers, dynamic file serving, local ingest compatibility proxies, review/item helper utilities.
+- `api/runtime.py`: config, workspace/vault management, switch preflight usage, metadata maintenance/status, system memory.
+- `api/ingestion.py`: queues, online ingest, local ingest, drag-drop intake, runtime ingest state.
+- `api/library.py`: items, thumbnails, facets/search suggestions, artists/platforms, topic/WD metadata actions.
+- `api/logs.py`: log streaming/open/clear/UI log ingest.
+- `api/review.py`: review list/count/actions/cleanup.
+
+`web_api.py` re-exports router helpers and models used by compatibility tests and sync callers, and forwards legacy monkeypatches into the router modules.
 
 Core API areas:
 
@@ -454,7 +488,7 @@ Core API areas:
 - Vaults: `/api/vaults`, `/api/vaults/active`, vault rename/delete/merge endpoints.
 - Workspace metadata maintenance: `/api/workspace-metadata/rebuild`, `/api/workspace-metadata/prune`.
 - Artist/platform dictionaries: `/api/artists`, `/api/platforms`, artist detail/edit/alias/link/merge endpoints.
-- Topic rename: `/api/topics/rename`.
+- Topic/WD maintenance: `/api/topics/rename`, `/api/topics/delete`, `/api/topics/merge`, `/api/wd-tags/rename`, `/api/wd-tags/delete`.
 
 Security and runtime constraints:
 
@@ -465,6 +499,7 @@ Security and runtime constraints:
 - Local drag-drop paths are preflighted by the backend before they are staged into Local Ingestion.
 - Blocking filesystem/SQLite work is routed through thread helpers on main API paths.
 - Static vault/review assets are served from active-vault runtime folders.
+- Public workspace/vault switch endpoints run runtime-switch preflight and reject switches while local ingest, online ingest, or metadata repair is active.
 - Frontend API calls go through `frontend/src/lib/api.ts`.
 - `config/config.yaml` stores non-secret runtime settings. `secrets/.secrets.yaml` stores external-service credentials such as Pixiv refresh token and cookie path overrides.
 
@@ -483,7 +518,7 @@ Top-level structure:
 - `MediaFocus.svelte`: wide/fullscreen media view, grouped navigation, filmstrip, fullscreen zoom/pan.
 - `Ingestion.svelte`: markdown queue editor, queue runner, local ingest staging, and drag-drop intake target.
 - `ReviewView.svelte`: duplicate/review workflow.
-- `StatsView.svelte`: facet-count browsing, topic/WD selection handoff, artist editing/merge, topic rename.
+- `StatsView.svelte`: orchestration shell for Stats tabs, runtime-session reset, facet filtering handoff, artist flows, and topic/WD maintenance modals.
 - `LogsView.svelte`: structured/raw log viewer.
 - `SettingsView.svelte`: config editing, workspace/vault selection, maintenance actions.
 
@@ -492,11 +527,13 @@ Shared frontend infrastructure:
 - `api.ts`: central API URL and authenticated fetch helper.
 - `configStore.ts`: shared config state and targeted config updates.
 - `statsStore.ts`: shared queue/review stats polling.
+- `runtimeStore.ts`: current workspace/vault runtime identity, session key, and post-switch UI invalidation flow.
 - `ramStore.ts`: optional RAM tracker polling.
 - `media.ts`: safe media type helpers.
 - `selection.ts`: pure selection helpers.
 - `observers.ts`: reusable intersection/resize observer helpers.
 - `logger.ts`: batched frontend UI logging.
+- `stats/`: split Stats components, API helpers, types, utilities, and CSS.
 
 ## Vault Renderers
 
@@ -590,8 +627,14 @@ Topic behavior:
 - New/saved manual topics create or reuse `data/topics/<slug>.md`.
 - Item notes store relative Markdown links to topic files.
 - Legacy plain topic strings remain readable and indexable.
-- Topic rename is explicit from Stats Topics via the `...` action and `POST /api/topics/rename`.
-- Topic rename changes the shared topic file name and rewrites linked/plain topic refs across all registered vaults.
+- Topic rename/delete/merge are explicit from Stats Topic chip actions.
+- Topic maintenance rewrites linked/plain topic refs across all registered vaults and refreshes metadata index/facet rows.
+
+WD tag behavior:
+
+- WD rating, character tags, and general tags are read from Markdown frontmatter and indexed into active-vault metadata tables.
+- WD tag rename/delete are explicit from Stats WD chip actions.
+- WD maintenance can scope to rating, character, general, or all WD fields and rewrites affected note frontmatter plus metadata index/facet rows.
 
 ## Media Focus
 
@@ -613,19 +656,19 @@ Refinement still expected:
 
 ## Workspace And Vault Management
 
-Workspace selection happens before startup.
-
 - `config/workspaces.yaml` stores registered workspaces and active workspace.
 - `LMZ_CONFIG_PATH` overrides the registry.
 - `start-lmz.bat` can prompt for the workspace.
-- Settings can register Obsidian workspaces and mark a workspace active for next restart.
+- Settings can register Obsidian workspaces and switch the active workspace dynamically when runtime preflight allows it.
 
 Each workspace has a `config.yaml` with one active vault:
 
 - `active_vault`: active vault id.
 - `vaults`: registered vaults and their roots.
 
-Vault switching is restart-based. Settings can create, rename, delete, and mark vaults active for next restart. Vault merge imports source vault items into a target vault by allocating new destination `storage_id` values and copying assets/notes/cache files.
+Vault switching is dynamic through Settings/API when runtime preflight allows it. Settings can create, rename, delete, and switch vaults. Vault merge imports source vault items into a target vault by allocating new destination `storage_id` values and copying assets/notes/cache files.
+
+`backend/runtime_context.py` is the source of truth for active workspace/vault paths. Legacy `utils.py` constants remain available, but new code should prefer context-aware helpers or explicit `ctx` propagation.
 
 ## Ingestion Integrity
 

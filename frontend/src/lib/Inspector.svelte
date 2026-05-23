@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { VaultItem } from './types';
-  import { createEventDispatcher, onDestroy } from 'svelte';
+  import { createEventDispatcher, onDestroy, tick } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { log as uiLog } from './logger';
   import { apiFetch, apiUrl } from './api';
@@ -21,6 +21,9 @@
   let topics: string[] = [];
   let savedTopics: string[] = [];
   let draftTopics: string[] = [];
+  let topicInputOpen = false;
+  let topicInputValue = '';
+  let topicInputElement: HTMLInputElement | undefined;
   let savedWdRating = '';
   let draftWdRating = '';
   let savedWdCharacters: string[] = [];
@@ -135,6 +138,8 @@
     topics = [];
     savedTopics = [];
     draftTopics = [];
+    topicInputOpen = false;
+    topicInputValue = '';
     savedWdRating = '';
     draftWdRating = '';
     savedWdCharacters = [];
@@ -185,8 +190,18 @@
            !savedTopics.some((topic) => topic.toLocaleLowerCase() === key);
   }
 
+  function normalizeTopicLabel(value: string) {
+    const cleaned = String(value || '')
+      .trim()
+      .toLocaleLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+      .replace(/_+/g, '_');
+    return cleaned || 'topic';
+  }
+
   function promoteWdToTopic(value: string) {
-    const clean = String(value || '').trim();
+    const clean = normalizeTopicLabel(value);
     if (!clean) return;
     const key = clean.toLocaleLowerCase();
     if (draftTopics.some((topic) => topic.toLocaleLowerCase() === key)) {
@@ -195,6 +210,40 @@
     }
     draftTopics = [...draftTopics, clean];
     topics = draftTopics;
+  }
+
+  async function openTopicInput() {
+    topicInputOpen = true;
+    await tick();
+    topicInputElement?.focus();
+  }
+
+  function addDraftTopic() {
+    const clean = normalizeTopicLabel(topicInputValue);
+    topicInputValue = '';
+    topicInputOpen = false;
+    if (!clean) return;
+    const key = clean.toLocaleLowerCase();
+    if (draftTopics.some((topic) => topic.toLocaleLowerCase() === key)) return;
+    draftTopics = [...draftTopics, clean];
+    topics = draftTopics;
+  }
+
+  function handleTopicInputKeydown(event: KeyboardEvent) {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      addDraftTopic();
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      topicInputValue = '';
+      topicInputOpen = false;
+    }
+  }
+
+  function handleTopicInputBlur() {
+    if (!topicInputValue.trim()) {
+      topicInputOpen = false;
+    }
   }
 
   function removeDraftTopic(value: string) {
@@ -461,7 +510,24 @@
 
     <div class="group-container">
       <!-- svelte-ignore a11y-label-has-associated-control -->
-      <label class="section-label">My Topics</label>
+      <div class="section-heading">
+        <label class="section-label">My Topics</label>
+        <button class="add-topic-btn" type="button" title="Add topic" aria-label="Add topic" on:click={openTopicInput}>+</button>
+      </div>
+      {#if topicInputOpen}
+        <div class="topic-input-row">
+          <input
+            bind:this={topicInputElement}
+            type="text"
+            class="topic-input"
+            bind:value={topicInputValue}
+            placeholder="Topic"
+            on:keydown={handleTopicInputKeydown}
+            on:blur={handleTopicInputBlur}
+          />
+          <button class="topic-confirm-btn" type="button" title="Add topic" aria-label="Add topic" on:mousedown|preventDefault on:click={addDraftTopic}>+</button>
+        </div>
+      {/if}
       <div class="tags-list">
           {#each (draftTopics || []) as tag}
               <!-- svelte-ignore a11y-no-noninteractive-tabindex -->
@@ -636,6 +702,51 @@
 
   .section-label { font-size: 11px; color: var(--text-muted); font-weight: 500; }
   .muted-title { font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 4px; }
+
+  .section-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .add-topic-btn,
+  .topic-confirm-btn {
+    display: inline-grid;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border-radius: 6px;
+    border: 1px solid rgba(163, 113, 247, 0.4);
+    background: rgba(163, 113, 247, 0.07);
+    color: var(--accent-purple);
+    font-size: 15px;
+    line-height: 1;
+    font-weight: 700;
+    cursor: pointer;
+  }
+
+  .add-topic-btn:hover,
+  .topic-confirm-btn:hover {
+    border-color: var(--accent-purple);
+    background: rgba(163, 113, 247, 0.12);
+    color: var(--text-bright);
+  }
+
+  .topic-input-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .topic-input {
+    flex: 1;
+    min-width: 0;
+    height: 26px;
+    padding: 3px 8px;
+    font-size: 12px;
+  }
 
   .value-text {
     color: #6a737d;
