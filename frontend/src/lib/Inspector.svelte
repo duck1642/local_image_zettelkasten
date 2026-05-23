@@ -26,6 +26,12 @@
   let topicInputOpen = false;
   let topicInputValue = '';
   let topicInputElement: HTMLInputElement | undefined;
+  let topicSuggestions: { value: string; count?: number }[] = [];
+  let topicSuggestionsOpen = false;
+  let topicSuggestionsLoading = false;
+  let activeTopicSuggestionIndex = -1;
+  let topicSuggestionTimer: number | null = null;
+  let topicSuggestionAbortController: AbortController | null = null;
   let savedWdRating = '';
   let draftWdRating = '';
   let savedWdCharacters: string[] = [];
@@ -218,6 +224,7 @@
     draftTopics = [];
     topicInputOpen = false;
     topicInputValue = '';
+    clearTopicSuggestions();
     savedWdRating = '';
     draftWdRating = '';
     savedWdCharacters = [];
@@ -307,12 +314,77 @@
     topicInputOpen = true;
     await tick();
     topicInputElement?.focus();
+    fetchTopicSuggestions('');
   }
 
-  function addDraftTopic() {
-    const clean = normalizeTopicLabel(topicInputValue);
-    topicInputValue = '';
-    topicInputOpen = false;
+  function clearTopicSuggestions() {
+    if (topicSuggestionTimer !== null) {
+      window.clearTimeout(topicSuggestionTimer);
+      topicSuggestionTimer = null;
+    }
+    topicSuggestionAbortController?.abort();
+    topicSuggestionAbortController = null;
+    topicSuggestions = [];
+    topicSuggestionsOpen = false;
+    topicSuggestionsLoading = false;
+    activeTopicSuggestionIndex = -1;
+  }
+
+  function normalizeTopicKey(value: string) {
+    return normalizeTopicLabel(value).toLocaleLowerCase();
+  }
+
+  function availableTopicSuggestions(items: { value: string; count?: number }[]) {
+    const existing = new Set(draftTopics.map((topic) => topic.toLocaleLowerCase()));
+    return items
+      .filter((item) => item.value && !existing.has(normalizeTopicKey(item.value)))
+      .slice(0, 8);
+  }
+
+  async function fetchTopicSuggestions(query: string) {
+    topicSuggestionAbortController?.abort();
+    topicSuggestionAbortController = new AbortController();
+    topicSuggestionsLoading = true;
+    try {
+      const params = new URLSearchParams({
+        kind: 'topic',
+        q: query.trim(),
+        scope: 'all',
+        limit: '8'
+      });
+      const response = await apiFetch(`/api/facets?${params.toString()}`, {
+        signal: topicSuggestionAbortController.signal
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      const items = Array.isArray(data.items) ? data.items : [];
+      topicSuggestions = availableTopicSuggestions(items.map((item: any) => ({
+        value: String(item.value || ''),
+        count: Number(item.count || 0)
+      })));
+      topicSuggestionsOpen = topicInputOpen && topicSuggestions.length > 0;
+      activeTopicSuggestionIndex = topicSuggestions.length > 0 ? 0 : -1;
+    } catch (error: any) {
+      if (error?.name !== 'AbortError') {
+        topicSuggestions = [];
+        topicSuggestionsOpen = false;
+        uiLog('ERROR', 'Failed to load topic suggestions', { error: String(error) });
+      }
+    } finally {
+      topicSuggestionsLoading = false;
+    }
+  }
+
+  function queueTopicSuggestions() {
+    if (topicSuggestionTimer !== null) window.clearTimeout(topicSuggestionTimer);
+    topicSuggestionTimer = window.setTimeout(() => {
+      topicSuggestionTimer = null;
+      fetchTopicSuggestions(topicInputValue);
+    }, 150);
+  }
+
+  function addTopicValue(value: string) {
+    const clean = normalizeTopicLabel(value);
     if (!clean) return;
     const key = clean.toLocaleLowerCase();
     if (draftTopics.some((topic) => topic.toLocaleLowerCase() === key)) return;
@@ -320,20 +392,45 @@
     topics = draftTopics;
   }
 
+  function addDraftTopic() {
+    const clean = topicSuggestionsOpen && activeTopicSuggestionIndex >= 0
+      ? topicSuggestions[activeTopicSuggestionIndex]?.value || topicInputValue
+      : topicInputValue;
+    topicInputValue = '';
+    topicInputOpen = false;
+    clearTopicSuggestions();
+    addTopicValue(clean);
+  }
+
   function handleTopicInputKeydown(event: KeyboardEvent) {
     if (event.key === 'Enter') {
       event.preventDefault();
       addDraftTopic();
+    } else if (event.key === 'ArrowDown' && topicSuggestionsOpen && topicSuggestions.length > 0) {
+      event.preventDefault();
+      activeTopicSuggestionIndex = (activeTopicSuggestionIndex + 1) % topicSuggestions.length;
+    } else if (event.key === 'ArrowUp' && topicSuggestionsOpen && topicSuggestions.length > 0) {
+      event.preventDefault();
+      activeTopicSuggestionIndex = (activeTopicSuggestionIndex - 1 + topicSuggestions.length) % topicSuggestions.length;
     } else if (event.key === 'Escape') {
       event.preventDefault();
       topicInputValue = '';
       topicInputOpen = false;
+      clearTopicSuggestions();
     }
+  }
+
+  function selectTopicSuggestion(value: string) {
+    topicInputValue = '';
+    topicInputOpen = false;
+    clearTopicSuggestions();
+    addTopicValue(value);
   }
 
   function handleTopicInputBlur() {
     if (!topicInputValue.trim()) {
       topicInputOpen = false;
+      clearTopicSuggestions();
     }
   }
 
@@ -518,6 +615,7 @@
 
   onDestroy(() => {
       abortController?.abort();
+      clearTopicSuggestions();
   });
 </script>
 
@@ -606,17 +704,43 @@
         <button class="add-topic-btn" type="button" title="Add topic" aria-label="Add topic" on:click={openTopicInput}>+</button>
       </div>
       {#if topicInputOpen}
-        <div class="topic-input-row">
-          <input
-            bind:this={topicInputElement}
-            type="text"
-            class="topic-input"
-            bind:value={topicInputValue}
-            placeholder="Topic"
-            on:keydown={handleTopicInputKeydown}
-            on:blur={handleTopicInputBlur}
-          />
-          <button class="topic-confirm-btn" type="button" title="Add topic" aria-label="Add topic" on:mousedown|preventDefault on:click={addDraftTopic}>+</button>
+        <div class="topic-input-wrap">
+          <div class="topic-input-row">
+            <input
+              bind:this={topicInputElement}
+              type="text"
+              class="topic-input"
+              bind:value={topicInputValue}
+              placeholder="Topic"
+              on:input={queueTopicSuggestions}
+              on:focus={() => fetchTopicSuggestions(topicInputValue)}
+              on:keydown={handleTopicInputKeydown}
+              on:blur={handleTopicInputBlur}
+            />
+            <button class="topic-confirm-btn" type="button" title="Add topic" aria-label="Add topic" on:mousedown|preventDefault on:click={addDraftTopic}>+</button>
+          </div>
+          {#if topicSuggestionsOpen}
+            <div class="topic-suggestions" role="listbox">
+              {#each topicSuggestions as suggestion, index}
+                <button
+                  type="button"
+                  class:active={index === activeTopicSuggestionIndex}
+                  role="option"
+                  aria-selected={index === activeTopicSuggestionIndex}
+                  on:mousedown|preventDefault
+                  on:mouseenter={() => activeTopicSuggestionIndex = index}
+                  on:click={() => selectTopicSuggestion(suggestion.value)}
+                >
+                  <span>{normalizeTopicLabel(suggestion.value)}</span>
+                  {#if suggestion.count}
+                    <span class="suggestion-count">{suggestion.count}</span>
+                  {/if}
+                </button>
+              {/each}
+            </div>
+          {:else if topicSuggestionsLoading}
+            <div class="topic-suggestions loading">Loading...</div>
+          {/if}
         </div>
       {/if}
       <div class="tags-list">
@@ -847,12 +971,64 @@
     gap: 6px;
   }
 
+  .topic-input-wrap {
+    position: relative;
+  }
+
   .topic-input {
     flex: 1;
     min-width: 0;
     height: 26px;
     padding: 3px 8px;
     font-size: 12px;
+  }
+
+  .topic-suggestions {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 28px;
+    z-index: 20;
+    max-height: 180px;
+    overflow-y: auto;
+    border: 1px solid var(--border-dim);
+    border-radius: 6px;
+    background: var(--bg-panel);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
+    padding: 4px 0;
+  }
+
+  .topic-suggestions.loading {
+    padding: 7px 10px;
+    color: var(--text-muted);
+    font-size: 12px;
+  }
+
+  .topic-suggestions button {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: var(--text-main);
+    padding: 7px 10px;
+    font-size: 12px;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .topic-suggestions button:hover,
+  .topic-suggestions button.active {
+    background: rgba(163, 113, 247, 0.18);
+    color: var(--text-bright);
+  }
+
+  .suggestion-count {
+    color: var(--text-muted);
+    font-size: 11px;
   }
 
   .value-text {
