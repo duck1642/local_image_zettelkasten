@@ -90,6 +90,10 @@ def main():
     if local_index_queue:
         log_ingest_local('INFO', f"Syncing RAM indexes for {len(local_index_queue)} local items...")
         for item in local_index_queue:
-            search_manager.update_indexes(**item, ctx=ctx)
+            filtered_item = {
+                k: v for k, v in item.items()
+                if k in {"file_hash", "phash", "url", "tiles", "audio_hash", "visual_embedding"}
+            }
+            search_manager.update_indexes(**filtered_item, ctx=ctx)
 
     log_ingest_local('INFO', f"\nFINAL SUMMARY: {stats['processed']} Added | {stats['skipped']} Skipped/Duplicates | {stats['errors']} Errors")
