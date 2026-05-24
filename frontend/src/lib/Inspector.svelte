@@ -633,242 +633,290 @@
       </div>
     {/if}
     {#if fullItem}
-    <div class="group-container media-preview">
-        {#if isImageMedia(item)}
-            <img src={apiUrl(item.thumbnail_url || item.url)} alt="Preview" />
-        {:else if isVideoMedia(item)}
-            <!-- svelte-ignore a11y-media-has-caption -->
-            <video
-                bind:this={videoElement}
-                src={apiUrl(item.url)}
-                controls
-                controlslist="nofullscreen"
-                muted
-                loop
-                autoplay
-            ></video>
-        {:else}
-            <div class="unsupported-media">Unknown media type</div>
-        {/if}
-        <div class="media-overlay">
-            <button class="overlay-btn" title="Wide View" on:click={() => toggleFocus('wide')}>
-                <svg viewBox="0 0 24 24" width="13" height="13" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M4 12h16M7 9l-3 3 3 3M17 9l3 3-3 3"></path>
-                </svg>
-            </button>
-            <button class="overlay-btn" title="Fullscreen" on:click={() => toggleFocus('fullscreen')}>
-                <svg viewBox="0 0 24 24" width="13" height="13" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path>
-                </svg>
-            </button>
-        </div>
-    </div>
-
-    {#if group && group.items.length > 1}
-        <div class="group-nav group-container horizontal">
-            <button on:click={prevItem} title="Previous Item">
-                <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
-                    <polyline points="15 18 9 12 15 6"></polyline>
-                </svg>
-            </button>
-            <div class="counter">
-                <span class="active-index">{currentIndex + 1}</span>
-                <span class="sep">/</span>
-                <span class="total-count">{group.items.length}</span>
-            </div>
-            <button on:click={nextItem} title="Next Item">
-                <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
-                    <polyline points="9 18 15 12 9 6"></polyline>
-                </svg>
-            </button>
-        </div>
-    {/if}
-
-    <div class="group-container">
-      <label class="section-label" for="inspector-artist">Artist</label>
-      <input id="inspector-artist" type="text" bind:value={artist} on:input={handleInput} placeholder="Artist" />
-    </div>
-
-    <div class="group-container horizontal action-row">
-        <button class="flex-grow" on:click={openFolder}>Open Folder</button>
-        <button class="flex-grow" on:click={openMarkdown}>Open Note</button>
-        <button class="flex-grow" on:click={copyFile}>Copy File</button>
-        <button class="flex-grow delete-btn" on:click={deleteData}>Delete Data</button>
-    </div>
-
-    <div class="group-container">
-      <label class="section-label" for="inspector-source-url">Source URL</label>
-      <input id="inspector-source-url" type="text" bind:value={sourceUrl} placeholder="Source URL" readonly />
-    </div>
-
-    <div class="group-container horizontal">
-      <div class="sub-group platform-col">
-        <!-- svelte-ignore a11y-label-has-associated-control -->
-        <label class="section-label">Platform</label>
-        <div class="value-text">{platform || 'Unknown'}</div>
-      </div>
-      <div class="sub-group flex-grow">
-        <!-- svelte-ignore a11y-label-has-associated-control -->
-        <label class="section-label">Hash</label>
-        <div class="hash-row">
-            <div class="value-text truncate">{item.hash}</div>
-            <button class="small-btn" on:click={copyHash}>Copy</button>
-        </div>
-      </div>
-    </div>
-
-    <div class="group-container">
-      <!-- svelte-ignore a11y-label-has-associated-control -->
-      <div class="section-heading">
-        <label class="section-label">My Topics</label>
-        <button class="add-topic-btn" type="button" title="Add topic" aria-label="Add topic" on:click={openTopicInput}>+</button>
-      </div>
-      {#if topicInputOpen}
-        <div class="topic-input-wrap">
-          <div class="topic-input-row">
-            <input
-              bind:this={topicInputElement}
-              type="text"
-              class="topic-input"
-              bind:value={topicInputValue}
-              placeholder="Topic"
-              on:input={queueTopicSuggestions}
-              on:focus={() => fetchTopicSuggestions(topicInputValue)}
-              on:keydown={handleTopicInputKeydown}
-              on:blur={handleTopicInputBlur}
-            />
-            <button class="topic-confirm-btn" type="button" title="Add topic" aria-label="Add topic" on:mousedown|preventDefault on:click={addDraftTopic}>+</button>
-          </div>
-          {#if topicSuggestionsOpen}
-            <div class="topic-suggestions" role="listbox">
-              {#each topicSuggestions as suggestion, index}
-                <button
-                  type="button"
-                  class:active={index === activeTopicSuggestionIndex}
-                  role="option"
-                  aria-selected={index === activeTopicSuggestionIndex}
-                  on:mousedown|preventDefault
-                  on:mouseenter={() => activeTopicSuggestionIndex = index}
-                  on:click={() => selectTopicSuggestion(suggestion.value)}
-                >
-                  <span>{normalizeTopicLabel(suggestion.value)}</span>
-                  {#if suggestion.count}
-                    <span class="suggestion-count">{suggestion.count}</span>
-                  {/if}
+      <!-- Pinned Header -->
+      <div class="inspector-header">
+        <div class="group-container media-preview">
+            {#if isImageMedia(item)}
+                <img src={apiUrl(item.thumbnail_url || item.url)} alt="Preview" />
+            {:else if isVideoMedia(item)}
+                <!-- svelte-ignore a11y-media-has-caption -->
+                <video
+                    bind:this={videoElement}
+                    src={apiUrl(item.url)}
+                    controls
+                    controlslist="nofullscreen"
+                    muted
+                    loop
+                    autoplay
+                ></video>
+            {:else}
+                <div class="unsupported-media">Unknown media type</div>
+            {/if}
+            <div class="media-overlay">
+                <button class="overlay-btn" title="Wide View" on:click={() => toggleFocus('wide')}>
+                    <svg viewBox="0 0 24 24" width="13" height="13" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M4 12h16M7 9l-3 3 3 3M17 9l3 3-3 3"></path>
+                    </svg>
                 </button>
-              {/each}
+                <button class="overlay-btn" title="Fullscreen" on:click={() => toggleFocus('fullscreen')}>
+                    <svg viewBox="0 0 24 24" width="13" height="13" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path>
+                    </svg>
+                </button>
             </div>
-          {:else if topicSuggestionsLoading}
-            <div class="topic-suggestions loading">Loading...</div>
-          {/if}
         </div>
-      {/if}
-      <div class="tags-list">
-          {#each (draftTopics || []) as tag}
-              <!-- svelte-ignore a11y-no-noninteractive-tabindex -->
-              <!-- svelte-ignore a11y-no-noninteractive-element-to-interactive-role -->
-              <span 
-                  class="tag-chip topic" 
-                  class:promoted={isUnsavedTopic(tag)}
-                  class:clickable={isUnsavedTopic(tag)}
-                  role={isUnsavedTopic(tag) ? "button" : undefined}
-                  tabindex={isUnsavedTopic(tag) ? 0 : undefined}
-                  title={isUnsavedTopic(tag) ? "Click to revert topic promotion" : undefined}
-                  on:click={() => { if (isUnsavedTopic(tag)) removeDraftTopic(tag); }}
-                  on:keydown={(event) => { if (isUnsavedTopic(tag) && (event.key === 'Enter' || event.key === ' ')) removeDraftTopic(tag); }}
-              >
-                  <span class="tag-label">{tag}</span>
-                  {#if countFor(fullItem.topic_counts, tag)}
-                      <span class="tag-count">{countFor(fullItem.topic_counts, tag)}</span>
+
+        {#if group && group.items.length > 1}
+            <div class="group-nav group-container horizontal">
+                <button on:click={prevItem} title="Previous Item">
+                    <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="15 18 9 12 15 6"></polyline>
+                    </svg>
+                </button>
+                <div class="counter">
+                    <span class="active-index">{currentIndex + 1}</span>
+                    <span class="sep">/</span>
+                    <span class="total-count">{group.items.length}</span>
+                </div>
+                <button on:click={nextItem} title="Next Item">
+                    <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="9 18 15 12 9 6"></polyline>
+                    </svg>
+                </button>
+            </div>
+        {/if}
+      </div>
+
+      <!-- Scrollable Body -->
+      <div class="inspector-body">
+        <div class="metadata-grid">
+          <!-- Artist Row -->
+          <span class="grid-label">Artist</span>
+          <div class="grid-value">
+            <input
+              id="inspector-artist"
+              type="text"
+              bind:value={artist}
+              on:input={handleInput}
+              placeholder="Unknown Artist"
+              class="inline-input"
+            />
+          </div>
+
+          <!-- Platform Row -->
+          <span class="grid-label">Platform</span>
+          <div class="grid-value platform-row">
+            <span class="platform-text">{platform || 'Unknown'}</span>
+          </div>
+
+          <!-- Source URL Row -->
+          <span class="grid-label">Source</span>
+          <div class="grid-value source-row">
+            <input
+              type="text"
+              bind:value={sourceUrl}
+              placeholder="No Source URL"
+              readonly
+              class="inline-input read-only-input"
+            />
+            {#if sourceUrl}
+              <a href={sourceUrl} target="_blank" rel="noopener noreferrer" class="link-icon-btn" title="Open Source URL: {sourceUrl}">
+                <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                  <polyline points="15 3 21 3 21 9"></polyline>
+                  <line x1="10" y1="14" x2="21" y2="3"></line>
+                </svg>
+              </a>
+            {/if}
+          </div>
+
+          <!-- Hash Row -->
+          <span class="grid-label">Hash</span>
+          <div class="grid-value hash-row">
+            <span class="hash-text" title={item.hash}>{item.hash}</span>
+            <button class="icon-btn-compact" on:click={copyHash} title="Copy Hash">
+              <svg viewBox="0 0 24 24" width="11" height="11" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="group-container horizontal action-toolbar">
+          <button class="toolbar-btn" on:click={openFolder} title="Open Folder (Reveal in File Explorer)">
+            <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+            </svg>
+          </button>
+          <button class="toolbar-btn" on:click={openMarkdown} title="Open Note (Open Markdown in Obsidian)">
+            <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+              <polyline points="14 2 14 8 20 8"></polyline>
+              <line x1="16" y1="13" x2="8" y2="13"></line>
+              <line x1="16" y1="17" x2="8" y2="17"></line>
+              <polyline points="10 9 9 9 8 9"></polyline>
+            </svg>
+          </button>
+          <button class="toolbar-btn" on:click={copyFile} title="Copy File to Clipboard">
+            <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path>
+              <rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect>
+            </svg>
+          </button>
+          <button class="toolbar-btn delete-btn" on:click={deleteData} title="Permanently Delete Media, Note, and Database Record">
+            <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="3 6 5 6 21 6"></polyline>
+              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+            </svg>
+          </button>
+        </div>
+
+        <div class="group-container">
+          <!-- svelte-ignore a11y-label-has-associated-control -->
+          <div class="section-heading">
+            <label class="section-label">My Topics</label>
+            <button class="add-topic-btn" type="button" title="Add topic" aria-label="Add topic" on:click={openTopicInput}>+</button>
+          </div>
+          {#if topicInputOpen}
+            <div class="topic-input-wrap">
+              <div class="topic-input-row">
+                <input
+                  bind:this={topicInputElement}
+                  type="text"
+                  class="topic-input"
+                  bind:value={topicInputValue}
+                  placeholder="Topic"
+                  on:input={queueTopicSuggestions}
+                  on:focus={() => fetchTopicSuggestions(topicInputValue)}
+                  on:keydown={handleTopicInputKeydown}
+                  on:blur={handleTopicInputBlur}
+                />
+                <button class="topic-confirm-btn" type="button" title="Add topic" aria-label="Add topic" on:mousedown|preventDefault on:click={addDraftTopic}>+</button>
+              </div>
+              {#if topicSuggestionsOpen}
+                <div class="topic-suggestions" role="listbox">
+                  {#each topicSuggestions as suggestion, index}
+                    <button
+                      type="button"
+                      class:active={index === activeTopicSuggestionIndex}
+                      role="option"
+                      aria-selected={index === activeTopicSuggestionIndex}
+                      on:mousedown|preventDefault
+                      on:mouseenter={() => activeTopicSuggestionIndex = index}
+                      on:click={() => selectTopicSuggestion(suggestion.value)}
+                    >
+                      <span>{normalizeTopicLabel(suggestion.value)}</span>
+                      {#if suggestion.count}
+                        <span class="suggestion-count">{suggestion.count}</span>
+                      {/if}
+                    </button>
+                  {/each}
+                </div>
+              {:else if topicSuggestionsLoading}
+                <div class="topic-suggestions loading">Loading...</div>
+              {/if}
+            </div>
+          {/if}
+          <div class="tags-list">
+              {#each (draftTopics || []) as tag}
+                  <!-- svelte-ignore a11y-no-noninteractive-tabindex -->
+                  <!-- svelte-ignore a11y-no-noninteractive-element-to-interactive-role -->
+                  <span 
+                      class="tag-chip topic" 
+                      class:promoted={isUnsavedTopic(tag)}
+                      class:clickable={isUnsavedTopic(tag)}
+                      role={isUnsavedTopic(tag) ? "button" : undefined}
+                      tabindex={isUnsavedTopic(tag) ? 0 : undefined}
+                      title={isUnsavedTopic(tag) ? "Click to revert topic promotion" : undefined}
+                      on:click={() => { if (isUnsavedTopic(tag)) removeDraftTopic(tag); }}
+                      on:keydown={(event) => { if (isUnsavedTopic(tag) && (event.key === 'Enter' || event.key === ' ')) removeDraftTopic(tag); }}
+                  >
+                      <span class="tag-label">{tag}</span>
+                      {#if countFor(fullItem.topic_counts, tag)}
+                          <span class="tag-count">{countFor(fullItem.topic_counts, tag)}</span>
+                      {/if}
+                      <button class="chip-rename" type="button" title="Rename topic" on:click|stopPropagation={() => openRenameTopicModal(tag)}>
+                          <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+                      </button>
+                      <button class="chip-remove" type="button" title="Remove topic" on:click={(event) => { stopChipRemove(event); removeDraftTopic(tag); }}>
+                          <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
+                      </button>
+                  </span>
+              {/each}
+              {#if !draftTopics || draftTopics.length === 0}
+                  <div class="value-text">No topics</div>
+              {/if}
+          </div>
+        </div>
+
+        <div class="group-container">
+          <!-- svelte-ignore a11y-label-has-associated-control -->
+          <label class="section-label">WD Suggestions</label>
+          
+          <div class="tags-list suggestions-wrap">
+            {#if draftWdRating}
+              <span class="tag-chip rating" class:clickable={!isAlreadyTopic(draftWdRating)} class:promoted={isTagPromoted(draftWdRating)} role="button" tabindex="0" title={isAlreadyTopic(draftWdRating) ? "Already a topic" : "Promote to topic"} on:click={() => promoteWdToTopic(draftWdRating)} on:keydown={(event) => { if (event.key === 'Enter' || event.key === ' ') promoteWdToTopic(draftWdRating); }}>
+                  <span class="tag-label">{draftWdRating}</span>
+                  {#if countFor(fullItem.wd_tag_counts, draftWdRating)}
+                      <span class="tag-count">{countFor(fullItem.wd_tag_counts, draftWdRating)}</span>
                   {/if}
-                  <button class="chip-rename" type="button" title="Rename topic" on:click|stopPropagation={() => openRenameTopicModal(tag)}>
-                      <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
-                  </button>
-                  <button class="chip-remove" type="button" title="Remove topic" on:click={(event) => { stopChipRemove(event); removeDraftTopic(tag); }}>
-                      <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
+                  <button class="chip-remove" type="button" title="Remove WD tag" on:click={(event) => { stopChipRemove(event); removeDraftWdTag('rating', draftWdRating); }}>
+                      <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
                   </button>
               </span>
-          {/each}
-          {#if !draftTopics || draftTopics.length === 0}
-              <div class="value-text">No topics</div>
-          {/if}
-      </div>
-    </div>
-
-    <div class="group-container">
-      <!-- svelte-ignore a11y-label-has-associated-control -->
-      <label class="section-label">WD Suggestions</label>
-      <div class="sub-section">
-        <span class="muted-title">Rating</span>
-        <div class="tags-list">
-            {#if draftWdRating}
-                <span class="tag-chip rating" class:clickable={!isAlreadyTopic(draftWdRating)} class:promoted={isTagPromoted(draftWdRating)} role="button" tabindex="0" title={isAlreadyTopic(draftWdRating) ? "Already a topic" : "Promote to topic"} on:click={() => promoteWdToTopic(draftWdRating)} on:keydown={(event) => { if (event.key === 'Enter' || event.key === ' ') promoteWdToTopic(draftWdRating); }}>
-                    <span class="tag-label">{draftWdRating}</span>
-                    {#if countFor(fullItem.wd_tag_counts, draftWdRating)}
-                        <span class="tag-count">{countFor(fullItem.wd_tag_counts, draftWdRating)}</span>
-                    {/if}
-                    <button class="chip-remove" type="button" title="Remove WD tag" on:click={(event) => { stopChipRemove(event); removeDraftWdTag('rating', draftWdRating); }}>
-                        <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
-                    </button>
-                </span>
-            {:else}
-                <div class="value-text">No rating</div>
             {/if}
-        </div>
-      </div>
-      <div class="sub-section">
-        <span class="muted-title">Character Tags</span>
-        <div class="tags-list">
+            
             {#each (draftWdCharacters || []) as tag}
-                <span class="tag-chip character" class:clickable={!isAlreadyTopic(tag)} class:promoted={isTagPromoted(tag)} role="button" tabindex="0" title={isAlreadyTopic(tag) ? "Already a topic" : "Promote to topic"} on:click={() => promoteWdToTopic(tag)} on:keydown={(event) => { if (event.key === 'Enter' || event.key === ' ') promoteWdToTopic(tag); }}>
-                    <span class="tag-label">{tag}</span>
-                    {#if countFor(fullItem.wd_tag_counts, tag)}
-                        <span class="tag-count">{countFor(fullItem.wd_tag_counts, tag)}</span>
-                    {/if}
-                    <button class="chip-remove" type="button" title="Remove WD tag" on:click={(event) => { stopChipRemove(event); removeDraftWdTag('character', tag); }}>
-                        <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
-                    </button>
-                </span>
+              <span class="tag-chip character" class:clickable={!isAlreadyTopic(tag)} class:promoted={isTagPromoted(tag)} role="button" tabindex="0" title={isAlreadyTopic(tag) ? "Already a topic" : "Promote to topic"} on:click={() => promoteWdToTopic(tag)} on:keydown={(event) => { if (event.key === 'Enter' || event.key === ' ') promoteWdToTopic(tag); }}>
+                  <span class="tag-label">{tag}</span>
+                  {#if countFor(fullItem.wd_tag_counts, tag)}
+                      <span class="tag-count">{countFor(fullItem.wd_tag_counts, tag)}</span>
+                  {/if}
+                  <button class="chip-remove" type="button" title="Remove WD tag" on:click={(event) => { stopChipRemove(event); removeDraftWdTag('character', tag); }}>
+                      <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
+                  </button>
+              </span>
             {/each}
-            {#if !draftWdCharacters || draftWdCharacters.length === 0}
-                <div class="value-text">No character tags</div>
-            {/if}
-        </div>
-      </div>
-      <div class="sub-section">
-        <span class="muted-title">Visual Tags</span>
-        <div class="tags-list">
+            
             {#each (draftWdGeneral || []) as tag}
-                <span class="tag-chip visual" class:clickable={!isAlreadyTopic(tag)} class:promoted={isTagPromoted(tag)} role="button" tabindex="0" title={isAlreadyTopic(tag) ? "Already a topic" : "Promote to topic"} on:click={() => promoteWdToTopic(tag)} on:keydown={(event) => { if (event.key === 'Enter' || event.key === ' ') promoteWdToTopic(tag); }}>
-                    <span class="tag-label">{tag}</span>
-                    {#if countFor(fullItem.wd_tag_counts, tag)}
-                        <span class="tag-count">{countFor(fullItem.wd_tag_counts, tag)}</span>
-                    {/if}
-                    <button class="chip-remove" type="button" title="Remove WD tag" on:click={(event) => { stopChipRemove(event); removeDraftWdTag('general', tag); }}>
-                        <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
-                    </button>
-                </span>
+              <span class="tag-chip visual" class:clickable={!isAlreadyTopic(tag)} class:promoted={isTagPromoted(tag)} role="button" tabindex="0" title={isAlreadyTopic(tag) ? "Already a topic" : "Promote to topic"} on:click={() => promoteWdToTopic(tag)} on:keydown={(event) => { if (event.key === 'Enter' || event.key === ' ') promoteWdToTopic(tag); }}>
+                  <span class="tag-label">{tag}</span>
+                  {#if countFor(fullItem.wd_tag_counts, tag)}
+                      <span class="tag-count">{countFor(fullItem.wd_tag_counts, tag)}</span>
+                  {/if}
+                  <button class="chip-remove" type="button" title="Remove WD tag" on:click={(event) => { stopChipRemove(event); removeDraftWdTag('general', tag); }}>
+                      <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
+                  </button>
+              </span>
             {/each}
-            {#if !draftWdGeneral || draftWdGeneral.length === 0}
-                <div class="value-text">No tags</div>
-            {/if}
+          </div>
+          
+          {#if !draftWdRating && (!draftWdCharacters || draftWdCharacters.length === 0) && (!draftWdGeneral || draftWdGeneral.length === 0)}
+              <div class="value-text">No suggestions</div>
+          {/if}
+        </div>
+
+        <div class="action-footer">
+            <button class="tag-btn" on:click={runTagging} disabled={tagging}>
+                <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round" class="btn-icon">
+                  <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"></path>
+                </svg>
+                {tagging ? 'Tagging...' : 'Tag Media'}
+            </button>
+            
+            <div class="save-group">
+                {#if isDirty}
+                <button class="revert-btn" on:click={revertChanges}>
+                    Revert
+                </button>
+                {/if}
+                <button class="save-btn" on:click={save} disabled={!isDirty}>
+                    Save
+                </button>
+            </div>
         </div>
       </div>
-    </div>
-
-    <div class="action-footer">
-        <button class="tag-btn" on:click={runTagging} disabled={tagging}>
-            {tagging ? 'Tagging...' : 'Tag Media'}
-        </button>
-        {#if isDirty}
-        <button class="revert-btn" on:click={revertChanges}>
-            Revert
-        </button>
-        {/if}
-        <button class="save-btn primary" on:click={save} disabled={!isDirty}>
-            Save Changes
-        </button>
-    </div>
     {/if}
   {/if}
 
@@ -891,11 +939,32 @@
     background: var(--bg-main);
     display: flex;
     flex-direction: column;
-    padding: 15px;
-    gap: 12px;
-    overflow-y: auto;
+    padding: 0;
+    gap: 0;
+    overflow: hidden;
     position: relative;
+    height: 100%;
   }
+
+  .inspector-header {
+    display: flex;
+    flex-direction: column;
+    padding: 15px 15px 0 15px;
+    gap: 12px;
+    flex-shrink: 0;
+  }
+
+  .inspector-body {
+    flex-grow: 1;
+    overflow-y: auto;
+    padding: 12px 15px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+  }
+
 
   .group-container {
     background: var(--bg-panel);
@@ -990,7 +1059,6 @@
   }
 
   .section-label { font-size: 11px; color: var(--text-muted); font-weight: 500; }
-  .muted-title { font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 4px; }
 
   .section-heading {
     display: flex;
@@ -1097,23 +1165,151 @@
     padding: 2px 0;
   }
 
-  .truncate { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: monospace; font-size: 11px; }
   .horizontal { flex-direction: row; gap: 20px; }
-  .sub-group { display: flex; flex-direction: column; gap: 4px; }
-  .platform-col { width: 60px; flex-shrink: 0; }
-  .flex-grow { flex-grow: 1; min-width: 0; }
+
+  /* Metadata Grid Styling */
+  .metadata-grid {
+    display: grid;
+    grid-template-columns: 80px 1fr;
+    row-gap: 6px;
+    column-gap: 12px;
+    align-items: center;
+    background: var(--bg-panel);
+    border: 1px solid var(--border-dim);
+    border-radius: 8px;
+    padding: 10px 12px;
+  }
+
+  .grid-label {
+    font-size: 10px;
+    color: var(--text-muted);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    user-select: none;
+  }
+
+  .grid-value {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+  }
+
+  input.inline-input {
+    width: 100%;
+    height: 24px;
+    padding: 2px 6px;
+    margin-left: -6px; /* Offset padding exactly so text left-aligns with non-input text */
+    background: transparent !important;
+    border: 1px solid transparent !important;
+    border-radius: 4px;
+    color: var(--text-main);
+    font-size: 12px;
+    font-weight: 500;
+    transition: none !important;
+    box-shadow: none !important;
+  }
+
+  input.inline-input:hover {
+    background: rgba(255, 255, 255, 0.03) !important;
+    border-color: rgba(255, 255, 255, 0.08) !important;
+  }
+
+  input.inline-input:focus {
+    background: var(--bg-input) !important;
+    border-color: var(--accent-purple) !important;
+    outline: none !important;
+  }
+
+  input.inline-input.read-only-input {
+    cursor: default;
+    color: var(--text-muted);
+  }
+
+  input.inline-input.read-only-input:hover {
+    background: transparent !important;
+    border-color: transparent !important;
+  }
+
+  input.inline-input.read-only-input:focus {
+    background: transparent !important;
+    border-color: transparent !important;
+  }
+
+  .platform-row {
+    display: flex;
+    align-items: center;
+  }
+
+  .platform-text {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-main);
+  }
+
+  .source-row {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  .link-icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--accent-primary);
+    opacity: 0.8;
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 4px;
+    flex-shrink: 0;
+  }
+
+  .link-icon-btn:hover {
+    opacity: 1;
+    background: rgba(31, 111, 235, 0.1);
+    color: var(--text-bright);
+  }
 
   .hash-row {
     display: flex;
     align-items: center;
-    gap: 10px;
-    background: var(--bg-input);
-    padding: 4px 8px;
-    border-radius: 4px;
-    border: 1px solid var(--border-dim);
+    width: 100%;
+    gap: 6px;
+    min-width: 0;
   }
 
-  .small-btn { padding: 2px 8px; font-size: 11px; background: var(--bg-hover); cursor: pointer; }
+  .hash-text {
+    font-family: monospace;
+    font-size: 11px;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex-grow: 1;
+  }
+
+  .icon-btn-compact {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    border-radius: 3px;
+    flex-shrink: 0;
+  }
+
+  .icon-btn-compact:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text-bright);
+  }
 
   .tags-list { display: flex; flex-wrap: wrap; gap: 6px; }
 
@@ -1418,20 +1614,104 @@
       height: 24px !important;
   }
 
-  .sub-section {
-    margin-top: 5px;
-    padding-top: 5px;
-    border-top: 1px solid rgba(255,255,255,0.05);
-  }
-
   input { background: var(--bg-input); border: 1px solid #30363d; font-weight: 500; }
 
   .action-footer {
-      display: flex;
-      gap: 10px;
-      margin-top: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    gap: 12px;
+    margin-top: 4px;
   }
-  .action-footer button { flex: 1; padding: 10px; font-weight: bold; }
+
+  .save-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .tag-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 28px;
+    padding: 0 10px;
+    font-size: 11px;
+    font-weight: 600;
+    background: rgba(163, 113, 247, 0.08);
+    border: 1px solid rgba(163, 113, 247, 0.3);
+    border-radius: 6px;
+    color: var(--accent-purple);
+    cursor: pointer;
+    transition: none !important;
+  }
+
+  .tag-btn:hover:not(:disabled) {
+    background: rgba(163, 113, 247, 0.15);
+    border-color: var(--accent-purple);
+    color: var(--text-bright);
+  }
+
+  .tag-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .revert-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 28px;
+    padding: 0 10px;
+    font-size: 11px;
+    font-weight: 600;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: none !important;
+  }
+
+  .revert-btn:hover {
+    color: var(--text-bright);
+    background: rgba(255, 255, 255, 0.05);
+  }
+
+  .save-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 28px;
+    padding: 0 14px;
+    font-size: 11px;
+    font-weight: 700;
+    background: var(--accent-purple);
+    border: 1px solid var(--accent-purple);
+    border-radius: 6px;
+    color: #ffffff;
+    cursor: pointer;
+    transition: none !important;
+  }
+
+  .save-btn:hover:not(:disabled) {
+    background: #b085ff;
+    border-color: #b085ff;
+  }
+
+  .save-btn:disabled {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: var(--border-dim);
+    color: var(--text-muted);
+    cursor: not-allowed;
+    font-weight: 600;
+  }
+
+  .btn-icon {
+    margin-right: 4px;
+    flex-shrink: 0;
+  }
 
   .loading-overlay {
     position: absolute;
@@ -1456,8 +1736,43 @@
     color: var(--text-muted);
   }
 
-  .action-row button { background: var(--bg-input); border-color: var(--border-dim); font-size: 12px; font-weight: 600; padding: 6px; }
-  .action-row button:hover { border-color: var(--border-hover); color: var(--text-bright); }
-  .action-row button.delete-btn:hover { border-color: var(--accent-danger); color: var(--accent-danger); }
+  /* Sleek Horizontal Action Toolbar */
+  .action-toolbar {
+    flex-direction: row !important;
+    gap: 6px !important;
+    padding: 6px 8px !important;
+    align-items: center;
+  }
+
+  .toolbar-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-grow: 1;
+    height: 30px;
+    padding: 0;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border-dim);
+    border-radius: 6px;
+    color: var(--text-main);
+    cursor: pointer;
+    transition: none !important;
+  }
+
+  .toolbar-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.2);
+    color: var(--text-bright);
+  }
+
+  .toolbar-btn.delete-btn {
+    color: var(--text-muted);
+  }
+
+  .toolbar-btn.delete-btn:hover {
+    background: rgba(248, 81, 73, 0.15);
+    border-color: rgba(248, 81, 73, 0.3);
+    color: var(--accent-danger);
+  }
 </style>
 

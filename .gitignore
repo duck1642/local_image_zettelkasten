@@ -218,3 +218,7 @@ test_videos/
 !tests/fixtures/mock-vault/config.yaml
 !tests/fixtures/mock-vault/data/
 !tests/fixtures/mock-vault/data/**
+
+# Screenshots and temporary inspection files
+last_screen.png
+
