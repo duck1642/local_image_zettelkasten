@@ -391,7 +391,6 @@
         background: transparent;
         cursor: pointer;
         opacity: 0.35;
-        transition: opacity 0.15s, background 0.15s;
         color: #c9d1d9;
     }
     .level-pill.active { opacity: 1; }

@@ -651,16 +651,36 @@
             <div class="unsupported-media">Unknown media type</div>
         {/if}
         <div class="media-overlay">
-            <button class="overlay-btn" title="Wide View" on:click={() => toggleFocus('wide')}>W</button>
-            <button class="overlay-btn" title="Fullscreen" on:click={() => toggleFocus('fullscreen')}>F</button>
+            <button class="overlay-btn" title="Wide View" on:click={() => toggleFocus('wide')}>
+                <svg viewBox="0 0 24 24" width="13" height="13" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M4 12h16M7 9l-3 3 3 3M17 9l3 3-3 3"></path>
+                </svg>
+            </button>
+            <button class="overlay-btn" title="Fullscreen" on:click={() => toggleFocus('fullscreen')}>
+                <svg viewBox="0 0 24 24" width="13" height="13" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path>
+                </svg>
+            </button>
         </div>
     </div>
 
     {#if group && group.items.length > 1}
         <div class="group-nav group-container horizontal">
-            <button on:click={prevItem}>&lt;</button>
-            <span class="counter">{currentIndex + 1} / {group.items.length}</span>
-            <button on:click={nextItem}>&gt;</button>
+            <button on:click={prevItem} title="Previous Item">
+                <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="15 18 9 12 15 6"></polyline>
+                </svg>
+            </button>
+            <div class="counter">
+                <span class="active-index">{currentIndex + 1}</span>
+                <span class="sep">/</span>
+                <span class="total-count">{group.items.length}</span>
+            </div>
+            <button on:click={nextItem} title="Next Item">
+                <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="9 18 15 12 9 6"></polyline>
+                </svg>
+            </button>
         </div>
     {/if}
 
@@ -910,7 +930,6 @@
       display: flex;
       gap: 5px;
       opacity: 0;
-      transition: opacity 0.2s;
   }
   .media-preview:hover .media-overlay { opacity: 1; }
 
@@ -921,15 +940,54 @@
       background: rgba(0,0,0,0.6);
       border: 1px solid rgba(255,255,255,0.2);
       color: white;
-      font-weight: bold;
-      font-size: 11px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
       cursor: pointer;
+      border-radius: 6px;
   }
   .overlay-btn:hover { background: var(--accent-primary); border-color: var(--accent-primary); }
 
-  .group-nav { align-items: center; justify-content: center; gap: 20px; }
-  .group-nav button { padding: 4px 20px; font-weight: bold; }
-  .counter { font-size: 12px; font-weight: bold; color: var(--text-muted); }
+  .group-nav {
+      align-items: center;
+      justify-content: space-between;
+      background: rgba(0, 0, 0, 0.15) !important;
+      padding: 6px 12px !important;
+      margin: 0;
+  }
+  .group-nav button {
+      width: 32px;
+      height: 28px;
+      padding: 0;
+      display: inline-grid;
+      place-items: center;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      color: var(--text-main);
+      border-radius: 6px;
+      cursor: pointer;
+  }
+  .group-nav button:hover:not(:disabled) {
+      background: rgba(255, 255, 255, 0.1);
+      border-color: rgba(255, 255, 255, 0.2);
+      color: var(--text-bright);
+  }
+  .group-nav button:disabled {
+      opacity: 0.3;
+      cursor: not-allowed;
+  }
+  .group-nav .counter {
+      font-size: 11px;
+      font-weight: bold;
+      color: #8b949e;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+  }
+  .group-nav .active-index {
+      color: #8b949e;
+      font-weight: bold;
+  }
 
   .section-label { font-size: 11px; color: var(--text-muted); font-weight: 500; }
   .muted-title { font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 4px; }
@@ -1371,7 +1429,7 @@
   .action-footer {
       display: flex;
       gap: 10px;
-      margin-top: 10px;
+      margin-top: 0;
   }
   .action-footer button { flex: 1; padding: 10px; font-weight: bold; }
 

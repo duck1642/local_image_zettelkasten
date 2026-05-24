@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { createEventDispatcher, onDestroy } from 'svelte';
+  import { createEventDispatcher, onDestroy, onMount } from 'svelte';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { log as uiLog } from './logger';
   import { apiUrl } from './api';
@@ -40,19 +40,38 @@
   let filmstripOpen = false;
   let appliedMode: 'wide' | 'fullscreen' | '' = '';
   let activeHash = '';
+  let showShortcutsLegend = false;
+  let controlsVisible = true;
+  let controlsTimeout: number | null = null;
 
   $: assetUrl = item?.url ? apiUrl(item.url) : '';
   $: currentIndex = group ? group.items.findIndex((i: any) => i.hash === item?.hash) : 0;
   $: hasGroupFilmstrip = Boolean(group && group.items?.length > 1);
   $: mediaTransform = mode === 'fullscreen' ? `translate(${translateX}px, ${translateY}px) scale(${scale})` : 'none';
+  
   $: if (item?.hash && item.hash !== activeHash) {
     activeHash = item.hash;
     resetZoom();
   }
+  
   $: if (mode !== appliedMode) {
     appliedMode = mode;
     if (mode !== 'fullscreen') resetZoom();
     handleModeChange(mode);
+  }
+
+  // Auto-hide controls in fullscreen mode on mouse inactivity
+  function resetControlsTimeout() {
+    controlsVisible = true;
+    if (controlsTimeout) {
+      window.clearTimeout(controlsTimeout);
+    }
+    // Only auto-hide in fullscreen mode when not dragging, not zoomed, and filmstrip is closed
+    if (mode === 'fullscreen' && !isDragging && scale === 1 && !filmstripOpen && !showShortcutsLegend) {
+      controlsTimeout = window.setTimeout(() => {
+        controlsVisible = false;
+      }, 3000);
+    }
   }
 
   function clampScale(value: number) {
@@ -83,6 +102,7 @@
       translateY = 0;
       pointerMoved = false;
     }
+    resetControlsTimeout();
   }
 
   function zoomFromCenter(delta: number) {
@@ -133,26 +153,31 @@
       pointerMoved = false;
       pointerMovedResetTimer = null;
     }, DRAG_CLICK_SUPPRESSION_MS);
+    resetControlsTimeout();
   }
 
   function nextItem() {
     if (!group) return;
     const nextIdx = (currentIndex + 1) % group.items.length;
     dispatch('changeItem', group.items[nextIdx]);
+    resetControlsTimeout();
   }
 
   function prevItem() {
     if (!group) return;
     const prevIdx = (currentIndex - 1 + group.items.length) % group.items.length;
     dispatch('changeItem', group.items[prevIdx]);
+    resetControlsTimeout();
   }
 
   function changeTo(entry: any) {
     dispatch('changeItem', entry);
+    resetControlsTimeout();
   }
 
   async function handleModeChange(newMode: 'wide' | 'fullscreen') {
     uiLog('INFO', `MediaFocus mode changed to: ${newMode}`);
+    resetControlsTimeout();
     if (newMode === 'fullscreen') {
       const tauriOk = await setTauriFullscreen(true);
       if (!tauriOk || !document.fullscreenElement) await setBrowserFullscreen(true);
@@ -213,6 +238,11 @@
     close(event);
   }
 
+  function toggleMode() {
+    const targetMode = mode === 'fullscreen' ? 'wide' : 'fullscreen';
+    dispatch('switchMode', targetMode);
+  }
+
   function handleKeydown(e: KeyboardEvent) {
     if (e.repeat) return;
     const target = e.target as HTMLElement;
@@ -260,8 +290,13 @@
     return apiUrl(entry.thumbnail_url || entry.url);
   }
 
+  onMount(() => {
+    resetControlsTimeout();
+  });
+
   onDestroy(async () => {
     if (pointerMovedResetTimer !== null) window.clearTimeout(pointerMovedResetTimer);
+    if (controlsTimeout !== null) window.clearTimeout(controlsTimeout);
     await exitAllFullscreen();
   });
 </script>
@@ -272,21 +307,112 @@
 <div
   class="focus-overlay"
   class:fullscreen={mode === 'fullscreen'}
+  class:hide-cursor={mode === 'fullscreen' && !controlsVisible && scale === 1}
+  class:filmstrip-open={filmstripOpen && hasGroupFilmstrip}
   on:click={handleOverlayClick}
   on:keydown={handleKeydown}
   on:wheel={handleWheel}
+  on:mousemove={resetControlsTimeout}
   role="button"
   tabindex="-1"
 >
+  <!-- Premium Header Controls Bar -->
+  <header class="focus-header" class:hidden={!controlsVisible}>
+    <div class="header-left">
+      <span class="media-title truncate" title={item?.title || item?.storage_id || item?.hash}>
+        {item?.title || item?.storage_id || item?.hash?.slice(0, 8)}
+      </span>
+      {#if group}
+        <span class="group-badge">
+          {currentIndex + 1} / {group.items.length}
+        </span>
+      {/if}
+    </div>
+
+    <div class="header-right">
+      <!-- Interactive Zoom Indicator & Controls -->
+      {#if mode === 'fullscreen' && isImageMedia(item)}
+        <div class="zoom-controls">
+          <button class="icon-btn" title="Zoom Out (-)" on:click={() => zoomFromCenter(-KEYBOARD_STEP)}>
+            <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2.5" fill="none"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+          </button>
+          <button type="button" class="zoom-pill" class:active={scale > 1} on:click={resetZoom} title="Reset Zoom">
+            {Math.round(scale * 100)}%
+          </button>
+          <button class="icon-btn" title="Zoom In (+)" on:click={() => zoomFromCenter(KEYBOARD_STEP)}>
+            <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2.5" fill="none"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+          </button>
+        </div>
+      {/if}
+
+      <!-- Keyboard Shortcuts HUD Toggle -->
+      <button class="icon-btn" class:active={showShortcutsLegend} title="Keyboard Shortcuts Legend" on:click={() => showShortcutsLegend = !showShortcutsLegend}>
+        <svg viewBox="0 0 24 24" width="21" height="21" stroke="currentColor" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="4" width="20" height="16" rx="2" ry="2"></rect>
+          <line x1="6" y1="8" x2="6.01" y2="8"></line>
+          <line x1="10" y1="8" x2="10.01" y2="8"></line>
+          <line x1="14" y1="8" x2="14.01" y2="8"></line>
+          <line x1="18" y1="8" x2="18.01" y2="8"></line>
+          <line x1="6" y1="12" x2="6.01" y2="12"></line>
+          <line x1="10" y1="12" x2="10.01" y2="12"></line>
+          <line x1="14" y1="12" x2="14.01" y2="12"></line>
+          <line x1="18" y1="12" x2="18.01" y2="12"></line>
+          <line x1="7" y1="16" x2="17" y2="16"></line>
+        </svg>
+      </button>
+
+      <!-- Fullscreen / Wide Toggle -->
+      <button class="icon-btn" title={mode === 'fullscreen' ? 'Exit Fullscreen (F)' : 'Enter Fullscreen (F)'} on:click={toggleMode}>
+        {#if mode === 'fullscreen'}
+          <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 14h6v6M20 10h-6V4M14 10l7-7M10 14l-7 7"></path>
+          </svg>
+        {:else}
+          <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"></path>
+          </svg>
+        {/if}
+      </button>
+
+      <!-- Crisp Close Button -->
+      <button class="close-btn-header" title="Exit (Esc)" on:click={() => close('Close Button Header Clicked')}>
+        <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="18" y1="6" x2="6" y2="18"></line>
+          <line x1="6" y1="6" x2="18" y2="18"></line>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- Keyboard Shortcuts Floating HUD list -->
+  {#if showShortcutsLegend}
+    <!-- svelte-ignore a11y-no-static-element-interactions -->
+    <div class="shortcuts-legend" on:click|stopPropagation on:keydown|stopPropagation>
+      <h3>Keyboard Shortcuts</h3>
+      <div class="legend-grid">
+        <div class="legend-item"><kbd>Esc</kbd> <span>Close focus view</span></div>
+        <div class="legend-item"><kbd>A</kbd> <span>Previous item</span></div>
+        <div class="legend-item"><kbd>D</kbd> <span>Next item</span></div>
+        <div class="legend-item"><kbd>W</kbd> <span>Toggle Wide mode</span></div>
+        <div class="legend-item"><kbd>F</kbd> <span>Toggle Fullscreen</span></div>
+        <div class="legend-item"><kbd>+</kbd> / <kbd>-</kbd> <span>Zoom in / out</span></div>
+        <div class="legend-item"><kbd>Ctrl + Wheel</kbd> <span>Smooth zoom</span></div>
+        <div class="legend-item"><kbd>Dbl Click</kbd> <span>Reset zoom</span></div>
+      </div>
+      <button class="legend-close-btn" on:click={() => showShortcutsLegend = false}>Dismiss</button>
+    </div>
+  {/if}
+
+  <!-- Beautiful Circular Glass Navigation Arrows -->
   {#if hasGroupFilmstrip}
-    <button class="nav-btn prev" aria-label="Previous item" on:click|stopPropagation={prevItem}>
-      <svg viewBox="0 0 24 24" width="40" height="40" stroke="currentColor" stroke-width="3" stroke-linejoin="round" fill="currentColor">
-        <path d="M16 4 L6 12 L16 20 Z" />
+    <button class="nav-btn-rect prev" class:hidden={!controlsVisible} aria-label="Previous item" on:click|stopPropagation={prevItem}>
+      <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="15 18 9 12 15 6"></polyline>
       </svg>
     </button>
-    <button class="nav-btn next" aria-label="Next item" on:click|stopPropagation={nextItem}>
-      <svg viewBox="0 0 24 24" width="40" height="40" stroke="currentColor" stroke-width="3" stroke-linejoin="round" fill="currentColor">
-        <path d="M8 4 L18 12 L8 20 Z" />
+    <button class="nav-btn-rect next" class:hidden={!controlsVisible} aria-label="Next item" on:click|stopPropagation={nextItem}>
+      <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="9 18 15 12 9 6"></polyline>
       </svg>
     </button>
   {/if}
@@ -323,18 +449,20 @@
         <div class="unsupported-media">Unknown media type</div>
       {/if}
     </div>
-
-    <div class="controls">
-      <button class="close-btn" on:click={close}>Exit {mode === 'fullscreen' ? 'Fullscreen' : 'Wide View'}</button>
-    </div>
   </div>
 
+  <!-- Premium Filmstrip Controls -->
   {#if hasGroupFilmstrip}
-    <button class="filmstrip-toggle" aria-label="Toggle filmstrip" on:click|stopPropagation={() => filmstripOpen = !filmstripOpen}>
-      {filmstripOpen ? 'v' : '^'}
+    <button class="filmstrip-toggle" class:hidden={!controlsVisible} class:open={filmstripOpen} aria-label="Toggle filmstrip" on:click|stopPropagation={() => filmstripOpen = !filmstripOpen}>
+      <span class="toggle-text">{filmstripOpen ? 'Hide Filmstrip' : 'Show Filmstrip'}</span>
+      <svg class="chevron-icon" viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="18 15 12 9 6 15"></polyline>
+      </svg>
     </button>
+
     {#if filmstripOpen}
-      <div class="filmstrip" on:click|stopPropagation on:keydown|stopPropagation>
+      <!-- svelte-ignore a11y-no-static-element-interactions -->
+      <div class="filmstrip" class:hidden={!controlsVisible} on:click|stopPropagation on:keydown|stopPropagation>
         <div class="filmstrip-row">
           {#each group.items as entry, index (entry.hash)}
             <button
@@ -344,6 +472,7 @@
               on:click={() => changeTo(entry)}
             >
               <img src={thumbnailUrl(entry)} alt="" draggable="false" />
+              <div class="thumb-index-badge">{index + 1}</div>
             </button>
           {/each}
         </div>
@@ -359,20 +488,255 @@
     left: 0;
     width: 100vw;
     height: 100vh;
-    background: rgba(0,0,0,0.9);
+    background: rgba(8, 9, 12, 0.95);
     z-index: 1000;
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 40px;
+    padding: 76px 80px 64px 80px;
     overflow: hidden;
+    user-select: none;
+    outline: none;
+  }
+
+  .focus-overlay.filmstrip-open {
+    padding-bottom: 160px;
   }
 
   .focus-overlay.fullscreen {
     padding: 0;
-    background: #000;
+    background: #040406;
   }
 
+  .hide-cursor {
+    cursor: none !important;
+  }
+
+  .hide-cursor * {
+    cursor: none !important;
+  }
+
+  /* Premium Header bar */
+  .focus-header {
+    position: fixed;
+    top: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: auto;
+    min-width: 320px;
+    max-width: 90%;
+    height: 44px;
+    background: rgba(13, 17, 23, 0.85);
+    backdrop-filter: blur(16px) saturate(180%);
+    -webkit-backdrop-filter: blur(16px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 8px;
+    z-index: 1050;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 6px 0 16px;
+    gap: 20px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+    opacity: 1;
+  }
+
+  .focus-header.hidden {
+    opacity: 0;
+    pointer-events: none;
+    transform: translateX(-50%) translateY(-15px);
+  }
+
+  .header-left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+  }
+
+  .media-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-bright);
+    max-width: 180px;
+  }
+
+  .group-badge {
+    font-size: 11px;
+    font-weight: bold;
+    color: var(--text-muted);
+    background: rgba(255, 255, 255, 0.06);
+    padding: 2px 8px;
+    border-radius: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  /* Icon button styling */
+  .icon-btn {
+    width: 34px;
+    height: 34px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--text-muted);
+    border-radius: 6px;
+    cursor: pointer;
+  }
+
+  .icon-btn svg,
+  .close-btn-header svg {
+    width: 20px !important;
+    height: 20px !important;
+    stroke-width: 2.5px !important;
+    display: block;
+  }
+
+  .icon-btn:hover {
+    color: var(--text-bright);
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.08);
+  }
+
+  .icon-btn.active {
+    color: var(--accent-primary);
+    background: rgba(88, 166, 255, 0.15);
+    border-color: rgba(88, 166, 255, 0.25);
+  }
+
+  /* Zoom controls */
+  .zoom-controls {
+    display: flex;
+    align-items: center;
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 6px;
+    padding: 2px;
+  }
+
+  .zoom-pill {
+    font-size: 11px;
+    font-weight: bold;
+    color: var(--text-muted);
+    padding: 0 8px;
+    cursor: pointer;
+    min-width: 44px;
+    text-align: center;
+    background: transparent;
+    border: none;
+    outline: none;
+  }
+
+  .zoom-pill:hover,
+  .zoom-pill.active {
+    color: var(--text-bright);
+    background: transparent;
+    border: none;
+  }
+
+  /* Close Header button */
+  .close-btn-header {
+    width: 34px;
+    height: 34px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(248, 81, 73, 0.1);
+    border: 1px solid rgba(248, 81, 73, 0.2);
+    color: var(--accent-danger);
+    border-radius: 6px;
+    cursor: pointer;
+    margin-left: 6px;
+  }
+
+  .close-btn-header:hover {
+    background: var(--accent-danger);
+    border-color: var(--accent-danger);
+    color: white;
+    transform: scale(1.05);
+  }
+
+  /* Keyboard HUD legend */
+  .shortcuts-legend {
+    position: fixed;
+    top: 68px;
+    right: 20px;
+    width: 320px;
+    background: rgba(13, 17, 23, 0.88);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 12px;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6);
+    padding: 16px;
+    z-index: 1060;
+    color: var(--text-main);
+  }
+
+  .shortcuts-legend h3 {
+    margin: 0 0 14px 0;
+    font-size: 13px;
+    font-weight: bold;
+    color: var(--text-bright);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    padding-bottom: 8px;
+  }
+
+  .legend-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+
+  .legend-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 11px;
+  }
+
+  .legend-item kbd {
+    font-family: var(--font-mono, monospace);
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 4px;
+    padding: 2px 6px;
+    box-shadow: 0 2px 0 rgba(0,0,0,0.3);
+    font-weight: bold;
+    color: var(--text-bright);
+    font-size: 10px;
+  }
+
+  .legend-item span {
+    color: var(--text-muted);
+  }
+
+  .legend-close-btn {
+    width: 100%;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: var(--text-bright);
+    padding: 6px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .legend-close-btn:hover {
+    background: rgba(255, 255, 255, 0.15);
+    border-color: rgba(255, 255, 255, 0.2);
+  }
+
+  /* Centered media layout */
   .media-container {
     position: relative;
     max-width: 100%;
@@ -385,7 +749,7 @@
   }
 
   .media-container.filmstrip-open {
-    max-height: calc(100vh - 118px);
+    max-height: calc(100vh - 236px);
   }
 
   .media-frame {
@@ -406,9 +770,29 @@
   .focus-media {
     max-width: 100%;
     max-height: calc(100vh - 140px);
-    box-shadow: 0 0 50px rgba(0,0,0,0.5);
+    box-shadow: 0 24px 70px rgba(0,0,0,0.8);
     object-fit: contain;
     user-select: none;
+    border-radius: 4px;
+  }
+
+  .filmstrip-open .focus-media {
+    max-height: calc(100vh - 236px);
+  }
+
+  .fullscreen .focus-media {
+    max-width: 100vw;
+    max-height: 100vh;
+    width: 100vw;
+    height: 100vh;
+    object-fit: contain;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .fullscreen .media-container.filmstrip-open .focus-media {
+    max-height: calc(100vh - 118px);
+    height: calc(100vh - 118px);
   }
 
   .unsupported-media {
@@ -420,97 +804,103 @@
     color: var(--text-muted);
     border: 1px solid var(--border-dim);
     border-radius: 8px;
+    background: rgba(0,0,0,0.3);
   }
 
-  .fullscreen .focus-media {
-    max-width: 100vw;
-    max-height: 100vh;
-    width: 100vw;
-    object-fit: contain;
-  }
-
-  .fullscreen .media-container.filmstrip-open .focus-media {
-    max-height: calc(100vh - 118px);
-  }
-
-  .controls {
-    margin-top: 20px;
-  }
-
-  .fullscreen .controls {
+  /* Circular Glass Navigation controls */
+  .nav-btn-rect {
     position: fixed;
-    top: -12px;
-    right: 8px;
-    opacity: 0;
-    transition: opacity 0.3s;
-    z-index: 1001;
-  }
-
-  .fullscreen.focus-overlay:hover .controls,
-  .fullscreen .media-container:hover .controls {
-    opacity: 1;
-  }
-
-  .close-btn {
-    background: rgba(0,0,0,0.6);
-    border: 1px solid rgba(255,255,255,0.2);
-    color: white;
-    padding: 8px 20px;
-    border-radius: 6px;
-    font-weight: bold;
-    cursor: pointer;
-  }
-
-  .close-btn:hover {
-    background: var(--accent-primary);
-    border-color: var(--accent-primary);
-  }
-
-  .nav-btn {
-    position: absolute;
     top: 50%;
     transform: translateY(-50%);
-    background: transparent;
-    border: none;
-    color: white;
-    opacity: 0.15;
+    width: 48px;
+    height: 48px;
+    border-radius: 8px;
+    background: rgba(15, 17, 23, 0.45);
+    backdrop-filter: blur(12px) saturate(180%);
+    -webkit-backdrop-filter: blur(12px) saturate(180%);
+    border: 1px solid rgba(255,255,255,0.12);
+    color: rgba(255, 255, 255, 0.6);
     cursor: pointer;
-    padding: 20px;
-    transition: opacity 0.2s, transform 0.2s;
-    z-index: 1010;
     display: flex;
     align-items: center;
     justify-content: center;
+    z-index: 1010;
+    box-shadow: 0 12px 36px rgba(0,0,0,0.5);
+    opacity: 1;
   }
 
-  .nav-btn:hover {
-    opacity: 0.8;
-    transform: translateY(-50%) scale(1.1);
+  .nav-btn-rect.hidden {
+    opacity: 0;
+    pointer-events: none;
   }
 
-  .nav-btn.prev {
-    left: 20px;
+  .nav-btn-rect:hover {
+    color: var(--text-bright);
+    background: rgba(15, 17, 23, 0.8);
+    border-color: rgba(255, 255, 255, 0.35);
+    box-shadow: 0 12px 40px rgba(0,0,0,0.7);
+    transform: translateY(-50%) scale(1.08);
   }
 
-  .nav-btn.next {
-    right: 20px;
+  .nav-btn-rect:active {
+    transform: translateY(-50%) scale(0.96);
   }
 
+  .nav-btn-rect.prev {
+    left: 24px;
+  }
+
+  .nav-btn-rect.next {
+    right: 24px;
+  }
+
+  /* Filmstrip slider toggle */
   .filmstrip-toggle {
     position: fixed;
     left: 50%;
     bottom: 16px;
     transform: translateX(-50%);
     z-index: 1020;
-    min-width: 36px;
-    height: 28px;
-    border-radius: 999px;
-    background: rgba(13, 17, 23, 0.82);
-    border: 1px solid rgba(255,255,255,0.25);
-    color: var(--text-main);
+    height: 32px;
+    border-radius: 8px;
+    background: rgba(13, 17, 23, 0.85);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: var(--text-muted);
     cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 16px;
+    font-size: 11px;
+    font-weight: bold;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+    opacity: 1;
   }
 
+  .filmstrip-toggle.hidden {
+    opacity: 0;
+    pointer-events: none;
+    transform: translateX(-50%) translateY(10px);
+  }
+
+  .filmstrip-toggle:hover {
+    color: var(--text-bright);
+    border-color: rgba(255, 255, 255, 0.3);
+    box-shadow: 0 10px 35px rgba(0, 0, 0, 0.7);
+    background: rgba(13, 17, 23, 0.95);
+  }
+
+  .filmstrip-toggle.open .chevron-icon {
+    transform: rotate(180deg);
+  }
+
+  .filmstrip-toggle.open {
+    bottom: 112px;
+  }
+
+  /* Filmstrip panel */
   .filmstrip {
     position: fixed;
     left: 0;
@@ -518,44 +908,94 @@
     bottom: 0;
     height: 96px;
     z-index: 1015;
-    background: rgba(13, 17, 23, 0.94);
-    border-top: 1px solid rgba(255,255,255,0.12);
+    background: rgba(13, 17, 23, 0.85);
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
     display: flex;
     align-items: center;
-    padding: 10px 54px;
+    padding: 10px 24px;
     box-sizing: border-box;
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  .filmstrip.hidden {
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(20px);
   }
 
   .filmstrip-row {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 12px;
     overflow-x: auto;
     overflow-y: hidden;
     width: 100%;
     height: 100%;
+    scroll-behavior: smooth;
+    padding: 4px 0;
+  }
+
+  /* Hide scrollbar of filmstrip */
+  .filmstrip-row::-webkit-scrollbar {
+    display: none;
+  }
+  .filmstrip-row {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
   }
 
   .filmstrip-thumb {
-    width: 64px;
-    height: 72px;
+    position: relative;
+    width: 68px;
+    height: 68px;
     flex: 0 0 auto;
-    padding: 2px;
-    border-radius: 6px;
+    padding: 0;
+    border-radius: 8px;
     border: 2px solid transparent;
-    background: rgba(255,255,255,0.06);
+    background: rgba(255, 255, 255, 0.05);
     cursor: pointer;
+    overflow: hidden;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  }
+
+  .filmstrip-thumb:hover {
+    transform: scale(1.06);
+    border-color: rgba(255, 255, 255, 0.3);
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4);
   }
 
   .filmstrip-thumb.active {
     border-color: var(--accent-primary);
+    transform: scale(1.06);
+    box-shadow: 0 8px 24px rgba(88, 166, 255, 0.35);
   }
 
   .filmstrip-thumb img {
     width: 100%;
     height: 100%;
     object-fit: cover;
-    border-radius: 4px;
     display: block;
+  }
+
+  .filmstrip-thumb:hover img {
+    transform: scale(1.04);
+  }
+
+  /* Thumbnail badge indicator */
+  .thumb-index-badge {
+    position: absolute;
+    bottom: 4px;
+    right: 4px;
+    background: rgba(0, 0, 0, 0.7);
+    color: white;
+    font-size: 8px;
+    font-weight: bold;
+    padding: 1px 4px;
+    border-radius: 4px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    pointer-events: none;
   }
 </style>

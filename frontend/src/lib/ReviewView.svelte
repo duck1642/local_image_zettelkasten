@@ -217,52 +217,94 @@
 
 <div class="review-root">
   {#if loading}
-    <div class="centered">Loading...</div>
+    <div class="centered-state">
+      <div class="spinner"></div>
+      <span>Loading review queue...</span>
+    </div>
   {:else if items.length === 0}
-    <div class="centered">Review folder is empty.</div>
+    <div class="centered-state empty-state">
+      <svg viewBox="0 0 24 24" width="48" height="48" stroke="currentColor" stroke-width="1.5" fill="none">
+        <circle cx="12" cy="12" r="10"></circle>
+        <path d="m9 12 2 2 4-4"></path>
+      </svg>
+      <span>Review folder is completely empty.</span>
+      <p class="sub-muted">Everything is perfectly ingested and categorized!</p>
+    </div>
   {:else}
+    <!-- Queue Sidebar List -->
     <aside class="queue-list">
-      <div class="queue-title">Review Queue</div>
+      <div class="queue-header">
+        <span class="queue-title">Review Inbox</span>
+        <span class="total-badge">{items.length} items</span>
+      </div>
+
       <div class="queue-scroll">
-        <div class="queue-section-title">Pending ({pendingItems.length})</div>
+        <div class="queue-section-header">
+          <span class="section-indicator blue-dot"></span>
+          <span class="section-title">Pending ({pendingItems.length})</span>
+        </div>
         {#if pendingItems.length === 0}
           <div class="queue-empty">No pending decisions.</div>
         {:else}
           {#each pendingItems as item}
-            <button class="queue-item {item.filename === current?.filename ? 'active' : ''}" on:click={() => selectItem(item)}>
-              <span class="queue-name">{displayName(item)}</span>
-              <span class="queue-state">{item.state || 'pending'}</span>
+            <button class="queue-item" class:active={item.filename === current?.filename} on:click={() => selectItem(item)}>
+              <div class="queue-item-row">
+                <span class="media-icon-indicator" title={isVideoMedia(item) ? "Video File" : "Image File"}>
+                  {#if isVideoMedia(item)}
+                    <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" stroke-width="2.5" fill="none"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>
+                  {:else}
+                    <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" stroke-width="2.5" fill="none"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+                  {/if}
+                </span>
+                <span class="queue-name truncate">{displayName(item)}</span>
+              </div>
+              <span class="queue-state">{item.state || 'pending decision'}</span>
             </button>
           {/each}
         {/if}
 
-        <div class="queue-section-title cleanup-title">Cleanup ({cleanupItems.length})</div>
+        <div class="queue-section-header cleanup-header">
+          <span class="section-indicator orange-dot"></span>
+          <span class="section-title">Cleanup ({cleanupItems.length})</span>
+        </div>
         {#if cleanupItems.length === 0}
           <div class="queue-empty">No cleanup problems.</div>
         {:else}
           {#each cleanupItems as item}
-            <button class="queue-item cleanup {item.filename === current?.filename ? 'active' : ''}" on:click={() => selectItem(item)}>
-              <span class="queue-name">{displayName(item)}</span>
-              <span class="queue-state">{item.last_cleanup_error || item.state || 'pending_cleanup'}</span>
+            <button class="queue-item cleanup" class:active={item.filename === current?.filename} on:click={() => selectItem(item)}>
+              <div class="queue-item-row">
+                <span class="media-icon-indicator warn">
+                  <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" stroke-width="2.5" fill="none"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+                </span>
+                <span class="queue-name truncate">{displayName(item)}</span>
+              </div>
+              <span class="queue-state truncate">{item.last_cleanup_error || item.state || 'pending_cleanup'}</span>
             </button>
           {/each}
         {/if}
       </div>
     </aside>
 
+    <!-- Main Comparison Section -->
     {#if current}
       <section class="review-main">
         {#if current.section === 'cleanup'}
+          <!-- Header titles -->
           <div class="comparison-header">
-            <div class="column-title">REVIEW FILE</div>
-            <div class="column-title">CLEANUP PROBLEM</div>
+            <div class="column-title">
+              <span class="pill-badge warning">Review File (Active)</span>
+            </div>
+            <div class="column-title">
+              <span class="pill-badge neutral">Cleanup Error Details</span>
+            </div>
           </div>
 
+          <!-- Comparison panes -->
           <div class="panes">
             <div class="pane">
               {#if mediaMounted}
                 {#if isVideoMedia(current)}
-                  <!-- svelte-ignore a11y_media_has_caption -->
+                  <!-- svelte-ignore a11y-media-has-caption -->
                   <video src={mediaUrl(current)} controls preload="metadata"></video>
                 {:else}
                   <img src={mediaUrl(current)} alt="Review cleanup item" />
@@ -271,35 +313,50 @@
             </div>
             <div class="pane detail-pane">
               <div class="cleanup-detail">
-                <div class="detail-label">State</div>
-                <div>{current.state || 'pending_cleanup'}</div>
-                <div class="detail-label">Last action</div>
-                <div>{current.last_action || current.metadata?.last_action || 'unknown'}</div>
-                <div class="detail-label">Last error</div>
-                <div class="error-text">{current.last_cleanup_error || current.metadata?.last_cleanup_error || 'Cleanup failed.'}</div>
+                <div class="detail-label">Current State</div>
+                <div class="detail-val">{current.state || 'pending_cleanup'}</div>
+                <div class="detail-label">Last Action Attempt</div>
+                <div class="detail-val">{current.last_action || current.metadata?.last_action || 'unknown'}</div>
+                <div class="detail-label">Error Output</div>
+                <div class="error-text-box">
+                  {current.last_cleanup_error || current.metadata?.last_cleanup_error || 'Cleanup failed.'}
+                </div>
               </div>
             </div>
           </div>
 
-          <div class="meta-bar">
-            <span>File: {displayName(current)}</span>
-            <span>Target: {current.metadata?.target_hash || current.metadata?.best_match || 'missing'}</span>
+          <!-- File info metadata card -->
+          <div class="meta-card">
+            <div class="meta-grid">
+              <div class="meta-item"><span class="meta-label">Original File:</span> <span class="meta-val" title={displayName(current)}>{displayName(current)}</span></div>
+              <div class="meta-item"><span class="meta-label">Target ID:</span> <span class="meta-val" title={current.metadata?.target_hash || current.metadata?.best_match || 'missing'}>{current.metadata?.target_hash || current.metadata?.best_match || 'missing'}</span></div>
+            </div>
           </div>
 
+          <!-- Big Action Button Area -->
           <div class="action-bar">
-            <button class="action-big retry-btn" on:click={retryCleanup} disabled={acting}>Retry Cleanup</button>
+            <button class="action-big retry-btn" on:click={retryCleanup} disabled={acting}>
+              <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2.5" fill="none"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+              <span>Retry Cleanup & Delete Staged File</span>
+            </button>
           </div>
         {:else}
+          <!-- Header titles -->
           <div class="comparison-header">
-            <div class="column-title">NEW ITEM</div>
-            <div class="column-title">BEST MATCH IN VAULT</div>
+            <div class="column-title">
+              <span class="pill-badge primary">Incoming Item (Inbox)</span>
+            </div>
+            <div class="column-title">
+              <span class="pill-badge info">Best Similarity Match in Vault</span>
+            </div>
           </div>
 
+          <!-- Comparison panes -->
           <div class="panes">
             <div class="pane">
               {#if mediaMounted}
                 {#if isVideoMedia(current)}
-                  <!-- svelte-ignore a11y_media_has_caption -->
+                  <!-- svelte-ignore a11y-media-has-caption -->
                   <video src={mediaUrl(current)} controls preload="metadata"></video>
                 {:else}
                   <img src={mediaUrl(current)} alt="New" />
@@ -309,34 +366,76 @@
             <div class="pane">
               {#if mediaMounted && current.best_match}
                 {#if isVideoMedia(current.best_match)}
-                  <!-- svelte-ignore a11y_media_has_caption -->
+                  <!-- svelte-ignore a11y-media-has-caption -->
                   <video src={mediaUrl(current.best_match)} controls preload="metadata"></video>
                 {:else}
                   <img src={mediaUrl(current.best_match)} alt="Match" />
                 {/if}
               {:else if mediaMounted}
-                <div class="no-match">No best-match preview available.</div>
+                <div class="no-match">
+                  <svg viewBox="0 0 24 24" width="36" height="36" stroke="currentColor" stroke-width="1.5" fill="none">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <path d="M12 8v4"></path>
+                    <path d="M12 16h.01"></path>
+                  </svg>
+                  <span>No best-match duplicates detected in vault.</span>
+                  <p class="sub-muted">This file appears to be entirely unique.</p>
+                </div>
               {/if}
             </div>
           </div>
 
-          <div class="meta-bar">
-            <span>File: {displayName(current)}</span>
-            <span>Target: {current.best_match?.hash || current.metadata?.best_match || 'missing'}</span>
+          <!-- File info metadata card -->
+          <div class="meta-card">
+            <div class="meta-grid">
+              <div class="meta-item"><span class="meta-label">Original File:</span> <span class="meta-val" title={displayName(current)}>{displayName(current)}</span></div>
+              <div class="meta-item"><span class="meta-label">Match Target:</span> <span class="meta-val" title={current.best_match?.hash || current.metadata?.best_match || 'missing'}>{current.best_match?.hash || current.metadata?.best_match || 'none'}</span></div>
+            </div>
           </div>
 
+          <!-- Big Action Button Area -->
           <div class="action-bar">
-            <button class="action-big keep-btn" on:click={() => handleAction('keep')} disabled={acting}>Keep Visible</button>
-            <button class="action-big variant-btn" on:click={() => handleAction('variant')} disabled={acting}>Save Variant</button>
-            <button class="action-big replace-btn" on:click={() => handleAction('replace')} disabled={acting}>Replace</button>
-            <button class="action-big delete-btn" on:click={() => handleAction('delete')} disabled={acting}>Delete</button>
+            <!-- Keep: Leaves file in review staging -->
+            <button class="action-big keep-btn" on:click={() => handleAction('keep')} disabled={acting}>
+              <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2.5" fill="none"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+              <span>Keep Staged</span>
+            </button>
+            <!-- Save Variant: Ingests new variant cleanly without replacing matching vault item -->
+            <button class="action-big variant-btn" on:click={() => handleAction('variant')} disabled={acting}>
+              <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2.5" fill="none"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+              <span>Save as Variant</span>
+            </button>
+            <!-- Replace: Replaces the duplicate matching file in Vault, preserving manual YAML tags -->
+            <button class="action-big replace-btn" on:click={() => handleAction('replace')} disabled={acting}>
+              <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2.5" fill="none"><polyline points="17 1 21 5 17 9"></polyline><path d="M3 11V9a4 4 0 0 1 4-4h14"></path><polyline points="7 23 3 19 7 15"></polyline><path d="M21 13v2a4 4 0 0 1-4 4H3"></path></svg>
+              <span>Replace Vault Copy</span>
+            </button>
+            <!-- Delete: Deletes the staged file from Review immediately -->
+            <button class="action-big delete-btn" on:click={() => handleAction('delete')} disabled={acting}>
+              <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="3 6 5 6 21 6"></polyline>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                <line x1="10" y1="11" x2="10" y2="17"></line>
+                <line x1="14" y1="11" x2="14" y2="17"></line>
+              </svg>
+              <span>Delete Staged</span>
+            </button>
           </div>
         {/if}
 
+        <!-- Queue Nav Bar -->
         <div class="nav-bar">
-          <button on:click={() => selectRelative(-1)} disabled={currentSectionIndex <= 0}>Previous</button>
-          <div class="counter">Item {currentSectionIndex + 1} of {currentSectionItems.length}</div>
-          <button on:click={() => selectRelative(1)} disabled={currentSectionIndex >= currentSectionItems.length - 1}>Next</button>
+          <button class="nav-arrow-btn" on:click={() => selectRelative(-1)} disabled={currentSectionIndex <= 0}>
+            <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
+            <span>Previous</span>
+          </button>
+          <div class="counter">
+            Item <span class="focus-number">{currentSectionIndex + 1}</span> of <span class="total-number">{currentSectionItems.length}</span>
+          </div>
+          <button class="nav-arrow-btn" on:click={() => selectRelative(1)} disabled={currentSectionIndex >= currentSectionItems.length - 1}>
+            <span>Next</span>
+            <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+          </button>
         </div>
       </section>
     {/if}
@@ -347,94 +446,203 @@
   .review-root {
     flex-grow: 1;
     display: flex;
-    gap: 12px;
-    padding: 14px;
+    gap: 16px;
+    padding: 16px;
     background: var(--bg-main);
     overflow: hidden;
+    height: calc(100vh - var(--header-height));
   }
 
+  /* Premium Sidebar List */
   .queue-list {
-    width: 280px;
-    min-width: 240px;
+    width: 290px;
+    min-width: 260px;
     max-width: 320px;
-    background: var(--bg-panel);
+    background: rgba(22, 27, 34, 0.4);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
     border: 1px solid var(--border-dim);
-    border-radius: 8px;
+    border-radius: 10px;
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  }
+
+  .queue-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border-dim);
+    background: rgba(0, 0, 0, 0.15);
   }
 
   .queue-title {
-    padding: 10px 12px;
-    border-bottom: 1px solid var(--border-dim);
-    font-size: 12px;
-    color: var(--text-muted);
+    font-size: 13px;
+    color: var(--text-bright);
     font-weight: 700;
+  }
+
+  .total-badge {
+    font-size: 10px;
+    font-weight: bold;
+    color: var(--text-muted);
+    background: rgba(255, 255, 255, 0.06);
+    padding: 2px 8px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
   }
 
   .queue-scroll {
-    overflow: auto;
+    overflow-y: auto;
+    overflow-x: hidden;
     flex-grow: 1;
-    padding: 8px;
+    padding: 10px;
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
   }
 
-  .queue-section-title {
-    margin-top: 4px;
-    padding: 4px 2px;
-    font-size: 11px;
+  /* Custom scrollbar for sidebar */
+  .queue-scroll::-webkit-scrollbar {
+    width: 6px;
+  }
+  .queue-scroll::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .queue-scroll::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 3px;
+  }
+  .queue-scroll::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.25);
+  }
+
+  .queue-section-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 8px 0 2px 2px;
+  }
+
+  .section-indicator {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+  }
+
+  .section-indicator.blue-dot {
+    background: var(--accent-primary);
+    box-shadow: 0 0 6px var(--accent-primary);
+  }
+
+  .section-indicator.orange-dot {
+    background: var(--accent-warning);
+    box-shadow: 0 0 6px var(--accent-warning);
+  }
+
+  .section-title {
+    font-size: 10px;
     color: var(--text-muted);
     font-weight: 700;
     text-transform: uppercase;
-  }
-
-  .cleanup-title {
-    margin-top: 12px;
-    color: var(--accent-warning);
+    letter-spacing: 0.5px;
   }
 
   .queue-empty {
-    padding: 7px 8px;
+    padding: 10px;
     font-size: 11px;
     color: var(--text-muted);
+    font-style: italic;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px dashed var(--border-dim);
+    border-radius: 6px;
+    text-align: center;
   }
 
+  /* Queue card item */
   .queue-item {
     width: 100%;
     text-align: left;
-    background: transparent;
+    background: rgba(255, 255, 255, 0.02);
     border: 1px solid var(--border-dim);
-    border-radius: 6px;
-    padding: 8px;
+    border-radius: 8px;
+    padding: 10px;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 6px;
+    cursor: pointer;
+  }
+
+  .queue-item:hover {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.15);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
   }
 
   .queue-item.cleanup {
-    border-color: rgba(210, 153, 34, 0.45);
+    border-color: rgba(240, 139, 44, 0.2);
+    background: rgba(240, 139, 44, 0.01);
+  }
+
+  .queue-item.cleanup:hover {
+    border-color: rgba(240, 139, 44, 0.4);
+    background: rgba(240, 139, 44, 0.04);
   }
 
   .queue-item.active {
-    border-color: var(--accent-primary);
-    background: rgba(31, 111, 235, 0.14);
+    border-color: var(--accent-primary) !important;
+    background: rgba(31, 111, 235, 0.1) !important;
+    box-shadow: 0 4px 16px rgba(31, 111, 235, 0.15);
+  }
+
+  .queue-item-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .media-icon-indicator {
+    display: inline-grid;
+    place-items: center;
+    width: 20px;
+    height: 20px;
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 4px;
+    color: var(--text-muted);
+    flex-shrink: 0;
+  }
+
+  .queue-item:hover .media-icon-indicator {
+    color: var(--accent-primary);
+    background: rgba(88, 166, 255, 0.15);
+  }
+
+  .media-icon-indicator.warn {
+    color: var(--accent-warning);
+    background: rgba(240, 139, 44, 0.1);
   }
 
   .queue-name {
     font-size: 12px;
+    font-weight: 600;
     color: var(--text-main);
-    word-break: break-word;
+  }
+
+  .queue-item.active .queue-name {
+    color: var(--text-bright);
   }
 
   .queue-state {
-    font-size: 11px;
+    font-size: 10px;
     color: var(--text-muted);
-    word-break: break-word;
+    padding-left: 28px;
   }
 
+  /* Main Comparison Body */
   .review-main {
     flex-grow: 1;
     display: flex;
@@ -445,46 +653,84 @@
 
   .comparison-header {
     display: flex;
-    margin-bottom: 10px;
+    gap: 16px;
+    margin-bottom: 12px;
   }
 
   .column-title {
     flex: 1;
+    display: flex;
+    align-items: center;
+  }
+
+  .pill-badge {
     font-size: 11px;
-    color: var(--text-muted);
     font-weight: bold;
-    text-align: left;
+    padding: 4px 12px;
+    border-radius: 999px;
+    border: 1px solid transparent;
+  }
+
+  .pill-badge.primary {
+    color: var(--accent-purple);
+    background: rgba(163, 113, 247, 0.12);
+    border-color: rgba(163, 113, 247, 0.25);
+  }
+
+  .pill-badge.info {
+    color: var(--accent-primary);
+    background: rgba(88, 166, 255, 0.1);
+    border-color: rgba(88, 166, 255, 0.2);
+  }
+
+  .pill-badge.warning {
+    color: var(--accent-warning);
+    background: rgba(240, 139, 44, 0.1);
+    border-color: rgba(240, 139, 44, 0.2);
+  }
+
+  .pill-badge.neutral {
+    color: var(--text-muted);
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.08);
   }
 
   .panes {
     flex: 1;
     display: flex;
-    gap: 20px;
+    gap: 16px;
     min-height: 0;
   }
 
   .pane {
     flex: 1;
-    background: var(--bg-panel);
+    background: rgba(15, 17, 23, 0.25);
     border: 1px solid var(--border-dim);
-    border-radius: 8px;
+    border-radius: 10px;
     display: flex;
     align-items: center;
     justify-content: center;
     overflow: hidden;
     min-width: 0;
+    position: relative;
+    box-shadow: inset 0 2px 10px rgba(0,0,0,0.5);
+  }
+
+  .pane:hover {
+    border-color: rgba(255, 255, 255, 0.1);
   }
 
   .detail-pane {
     align-items: stretch;
     justify-content: flex-start;
-    padding: 14px;
+    padding: 20px;
+    background: rgba(22, 27, 34, 0.35);
   }
 
   .cleanup-detail {
     display: grid;
-    grid-template-columns: 110px minmax(0, 1fr);
-    gap: 10px;
+    grid-template-columns: 140px minmax(0, 1fr);
+    gap: 14px 10px;
     width: 100%;
     color: var(--text-main);
     font-size: 12px;
@@ -493,96 +739,291 @@
 
   .detail-label {
     color: var(--text-muted);
-    font-weight: 700;
+    font-weight: bold;
+    text-transform: uppercase;
+    font-size: 10px;
+    letter-spacing: 0.5px;
+    align-self: center;
   }
 
-  .error-text {
+  .detail-val {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-family: monospace;
+    font-size: 11px;
+    color: var(--text-bright);
+  }
+
+  .error-text-box {
+    background: rgba(240, 139, 44, 0.08);
+    border: 1px solid rgba(240, 139, 44, 0.25);
+    padding: 10px 14px;
+    border-radius: 6px;
+    font-family: monospace;
+    font-size: 11px;
     color: var(--accent-warning);
-    word-break: break-word;
+    word-break: break-all;
+    overflow-y: auto;
+    max-height: 240px;
   }
 
   .pane img, .pane video {
     max-width: 100%;
     max-height: 100%;
     object-fit: contain;
+    border-radius: 4px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.5);
   }
 
-  .meta-bar {
-    margin-top: 10px;
-    display: flex;
-    justify-content: space-between;
+  /* Unique duplicate placeholder */
+  .no-match {
+    flex-direction: column;
     gap: 12px;
-    color: var(--text-muted);
+    text-align: center;
+    padding: 30px;
+  }
+
+  .no-match svg {
+    color: var(--accent-success);
+    background: rgba(46, 160, 67, 0.15);
+    padding: 8px;
+    border-radius: 50%;
+  }
+
+  .no-match span {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-bright);
+  }
+
+  .sub-muted {
     font-size: 11px;
+    color: var(--text-muted);
+    margin: 0;
+  }
+
+  /* File Info Metadata Card */
+  .meta-card {
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid var(--border-dim);
+    border-radius: 8px;
+    padding: 10px 16px;
+    margin-top: 12px;
+  }
+
+  .meta-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+  }
+
+  .meta-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    font-size: 11px;
+  }
+
+  .meta-label {
+    color: var(--text-muted);
+    font-weight: bold;
+    flex-shrink: 0;
+  }
+
+  .meta-val {
+    color: var(--text-main);
+    font-family: monospace;
     white-space: nowrap;
     overflow: hidden;
-  }
-
-  .meta-bar span {
-    overflow: hidden;
     text-overflow: ellipsis;
+    min-width: 0;
   }
 
+  /* Action Buttons panel */
   .action-bar {
     display: flex;
-    gap: 10px;
+    gap: 12px;
     margin: 12px 0;
   }
 
   .action-big {
     flex: 1;
-    padding: 10px;
-    font-weight: 700;
-    font-size: 13px;
-  }
-
-  .keep-btn {
-    background: #8b949e;
-    color: #0d1117;
-    border: none;
-  }
-
-  .variant-btn {
-    background: var(--accent-success);
-    color: #ffffff;
-    border: none;
-  }
-
-  .replace-btn, .retry-btn {
-    background: var(--accent-warning);
-    color: #111111;
-    border: none;
-  }
-
-  .delete-btn {
-    background: var(--accent-danger);
-    color: #ffffff;
-    border: none;
-  }
-
-  .nav-bar {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-
-  .nav-bar button {
-    flex: 1;
-    background: var(--bg-panel);
-  }
-
-  .counter {
-    flex: 1;
-    text-align: center;
-    color: var(--text-muted);
-    font-size: 12px;
-  }
-
-  .centered, .no-match {
-    flex-grow: 1;
+    height: 40px;
     display: flex;
     align-items: center;
     justify-content: center;
+    gap: 8px;
+    font-weight: 700;
+    font-size: 12px;
+    border-radius: 8px;
+    cursor: pointer;
+  }
+
+  .action-big:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px rgba(0,0,0,0.3);
+  }
+
+  .action-big:active:not(:disabled) {
+    transform: translateY(0);
+  }
+
+  .action-big:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
+  }
+
+  .keep-btn {
+    background: rgba(139, 148, 158, 0.15);
+    color: var(--text-bright);
+    border: 1px solid rgba(139, 148, 158, 0.3);
+  }
+  .keep-btn:hover:not(:disabled) {
+    background: rgba(139, 148, 158, 0.25);
+    border-color: rgba(255, 255, 255, 0.3);
+  }
+
+  .variant-btn {
+    background: rgba(46, 160, 67, 0.15);
+    color: var(--accent-success);
+    border: 1px solid rgba(46, 160, 67, 0.3);
+  }
+  .variant-btn:hover:not(:disabled) {
+    background: var(--accent-success);
+    color: white;
+    border-color: var(--accent-success);
+  }
+
+  .replace-btn {
+    background: rgba(240, 139, 44, 0.15);
+    color: var(--accent-warning);
+    border: 1px solid rgba(240, 139, 44, 0.3);
+  }
+  .replace-btn:hover:not(:disabled) {
+    background: var(--accent-warning);
+    color: #111111;
+    border-color: var(--accent-warning);
+  }
+
+  .retry-btn {
+    background: rgba(240, 139, 44, 0.15);
+    color: var(--accent-warning);
+    border: 1px solid rgba(240, 139, 44, 0.3);
+    width: 100%;
+  }
+  .retry-btn:hover:not(:disabled) {
+    background: var(--accent-warning);
+    color: #111111;
+    border-color: var(--accent-warning);
+  }
+
+  .delete-btn {
+    background: rgba(248, 81, 73, 0.15);
+    color: var(--accent-danger);
+    border: 1px solid rgba(248, 81, 73, 0.3);
+  }
+  .delete-btn:hover:not(:disabled) {
+    background: var(--accent-danger);
+    color: white;
+    border-color: var(--accent-danger);
+  }
+
+  /* Nav arrow footer */
+  .nav-bar {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    background: rgba(0, 0, 0, 0.15);
+    padding: 8px 16px;
+    border-radius: 8px;
+    border: 1px solid var(--border-dim);
+  }
+
+  .nav-arrow-btn {
+    flex: 1;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: var(--text-main);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  .nav-arrow-btn:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--text-bright);
+    border-color: rgba(255, 255, 255, 0.2);
+  }
+
+  .nav-arrow-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.35;
+  }
+
+  .counter {
+    flex: 1.5;
+    text-align: center;
     color: var(--text-muted);
+    font-size: 11px;
+    font-weight: 500;
+  }
+
+  .focus-number {
+    color: var(--text-bright);
+    font-weight: 700;
+  }
+
+  .total-number {
+    font-weight: bold;
+  }
+
+  /* Centered Loader states */
+  .centered-state {
+    flex-grow: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    color: var(--text-muted);
+    font-size: 13px;
+  }
+
+  .empty-state svg {
+    color: var(--text-muted);
+    background: rgba(255, 255, 255, 0.03);
+    padding: 16px;
+    border-radius: 50%;
+    border: 1px solid var(--border-dim);
+    margin-bottom: 8px;
+  }
+
+  .empty-state span {
+    font-size: 15px;
+    font-weight: bold;
+    color: var(--text-bright);
+  }
+
+  /* Loading Spinner */
+  .spinner {
+    width: 32px;
+    height: 32px;
+    border: 3px solid rgba(88, 166, 255, 0.1);
+    border-top-color: var(--accent-primary);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
   }
 </style>

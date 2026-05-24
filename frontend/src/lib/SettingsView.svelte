@@ -937,7 +937,6 @@
     height: 100%;
     min-width: 2px;
     background: var(--accent-primary);
-    transition: width 180ms ease;
   }
 
   .shortcuts-guide h4 {

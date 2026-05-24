@@ -286,7 +286,12 @@
       on:click={refreshSuggestions}
     />
     {#if searchQuery.trim() || hasActiveFilters(activeFilters)}
-      <button class="clear-search" on:click={clearSearch} title="Clear Search">x</button>
+      <button class="clear-search" on:click={clearSearch} title="Clear Search">
+        <svg viewBox="0 0 24 24" width="11" height="11" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="18" y1="6" x2="6" y2="18"></line>
+          <line x1="6" y1="6" x2="18" y2="18"></line>
+        </svg>
+      </button>
     {/if}
     {#if showSuggestions && suggestions.length > 0}
       <ul bind:this={suggestionsListEl} class="suggestions-dropdown" style={`left: ${suggestionLeft}px;`}>
@@ -316,6 +321,6 @@
   .suggestion-value { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .suggestion-count { color: var(--text-muted); font-variant-numeric: tabular-nums; }
   .suggestions-dropdown button:hover .suggestion-count, .suggestions-dropdown button.active .suggestion-count { color: rgba(255,255,255,0.8); }
-  .clear-search { position: absolute; right: 8px; background: transparent; border: none; color: var(--text-muted); font-size: 14px; cursor: pointer; padding: 4px; }
+  .clear-search { position: absolute; right: 8px; background: transparent; border: none; color: var(--text-muted); cursor: pointer; padding: 4px; display: inline-flex; align-items: center; justify-content: center; }
   .clear-search:hover { color: var(--accent-danger); background: transparent; border: none; }
 </style>

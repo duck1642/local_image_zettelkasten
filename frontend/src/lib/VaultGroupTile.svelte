@@ -65,9 +65,17 @@
 
         {#if group.items.length > 1}
             <div class="controls">
-                <button class="nav-btn" on:click={prev}>&lt;</button>
+                <button class="nav-btn" on:click={prev} title="Previous Item">
+                    <svg viewBox="0 0 24 24" width="11" height="11" stroke="currentColor" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="15 18 9 12 15 6"></polyline>
+                    </svg>
+                </button>
                 <div class="counter">{index + 1} / {group.items.length}</div>
-                <button class="nav-btn" on:click={next}>&gt;</button>
+                <button class="nav-btn" on:click={next} title="Next Item">
+                    <svg viewBox="0 0 24 24" width="11" height="11" stroke="currentColor" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="9 18 15 12 9 6"></polyline>
+                    </svg>
+                </button>
             </div>
         {/if}
     </div>
@@ -128,7 +136,6 @@
     align-items: center;
     padding: 2px;
     opacity: 0;
-    transition: opacity 0.2s;
   }
 
   .tile-group:hover .controls { opacity: 1; }
@@ -137,11 +144,20 @@
     background: #161b22;
     border: 1px solid #30363d;
     color: white;
-    padding: 2px 8px;
-    font-size: 10px;
-    font-weight: bold;
+    width: 24px;
+    height: 20px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    cursor: pointer;
+    border-radius: 4px;
   }
   .nav-btn:hover { border-color: var(--accent-primary); }
+
+  .nav-btn svg {
+    display: block;
+  }
 
   .counter { font-size: 10px; color: #8b949e; font-weight: bold; }
   .unsupported-media { min-height: 100px; display: flex; align-items: center; justify-content: center; color: var(--text-muted); font-size: 11px; }

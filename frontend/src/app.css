@@ -40,10 +40,14 @@ button {
   background: var(--bg-panel);
   color: var(--text-main);
   padding: 6px 12px;
-  transition: all 0.1s;
 }
 
 button:hover { border-color: var(--border-hover); }
+
+/* Snappy interface - remove all transitions */
+*, *::before, *::after {
+  transition: none !important;
+}
 
 button:disabled {
   cursor: not-allowed;

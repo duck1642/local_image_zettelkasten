@@ -674,7 +674,7 @@ test('inspector drafts WD promotion and removal until save', async ({ page }) =>
   await expect(inspector.locator('.tag-chip.visual').filter({ hasText: 'mock_tag' })).toHaveCount(0);
 
   await inspector.getByRole('button', { name: 'Save Changes' }).click();
-  expect(patches).toHaveLength(1);
+  await expect.poll(() => patches.length).toBe(1);
   expect(patches[0]).toMatchObject({
     topics: ['mock-topic', 'mock_tag'],
     wd_rating: 'safe',
@@ -795,8 +795,8 @@ test('review fixture uses display names and encoded asset/action paths', async (
   await page.getByRole('button', { name: /Review/ }).click();
   await expect(page.getByRole('button', { name: 'Original Review Name.jpg pending' })).toBeVisible();
   await expect(page.getByRole('button', { name: /Locked Cleanup Item\.jpg/ })).toBeVisible();
-  await page.getByRole('button', { name: /Original Review Name\.jpg/ }).click();
-  await page.getByRole('button', { name: 'Keep Visible' }).click();
+  await page.getByRole('button', { name: 'Original Review Name\.jpg' }).click();
+  await page.getByRole('button', { name: 'Keep Staged' }).click();
 
   expect(reviewRequests.some((url) => url.includes('review%2520encoded%2Bname.jpg'))).toBeTruthy();
 });
@@ -812,7 +812,7 @@ test('review destructive actions unmount media before posting', async ({ page })
   await page.getByRole('button', { name: /Review/ }).click();
   await page.getByRole('button', { name: /Original Review Name\.jpg/ }).click();
   await expect(page.locator('.review-main .pane img')).toHaveCount(2);
-  await page.getByRole('button', { name: 'Save Variant' }).click();
+  await page.getByRole('button', { name: 'Save as Variant' }).click();
 
   await expect.poll(() => mediaUnmountedBeforePost).toBeTruthy();
 });
@@ -1153,7 +1153,7 @@ test('stats selected topics and wd tags filter the vault', async ({ page }) => {
   await page.getByRole('button', { name: 'WD Tags' }).click();
   await page.locator('.stat-chip').filter({ hasText: 'mock_tag' }).click();
   await expect(page.locator('.stats-filter-bar')).toContainText('1 selected');
-  await expect(page.locator('.stat-chip.selected')).toContainText('mock_tag');
+  await expect(page.locator('.stat-chip-wrap.selected')).toContainText('mock_tag');
 
   await page.getByRole('button', { name: 'Topics' }).click();
   await page.locator('.stat-chip').filter({ hasText: 'mock-topic' }).click();
@@ -1183,6 +1183,7 @@ test('stats metadata actions update topic and wd facets', async ({ page }) => {
 
   await page.getByRole('button', { name: 'WD Tags' }).click();
   await expect(page.locator('.stat-chip').filter({ hasText: 'mock_tag' })).toBeVisible();
+  await page.locator('.stat-chip-wrap').filter({ hasText: 'mock_tag' }).hover();
   await page.getByLabel('Rename mock_tag').click();
   await page.getByLabel('New').fill('renamed_tag');
   await page.getByRole('button', { name: 'Rename', exact: true }).click();
@@ -1190,6 +1191,7 @@ test('stats metadata actions update topic and wd facets', async ({ page }) => {
   await expect(page.locator('.stat-chip').filter({ hasText: 'mock_tag' })).toHaveCount(0);
   await page.getByRole('button', { name: 'Close' }).click();
 
+  await page.locator('.stat-chip-wrap').filter({ hasText: 'renamed_tag' }).hover();
   await page.getByLabel('Delete renamed_tag').click();
   await page.getByRole('button', { name: 'Delete', exact: true }).click();
   await expect(page.locator('.stat-chip').filter({ hasText: 'renamed_tag' })).toHaveCount(0);
@@ -1197,12 +1199,14 @@ test('stats metadata actions update topic and wd facets', async ({ page }) => {
 
   await page.getByRole('button', { name: 'Topics' }).click();
   await expect(page.locator('.stat-chip').filter({ hasText: 'group-topic' })).toBeVisible();
+  await page.locator('.stat-chip-wrap').filter({ hasText: 'group-topic' }).hover();
   await page.getByLabel('Merge group-topic').click();
   await page.getByLabel('Target').fill('mock-topic');
   await page.getByRole('button', { name: 'Merge', exact: true }).click();
   await expect(page.locator('.stat-chip').filter({ hasText: 'group-topic' })).toHaveCount(0);
   await page.getByRole('button', { name: 'Close' }).click();
 
+  await page.locator('.stat-chip-wrap').filter({ hasText: 'mock-topic' }).hover();
   await page.getByLabel('Delete mock-topic').click();
   await page.getByRole('button', { name: 'Delete', exact: true }).click();
   await expect(page.locator('.stat-chip').filter({ hasText: 'mock-topic' })).toHaveCount(0);
