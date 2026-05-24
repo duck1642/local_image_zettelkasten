@@ -305,6 +305,11 @@
       } else {
         dispatch('switchMode', 'fullscreen');
       }
+    } else if (e.key.toLowerCase() === 's') {
+      if (hasGroupFilmstrip) {
+        e.preventDefault();
+        handleToggleFilmstrip();
+      }
     } else if (e.key.toLowerCase() === 'a') {
       e.preventDefault();
       prevItem();
@@ -380,7 +385,7 @@
       {/if}
 
       <!-- Keyboard Shortcuts HUD Toggle -->
-      <button class="icon-btn" class:active={showShortcutsLegend} title="Keyboard Shortcuts Legend" on:click={() => showShortcutsLegend = !showShortcutsLegend}>
+      <button class="icon-btn" class:active={showShortcutsLegend} title="Keyboard Shortcuts" on:click={() => showShortcutsLegend = !showShortcutsLegend}>
         <IconKeyboard size={18} strokeWidth={2.2} />
       </button>
 
@@ -411,11 +416,18 @@
         <div class="legend-item"><kbd>D</kbd> <span>Next item</span></div>
         <div class="legend-item"><kbd>W</kbd> <span>Toggle Wide mode</span></div>
         <div class="legend-item"><kbd>F</kbd> <span>Toggle Fullscreen</span></div>
-        <div class="legend-item"><kbd>+</kbd> / <kbd>-</kbd> <span>Zoom in / out</span></div>
+        <div class="legend-item"><kbd>S</kbd> <span>Toggle Filmstrip</span></div>
+        <div class="legend-item">
+          <div class="keys">
+            <kbd>+</kbd>
+            <span>/</span>
+            <kbd>-</kbd>
+          </div>
+          <span>Zoom in / out</span>
+        </div>
         <div class="legend-item"><kbd>Ctrl + Wheel</kbd> <span>Smooth zoom</span></div>
         <div class="legend-item"><kbd>Dbl Click</kbd> <span>Reset zoom</span></div>
       </div>
-      <button class="legend-close-btn" on:click={() => showShortcutsLegend = false}>Dismiss</button>
     </div>
   {/if}
 
@@ -715,9 +727,10 @@
   .shortcuts-legend {
     position: fixed;
     top: 68px;
-    right: 20px;
-    width: 320px;
-    background: rgba(13, 17, 23, 0.88);
+    left: 50%;
+    transform: translateX(-50%);
+    width: 270px;
+    background: rgba(13, 17, 23, 0.75);
     backdrop-filter: blur(20px) saturate(180%);
     -webkit-backdrop-filter: blur(20px) saturate(180%);
     border: 1px solid rgba(255, 255, 255, 0.12);
@@ -741,7 +754,6 @@
     display: flex;
     flex-direction: column;
     gap: 10px;
-    margin-bottom: 16px;
   }
 
   .legend-item {
@@ -749,6 +761,12 @@
     align-items: center;
     justify-content: space-between;
     font-size: 11px;
+  }
+
+  .legend-item .keys {
+    display: flex;
+    align-items: center;
+    gap: 6px;
   }
 
   .legend-item kbd {
@@ -765,23 +783,6 @@
 
   .legend-item span {
     color: var(--text-muted);
-  }
-
-  .legend-close-btn {
-    width: 100%;
-    background: rgba(255, 255, 255, 0.08);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    color: var(--text-bright);
-    padding: 6px;
-    border-radius: 6px;
-    font-size: 11px;
-    font-weight: 600;
-    cursor: pointer;
-  }
-
-  .legend-close-btn:hover {
-    background: rgba(255, 255, 255, 0.15);
-    border-color: rgba(255, 255, 255, 0.2);
   }
 
   /* Centered media layout */
