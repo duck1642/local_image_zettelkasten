@@ -370,7 +370,12 @@
 
   function setSingleSelection(item: VaultItem) {
     selectedItem = item;
-    selectedGroup = hashIndex.get(item.hash)?.group ?? null;
+    const nextGroup = hashIndex.get(item.hash)?.group ?? null;
+    if (nextGroup) {
+      selectedGroup = nextGroup;
+    } else if (!selectedGroup || !selectedGroup.items.some((i) => i.hash === item.hash)) {
+      selectedGroup = null;
+    }
     selectedHashes = new Set([item.hash]);
     lastSelectedHash = item.hash;
     focusStartTime = 0;

@@ -71,6 +71,29 @@
     handleModeChange(mode);
   }
 
+  // Automatically, snappily scroll the active thumbnail into the center of the filmstrip view
+  $: if (filmstripOpen && item && typeof document !== 'undefined') {
+    setTimeout(() => {
+      const activeEl = document.querySelector('.filmstrip-thumb.active');
+      activeEl?.scrollIntoView({
+        behavior: 'auto',
+        block: 'nearest',
+        inline: 'center'
+      });
+    }, 0);
+  }
+
+  let disableFilmstripClicks = false;
+  function handleToggleFilmstrip() {
+    if (!filmstripOpen) {
+      disableFilmstripClicks = true;
+      window.setTimeout(() => {
+        disableFilmstripClicks = false;
+      }, 150);
+    }
+    filmstripOpen = !filmstripOpen;
+  }
+
   // Auto-hide controls in fullscreen mode on mouse inactivity
   function resetControlsTimeout() {
     controlsVisible = true;
@@ -314,6 +337,7 @@
 
 <svelte:window on:keydown={handleKeydown}/>
 
+<!-- svelte-ignore a11y-click-events-have-key-events -->
 <!-- svelte-ignore a11y-no-static-element-interactions -->
 <div
   class="focus-overlay"
@@ -321,7 +345,6 @@
   class:hide-cursor={mode === 'fullscreen' && !controlsVisible && scale === 1}
   class:filmstrip-open={filmstripOpen && hasGroupFilmstrip}
   on:click={handleOverlayClick}
-  on:keydown={handleKeydown}
   on:wheel={handleWheel}
   on:mousemove={resetControlsTimeout}
   role="button"
@@ -442,14 +465,14 @@
 
   <!-- Premium Filmstrip Controls -->
   {#if hasGroupFilmstrip}
-    <button class="filmstrip-toggle" class:hidden={!controlsVisible} class:open={filmstripOpen} aria-label="Toggle filmstrip" on:click|stopPropagation={() => filmstripOpen = !filmstripOpen}>
+    <button class="filmstrip-toggle" class:hidden={!controlsVisible} class:open={filmstripOpen} aria-label="Toggle filmstrip" on:click|stopPropagation={handleToggleFilmstrip}>
       <span class="toggle-text">{filmstripOpen ? 'Hide Filmstrip' : 'Show Filmstrip'}</span>
       <IconChevronUp size={14} className="chevron-icon" />
     </button>
 
     {#if filmstripOpen}
       <!-- svelte-ignore a11y-no-static-element-interactions -->
-      <div class="filmstrip" class:hidden={!controlsVisible} on:click|stopPropagation on:keydown|stopPropagation>
+      <div class="filmstrip" class:hidden={!controlsVisible} class:disable-clicks={disableFilmstripClicks} on:click|stopPropagation on:keydown|stopPropagation>
         <div class="filmstrip-row">
           {#each group.items as entry, index (entry.hash)}
             <button
@@ -865,11 +888,10 @@
     background: rgba(15, 17, 23, 0.8);
     border-color: rgba(255, 255, 255, 0.35);
     box-shadow: 0 12px 40px rgba(0,0,0,0.7);
-    transform: translateY(-50%) scale(1.08);
   }
 
   .nav-btn-rect:active {
-    transform: translateY(-50%) scale(0.96);
+    background: rgba(15, 17, 23, 0.95);
   }
 
   .nav-btn-rect.prev {
@@ -887,8 +909,9 @@
     bottom: 16px;
     transform: translateX(-50%);
     z-index: 1020;
-    height: 32px;
-    border-radius: 8px;
+    height: 30px;
+    min-width: 132px;
+    border-radius: 6px;
     background: rgba(13, 17, 23, 0.85);
     backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
@@ -897,12 +920,14 @@
     cursor: pointer;
     display: flex;
     align-items: center;
+    justify-content: center;
     gap: 6px;
     padding: 0 16px;
     font-size: 11px;
     font-weight: bold;
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
     opacity: 1;
+    box-sizing: border-box;
   }
 
   .filmstrip-toggle.hidden {
@@ -944,6 +969,11 @@
     box-sizing: border-box;
     opacity: 1;
     transform: translateY(0);
+  }
+
+  .filmstrip.disable-clicks,
+  .filmstrip.disable-clicks * {
+    pointer-events: none !important;
   }
 
   .filmstrip.hidden {
@@ -988,15 +1018,13 @@
   }
 
   .filmstrip-thumb:hover {
-    transform: scale(1.06);
-    border-color: rgba(255, 255, 255, 0.3);
+    border-color: rgba(255, 255, 255, 0.35);
     box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4);
   }
 
   .filmstrip-thumb.active {
     border-color: var(--accent-primary);
-    transform: scale(1.06);
-    box-shadow: 0 8px 24px rgba(88, 166, 255, 0.35);
+    box-shadow: 0 8px 24px rgba(88, 166, 255, 0.25);
   }
 
   .filmstrip-thumb img {
@@ -1004,10 +1032,6 @@
     height: 100%;
     object-fit: cover;
     display: block;
-  }
-
-  .filmstrip-thumb:hover img {
-    transform: scale(1.04);
   }
 
   /* Thumbnail badge indicator */
