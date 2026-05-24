@@ -4,7 +4,7 @@ import threading
 from pathlib import Path
 from datetime import datetime
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
-from utils import DB_PATH, utc_now_str
+from utils import utc_now_str
 from runtime_context import WorkspaceContext, get_runtime_context
 
 _SCHEMA_READY_PATHS: set[Path] = set()

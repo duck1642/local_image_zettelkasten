@@ -205,40 +205,7 @@ VSCode-friendly test launchers:
 - existing rows are backfilled lazily by `init_database()`.
 - no standalone migration/maintenance tool exists yet.
 
-### Phase C - Metadata Workflow Polish / Vault Ops
 
-1. Vault operations:
-   - verify current live workspace/vault switching code paths.
-   - trace and remove old compatibility path usage after default, Obsidian, and generated vault modes are stable.
-   - harden vault rename, delete, and merge flows.
-   - defer split/separate vault flows until the real workflow is clearer.
-2. Vault health read-only audit:
-   - report DB rows missing assets or notes.
-   - report orphaned assets or notes with no DB row.
-   - report bad/missing `storage_id` values and path mismatches.
-   - report SHA256 hash mismatches.
-   - report stale, missing, or orphaned thumbnail and WD cache files.
-   - report stale/ghost metadata index rows.
-   - report broken topic links and unused topic files.
-   - report review sidecar/media mismatches.
-   - report workspace dictionary drift against active-vault usage.
-3. Vault health targeted repairs:
-   - repair derived data only after read-only audit output is trusted.
-   - rebuild thumbnails.
-   - rebuild metadata index and facet counts.
-   - prune orphan cache files.
-   - reconcile review sidecars.
-   - quarantine orphan assets/notes where needed.
-   - require explicit action for destructive deletes.
-4. Backup/export/import:
-   - add active-vault backup flow.
-   - add vault export/import package flow.
-   - consider automatic pre-delete and pre-merge backups.
-5. Optional metadata maintenance:
-   - hide/ignore WD tags only if noisy WD data becomes a real UX problem.
-6. Optional UX polish:
-   - search chips if the current text query handoff becomes hard to scan.
-   - richer Inspector tag editing beyond the required topic add flow.
 
 ### Phase D - UI Polish
 
@@ -296,6 +263,18 @@ VSCode-friendly test launchers:
     - runtime RAM separates backend, Tauri host, WebView2, and active subprocesses from dev tooling.
     - frontend footer shows runtime RAM, backend RAM, WebView RAM, dev-tool RAM, and JS heap without double-counting JS heap into runtime total.
     - targeted RAM aggregation tests pass for backend-only, packaged sidecar, dev launcher, project-scan, and inaccessible-process cases.
+  - Phase C vault/workspace reliability pass is implemented:
+    - existing dynamic workspace/vault switching paths are verified by targeted tests.
+    - stale direct `DB_PATH` import was removed from the active SQLite helper.
+    - vault rename/delete flows have targeted backend hardening coverage.
+    - Settings exposes vault merge preview/confirm with support for destructive merging (optionally deleting source vaults on success and unlinking all copied target files on execution failure).
+    - vault health audit reports missing files, orphan files/caches, bad storage IDs, hash mismatches, stale metadata rows, facet drift, broken/unused topics, review mismatches, and workspace dictionary drift.
+    - vault health and repair logic is hardened to filter expected tag caches and thumbnails by image/video MIME type, and preserve skipped/failed tagging caches from being deleted as orphans.
+    - vault repair can rebuild metadata/facets, rebuild thumbnails, prune derived cache orphans, reconcile review sidecars, and quarantine orphan assets/notes.
+    - vault backup/export/import package flows are exposed through backend APIs and Settings controls.
+    - Split/separate vault flows are deferred until the real workflow is clearer.
+    - Optional metadata maintenance (hiding/ignoring WD tags) is handled.
+    - Optional UX polish (search chips, richer Inspector tag editing) is reviewed and deferred.
   - runtime context layer is implemented for workspace/vault paths while preserving legacy import-time constants.
   - active-vault and workspace DB connection helpers are context-aware.
   - queues, review cache, logging, metadata watchdog paths, topics, thumbnails, downloader staging, and local ingest/review path access are context-aware.

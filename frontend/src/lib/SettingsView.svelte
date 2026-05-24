@@ -47,6 +47,23 @@
   let vaultResult = '';
   let vaultName = 'New Vault';
   let vaultRestartRequired = false;
+  let mergeTargetId = '';
+  let mergeSourceIds: string[] = [];
+  let mergePreview: any = null;
+  let mergeBusy = false;
+  let mergeResult = '';
+  let healthVaultId = '';
+  let healthBusy = false;
+  let healthResult = '';
+  let healthReport: any = null;
+  let healthDetailsOpen = false;
+  let repairErrors: Array<{ hash: string; storage_id: string; status: string; error: string }> = [];
+  let backupResult = '';
+  let importPackagePath = '';
+  let importVaultName = '';
+
+  $: if (!mergeTargetId && vaultActive) mergeTargetId = vaultActive;
+  $: if (!healthVaultId && vaultActive) healthVaultId = vaultActive;
 
   function setConfig(mutator: (draft: any) => void) {
     updateConfig(mutator, false);
@@ -160,6 +177,8 @@
       if (!response.ok) throw new Error(payload?.detail || `HTTP ${response.status}`);
       vaultActive = String(payload?.active || '');
       vaults = Array.isArray(payload?.items) ? payload.items : [];
+      if (!mergeTargetId && vaultActive) mergeTargetId = vaultActive;
+      if (!healthVaultId && vaultActive) healthVaultId = vaultActive;
     } catch (error) {
       vaultResult = `error: ${String(error)}`;
     }
@@ -255,10 +274,239 @@
       if (!response.ok) throw new Error(payload?.detail || `HTTP ${response.status}`);
       vaults = Array.isArray(payload?.items) ? payload.items : vaults;
       vaultResult = 'vault deleted';
+      mergeSourceIds = mergeSourceIds.filter((value) => value !== id);
+      if (mergeTargetId === id) mergeTargetId = vaultActive;
+      if (healthVaultId === id) healthVaultId = vaultActive;
     } catch (error) {
       vaultResult = `error: ${String(error)}`;
     } finally {
       vaultBusy = false;
+    }
+  }
+
+  function toggleMergeSource(id: string, checked: boolean) {
+    mergePreview = null;
+    if (checked) {
+      mergeSourceIds = Array.from(new Set([...mergeSourceIds, id])).filter((value) => value !== mergeTargetId);
+    } else {
+      mergeSourceIds = mergeSourceIds.filter((value) => value !== id);
+    }
+  }
+
+  async function previewVaultMerge() {
+    if (!mergeTargetId || !mergeSourceIds.length || mergeBusy) return;
+    mergeBusy = true;
+    mergeResult = '';
+    mergePreview = null;
+    try {
+      const response = await apiFetch(`/api/vaults/${encodeURIComponent(mergeTargetId)}/merge-preview`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source_vault_ids: mergeSourceIds })
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload?.detail || `HTTP ${response.status}`);
+      mergePreview = payload;
+      mergeResult = `preview: ${Number(payload.importable || 0).toLocaleString()} importable`;
+    } catch (error) {
+      mergeResult = `error: ${String(error)}`;
+    } finally {
+      mergeBusy = false;
+    }
+  }
+
+  async function confirmVaultMerge() {
+    if (!mergeTargetId || !mergeSourceIds.length || mergeBusy) return;
+    if (!mergePreview && !confirm('Merge without preview?')) return;
+    if (!confirm(`Merge ${mergeSourceIds.length} source vault(s) into "${mergeTargetId}"? Sources stay intact.`)) return;
+    mergeBusy = true;
+    mergeResult = '';
+    try {
+      const response = await apiFetch(`/api/vaults/${encodeURIComponent(mergeTargetId)}/merge`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source_vault_ids: mergeSourceIds })
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload?.detail || `HTTP ${response.status}`);
+      mergePreview = payload;
+      mergeResult = `merged ${Number(payload.imported || 0).toLocaleString()} items`;
+      await loadVaults();
+    } catch (error) {
+      mergeResult = `error: ${String(error)}`;
+    } finally {
+      mergeBusy = false;
+    }
+  }
+
+  function healthSummary(report: any) {
+    if (!report) return '';
+    return `${Number(report.issue_count || 0).toLocaleString()} issues`;
+  }
+
+  function countValues(value: any) {
+    if (!value || typeof value !== 'object') return 0;
+    return Object.values(value).reduce<number>((total, item: any) => {
+      if (Array.isArray(item)) return total + item.length;
+      if (typeof item === 'number') return total + item;
+      return total;
+    }, 0);
+  }
+
+  function repairSummary(payload: any) {
+    const fixed = Number(payload?.fixed_issue_count || 0);
+    const after = Number(payload?.after_issue_count ?? payload?.after?.issue_count ?? 0);
+    const manual = countValues(payload?.manual_remaining);
+    const tagged = Number(payload?.wd_tagging?.tagged || 0);
+    const base = payload?.message || (fixed ? `Fixed ${fixed} issues` : 'No repairable issues changed');
+    const wdText = tagged ? `; tagged ${tagged.toLocaleString()} items` : '';
+    if (manual) return `${base}${wdText}; ${manual.toLocaleString()} need manual review; ${after.toLocaleString()} total remain`;
+    return `${base}${wdText}; ${after.toLocaleString()} total remain`;
+  }
+
+  function firstValues(value: any, limit = 5) {
+    if (!value || typeof value !== 'object') return [];
+    const rows: Array<{ kind: string; value: string }> = [];
+    for (const [kind, raw] of Object.entries(value)) {
+      if (Array.isArray(raw)) {
+        for (const item of raw) {
+          rows.push({ kind, value: String(typeof item === 'object' && item ? (item as any).path || JSON.stringify(item) : item) });
+          if (rows.length >= limit) return rows;
+        }
+      } else if (typeof raw === 'number' && raw) {
+        rows.push({ kind, value: String(raw) });
+      }
+      if (rows.length >= limit) return rows;
+    }
+    return rows;
+  }
+
+  function detailValues(value: any, limit = 100) {
+    return firstValues(value, limit);
+  }
+
+  function closeHealthDetailsOnBackdrop(event: MouseEvent) {
+    if (event.target === event.currentTarget) healthDetailsOpen = false;
+  }
+
+  function healthKindLabel(kind: string) {
+    const labels: Record<string, string> = {
+      asset: 'Asset',
+      note: 'Note',
+      wd: 'WD cache',
+      thumb: 'Thumbnail',
+      assets: 'Asset',
+      notes: 'Note',
+      wd_cache: 'WD cache',
+      thumbnails: 'Thumbnail',
+      topics: 'Topics',
+      wd_tags: 'WD tags',
+      metadata_files: 'Metadata rows'
+    };
+    return labels[kind] || kind.replace(/_/g, ' ');
+  }
+
+  async function auditVaultHealth() {
+    if (!healthVaultId || healthBusy) return;
+    healthBusy = true;
+    healthResult = 'auditing...';
+      healthReport = null;
+      healthDetailsOpen = false;
+    try {
+      const response = await apiFetch(`/api/vaults/${encodeURIComponent(healthVaultId)}/health`);
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload?.detail || `HTTP ${response.status}`);
+      healthReport = payload;
+      healthResult = healthSummary(payload);
+      uiLog('INFO', 'Vault health audit completed', {
+        vault: healthVaultId,
+        issues: payload?.issue_count || 0,
+        missing_files: countValues(payload?.missing_files),
+        orphans: countValues(payload?.orphans),
+        facet_drift: payload?.facet_drift?.length || 0
+      });
+    } catch (error) {
+      healthResult = `error: ${String(error)}`;
+      uiLog('ERROR', 'Vault health audit failed', { vault: healthVaultId, error: String(error) });
+    } finally {
+      healthBusy = false;
+    }
+  }
+
+  async function repairVaultHealth() {
+    if (!healthVaultId || healthBusy) return;
+    if (!confirm(`Repair vault "${healthVaultId}"? Orphan assets/notes are quarantined, not deleted.`)) return;
+    healthBusy = true;
+    healthResult = 'repairing...';
+    try {
+      const response = await apiFetch(`/api/vaults/${encodeURIComponent(healthVaultId)}/repair`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          actions: ['metadata', 'thumbnails', 'wd_tagging', 'derived_cache', 'review_sidecars', 'quarantine_orphans']
+        })
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload?.detail || `HTTP ${response.status}`);
+      healthReport = payload.after || null;
+      repairErrors = payload.wd_tagging?.errors || [];
+      // Keep details panel openable (don't force-close after repair)
+      healthResult = repairSummary(payload);
+      uiLog('INFO', 'Vault repair completed', {
+        vault: healthVaultId,
+        fixed: payload?.fixed_issue_count || 0,
+        before: payload?.before_issue_count || 0,
+        after: payload?.after_issue_count || 0,
+        manual_remaining: payload?.manual_remaining || {},
+        actions: payload?.actions || []
+      });
+      await loadVaults();
+    } catch (error) {
+      healthResult = `error: ${String(error)}`;
+      uiLog('ERROR', 'Vault repair failed', { vault: healthVaultId, error: String(error) });
+    } finally {
+      healthBusy = false;
+    }
+  }
+
+  async function backupVault(kind: 'backup' | 'export') {
+    const id = healthVaultId || vaultActive;
+    if (!id || healthBusy) return;
+    healthBusy = true;
+    backupResult = '';
+    try {
+      const response = await apiFetch(`/api/vaults/${encodeURIComponent(id)}/${kind}`, { method: 'POST' });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload?.detail || `HTTP ${response.status}`);
+      backupResult = `${kind}: ${payload.package_path || 'created'}`;
+    } catch (error) {
+      backupResult = `error: ${String(error)}`;
+    } finally {
+      healthBusy = false;
+    }
+  }
+
+  async function importVaultPackage() {
+    const path = importPackagePath.trim();
+    if (!path || healthBusy) return;
+    healthBusy = true;
+    backupResult = '';
+    try {
+      const response = await apiFetch('/api/vaults/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ package_path: path, name: importVaultName.trim() || undefined })
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload?.detail || `HTTP ${response.status}`);
+      vaults = Array.isArray(payload?.items) ? payload.items : vaults;
+      importPackagePath = '';
+      importVaultName = '';
+      backupResult = `imported ${payload.vault || 'vault'}`;
+    } catch (error) {
+      backupResult = `error: ${String(error)}`;
+    } finally {
+      healthBusy = false;
     }
   }
 
@@ -493,6 +741,166 @@
           {#if vaultResult}
             <div class="workspace-result">{vaultResult}</div>
           {/if}
+          <div class="vault-tool-panel">
+            <h5>Merge Vaults</h5>
+            <div class="add-workspace">
+              <select bind:value={mergeTargetId} on:change={() => { mergeSourceIds = mergeSourceIds.filter((id) => id !== mergeTargetId); mergePreview = null; }}>
+                {#each vaults as vault}
+                  <option value={vault.id}>{vault.name}</option>
+                {/each}
+              </select>
+              <button type="button" on:click={previewVaultMerge} disabled={mergeBusy || !mergeTargetId || !mergeSourceIds.length}>Preview Merge</button>
+              <button type="button" on:click={confirmVaultMerge} disabled={mergeBusy || !mergeTargetId || !mergeSourceIds.length}>Merge</button>
+            </div>
+            <div class="merge-source-list">
+              {#each vaults as vault}
+                <label>
+                  <input
+                    type="checkbox"
+                    disabled={mergeBusy || vault.id === mergeTargetId}
+                    checked={mergeSourceIds.includes(vault.id)}
+                    on:change={(event) => toggleMergeSource(vault.id, checkedValue(event))}
+                  />
+                  <span>{vault.name}</span>
+                </label>
+              {/each}
+            </div>
+            {#if mergePreview}
+              <div class="workspace-note">
+                {Number(mergePreview.total_items || 0).toLocaleString()} total |
+                {Number(mergePreview.duplicates || 0).toLocaleString()} duplicates |
+                {Number(mergePreview.importable || 0).toLocaleString()} importable
+              </div>
+            {/if}
+            {#if mergeResult}
+              <div class="workspace-result">{mergeResult}</div>
+            {/if}
+          </div>
+          <div class="vault-tool-panel">
+            <h5>Vault Health</h5>
+            <div class="add-workspace">
+              <select bind:value={healthVaultId}>
+                {#each vaults as vault}
+                  <option value={vault.id}>{vault.name}</option>
+                {/each}
+              </select>
+              <button type="button" on:click={auditVaultHealth} disabled={healthBusy || !healthVaultId}>Audit Vault Health</button>
+              <button type="button" on:click={repairVaultHealth} disabled={healthBusy || !healthVaultId || healthVaultId !== vaultActive}>Repair Active Vault</button>
+            </div>
+            {#if healthReport}
+              <div class="health-summary">
+                <span>{Number(healthReport.issue_count || 0).toLocaleString()} issues</span>
+                <span>{countValues(healthReport.missing_files)} missing files</span>
+                <span>{countValues(healthReport.orphans)} orphans</span>
+                <span>{(healthReport.facet_drift || []).length} facet drift</span>
+                <span>{countValues(healthReport.stale_index_rows)} stale index</span>
+                <span>{(healthReport.hash_mismatches || []).length} hash mismatch</span>
+                <button type="button" class="compact-action" on:click={() => healthDetailsOpen = true}>Details</button>
+              </div>
+            {/if}
+            {#if healthDetailsOpen && healthReport}
+              <div class="modal-backdrop" role="presentation" on:click={closeHealthDetailsOnBackdrop}>
+                <div class="health-modal" role="dialog" aria-modal="true" aria-label="Vault Health Details" tabindex="-1">
+                  <div class="modal-header">
+                    <h4>Vault Health Details</h4>
+                    <button type="button" on:click={() => healthDetailsOpen = false}>Close</button>
+                  </div>
+                  <div class="health-detail">
+                {#if countValues(healthReport.missing_files)}
+                  <div class="health-section-title">Missing Files</div>
+                  {#each detailValues(healthReport.details?.missing_files || healthReport.missing_files) as row}
+                    <div class="health-row">
+                      <span>{healthKindLabel(row.kind)}</span>
+                      <code title={row.value}>{row.value}</code>
+                    </div>
+                  {/each}
+                {/if}
+                {#if countValues(healthReport.orphans)}
+                  <div class="health-section-title">Orphans</div>
+                  {#each detailValues(healthReport.orphans) as row}
+                    <div class="health-row">
+                      <span>{healthKindLabel(row.kind)}</span>
+                      <code title={row.value}>{row.value}</code>
+                    </div>
+                  {/each}
+                {/if}
+                {#if countValues(healthReport.stale_index_rows)}
+                  <div class="health-section-title">Stale Index Rows</div>
+                  {#each detailValues(healthReport.stale_index_rows) as row}
+                    <div class="health-row">
+                      <span>{healthKindLabel(row.kind)}</span>
+                      <code>{row.value}</code>
+                    </div>
+                  {/each}
+                {/if}
+                    {#if (healthReport.facet_drift || []).length}
+                      <div class="health-section-title">Facet Drift</div>
+                      {#each healthReport.facet_drift as row}
+                        <div class="health-row"><span>Facet</span><code>{row}</code></div>
+                      {/each}
+                    {/if}
+                    {#if (healthReport.hash_mismatches || []).length}
+                      <div class="health-section-title">Hash Mismatches</div>
+                      {#each healthReport.hash_mismatches as row}
+                        <div class="health-row"><span>Asset</span><code title={row}>{row}</code></div>
+                      {/each}
+                    {/if}
+                    {#if (healthReport.bad_storage_ids || []).length}
+                      <div class="health-section-title">Bad Storage IDs</div>
+                      {#each healthReport.bad_storage_ids as row}
+                        <div class="health-row"><span>Item hash</span><code title={row}>{row}</code></div>
+                      {/each}
+                    {/if}
+                    {#if (healthReport.broken_topic_links || []).length}
+                      <div class="health-section-title">Broken Topic Links</div>
+                      {#each healthReport.broken_topic_links as row}
+                        <div class="health-row"><span>Topic</span><code title={row}>{row}</code></div>
+                      {/each}
+                    {/if}
+                    {#if countValues(healthReport.review_mismatches)}
+                      <div class="health-section-title">Review Mismatches</div>
+                      {#each detailValues(healthReport.review_mismatches) as row}
+                        <div class="health-row"><span>{healthKindLabel(row.kind)}</span><code title={row.value}>{row.value}</code></div>
+                      {/each}
+                    {/if}
+                    {#if (healthReport.workspace_dictionary_drift?.missing_in_dictionary || 0) + (healthReport.workspace_dictionary_drift?.unused_in_vault || 0) > 0}
+                      <div class="health-section-title">Dictionary Drift</div>
+                      {#if healthReport.workspace_dictionary_drift?.missing_in_dictionary}
+                        <div class="health-row"><span>Missing in dict</span><code>{healthReport.workspace_dictionary_drift.missing_in_dictionary} tags</code></div>
+                      {/if}
+                      {#if healthReport.workspace_dictionary_drift?.unused_in_vault}
+                        <div class="health-row"><span>Unused in vault</span><code>{healthReport.workspace_dictionary_drift.unused_in_vault} tags</code></div>
+                      {/if}
+                    {/if}
+                    {#if repairErrors.length}
+                      <div class="health-section-title">WD Tagging Errors ({repairErrors.length})</div>
+                      {#each repairErrors as err}
+                        <div class="health-row">
+                          <span>{err.status || 'error'}</span>
+                          <code title={err.error}>{err.error}</code>
+                        </div>
+                      {/each}
+                    {/if}
+                  </div>
+                </div>
+              </div>
+            {/if}
+            {#if healthResult}
+              <div class="workspace-result">{healthResult}</div>
+            {/if}
+            <div class="add-workspace">
+              <button type="button" on:click={() => backupVault('backup')} disabled={healthBusy || !healthVaultId}>Backup Vault</button>
+              <button type="button" on:click={() => backupVault('export')} disabled={healthBusy || !healthVaultId}>Export Vault</button>
+            </div>
+            <div class="add-workspace">
+              <input type="text" placeholder="Vault package path" bind:value={importPackagePath} />
+              <input type="text" placeholder="Imported vault name" bind:value={importVaultName} />
+              <button type="button" on:click={importVaultPackage} disabled={healthBusy || !importPackagePath.trim()}>Import Vault</button>
+            </div>
+            {#if backupResult}
+              <div class="workspace-result">{backupResult}</div>
+            {/if}
+          </div>
         </div>
       </div>
     {/if}
@@ -898,6 +1306,136 @@
     margin: 0 0 12px 0;
     color: var(--text-bright);
     font-size: 14px;
+  }
+
+  .vault-tool-panel {
+    margin-top: 14px;
+    border-top: 1px solid var(--border-dim);
+    padding-top: 12px;
+  }
+
+  .vault-tool-panel h5 {
+    margin: 0 0 8px 0;
+    color: var(--text-bright);
+    font-size: 13px;
+  }
+
+  .merge-source-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    margin: 8px 0;
+  }
+
+  .merge-source-list label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-muted);
+    font-size: 12px;
+  }
+
+  .health-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 8px 0;
+    color: var(--text-muted);
+    font-size: 12px;
+  }
+
+  .health-detail {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin: 8px 0;
+    color: var(--text-muted);
+    font-size: 12px;
+  }
+
+  .health-section-title {
+    color: var(--text-bright);
+    font-size: 13px;
+    font-weight: 700;
+    margin-top: 8px;
+  }
+
+  .health-section-title:first-child {
+    margin-top: 0;
+  }
+
+  .health-row {
+    display: grid;
+    grid-template-columns: 92px minmax(0, 1fr);
+    gap: 10px;
+    align-items: baseline;
+    min-height: 20px;
+  }
+
+  .health-row span {
+    color: var(--text-muted);
+    font-size: 12px;
+  }
+
+  .health-row code {
+    display: block;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--text-bright);
+    font-size: 12px;
+  }
+
+  .compact-action {
+    padding: 2px 8px;
+    min-height: 22px;
+    font-size: 12px;
+  }
+
+  .modal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.55);
+  }
+
+  .health-modal {
+    width: min(900px, calc(100vw - 32px));
+    height: min(720px, calc(100vh - 32px));
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-panel);
+    border: 1px solid var(--border-dim);
+    border-radius: 8px;
+    box-shadow: 0 18px 60px rgba(0, 0, 0, 0.45);
+    padding: 14px;
+  }
+
+  .modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 10px;
+  }
+
+  .modal-header h4 {
+    margin: 0;
+    color: var(--text-bright);
+    font-size: 14px;
+  }
+
+  .health-modal .health-detail {
+    overflow: auto;
+    min-height: 0;
+    flex: 1;
+    margin: 0;
+    padding: 2px 8px 2px 0;
+    scrollbar-width: thin;
   }
 
   .maintenance-grid {

@@ -541,6 +541,49 @@ def _preview_vault_merge_sync(target_id: str, body: dict):
         raise HTTPException(status_code=400, detail=str(exc))
 
 
+    if not vault_id:
+        raise HTTPException(status_code=400, detail="vault id is required")
+    try:
+        return set_active_vault(vault_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.delete("/api/vaults/{vault_id}")
+async def delete_vault(vault_id: str, confirm: bool = Query(False)):
+    return await asyncio.to_thread(_delete_vault_sync, vault_id, confirm)
+
+
+def _delete_vault_sync(vault_id: str, confirm: bool = False):
+    from vaults import delete_vault
+
+    try:
+        return delete_vault(vault_id, confirm=confirm)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/api/vaults/{target_id}/merge-preview")
+async def preview_vault_merge(target_id: str, body: dict):
+    return await asyncio.to_thread(_preview_vault_merge_sync, target_id, body)
+
+
+def _preview_vault_merge_sync(target_id: str, body: dict):
+    from vaults import preview_vault_merge
+
+    sources = list((body or {}).get("source_vault_ids") or [])
+    try:
+        return preview_vault_merge(target_id, sources)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
 @router.post("/api/vaults/{target_id}/merge")
 async def merge_vaults(target_id: str, body: dict):
     return await asyncio.to_thread(_merge_vaults_sync, target_id, body)
@@ -550,8 +593,97 @@ def _merge_vaults_sync(target_id: str, body: dict):
     from vaults import merge_vaults
 
     sources = list((body or {}).get("source_vault_ids") or [])
+    delete_sources = bool((body or {}).get("delete_sources", True))
     try:
-        return merge_vaults(target_id, sources)
+        return merge_vaults(target_id, sources, delete_sources=delete_sources)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.get("/api/vaults/{vault_id}/health")
+async def get_vault_health(vault_id: str):
+    return await asyncio.to_thread(_get_vault_health_sync, vault_id)
+
+
+def _get_vault_health_sync(vault_id: str):
+    from vaults import audit_vault_health
+
+    try:
+        return audit_vault_health(vault_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/api/vaults/{vault_id}/repair")
+async def repair_vault(vault_id: str, body: dict):
+    return await asyncio.to_thread(_repair_vault_sync, vault_id, body)
+
+
+def _repair_vault_sync(vault_id: str, body: dict):
+    from vaults import repair_vault
+
+    try:
+        return repair_vault(
+            vault_id,
+            actions=list((body or {}).get("actions") or []),
+            confirm_destructive=bool((body or {}).get("confirm_destructive")),
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/api/vaults/{vault_id}/backup")
+async def backup_vault(vault_id: str):
+    return await asyncio.to_thread(_backup_vault_sync, vault_id)
+
+
+def _backup_vault_sync(vault_id: str):
+    from vaults import backup_vault
+
+    try:
+        return backup_vault(vault_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/api/vaults/{vault_id}/export")
+async def export_vault(vault_id: str):
+    return await asyncio.to_thread(_export_vault_sync, vault_id)
+
+
+def _export_vault_sync(vault_id: str):
+    from vaults import export_vault
+
+    try:
+        return export_vault(vault_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/api/vaults/import")
+async def import_vault(body: dict):
+    return await asyncio.to_thread(_import_vault_sync, body)
+
+
+def _import_vault_sync(body: dict):
+    from vaults import import_vault_package
+
+    try:
+        return import_vault_package(
+            str((body or {}).get("package_path") or "").strip(),
+            name=str((body or {}).get("name") or "").strip() or None,
+            vault_id=str((body or {}).get("id") or "").strip() or None,
+        )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except ValueError as exc:

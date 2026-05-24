@@ -83,6 +83,7 @@ async function installMockVaultApi(
     metadataRebuildResponse?: unknown;
     metadataStatusSequence?: unknown[];
     onWorkspaceAction?: (action: 'add' | 'active', payload?: any) => Promise<void> | void;
+    onVaultAction?: (action: 'merge-preview' | 'merge' | 'health' | 'repair' | 'backup' | 'export' | 'import', payload?: any) => Promise<void> | void;
   } = {}
 ) {
   let items = cloneItems();
@@ -148,13 +149,35 @@ async function installMockVaultApi(
       exists: true
     }
   ];
+  let vaultActive = 'default';
+  let vaultItems = [
+    {
+      id: 'default',
+      name: 'Default',
+      root: 'C:/ObsidianVault/lmz/data/vaults/default',
+      active: true,
+      exists: true,
+      item_count: items.length
+    },
+    {
+      id: 'archive',
+      name: 'Archive',
+      root: 'C:/ObsidianVault/lmz/data/vaults/archive',
+      active: false,
+      exists: true,
+      item_count: 2
+    }
+  ];
   const appConfig = {
     _runtime: {
       config_path: 'C:/ObsidianVault/lmz/config.yaml',
       config_root: 'C:/ObsidianVault/lmz',
       topic_root: 'C:/ObsidianVault/lmz/data/topics',
       workspace_mode: 'obsidian',
-      workspace_label: 'Obsidian workspace'
+      workspace_label: 'Obsidian workspace',
+      active_vault: 'default',
+      active_vault_name: 'Default',
+      active_vault_root: 'C:/ObsidianVault/lmz/data/vaults/default'
     },
     ui: {
       vault_layout_mode: 'masonry',
@@ -239,6 +262,55 @@ async function installMockVaultApi(
         }
       ];
       return fulfillJson(route, { status: 'success', active: workspaceActive, restart_required: false, items: workspaceItems });
+    }
+    return fulfillJson(route, { detail: 'not found' }, 404);
+  });
+  await page.route('**/api/vaults**', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const mergeMatch = url.pathname.match(/\/api\/vaults\/([^/]+)\/(merge-preview|merge)$/);
+    const utilityMatch = url.pathname.match(/\/api\/vaults\/([^/]+)\/(health|repair|backup|export)$/);
+    if (url.pathname === '/api/vaults' && request.method() === 'GET') {
+      return fulfillJson(route, { active: vaultActive, items: vaultItems });
+    }
+    if (mergeMatch && request.method() === 'POST') {
+      const payload = JSON.parse(request.postData() || '{}');
+      const action = mergeMatch[2] as 'merge-preview' | 'merge';
+      await options.onVaultAction?.(action, payload);
+      const response = {
+        target: mergeMatch[1],
+        sources: [{ id: 'archive', items: 2, duplicates: 1, importable: 1 }],
+        total_items: 2,
+        duplicates: 1,
+        importable: 1,
+        imported: action === 'merge' ? 1 : undefined,
+        skipped: action === 'merge' ? 1 : undefined
+      };
+      return fulfillJson(route, response);
+    }
+    if (utilityMatch) {
+      const action = utilityMatch[2] as 'health' | 'repair' | 'backup' | 'export';
+      await options.onVaultAction?.(action);
+      if (action === 'health') {
+        return fulfillJson(route, {
+          status: 'success',
+          vault: utilityMatch[1],
+          issue_count: 3,
+          missing_files: { asset: ['missing.jpg'], note: [], wd: [], thumb: [] },
+          orphans: { assets: ['orphan.jpg'], notes: [], wd_cache: [], thumbnails: [] },
+          facet_drift: ['topic']
+        });
+      }
+      if (action === 'repair') {
+        return fulfillJson(route, { status: 'success', after: { issue_count: 0, missing_files: {}, orphans: {}, facet_drift: [] } });
+      }
+      return fulfillJson(route, { status: 'success', package_path: `C:/ObsidianVault/lmz/${action}s/default.lmzvault.zip` });
+    }
+    if (url.pathname === '/api/vaults/import' && request.method() === 'POST') {
+      const payload = JSON.parse(request.postData() || '{}');
+      await options.onVaultAction?.('import', payload);
+      vaultItems = [...vaultItems, { id: 'imported', name: payload.name || 'Imported', root: 'C:/Imported', active: false, exists: true, item_count: 0 }];
+      return fulfillJson(route, { status: 'success', vault: 'imported', items: vaultItems });
     }
     return fulfillJson(route, { detail: 'not found' }, 404);
   });
@@ -593,6 +665,8 @@ async function openMockVault(
     onMaintenanceAction?: (action: 'auth' | 'metadata' | 'review') => Promise<void> | void;
     onItemsRequest?: (url: URL) => Promise<void> | void;
     onItemPatch?: (payload: any) => Promise<void> | void;
+    onWorkspaceAction?: (action: 'add' | 'active', payload?: any) => Promise<void> | void;
+    onVaultAction?: (action: 'merge-preview' | 'merge' | 'health' | 'repair' | 'backup' | 'export' | 'import', payload?: any) => Promise<void> | void;
   } = {}
 ) {
   await installMockVaultApi(page, options);
@@ -946,7 +1020,7 @@ test('settings registers and activates workspaces for next restart', async ({ pa
   await page.getByRole('button', { name: /Settings/ }).click();
 
   await expect(page.getByText('Default').first()).toBeVisible();
-  await page.getByRole('button', { name: 'Activate' }).click();
+  await page.getByRole('button', { name: 'Activate' }).first().click();
   await expect(page.getByText('Restart required to use the selected workspace.')).toBeVisible();
 
   await page.getByPlaceholder('Obsidian vault path').fill('F:/Archive/Main');
@@ -958,6 +1032,35 @@ test('settings registers and activates workspaces for next restart', async ({ pa
     { action: 'active', payload: { id: 'obsidian-main' } },
     { action: 'add', payload: { path: 'F:/Archive/Main', name: 'Main Vault' } }
   ]);
+});
+
+test('settings previews vault merge and runs vault health package actions', async ({ page }) => {
+  const actions: Array<{ action: string; payload?: any }> = [];
+  await openMockVault(page, {
+    onVaultAction: (action, payload) => actions.push({ action, payload })
+  });
+  page.on('dialog', async (dialog) => dialog.accept());
+  await page.getByRole('button', { name: /Settings/ }).click();
+
+  await page.getByRole('checkbox', { name: 'Archive' }).check();
+  await page.getByRole('button', { name: 'Preview Merge' }).click();
+  await expect(page.getByText('1 importable').first()).toBeVisible();
+  await page.getByRole('button', { name: 'Merge', exact: true }).click();
+  await expect(page.getByText('merged 1 items')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Audit Vault Health' }).click();
+  await expect(page.getByText('3 issues').first()).toBeVisible();
+  await page.getByRole('button', { name: 'Repair Active Vault' }).click();
+  await expect(page.getByText(/0 total remain/)).toBeVisible();
+
+  await page.getByRole('button', { name: 'Backup Vault' }).click();
+  await expect(page.getByText(/backup: C:\/ObsidianVault/)).toBeVisible();
+  await page.getByPlaceholder('Vault package path').fill('C:/Exports/default.lmzvault.zip');
+  await page.getByPlaceholder('Imported vault name').fill('Imported');
+  await page.getByRole('button', { name: 'Import Vault' }).click();
+  await expect(page.getByText('imported imported')).toBeVisible();
+
+  expect(actions.map((entry) => entry.action)).toEqual(['merge-preview', 'merge', 'health', 'repair', 'backup', 'import']);
 });
 
 test('settings metadata rebuild shows progress only for maintenance job', async ({ page }) => {

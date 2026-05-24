@@ -626,6 +626,118 @@ def test_vault_api_creates_sets_active_and_rejects_active_delete(monkeypatch, tm
     assert exc.value.status_code == 400
 
 
+def test_vault_rename_delete_confirm_and_missing_errors(monkeypatch, tmp_path):
+    web_api, vaults = fresh_backend(monkeypatch, tmp_path, "web_api", "vaults")
+
+    web_api._create_vault_sync({"name": "Temporary Vault"})
+    renamed = web_api._rename_vault_sync("temporary-vault", {"name": "Renamed Vault"})
+    assert any(item["id"] == "temporary-vault" and item["name"] == "Renamed Vault" for item in renamed["items"])
+
+    with pytest.raises(HTTPException) as missing:
+        web_api._rename_vault_sync("missing-vault", {"name": "Missing"})
+    assert missing.value.status_code == 404
+
+    with pytest.raises(HTTPException) as needs_confirm:
+        web_api._delete_vault_sync("temporary-vault", confirm=False)
+    assert needs_confirm.value.status_code == 400
+
+    deleted = web_api._delete_vault_sync("temporary-vault", confirm=True)
+    assert all(item["id"] != "temporary-vault" for item in deleted["items"])
+
+    with pytest.raises(HTTPException) as missing_delete:
+        web_api._delete_vault_sync("temporary-vault", confirm=True)
+    assert missing_delete.value.status_code == 404
+
+
+def test_vault_health_reports_orphans_and_stale_index_rows(monkeypatch, tmp_path):
+    vaults, sqlite_operator = fresh_backend(monkeypatch, tmp_path, "vaults", "db.sqlite_operator")
+    conn = insert_mock_item(sqlite_operator, "cd" * 32)
+    conn.execute("PRAGMA foreign_keys=OFF")
+    conn.execute("INSERT INTO item_topics(item_hash, topic, topic_norm, topic_rel, topic_key) VALUES (?, 'Ghost', 'ghost', '', 'plain:ghost')", ("missing",))
+    conn.commit()
+    conn.close()
+
+    default = next(item for item in vaults.vault_list() if item["id"] == "default")
+    orphan = Path(default["root"]) / "vault" / "assets" / "zz" / "orphan.jpg"
+    orphan.parent.mkdir(parents=True, exist_ok=True)
+    orphan.write_bytes(b"orphan")
+
+    report = vaults.audit_vault_health("default")
+
+    assert report["status"] == "success"
+    assert report["stale_index_rows"]["topics"] == 1
+    assert str(orphan) in report["orphans"]["assets"]
+    assert report["issue_count"] >= 2
+
+
+def test_vault_repair_wd_tagging_creates_cache_and_reindexes(monkeypatch, tmp_path):
+    vaults, sqlite_operator, utils = fresh_backend(monkeypatch, tmp_path, "vaults", "db.sqlite_operator", "utils")
+    item_hash = "ef" * 32
+    conn = insert_mock_item(sqlite_operator, item_hash)
+    storage_id = storage_id_for(conn, item_hash)
+    asset_path = utils.asset_path_for(item_hash, ".jpg", "image/jpeg", storage_id=storage_id)
+    asset_path.parent.mkdir(parents=True, exist_ok=True)
+    asset_path.write_bytes(b"not a real image")
+    write_compact_note(utils, conn, item_hash, "---\ntopics: []\n---\n")
+    conn.close()
+
+    service = importlib.import_module("tagging.service")
+    real_result = service.TagResult(
+        hash=item_hash,
+        status="ok",
+        model="fake",
+        threshold=0.35,
+        created_at="2026-01-01 00:00:00",
+        rating={"label": "safe"},
+        character_tags=[{"name": "character one"}],
+        tags=[{"name": "general one"}],
+    )
+
+    def fake_tag_media(media_path, item_hash=None, config=None, storage_id=None):
+        cache_path = utils.wd_tag_cache_path_for(item_hash, storage_id)
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        cache_path.write_text(json.dumps(real_result.to_dict()), encoding="utf-8")
+        return real_result
+
+    monkeypatch.setattr(service, "tag_media", fake_tag_media)
+
+    result = vaults.repair_vault("default", actions=["wd_tagging"])
+
+    conn = sqlite_operator.init_database()
+    try:
+        rows = conn.execute("SELECT tag_type, tag FROM item_wd_tags WHERE item_hash = ? ORDER BY tag_type, tag", (item_hash,)).fetchall()
+    finally:
+        conn.close()
+    note_data = frontmatter_from_markdown(utils.note_path_for(item_hash, storage_id).read_text(encoding="utf-8"))
+
+    assert result["wd_tagging"]["tagged"] == 1
+    assert utils.wd_tag_cache_path_for(item_hash, storage_id).exists()
+    assert note_data["wd_rating"] == "safe"
+    assert note_data["wd_character_tags"] == ["character one"]
+    assert note_data["wd_tags"] == ["general one"]
+    assert ("general", "general one") in rows
+    assert ("character", "character one") in rows
+
+
+def test_vault_backup_export_and_import_package(monkeypatch, tmp_path):
+    vaults = fresh_backend(monkeypatch, tmp_path, "vaults")[0]
+    source = vaults.create_vault("Portable Vault")
+    source_root = Path(next(item["root"] for item in source["items"] if item["id"] == "portable-vault"))
+    marker = source_root / "vault" / "notes" / "aa" / "marker.md"
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text("portable", encoding="utf-8")
+
+    backup = vaults.backup_vault("portable-vault")
+    exported = vaults.export_vault("portable-vault")
+    assert Path(backup["package_path"]).exists()
+    assert Path(exported["package_path"]).exists()
+
+    imported = vaults.import_vault_package(backup["package_path"], name="Imported Portable")
+    imported_root = Path(next(item["root"] for item in imported["items"] if item["id"] == "imported-portable"))
+
+    assert (imported_root / "vault" / "notes" / "aa" / "marker.md").read_text(encoding="utf-8") == "portable"
+
+
 def test_active_workspace_and_vault_switches_are_preflight_guarded(monkeypatch, tmp_path):
     web_api, vaults, workspaces = fresh_backend(monkeypatch, tmp_path, "web_api", "vaults", "workspaces")
     registry_path = tmp_path / "workspaces.yaml"
@@ -714,7 +826,7 @@ def test_vault_merge_reallocates_storage_ids_and_keeps_source(monkeypatch, tmp_p
     source_asset.write_bytes(b"asset")
     source_note.write_text("---\ntopics: []\n---\n", encoding="utf-8")
 
-    result = vaults.merge_vaults("target", ["source"])
+    result = vaults.merge_vaults("target", ["source"], delete_sources=False)
 
     target_conn = sqlite3.connect(items["target"]["db_path"])
     source_conn = sqlite3.connect(items["source"]["db_path"])
