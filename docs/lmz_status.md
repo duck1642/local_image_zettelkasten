@@ -1,6 +1,6 @@
   # LMZ Current Status
 
-Last updated: 2026-05-22
+Last updated: 2026-05-24
 
 ## Current Status
 
@@ -212,6 +212,11 @@ VSCode-friendly test launchers:
 - Review panel design refinement.
 - Fullscreen board/view refinements.
 - Inspector polish and better tag workflows.
+- Icon system policy:
+  - use local named Svelte icon components from `frontend/src/lib/icons/`.
+  - keep the app local-first: do not add `lucide-svelte` as a runtime dependency by default.
+  - use Lucide as a source/catalog when useful, but vendor only selected SVG paths into local icon components.
+  - do not dump the full Lucide icon pack into the repo unless a future broad icon-browser workflow needs it.
 - Custom context menu for vault tiles.
 - Animation-aware GIF handling beyond first-frame thumbnail/tag behavior.
 - Video hover preview strategy:

@@ -5,6 +5,7 @@
   import { apiFetch } from './api';
   import { log as uiLog } from './logger';
   import { runtimeSessionKey } from './runtimeStore';
+  import { IconClose } from './icons';
 
   const dispatch = createEventDispatcher();
   export let externalQuery: { id: string; query: string } | null = null;
@@ -287,10 +288,7 @@
     />
     {#if searchQuery.trim() || hasActiveFilters(activeFilters)}
       <button class="clear-search" on:click={clearSearch} title="Clear Search">
-        <svg viewBox="0 0 24 24" width="11" height="11" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
-          <line x1="18" y1="6" x2="6" y2="18"></line>
-          <line x1="6" y1="6" x2="18" y2="18"></line>
-        </svg>
+        <IconClose size={11} />
       </button>
     {/if}
     {#if showSuggestions && suggestions.length > 0}

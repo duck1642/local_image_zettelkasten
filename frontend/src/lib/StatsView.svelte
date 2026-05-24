@@ -9,6 +9,7 @@
   import MetadataActionModal from './stats/MetadataActionModal.svelte';
   import StatsControls from './stats/StatsControls.svelte';
   import StatsFilterBar from './stats/StatsFilterBar.svelte';
+  import { IconClose, IconPlus } from './icons';
   import {
     addArtistAlias,
     addArtistLink,
@@ -710,18 +711,19 @@
             disabled={topicCreateBusy}
             on:keydown={handleTopicCreateKeydown}
           />
-          <button type="button" title="Create topic" aria-label="Create topic" disabled={topicCreateBusy || !topicCreateValue.trim()} on:click={confirmTopicCreate}>+</button>
+          <button type="button" title="Create topic" aria-label="Create topic" disabled={topicCreateBusy || !topicCreateValue.trim()} on:click={confirmTopicCreate}>
+            <IconPlus size={12} />
+          </button>
           <button type="button" title="Cancel" aria-label="Cancel" disabled={topicCreateBusy} on:click={closeTopicCreate}>
-            <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
-              <line x1="18" y1="6" x2="6" y2="18"></line>
-              <line x1="6" y1="6" x2="18" y2="18"></line>
-            </svg>
+            <IconClose size={12} />
           </button>
           {#if topicCreateError}
             <span class="topic-create-error">{topicCreateError}</span>
           {/if}
         {:else}
-          <button class="topic-create-toggle" type="button" title="Create topic" aria-label="Create topic" on:click={openTopicCreate}>+</button>
+          <button class="topic-create-toggle" type="button" title="Create topic" aria-label="Create topic" on:click={openTopicCreate}>
+            <IconPlus size={12} />
+          </button>
         {/if}
       </div>
     {/if}

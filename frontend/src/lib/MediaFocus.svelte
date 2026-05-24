@@ -4,6 +4,17 @@
   import { log as uiLog } from './logger';
   import { apiUrl } from './api';
   import { isImageMedia, isVideoMedia } from './media';
+  import {
+    IconChevronLeft,
+    IconChevronRight,
+    IconChevronUp,
+    IconClose,
+    IconKeyboard,
+    IconMaximizeDiagonal,
+    IconMinimizeDiagonal,
+    IconMinus,
+    IconPlus
+  } from './icons';
 
   export let item: any;
   export let group: any = null;
@@ -334,52 +345,34 @@
       {#if mode === 'fullscreen' && isImageMedia(item)}
         <div class="zoom-controls">
           <button class="icon-btn" title="Zoom Out (-)" on:click={() => zoomFromCenter(-KEYBOARD_STEP)}>
-            <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2.5" fill="none"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+            <IconMinus size={16} />
           </button>
           <button type="button" class="zoom-pill" class:active={scale > 1} on:click={resetZoom} title="Reset Zoom">
             {Math.round(scale * 100)}%
           </button>
           <button class="icon-btn" title="Zoom In (+)" on:click={() => zoomFromCenter(KEYBOARD_STEP)}>
-            <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2.5" fill="none"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+            <IconPlus size={16} />
           </button>
         </div>
       {/if}
 
       <!-- Keyboard Shortcuts HUD Toggle -->
       <button class="icon-btn" class:active={showShortcutsLegend} title="Keyboard Shortcuts Legend" on:click={() => showShortcutsLegend = !showShortcutsLegend}>
-        <svg viewBox="0 0 24 24" width="21" height="21" stroke="currentColor" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="2" y="4" width="20" height="16" rx="2" ry="2"></rect>
-          <line x1="6" y1="8" x2="6.01" y2="8"></line>
-          <line x1="10" y1="8" x2="10.01" y2="8"></line>
-          <line x1="14" y1="8" x2="14.01" y2="8"></line>
-          <line x1="18" y1="8" x2="18.01" y2="8"></line>
-          <line x1="6" y1="12" x2="6.01" y2="12"></line>
-          <line x1="10" y1="12" x2="10.01" y2="12"></line>
-          <line x1="14" y1="12" x2="14.01" y2="12"></line>
-          <line x1="18" y1="12" x2="18.01" y2="12"></line>
-          <line x1="7" y1="16" x2="17" y2="16"></line>
-        </svg>
+        <IconKeyboard size={21} strokeWidth={2.2} />
       </button>
 
       <!-- Fullscreen / Wide Toggle -->
       <button class="icon-btn" title={mode === 'fullscreen' ? 'Exit Fullscreen (F)' : 'Enter Fullscreen (F)'} on:click={toggleMode}>
         {#if mode === 'fullscreen'}
-          <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M4 14h6v6M20 10h-6V4M14 10l7-7M10 14l-7 7"></path>
-          </svg>
+          <IconMinimizeDiagonal size={20} />
         {:else}
-          <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"></path>
-          </svg>
+          <IconMaximizeDiagonal size={20} />
         {/if}
       </button>
 
       <!-- Crisp Close Button -->
       <button class="close-btn-header" title="Exit (Esc)" on:click={() => close('Close Button Header Clicked')}>
-        <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
-          <line x1="18" y1="6" x2="6" y2="18"></line>
-          <line x1="6" y1="6" x2="18" y2="18"></line>
-        </svg>
+        <IconClose size={20} />
       </button>
     </div>
   </header>
@@ -406,14 +399,10 @@
   <!-- Beautiful Circular Glass Navigation Arrows -->
   {#if hasGroupFilmstrip}
     <button class="nav-btn-rect prev" class:hidden={!controlsVisible} aria-label="Previous item" on:click|stopPropagation={prevItem}>
-      <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round">
-        <polyline points="15 18 9 12 15 6"></polyline>
-      </svg>
+      <IconChevronLeft size={24} strokeWidth={3} />
     </button>
     <button class="nav-btn-rect next" class:hidden={!controlsVisible} aria-label="Next item" on:click|stopPropagation={nextItem}>
-      <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round">
-        <polyline points="9 18 15 12 9 6"></polyline>
-      </svg>
+      <IconChevronRight size={24} strokeWidth={3} />
     </button>
   {/if}
 
@@ -455,9 +444,7 @@
   {#if hasGroupFilmstrip}
     <button class="filmstrip-toggle" class:hidden={!controlsVisible} class:open={filmstripOpen} aria-label="Toggle filmstrip" on:click|stopPropagation={() => filmstripOpen = !filmstripOpen}>
       <span class="toggle-text">{filmstripOpen ? 'Hide Filmstrip' : 'Show Filmstrip'}</span>
-      <svg class="chevron-icon" viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
-        <polyline points="18 15 12 9 6 15"></polyline>
-      </svg>
+      <IconChevronUp size={14} className="chevron-icon" />
     </button>
 
     {#if filmstripOpen}
@@ -591,8 +578,8 @@
     cursor: pointer;
   }
 
-  .icon-btn svg,
-  .close-btn-header svg {
+  .icon-btn :global(svg),
+  .close-btn-header :global(svg) {
     width: 20px !important;
     height: 20px !important;
     stroke-width: 2.5px !important;
@@ -892,7 +879,7 @@
     background: rgba(13, 17, 23, 0.95);
   }
 
-  .filmstrip-toggle.open .chevron-icon {
+  .filmstrip-toggle.open :global(.chevron-icon) {
     transform: rotate(180deg);
   }
 

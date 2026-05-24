@@ -3,6 +3,7 @@
   import { createEventDispatcher } from 'svelte';
   import { apiUrl } from './api';
   import { isImageMedia, isVideoMedia } from './media';
+  import { IconChevronLeft, IconChevronRight } from './icons';
   
   export let group: { id: string, items: VaultItem[] };
   export let selectedHash: string | undefined = '';
@@ -66,15 +67,11 @@
         {#if group.items.length > 1}
             <div class="controls">
                 <button class="nav-btn" on:click={prev} title="Previous Item">
-                    <svg viewBox="0 0 24 24" width="11" height="11" stroke="currentColor" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round">
-                        <polyline points="15 18 9 12 15 6"></polyline>
-                    </svg>
+                    <IconChevronLeft size={11} strokeWidth={3} />
                 </button>
                 <div class="counter">{index + 1} / {group.items.length}</div>
                 <button class="nav-btn" on:click={next} title="Next Item">
-                    <svg viewBox="0 0 24 24" width="11" height="11" stroke="currentColor" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round">
-                        <polyline points="9 18 15 12 9 6"></polyline>
-                    </svg>
+                    <IconChevronRight size={11} strokeWidth={3} />
                 </button>
             </div>
         {/if}
@@ -155,7 +152,7 @@
   }
   .nav-btn:hover { border-color: var(--accent-primary); }
 
-  .nav-btn svg {
+  .nav-btn :global(svg) {
     display: block;
   }
 

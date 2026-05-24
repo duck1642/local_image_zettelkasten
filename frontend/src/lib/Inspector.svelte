@@ -1,11 +1,15 @@
 <script lang="ts">
   import type { VaultItem } from './types';
-  import { createEventDispatcher, onDestroy, tick } from 'svelte';
+  import { createEventDispatcher, onDestroy } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { log as uiLog } from './logger';
-  import { apiFetch, apiUrl } from './api';
-  import { isImageMedia, isVideoMedia } from './media';
+  import { apiFetch } from './api';
   import { runtimeSessionKey } from './runtimeStore';
+  import InspectorMediaPreview from './InspectorMediaPreview.svelte';
+  import InspectorMetadataGrid from './InspectorMetadataGrid.svelte';
+  import InspectorTopicEditor from './InspectorTopicEditor.svelte';
+  import InspectorWdSuggestions from './InspectorWdSuggestions.svelte';
+  import { IconCopy, IconFileText, IconFolder, IconSparkles, IconTrash } from './icons';
   import MetadataActionModal from './stats/MetadataActionModal.svelte';
   import { renameTopic } from './stats/statsApi';
 
@@ -20,7 +24,6 @@
   let savedArtist = '';
   let sourceUrl = '';
   let platform = '';
-  let topics: string[] = [];
   let savedTopics: string[] = [];
   let draftTopics: string[] = [];
   let topicInputOpen = false;
@@ -39,7 +42,6 @@
   let savedWdGeneral: string[] = [];
   let draftWdGeneral: string[] = [];
   let isDirty = false;
-  let loading = false;
   let loadingTimeout: any = null;
   let showLoadingIndicator = false;
   let tagging = false;
@@ -82,10 +84,9 @@
       const payload = await renameTopic(renameModalValue, renameModalNewValue);
       const newLabel = String(payload.new_label || renameModalNewValue.trim());
       
-      // Update draftTopics, savedTopics, topics in local state
+      // Update draftTopics and savedTopics in local state
       draftTopics = draftTopics.map((t) => t === renameModalValue ? newLabel : t);
       savedTopics = savedTopics.map((t) => t === renameModalValue ? newLabel : t);
-      topics = [...draftTopics];
       
       // If fullItem holds details, refresh counts or update fullItem.topics
       if (fullItem && Array.isArray(fullItem.topics)) {
@@ -123,7 +124,7 @@
     }
   }
 
-  let videoElement: HTMLVideoElement | undefined;
+  let previewVideoTime = 0;
 
   $: if (item) {
       if (item.hash !== lastLoadedHash) loadFullDetails(item.hash);
@@ -152,7 +153,6 @@
       loadingTimeout = null;
     }
     
-    loading = true;
     showLoadingIndicator = false;
     
     // Only trigger loading overlay and clear details if it takes longer than 200ms
@@ -184,14 +184,8 @@
             fullItem = null;
             uiLog('ERROR', 'Failed to load item details', { hash, error: String(e) });
         }
-    } finally {
-        if (!signal.aborted) {
-            loading = false;
-        }
     }
   }
-
-  function handleInput() {}
 
   function normalizeList(values: unknown): string[] {
     if (!Array.isArray(values)) return [];
@@ -219,7 +213,6 @@
     savedArtist = '';
     sourceUrl = '';
     platform = '';
-    topics = [];
     savedTopics = [];
     draftTopics = [];
     topicInputOpen = false;
@@ -231,7 +224,6 @@
     draftWdCharacters = [];
     savedWdGeneral = [];
     draftWdGeneral = [];
-    loading = false;
     tagging = false;
     lastLoadedHash = null;
   }
@@ -249,7 +241,6 @@
     platform = detail.platform || '';
     savedTopics = normalizeList(detail.topics || []);
     draftTopics = [...savedTopics];
-    topics = draftTopics;
     savedWdRating = detail.wd_tags?.rating && detail.wd_tags.rating !== 'None' ? String(detail.wd_tags.rating) : '';
     draftWdRating = savedWdRating;
     savedWdCharacters = normalizeList(detail.wd_tags?.characters || []);
@@ -307,13 +298,10 @@
       return;
     }
     draftTopics = [...draftTopics, clean];
-    topics = draftTopics;
   }
 
-  async function openTopicInput() {
+  function openTopicInput() {
     topicInputOpen = true;
-    await tick();
-    topicInputElement?.focus();
     fetchTopicSuggestions('');
   }
 
@@ -389,7 +377,6 @@
     const key = clean.toLocaleLowerCase();
     if (draftTopics.some((topic) => topic.toLocaleLowerCase() === key)) return;
     draftTopics = [...draftTopics, clean];
-    topics = draftTopics;
   }
 
   function addDraftTopic() {
@@ -437,7 +424,6 @@
   function removeDraftTopic(value: string) {
     const key = String(value || '').trim().toLocaleLowerCase();
     draftTopics = draftTopics.filter((topic) => topic.toLocaleLowerCase() !== key);
-    topics = draftTopics;
   }
 
   function removeDraftWdTag(kind: 'rating' | 'character' | 'general', value: string) {
@@ -478,21 +464,51 @@
 
   async function save() {
     if (!item) return;
+    const savedSnapshot = {
+      artist,
+      topics: [...draftTopics],
+      wdRating: draftWdRating,
+      wdCharacters: [...draftWdCharacters],
+      wdGeneral: [...draftWdGeneral]
+    };
     try {
       const res = await apiFetch(`/api/items/${item.hash}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          artist,
-          topics: draftTopics,
-          wd_rating: draftWdRating,
-          wd_character_tags: draftWdCharacters,
-          wd_tags: draftWdGeneral
+          artist: savedSnapshot.artist,
+          topics: savedSnapshot.topics,
+          wd_rating: savedSnapshot.wdRating,
+          wd_character_tags: savedSnapshot.wdCharacters,
+          wd_tags: savedSnapshot.wdGeneral
         })
       });
       if (!res.ok) throw new Error('Failed to save');
       const detail = await res.json();
       applyLoadedDetails(detail);
+      savedArtist = savedSnapshot.artist;
+      artist = savedSnapshot.artist;
+      savedTopics = [...savedSnapshot.topics];
+      draftTopics = [...savedSnapshot.topics];
+      savedWdRating = savedSnapshot.wdRating;
+      draftWdRating = savedSnapshot.wdRating;
+      savedWdCharacters = [...savedSnapshot.wdCharacters];
+      draftWdCharacters = [...savedSnapshot.wdCharacters];
+      savedWdGeneral = [...savedSnapshot.wdGeneral];
+      draftWdGeneral = [...savedSnapshot.wdGeneral];
+      if (fullItem) {
+        fullItem = {
+          ...fullItem,
+          artist: savedSnapshot.artist,
+          topics: [...savedSnapshot.topics],
+          wd_tags: {
+            ...(fullItem.wd_tags || {}),
+            rating: savedSnapshot.wdRating || 'None',
+            characters: [...savedSnapshot.wdCharacters],
+            general: [...savedSnapshot.wdGeneral]
+          }
+        };
+      }
       dispatch('updated', { hash: item.hash, artist, source_url: sourceUrl, platform });
       uiLog('INFO', `Metadata saved for ${item.hash.substring(0, 12)}`);
     } catch (e) {
@@ -572,8 +588,7 @@
         .catch(e => uiLog('ERROR', 'Failed to copy hash', { error: String(e) }));
   }
 
-  function toggleFocus(mode: 'wide' | 'fullscreen') {
-      const startTime = videoElement ? videoElement.currentTime : 0;
+  function toggleFocus(mode: 'wide' | 'fullscreen', startTime = previewVideoTime) {
       dispatch('focus', { mode, hash: item?.hash, startTime });
   }
 
@@ -633,145 +648,78 @@
       </div>
     {/if}
     {#if fullItem}
-      <!-- Pinned Header -->
-      <div class="inspector-header">
-        <div class="group-container media-preview">
-            {#if isImageMedia(item)}
-                <img src={apiUrl(item.thumbnail_url || item.url)} alt="Preview" />
-            {:else if isVideoMedia(item)}
-                <!-- svelte-ignore a11y-media-has-caption -->
-                <video
-                    bind:this={videoElement}
-                    src={apiUrl(item.url)}
-                    controls
-                    controlslist="nofullscreen"
-                    muted
-                    loop
-                    autoplay
-                ></video>
-            {:else}
-                <div class="unsupported-media">Unknown media type</div>
-            {/if}
-            <div class="media-overlay">
-                <button class="overlay-btn" title="Wide View" on:click={() => toggleFocus('wide')}>
-                    <svg viewBox="0 0 24 24" width="13" height="13" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M4 12h16M7 9l-3 3 3 3M17 9l3 3-3 3"></path>
-                    </svg>
-                </button>
-                <button class="overlay-btn" title="Fullscreen" on:click={() => toggleFocus('fullscreen')}>
-                    <svg viewBox="0 0 24 24" width="13" height="13" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path>
-                    </svg>
-                </button>
-            </div>
-        </div>
-
-        {#if group && group.items.length > 1}
-            <div class="group-nav group-container horizontal">
-                <button on:click={prevItem} title="Previous Item">
-                    <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
-                        <polyline points="15 18 9 12 15 6"></polyline>
-                    </svg>
-                </button>
-                <div class="counter">
-                    <span class="active-index">{currentIndex + 1}</span>
-                    <span class="sep">/</span>
-                    <span class="total-count">{group.items.length}</span>
-                </div>
-                <button on:click={nextItem} title="Next Item">
-                    <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
-                        <polyline points="9 18 15 12 9 6"></polyline>
-                    </svg>
-                </button>
-            </div>
-        {/if}
-      </div>
+      <InspectorMediaPreview
+        {item}
+        {group}
+        {currentIndex}
+        on:focus={(event) => toggleFocus(event.detail.mode, event.detail.startTime)}
+        on:prev={prevItem}
+        on:next={nextItem}
+        on:time={(event) => previewVideoTime = event.detail}
+      />
 
       <!-- Scrollable Body -->
       <div class="inspector-body">
-        <div class="metadata-grid">
-          <!-- Artist Row -->
-          <span class="grid-label">Artist</span>
-          <div class="grid-value">
-            <input
-              id="inspector-artist"
-              type="text"
-              bind:value={artist}
-              on:input={handleInput}
-              placeholder="Unknown Artist"
-              class="inline-input"
-            />
-          </div>
-
-          <!-- Platform Row -->
-          <span class="grid-label">Platform</span>
-          <div class="grid-value platform-row">
-            <span class="platform-text">{platform || 'Unknown'}</span>
-          </div>
-
-          <!-- Source URL Row -->
-          <span class="grid-label">Source</span>
-          <div class="grid-value source-row">
-            <input
-              type="text"
-              bind:value={sourceUrl}
-              placeholder="No Source URL"
-              readonly
-              class="inline-input read-only-input"
-            />
-            {#if sourceUrl}
-              <a href={sourceUrl} target="_blank" rel="noopener noreferrer" class="link-icon-btn" title="Open Source URL: {sourceUrl}">
-                <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
-                  <polyline points="15 3 21 3 21 9"></polyline>
-                  <line x1="10" y1="14" x2="21" y2="3"></line>
-                </svg>
-              </a>
-            {/if}
-          </div>
-
-          <!-- Hash Row -->
-          <span class="grid-label">Hash</span>
-          <div class="grid-value hash-row">
-            <span class="hash-text" title={item.hash}>{item.hash}</span>
-            <button class="icon-btn-compact" on:click={copyHash} title="Copy Hash">
-              <svg viewBox="0 0 24 24" width="11" height="11" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
-                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-              </svg>
-            </button>
-          </div>
-        </div>
+        <InspectorMetadataGrid
+          {item}
+          {artist}
+          {platform}
+          {sourceUrl}
+          on:artistChange={(event) => artist = event.detail}
+          on:copyHash={copyHash}
+        />
 
         <div class="group-container horizontal action-toolbar">
           <button class="toolbar-btn" on:click={openFolder} title="Open Folder (Reveal in File Explorer)">
-            <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
-            </svg>
+            <IconFolder size={14} />
           </button>
           <button class="toolbar-btn" on:click={openMarkdown} title="Open Note (Open Markdown in Obsidian)">
-            <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-              <polyline points="14 2 14 8 20 8"></polyline>
-              <line x1="16" y1="13" x2="8" y2="13"></line>
-              <line x1="16" y1="17" x2="8" y2="17"></line>
-              <polyline points="10 9 9 9 8 9"></polyline>
-            </svg>
+            <IconFileText size={14} />
           </button>
           <button class="toolbar-btn" on:click={copyFile} title="Copy File to Clipboard">
-            <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path>
-              <rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect>
-            </svg>
+            <IconCopy size={14} />
           </button>
           <button class="toolbar-btn delete-btn" on:click={deleteData} title="Permanently Delete Media, Note, and Database Record">
-            <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
-              <polyline points="3 6 5 6 21 6"></polyline>
-              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-            </svg>
+            <IconTrash size={14} />
           </button>
         </div>
 
+        <InspectorTopicEditor
+          {draftTopics}
+          {savedTopics}
+          topicCounts={fullItem.topic_counts}
+          inputOpen={topicInputOpen}
+          inputValue={topicInputValue}
+          suggestions={topicSuggestions}
+          suggestionsOpen={topicSuggestionsOpen}
+          suggestionsLoading={topicSuggestionsLoading}
+          activeSuggestionIndex={activeTopicSuggestionIndex}
+          normalizeLabel={normalizeTopicLabel}
+          on:openInput={openTopicInput}
+          on:inputChange={(event) => topicInputValue = event.detail}
+          on:queueSuggestions={queueTopicSuggestions}
+          on:fetchSuggestions={() => fetchTopicSuggestions(topicInputValue)}
+          on:inputKeydown={(event) => handleTopicInputKeydown(event.detail)}
+          on:inputBlur={handleTopicInputBlur}
+          on:add={addDraftTopic}
+          on:suggestionHover={(event) => activeTopicSuggestionIndex = event.detail}
+          on:selectSuggestion={(event) => selectTopicSuggestion(event.detail)}
+          on:removeTopic={(event) => removeDraftTopic(event.detail)}
+          on:renameTopic={(event) => openRenameTopicModal(event.detail)}
+        />
+
+        <InspectorWdSuggestions
+          rating={draftWdRating}
+          characters={draftWdCharacters}
+          general={draftWdGeneral}
+          wdTagCounts={fullItem.wd_tag_counts}
+          {isAlreadyTopic}
+          {isTagPromoted}
+          on:promote={(event) => promoteWdToTopic(event.detail)}
+          on:remove={(event) => removeDraftWdTag(event.detail.kind, event.detail.value)}
+        />
+
+        <div class="legacy-inspector-blocks">
         <div class="group-container">
           <!-- svelte-ignore a11y-label-has-associated-control -->
           <div class="section-heading">
@@ -897,11 +845,11 @@
           {/if}
         </div>
 
+        </div>
+
         <div class="action-footer">
             <button class="tag-btn" on:click={runTagging} disabled={tagging}>
-                <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round" class="btn-icon">
-                  <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"></path>
-                </svg>
+                <IconSparkles size={12} className="btn-icon" />
                 {tagging ? 'Tagging...' : 'Tag Media'}
             </button>
             
@@ -936,6 +884,7 @@
 
 <style>
   .inspector {
+    --inspector-scrollbar-gutter-width: 18px;
     background: var(--bg-main);
     display: flex;
     flex-direction: column;
@@ -946,7 +895,7 @@
     height: 100%;
   }
 
-  .inspector-header {
+  :global(.inspector-header) {
     display: flex;
     flex-direction: column;
     padding: 15px 15px 0 15px;
@@ -957,12 +906,34 @@
   .inspector-body {
     flex-grow: 1;
     overflow-y: auto;
+    scrollbar-gutter: stable;
     padding: 12px 15px;
     display: flex;
     flex-direction: column;
     gap: 12px;
-    scrollbar-width: thin;
-    scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+    scrollbar-width: auto;
+    scrollbar-color: rgba(255, 255, 255, 0.28) transparent;
+  }
+
+  .inspector-body::-webkit-scrollbar {
+    width: 16px;
+  }
+
+  .inspector-body::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .inspector-body::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.22);
+    border-radius: 10px;
+    border: 4px solid transparent;
+    background-clip: content-box;
+    min-height: 40px;
+  }
+
+  .inspector-body::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.34);
+    background-clip: content-box;
   }
 
 
@@ -976,7 +947,11 @@
     gap: 8px;
   }
 
-  .group-container.media-preview {
+  .legacy-inspector-blocks {
+    display: none;
+  }
+
+  :global(.group-container.media-preview) {
     padding: 0;
     overflow: hidden;
     position: relative;
@@ -985,14 +960,14 @@
     background: #000;
   }
 
-  .media-preview img, .media-preview video {
+  :global(.media-preview img), :global(.media-preview video) {
     width: 100%;
     height: 100%;
     object-fit: contain;
   }
-  .unsupported-media { min-height: 200px; display: flex; align-items: center; justify-content: center; color: var(--text-muted); font-size: 12px; }
+  :global(.unsupported-media) { min-height: 200px; display: flex; align-items: center; justify-content: center; color: var(--text-muted); font-size: 12px; }
 
-  .media-overlay {
+  :global(.media-overlay) {
       position: absolute;
       top: 10px;
       right: 10px;
@@ -1000,9 +975,9 @@
       gap: 5px;
       opacity: 0;
   }
-  .media-preview:hover .media-overlay { opacity: 1; }
+  :global(.media-preview:hover .media-overlay) { opacity: 1; }
 
-  .overlay-btn {
+  :global(.overlay-btn) {
       width: 30px;
       height: 30px;
       padding: 0;
@@ -1015,16 +990,16 @@
       cursor: pointer;
       border-radius: 6px;
   }
-  .overlay-btn:hover { background: var(--accent-primary); border-color: var(--accent-primary); }
+  :global(.overlay-btn:hover) { background: var(--accent-primary); border-color: var(--accent-primary); }
 
-  .group-nav {
+  :global(.group-nav) {
       align-items: center;
       justify-content: space-between;
       background: rgba(0, 0, 0, 0.15) !important;
       padding: 6px 12px !important;
       margin: 0;
   }
-  .group-nav button {
+  :global(.group-nav button) {
       width: 32px;
       height: 28px;
       padding: 0;
@@ -1036,16 +1011,16 @@
       border-radius: 6px;
       cursor: pointer;
   }
-  .group-nav button:hover:not(:disabled) {
+  :global(.group-nav button:hover:not(:disabled)) {
       background: rgba(255, 255, 255, 0.1);
       border-color: rgba(255, 255, 255, 0.2);
       color: var(--text-bright);
   }
-  .group-nav button:disabled {
+  :global(.group-nav button:disabled) {
       opacity: 0.3;
       cursor: not-allowed;
   }
-  .group-nav .counter {
+  :global(.group-nav .counter) {
       font-size: 11px;
       font-weight: bold;
       color: #8b949e;
@@ -1053,7 +1028,7 @@
       align-items: center;
       gap: 4px;
   }
-  .group-nav .active-index {
+  :global(.group-nav .active-index) {
       color: #8b949e;
       font-weight: bold;
   }
@@ -1168,7 +1143,7 @@
   .horizontal { flex-direction: row; gap: 20px; }
 
   /* Metadata Grid Styling */
-  .metadata-grid {
+  :global(.metadata-grid) {
     display: grid;
     grid-template-columns: 80px 1fr;
     row-gap: 6px;
@@ -1180,7 +1155,7 @@
     padding: 10px 12px;
   }
 
-  .grid-label {
+  :global(.grid-label) {
     font-size: 10px;
     color: var(--text-muted);
     font-weight: 700;
@@ -1189,13 +1164,13 @@
     user-select: none;
   }
 
-  .grid-value {
+  :global(.grid-value) {
     display: flex;
     align-items: center;
     min-width: 0;
   }
 
-  input.inline-input {
+  :global(input.inline-input) {
     width: 100%;
     height: 24px;
     padding: 2px 6px;
@@ -1210,44 +1185,44 @@
     box-shadow: none !important;
   }
 
-  input.inline-input:hover {
+  :global(input.inline-input:hover) {
     background: rgba(255, 255, 255, 0.03) !important;
     border-color: rgba(255, 255, 255, 0.08) !important;
   }
 
-  input.inline-input:focus {
+  :global(input.inline-input:focus) {
     background: var(--bg-input) !important;
     border-color: var(--accent-purple) !important;
     outline: none !important;
   }
 
-  input.inline-input.read-only-input {
+  :global(input.inline-input.read-only-input) {
     cursor: default;
     color: var(--text-muted);
   }
 
-  input.inline-input.read-only-input:hover {
+  :global(input.inline-input.read-only-input:hover) {
     background: transparent !important;
     border-color: transparent !important;
   }
 
-  input.inline-input.read-only-input:focus {
+  :global(input.inline-input.read-only-input:focus) {
     background: transparent !important;
     border-color: transparent !important;
   }
 
-  .platform-row {
+  :global(.platform-row) {
     display: flex;
     align-items: center;
   }
 
-  .platform-text {
+  :global(.platform-text) {
     font-size: 12px;
     font-weight: 600;
     color: var(--text-main);
   }
 
-  .source-row {
+  :global(.source-row) {
     display: flex;
     align-items: center;
     width: 100%;
@@ -1255,7 +1230,7 @@
     min-width: 0;
   }
 
-  .link-icon-btn {
+  :global(.link-icon-btn) {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -1267,13 +1242,13 @@
     flex-shrink: 0;
   }
 
-  .link-icon-btn:hover {
+  :global(.link-icon-btn:hover) {
     opacity: 1;
     background: rgba(31, 111, 235, 0.1);
     color: var(--text-bright);
   }
 
-  .hash-row {
+  :global(.hash-row) {
     display: flex;
     align-items: center;
     width: 100%;
@@ -1281,7 +1256,7 @@
     min-width: 0;
   }
 
-  .hash-text {
+  :global(.hash-text) {
     font-family: monospace;
     font-size: 11px;
     color: var(--text-muted);
@@ -1291,7 +1266,7 @@
     flex-grow: 1;
   }
 
-  .icon-btn-compact {
+  :global(.icon-btn-compact) {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -1306,7 +1281,7 @@
     flex-shrink: 0;
   }
 
-  .icon-btn-compact:hover {
+  :global(.icon-btn-compact:hover) {
     background: rgba(255, 255, 255, 0.08);
     color: var(--text-bright);
   }
@@ -1708,7 +1683,7 @@
     font-weight: 600;
   }
 
-  .btn-icon {
+  :global(.btn-icon) {
     margin-right: 4px;
     flex-shrink: 0;
   }

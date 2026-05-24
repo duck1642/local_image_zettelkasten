@@ -4,6 +4,20 @@
   import { log as uiLog } from './logger';
   import { refreshReviewCount } from './statsStore';
   import { runtimeSessionKey } from './runtimeStore';
+  import {
+    IconAlertTriangle,
+    IconCheckCircle,
+    IconChevronLeft,
+    IconChevronRight,
+    IconCopy,
+    IconEye,
+    IconImage,
+    IconInfoCircle,
+    IconRefresh,
+    IconReplace,
+    IconTrash,
+    IconVideo
+  } from './icons';
 
   interface ReviewItem {
     filename: string;
@@ -223,10 +237,7 @@
     </div>
   {:else if items.length === 0}
     <div class="centered-state empty-state">
-      <svg viewBox="0 0 24 24" width="48" height="48" stroke="currentColor" stroke-width="1.5" fill="none">
-        <circle cx="12" cy="12" r="10"></circle>
-        <path d="m9 12 2 2 4-4"></path>
-      </svg>
+      <IconCheckCircle size={48} strokeWidth={1.5} />
       <span>Review folder is completely empty.</span>
       <p class="sub-muted">Everything is perfectly ingested and categorized!</p>
     </div>
@@ -251,9 +262,9 @@
               <div class="queue-item-row">
                 <span class="media-icon-indicator" title={isVideoMedia(item) ? "Video File" : "Image File"}>
                   {#if isVideoMedia(item)}
-                    <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" stroke-width="2.5" fill="none"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>
+                    <IconVideo size={12} />
                   {:else}
-                    <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" stroke-width="2.5" fill="none"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+                    <IconImage size={12} />
                   {/if}
                 </span>
                 <span class="queue-name truncate">{displayName(item)}</span>
@@ -274,7 +285,7 @@
             <button class="queue-item cleanup" class:active={item.filename === current?.filename} on:click={() => selectItem(item)}>
               <div class="queue-item-row">
                 <span class="media-icon-indicator warn">
-                  <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" stroke-width="2.5" fill="none"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+                  <IconAlertTriangle size={12} />
                 </span>
                 <span class="queue-name truncate">{displayName(item)}</span>
               </div>
@@ -336,7 +347,7 @@
           <!-- Big Action Button Area -->
           <div class="action-bar">
             <button class="action-big retry-btn" on:click={retryCleanup} disabled={acting}>
-              <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2.5" fill="none"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+              <IconRefresh size={14} />
               <span>Retry Cleanup & Delete Staged File</span>
             </button>
           </div>
@@ -373,11 +384,7 @@
                 {/if}
               {:else if mediaMounted}
                 <div class="no-match">
-                  <svg viewBox="0 0 24 24" width="36" height="36" stroke="currentColor" stroke-width="1.5" fill="none">
-                    <circle cx="12" cy="12" r="10"></circle>
-                    <path d="M12 8v4"></path>
-                    <path d="M12 16h.01"></path>
-                  </svg>
+                  <IconInfoCircle size={36} strokeWidth={1.5} />
                   <span>No best-match duplicates detected in vault.</span>
                   <p class="sub-muted">This file appears to be entirely unique.</p>
                 </div>
@@ -397,27 +404,22 @@
           <div class="action-bar">
             <!-- Keep: Leaves file in review staging -->
             <button class="action-big keep-btn" on:click={() => handleAction('keep')} disabled={acting}>
-              <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2.5" fill="none"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+              <IconEye size={14} />
               <span>Keep Staged</span>
             </button>
             <!-- Save Variant: Ingests new variant cleanly without replacing matching vault item -->
             <button class="action-big variant-btn" on:click={() => handleAction('variant')} disabled={acting}>
-              <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2.5" fill="none"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+              <IconCopy size={14} />
               <span>Save as Variant</span>
             </button>
             <!-- Replace: Replaces the duplicate matching file in Vault, preserving manual YAML tags -->
             <button class="action-big replace-btn" on:click={() => handleAction('replace')} disabled={acting}>
-              <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2.5" fill="none"><polyline points="17 1 21 5 17 9"></polyline><path d="M3 11V9a4 4 0 0 1 4-4h14"></path><polyline points="7 23 3 19 7 15"></polyline><path d="M21 13v2a4 4 0 0 1-4 4H3"></path></svg>
+              <IconReplace size={14} />
               <span>Replace Vault Copy</span>
             </button>
             <!-- Delete: Deletes the staged file from Review immediately -->
             <button class="action-big delete-btn" on:click={() => handleAction('delete')} disabled={acting}>
-              <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
-                <polyline points="3 6 5 6 21 6"></polyline>
-                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                <line x1="10" y1="11" x2="10" y2="17"></line>
-                <line x1="14" y1="11" x2="14" y2="17"></line>
-              </svg>
+              <IconTrash size={14} />
               <span>Delete Staged</span>
             </button>
           </div>
@@ -426,7 +428,7 @@
         <!-- Queue Nav Bar -->
         <div class="nav-bar">
           <button class="nav-arrow-btn" on:click={() => selectRelative(-1)} disabled={currentSectionIndex <= 0}>
-            <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
+            <IconChevronLeft size={14} />
             <span>Previous</span>
           </button>
           <div class="counter">
@@ -434,7 +436,7 @@
           </div>
           <button class="nav-arrow-btn" on:click={() => selectRelative(1)} disabled={currentSectionIndex >= currentSectionItems.length - 1}>
             <span>Next</span>
-            <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+            <IconChevronRight size={14} />
           </button>
         </div>
       </section>
@@ -785,7 +787,7 @@
     padding: 30px;
   }
 
-  .no-match svg {
+  .no-match :global(svg) {
     color: var(--accent-success);
     background: rgba(46, 160, 67, 0.15);
     padding: 8px;
@@ -998,7 +1000,7 @@
     font-size: 13px;
   }
 
-  .empty-state svg {
+  .empty-state :global(svg) {
     color: var(--text-muted);
     background: rgba(255, 255, 255, 0.03);
     padding: 16px;

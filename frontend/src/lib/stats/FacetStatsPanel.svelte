@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { FacetItem, FacetKind } from './types';
+  import { IconMerge, IconPencil, IconTrash } from '../icons';
 
   export let activeKind: FacetKind;
   export let visibleItems: FacetItem[] = [];
@@ -56,7 +57,7 @@
                   aria-label={`Rename ${item.value}`}
                   on:click|stopPropagation={() => onOpenMetadataAction(activeKind, 'rename', item.value)}
                 >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+                  <IconPencil size={12} />
                 </button>
                 {#if activeKind === 'topic'}
                   <button
@@ -66,7 +67,7 @@
                     aria-label={`Merge ${item.value}`}
                     on:click|stopPropagation={() => onOpenMetadataAction(activeKind, 'merge', item.value)}
                   >
-                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3"></circle><circle cx="6" cy="6" r="3"></circle><path d="M6 9v9a3 3 0 0 0 3 3h3"></path><path d="M18 15V9a6 6 0 0 0-6-6H9"></path></svg>
+                    <IconMerge size={12} />
                   </button>
                 {/if}
                 <button
@@ -76,7 +77,7 @@
                   aria-label={`Delete ${item.value}`}
                   on:click|stopPropagation={() => onOpenMetadataAction(activeKind, 'delete', item.value)}
                 >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
+                  <IconTrash size={12} />
                 </button>
               </span>
             {/if}
