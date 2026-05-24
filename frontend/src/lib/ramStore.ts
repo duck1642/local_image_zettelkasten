@@ -6,16 +6,28 @@ import { log as uiLog } from './logger';
 type RamStats = {
   enabled: boolean;
   backendMb: number | null;
+  appMb: number | null;
+  runtimeMb: number | null;
   frontendMb: number | null;
   totalMb: number | null;
+  roles: Record<string, number>;
+  processCount: number | null;
+  mode: string;
+  warnings: string[];
   error: string | null;
 };
 
 export const ramStats = writable<RamStats>({
   enabled: false,
   backendMb: null,
+  appMb: null,
+  runtimeMb: null,
   frontendMb: null,
   totalMb: null,
+  roles: {},
+  processCount: null,
+  mode: '',
+  warnings: [],
   error: null
 });
 
@@ -37,12 +49,24 @@ async function refreshRamStats() {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const data = await response.json();
     const backendMb = Number(data.backend_mb);
+    const appMb = Number(data.app_mb);
+    const runtimeMb = Number(data.runtime_mb);
     const frontendMb = frontendMemoryMb();
     ramStats.set({
       enabled: true,
       backendMb: Number.isFinite(backendMb) ? backendMb : null,
+      appMb: Number.isFinite(appMb) ? appMb : null,
+      runtimeMb: Number.isFinite(runtimeMb) ? runtimeMb : null,
       frontendMb,
-      totalMb: Number.isFinite(backendMb) && frontendMb !== null ? Math.round((backendMb + frontendMb) * 10) / 10 : null,
+      totalMb: Number.isFinite(appMb)
+        ? appMb
+        : Number.isFinite(backendMb) && frontendMb !== null
+          ? Math.round((backendMb + frontendMb) * 10) / 10
+          : null,
+      roles: data.roles && typeof data.roles === 'object' ? data.roles : {},
+      processCount: Number.isFinite(Number(data.process_count)) ? Number(data.process_count) : null,
+      mode: typeof data.mode === 'string' ? data.mode : '',
+      warnings: Array.isArray(data.warnings) ? data.warnings.map((value: unknown) => String(value)) : [],
       error: null
     });
   } catch (error) {
@@ -64,7 +88,19 @@ function stopPolling() {
     window.clearInterval(pollTimer);
     pollTimer = null;
   }
-  ramStats.set({ enabled: false, backendMb: null, frontendMb: null, totalMb: null, error: null });
+  ramStats.set({
+    enabled: false,
+    backendMb: null,
+    appMb: null,
+    runtimeMb: null,
+    frontendMb: null,
+    totalMb: null,
+    roles: {},
+    processCount: null,
+    mode: '',
+    warnings: [],
+    error: null
+  });
 }
 
 export function startRamTracker() {

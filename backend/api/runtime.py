@@ -44,13 +44,201 @@ def _get_system_memory_sync():
     try:
         try:
             import psutil
-            backend_mb = psutil.Process().memory_info().rss / 1024 / 1024
+            payload = _get_psutil_app_memory(psutil)
         except ModuleNotFoundError:
             backend_mb = _get_process_memory_mb_fallback()
-        return {"backend_mb": round(backend_mb, 2)}
+            payload = {
+                "backend_mb": round(backend_mb, 2),
+                "app_mb": round(backend_mb, 2),
+                "runtime_mb": round(backend_mb, 2),
+                "roles": _empty_memory_roles(backend_mb=backend_mb),
+                "process_count": 1,
+                "mode": "fallback",
+                "warnings": ["psutil unavailable; reporting backend process only"],
+                "processes": [],
+            }
+        return payload
     except Exception as exc:
         log_system("ERROR", "Failed to read backend memory", error=str(exc))
         raise HTTPException(status_code=500, detail="Failed to read backend memory") from exc
+
+def _empty_memory_roles(backend_mb: float = 0.0) -> dict:
+    return {
+        "backend_mb": round(float(backend_mb or 0.0), 2),
+        "tauri_mb": 0.0,
+        "webview_mb": 0.0,
+        "subprocess_mb": 0.0,
+        "dev_tool_mb": 0.0,
+        "other_mb": 0.0,
+    }
+
+def _process_name(proc) -> str:
+    try:
+        return str(proc.name() or "")
+    except Exception:
+        return ""
+
+def _process_exe(proc) -> str:
+    try:
+        return str(proc.exe() or "")
+    except Exception:
+        return ""
+
+def _process_cmdline(proc) -> list[str]:
+    try:
+        return [str(part or "") for part in (proc.cmdline() or [])]
+    except Exception:
+        return []
+
+def _process_rss_mb(proc) -> float | None:
+    try:
+        return float(proc.memory_info().rss) / 1024 / 1024
+    except Exception:
+        return None
+
+def _process_children(proc, recursive: bool = True) -> list:
+    try:
+        return list(proc.children(recursive=recursive))
+    except Exception:
+        return []
+
+def _process_parent(proc):
+    try:
+        return proc.parent()
+    except Exception:
+        return None
+
+def _looks_like_tauri_host(proc) -> bool:
+    name = _process_name(proc).casefold()
+    exe = _process_exe(proc).casefold()
+    haystack = " ".join([name, exe])
+    return any(token in haystack for token in ("lmz", "local_media_zettelkasten", "tauri"))
+
+def _looks_like_dev_launcher(proc) -> bool:
+    cmdline = " ".join(_process_cmdline(proc)).casefold()
+    return "dev.py" in cmdline and "local_media_zettelkasten" in cmdline
+
+def _project_path_token() -> str:
+    try:
+        return str(get_runtime_context().project_root).casefold()
+    except Exception:
+        try:
+            return str(Path(__file__).resolve().parents[2]).casefold()
+        except Exception:
+            return "local_media_zettelkasten"
+
+def _process_matches_project(proc, project_token: str) -> bool:
+    if not project_token:
+        return False
+    haystack = " ".join([_process_exe(proc), *_process_cmdline(proc)]).casefold()
+    return project_token in haystack or "local_media_zettelkasten" in haystack
+
+def _scan_project_processes(psutil_module, project_token: str) -> list:
+    matches = []
+    try:
+        iterator = psutil_module.process_iter(["pid", "name", "exe", "cmdline"])
+    except Exception:
+        return matches
+    for proc in iterator:
+        if _process_matches_project(proc, project_token):
+            matches.append(proc)
+            matches.extend(_process_children(proc, recursive=True))
+    return matches
+
+def _role_for_process(proc, backend_pid: int) -> str:
+    try:
+        if int(proc.pid) == int(backend_pid):
+            return "backend"
+    except Exception:
+        pass
+    name = _process_name(proc).casefold()
+    exe = _process_exe(proc).casefold()
+    cmdline = " ".join(_process_cmdline(proc)).casefold()
+    haystack = " ".join([name, exe, cmdline])
+    if "msedgewebview2" in haystack:
+        return "webview"
+    if any(token in haystack for token in ("ffmpeg", "gallery-dl", "gallery_dl", "yt-dlp", "yt_dlp")):
+        return "subprocess"
+    if _looks_like_tauri_host(proc):
+        return "tauri"
+    if any(token in haystack for token in ("node", "npm", "cargo", "vite", "tauri-cli")):
+        return "dev_tool"
+    return "other"
+
+def _collect_process_group(backend_proc, psutil_module=None) -> tuple[list, str, list[str]]:
+    warnings: list[str] = []
+    backend_children = _process_children(backend_proc, recursive=True)
+    parent = _process_parent(backend_proc)
+    processes = [backend_proc, *backend_children]
+    mode = "backend_tree"
+    if parent and _looks_like_tauri_host(parent):
+        processes = [parent, *_process_children(parent, recursive=True)]
+        mode = "packaged_sidecar"
+    elif parent and _looks_like_dev_launcher(parent):
+        processes = [parent, *_process_children(parent, recursive=True)]
+        mode = "dev_launcher"
+    elif psutil_module is not None:
+        project_matches = _scan_project_processes(psutil_module, _project_path_token())
+        if project_matches:
+            processes = [backend_proc, *backend_children, *project_matches]
+            mode = "dev_scan"
+            warnings.append("app root not detected; included readable project-matched process trees")
+        else:
+            warnings.append("app root not detected; reporting backend process tree only")
+    else:
+        warnings.append("app root not detected; reporting backend process tree only")
+
+    by_pid = {}
+    for proc in processes:
+        try:
+            by_pid[int(proc.pid)] = proc
+        except Exception:
+            continue
+    return list(by_pid.values()), mode, warnings
+
+def _aggregate_memory_processes(processes: list, backend_pid: int, mode: str, warnings: list[str]) -> dict:
+    roles = _empty_memory_roles()
+    process_rows = []
+    app_mb = 0.0
+    for proc in processes:
+        rss_mb = _process_rss_mb(proc)
+        if rss_mb is None:
+            warnings.append(f"process {getattr(proc, 'pid', '?')} memory unavailable")
+            continue
+        role = _role_for_process(proc, backend_pid)
+        key = f"{role}_mb"
+        if key not in roles:
+            key = "other_mb"
+        rounded = round(rss_mb, 2)
+        roles[key] = round(float(roles.get(key, 0.0)) + rounded, 2)
+        app_mb += rss_mb
+        process_rows.append({
+            "pid": int(getattr(proc, "pid", 0) or 0),
+            "name": _process_name(proc),
+            "role": role,
+            "rss_mb": rounded,
+        })
+    runtime_mb = (
+        roles["backend_mb"]
+        + roles["tauri_mb"]
+        + roles["webview_mb"]
+        + roles["subprocess_mb"]
+    )
+    return {
+        "backend_mb": roles["backend_mb"],
+        "app_mb": round(app_mb, 2),
+        "runtime_mb": round(runtime_mb, 2),
+        "roles": roles,
+        "process_count": len(process_rows),
+        "mode": mode,
+        "warnings": warnings,
+        "processes": sorted(process_rows, key=lambda row: (row["role"], row["pid"])),
+    }
+
+def _get_psutil_app_memory(psutil_module) -> dict:
+    backend_proc = psutil_module.Process()
+    processes, mode, warnings = _collect_process_group(backend_proc, psutil_module)
+    return _aggregate_memory_processes(processes, int(backend_proc.pid), mode, warnings)
 
 def _get_process_memory_mb_fallback():
     if sys.platform == "win32":

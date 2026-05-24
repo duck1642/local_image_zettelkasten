@@ -159,6 +159,15 @@
   function ramStatusText(stats: any) {
     if (stats.error) return 'RAM: unavailable';
     if (stats.backendMb === null) return 'RAM: loading';
+    if (stats.runtimeMb !== null) {
+      const roles = stats.roles || {};
+      const parts = [`RAM: runtime ${stats.runtimeMb} MB`, `backend ${stats.backendMb} MB`];
+      if (Number(roles.webview_mb) > 0) parts.push(`webview ${roles.webview_mb} MB`);
+      if (Number(roles.dev_tool_mb) > 0) parts.push(`dev ${roles.dev_tool_mb} MB`);
+      if (Number(roles.subprocess_mb) > 0) parts.push(`subprocess ${roles.subprocess_mb} MB`);
+      if (stats.frontendMb !== null) parts.push(`JS heap ${stats.frontendMb} MB`);
+      return parts.join(' | ');
+    }
     if (stats.frontendMb !== null && stats.totalMb !== null) {
       return `RAM: backend ${stats.backendMb} MB | frontend ${stats.frontendMb} MB | total ${stats.totalMb} MB`;
     }

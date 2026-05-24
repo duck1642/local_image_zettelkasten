@@ -207,16 +207,12 @@ VSCode-friendly test launchers:
 
 ### Phase C - Metadata Workflow Polish / Vault Ops
 
-1. RAM tracker precision:
-   - The current RAM tracker footer only measures V8 JS VM heap (`performance.memory.usedJSHeapSize`) in the frontend and a single Python process RSS in the backend.
-   - It completely misses WebView2 processes (`msedgewebview2.exe` hosting DOM, styles, compositing, decoders, graphics buffer allocations), Tauri's Rust main host process (`app.exe`/`LMZ.exe`), and active backend utility subprocesses (`ffmpeg`, `gallery-dl`, `yt-dlp`).
-   - Refactor `_get_system_memory_sync` in `backend/api/runtime.py` to aggregate the full application process tree using `psutil`. Automatically sum the parent Tauri process (`app.exe`/`LMZ.exe`), all its recursive child processes (WebView2 host/renderers, active subprocesses), and the current Python backend process to calculate the real app RAM footprint.
-2. Vault operations:
+1. Vault operations:
    - verify current live workspace/vault switching code paths.
    - trace and remove old compatibility path usage after default, Obsidian, and generated vault modes are stable.
    - harden vault rename, delete, and merge flows.
    - defer split/separate vault flows until the real workflow is clearer.
-3. Vault health read-only audit:
+2. Vault health read-only audit:
    - report DB rows missing assets or notes.
    - report orphaned assets or notes with no DB row.
    - report bad/missing `storage_id` values and path mismatches.
@@ -226,7 +222,7 @@ VSCode-friendly test launchers:
    - report broken topic links and unused topic files.
    - report review sidecar/media mismatches.
    - report workspace dictionary drift against active-vault usage.
-4. Vault health targeted repairs:
+3. Vault health targeted repairs:
    - repair derived data only after read-only audit output is trusted.
    - rebuild thumbnails.
    - rebuild metadata index and facet counts.
@@ -234,13 +230,13 @@ VSCode-friendly test launchers:
    - reconcile review sidecars.
    - quarantine orphan assets/notes where needed.
    - require explicit action for destructive deletes.
-5. Backup/export/import:
+4. Backup/export/import:
    - add active-vault backup flow.
    - add vault export/import package flow.
    - consider automatic pre-delete and pre-merge backups.
-6. Optional metadata maintenance:
+5. Optional metadata maintenance:
    - hide/ignore WD tags only if noisy WD data becomes a real UX problem.
-7. Optional UX polish:
+6. Optional UX polish:
    - search chips if the current text query handoff becomes hard to scan.
    - richer Inspector tag editing beyond the required topic add flow.
 
@@ -295,6 +291,11 @@ VSCode-friendly test launchers:
     - Stats Topics exposes a compact `+` create flow.
     - newly created unused topics appear in `All` topic scope and are selectable later from Inspector.
   - item metadata save lock timeout was fixed by skipping redundant workspace WD dictionary sync during item patch and review replacement preserve reindex paths.
+  - RAM tracker precision is implemented:
+    - backend `/api/system/memory` reports `backend_mb`, `runtime_mb`, `app_mb`, role breakdowns, process count, mode, warnings, and process rows.
+    - runtime RAM separates backend, Tauri host, WebView2, and active subprocesses from dev tooling.
+    - frontend footer shows runtime RAM, backend RAM, WebView RAM, dev-tool RAM, and JS heap without double-counting JS heap into runtime total.
+    - targeted RAM aggregation tests pass for backend-only, packaged sidecar, dev launcher, project-scan, and inaccessible-process cases.
   - runtime context layer is implemented for workspace/vault paths while preserving legacy import-time constants.
   - active-vault and workspace DB connection helpers are context-aware.
   - queues, review cache, logging, metadata watchdog paths, topics, thumbnails, downloader staging, and local ingest/review path access are context-aware.
