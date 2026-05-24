@@ -541,49 +541,6 @@ def _preview_vault_merge_sync(target_id: str, body: dict):
         raise HTTPException(status_code=400, detail=str(exc))
 
 
-    if not vault_id:
-        raise HTTPException(status_code=400, detail="vault id is required")
-    try:
-        return set_active_vault(vault_id)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-
-
-@router.delete("/api/vaults/{vault_id}")
-async def delete_vault(vault_id: str, confirm: bool = Query(False)):
-    return await asyncio.to_thread(_delete_vault_sync, vault_id, confirm)
-
-
-def _delete_vault_sync(vault_id: str, confirm: bool = False):
-    from vaults import delete_vault
-
-    try:
-        return delete_vault(vault_id, confirm=confirm)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-
-
-@router.post("/api/vaults/{target_id}/merge-preview")
-async def preview_vault_merge(target_id: str, body: dict):
-    return await asyncio.to_thread(_preview_vault_merge_sync, target_id, body)
-
-
-def _preview_vault_merge_sync(target_id: str, body: dict):
-    from vaults import preview_vault_merge
-
-    sources = list((body or {}).get("source_vault_ids") or [])
-    try:
-        return preview_vault_merge(target_id, sources)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-
-
 @router.post("/api/vaults/{target_id}/merge")
 async def merge_vaults(target_id: str, body: dict):
     return await asyncio.to_thread(_merge_vaults_sync, target_id, body)

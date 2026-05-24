@@ -307,7 +307,7 @@ def preview_vault_merge(target_id: str, source_ids: list[str], ctx: WorkspaceCon
     return payload
 
 
-def merge_vaults(target_id: str, source_ids: list[str], delete_sources: bool = True, ctx: WorkspaceContext | None = None) -> dict:
+def merge_vaults(target_id: str, source_ids: list[str], delete_sources: bool = False, ctx: WorkspaceContext | None = None) -> dict:
     import re
     preview = preview_vault_merge(target_id, source_ids, ctx)
     config = _ensure_vault_registry(_read_config(ctx))
