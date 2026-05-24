@@ -254,12 +254,7 @@
     return typeof count === 'number' && count > 0 ? count : null;
   }
 
-  function isUnsavedTopic(value: string) {
-    const key = value.toLocaleLowerCase();
-    return !savedTopics.some((topic) => topic.toLocaleLowerCase() === key);
-  }
-
-  function isTagPromoted(value: string) {
+  function isTagPromoted(value: string, _draft?: string[], _saved?: string[]) {
     if (!value) return false;
     const key = value.toLocaleLowerCase();
     return draftTopics.some((topic) => topic.toLocaleLowerCase() === key) &&
@@ -276,7 +271,7 @@
     return cleaned || 'topic';
   }
 
-  function isAlreadyTopic(value: string) {
+  function isAlreadyTopic(value: string, _saved?: string[]) {
     if (!value) return false;
     const clean = normalizeTopicLabel(value);
     const key = clean.toLocaleLowerCase();
@@ -437,11 +432,6 @@
     }
   }
 
-  function stopChipRemove(event: Event) {
-    event.preventDefault();
-    event.stopPropagation();
-  }
-
   async function revertChanges() {
     if (!item) return;
     await loadFullDetails(item.hash);
@@ -511,6 +501,10 @@
       }
       dispatch('updated', { hash: item.hash, artist, source_url: sourceUrl, platform });
       uiLog('INFO', `Metadata saved for ${item.hash.substring(0, 12)}`);
+      
+      // Dispatch global refresh events to synchronize sibling panels (StatsView, VaultView)
+      window.dispatchEvent(new CustomEvent('lmz:refresh', { detail: { tab: 'stats' } }));
+      window.dispatchEvent(new CustomEvent('lmz:refresh', { detail: { tab: 'vault' } }));
     } catch (e) {
         uiLog('ERROR', 'Save failed', { error: String(e) });
         alert('Failed to save changes.');
@@ -530,6 +524,10 @@
           fullItem = await res.json();
           applyLoadedDetails(fullItem);
           uiLog('INFO', `Tagging complete for ${item.hash.substring(0, 12)}`);
+          
+          // Dispatch global refresh events after automatic tagging updates the database
+          window.dispatchEvent(new CustomEvent('lmz:refresh', { detail: { tab: 'stats' } }));
+          window.dispatchEvent(new CustomEvent('lmz:refresh', { detail: { tab: 'vault' } }));
       } catch (e) {
           uiLog('ERROR', 'Tagging failed', { error: String(e) });
           alert(`Tagging failed: ${e}`);
@@ -575,6 +573,10 @@
           if (res.ok) {
               uiLog('INFO', `Item deleted: ${item.hash}`);
               dispatch('deleted', item.hash);
+              
+              // Dispatch global refresh events to update sibling panels (StatsView)
+              window.dispatchEvent(new CustomEvent('lmz:refresh', { detail: { tab: 'stats' } }));
+              window.dispatchEvent(new CustomEvent('lmz:refresh', { detail: { tab: 'vault' } }));
           } else {
               throw new Error("Failed to delete");
           }
@@ -713,139 +715,13 @@
           characters={draftWdCharacters}
           general={draftWdGeneral}
           wdTagCounts={fullItem.wd_tag_counts}
+          {draftTopics}
+          {savedTopics}
           {isAlreadyTopic}
           {isTagPromoted}
           on:promote={(event) => promoteWdToTopic(event.detail)}
           on:remove={(event) => removeDraftWdTag(event.detail.kind, event.detail.value)}
         />
-
-        <div class="legacy-inspector-blocks">
-        <div class="group-container">
-          <!-- svelte-ignore a11y-label-has-associated-control -->
-          <div class="section-heading">
-            <label class="section-label">My Topics</label>
-            <button class="add-topic-btn" type="button" title="Add topic" aria-label="Add topic" on:click={openTopicInput}>+</button>
-          </div>
-          {#if topicInputOpen}
-            <div class="topic-input-wrap">
-              <div class="topic-input-row">
-                <input
-                  bind:this={topicInputElement}
-                  type="text"
-                  class="topic-input"
-                  bind:value={topicInputValue}
-                  placeholder="Topic"
-                  on:input={queueTopicSuggestions}
-                  on:focus={() => fetchTopicSuggestions(topicInputValue)}
-                  on:keydown={handleTopicInputKeydown}
-                  on:blur={handleTopicInputBlur}
-                />
-                <button class="topic-confirm-btn" type="button" title="Add topic" aria-label="Add topic" on:mousedown|preventDefault on:click={addDraftTopic}>+</button>
-              </div>
-              {#if topicSuggestionsOpen}
-                <div class="topic-suggestions" role="listbox">
-                  {#each topicSuggestions as suggestion, index}
-                    <button
-                      type="button"
-                      class:active={index === activeTopicSuggestionIndex}
-                      role="option"
-                      aria-selected={index === activeTopicSuggestionIndex}
-                      on:mousedown|preventDefault
-                      on:mouseenter={() => activeTopicSuggestionIndex = index}
-                      on:click={() => selectTopicSuggestion(suggestion.value)}
-                    >
-                      <span>{normalizeTopicLabel(suggestion.value)}</span>
-                      {#if suggestion.count}
-                        <span class="suggestion-count">{suggestion.count}</span>
-                      {/if}
-                    </button>
-                  {/each}
-                </div>
-              {:else if topicSuggestionsLoading}
-                <div class="topic-suggestions loading">Loading...</div>
-              {/if}
-            </div>
-          {/if}
-          <div class="tags-list">
-              {#each (draftTopics || []) as tag}
-                  <!-- svelte-ignore a11y-no-noninteractive-tabindex -->
-                  <!-- svelte-ignore a11y-no-noninteractive-element-to-interactive-role -->
-                  <span 
-                      class="tag-chip topic" 
-                      class:promoted={isUnsavedTopic(tag)}
-                      class:clickable={isUnsavedTopic(tag)}
-                      role={isUnsavedTopic(tag) ? "button" : undefined}
-                      tabindex={isUnsavedTopic(tag) ? 0 : undefined}
-                      title={isUnsavedTopic(tag) ? "Click to revert topic promotion" : undefined}
-                      on:click={() => { if (isUnsavedTopic(tag)) removeDraftTopic(tag); }}
-                      on:keydown={(event) => { if (isUnsavedTopic(tag) && (event.key === 'Enter' || event.key === ' ')) removeDraftTopic(tag); }}
-                  >
-                      <span class="tag-label">{tag}</span>
-                      {#if countFor(fullItem.topic_counts, tag)}
-                          <span class="tag-count">{countFor(fullItem.topic_counts, tag)}</span>
-                      {/if}
-                      <button class="chip-rename" type="button" title="Rename topic" on:click|stopPropagation={() => openRenameTopicModal(tag)}>
-                          <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
-                      </button>
-                      <button class="chip-remove" type="button" title="Remove topic" on:click={(event) => { stopChipRemove(event); removeDraftTopic(tag); }}>
-                          <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
-                      </button>
-                  </span>
-              {/each}
-              {#if !draftTopics || draftTopics.length === 0}
-                  <div class="value-text">No topics</div>
-              {/if}
-          </div>
-        </div>
-
-        <div class="group-container">
-          <!-- svelte-ignore a11y-label-has-associated-control -->
-          <label class="section-label">WD Suggestions</label>
-          
-          <div class="tags-list suggestions-wrap">
-            {#if draftWdRating}
-              <span class="tag-chip rating" class:clickable={!isAlreadyTopic(draftWdRating)} class:promoted={isTagPromoted(draftWdRating)} role="button" tabindex="0" title={isAlreadyTopic(draftWdRating) ? "Already a topic" : "Promote to topic"} on:click={() => promoteWdToTopic(draftWdRating)} on:keydown={(event) => { if (event.key === 'Enter' || event.key === ' ') promoteWdToTopic(draftWdRating); }}>
-                  <span class="tag-label">{draftWdRating}</span>
-                  {#if countFor(fullItem.wd_tag_counts, draftWdRating)}
-                      <span class="tag-count">{countFor(fullItem.wd_tag_counts, draftWdRating)}</span>
-                  {/if}
-                  <button class="chip-remove" type="button" title="Remove WD tag" on:click={(event) => { stopChipRemove(event); removeDraftWdTag('rating', draftWdRating); }}>
-                      <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
-                  </button>
-              </span>
-            {/if}
-            
-            {#each (draftWdCharacters || []) as tag}
-              <span class="tag-chip character" class:clickable={!isAlreadyTopic(tag)} class:promoted={isTagPromoted(tag)} role="button" tabindex="0" title={isAlreadyTopic(tag) ? "Already a topic" : "Promote to topic"} on:click={() => promoteWdToTopic(tag)} on:keydown={(event) => { if (event.key === 'Enter' || event.key === ' ') promoteWdToTopic(tag); }}>
-                  <span class="tag-label">{tag}</span>
-                  {#if countFor(fullItem.wd_tag_counts, tag)}
-                      <span class="tag-count">{countFor(fullItem.wd_tag_counts, tag)}</span>
-                  {/if}
-                  <button class="chip-remove" type="button" title="Remove WD tag" on:click={(event) => { stopChipRemove(event); removeDraftWdTag('character', tag); }}>
-                      <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
-                  </button>
-              </span>
-            {/each}
-            
-            {#each (draftWdGeneral || []) as tag}
-              <span class="tag-chip visual" class:clickable={!isAlreadyTopic(tag)} class:promoted={isTagPromoted(tag)} role="button" tabindex="0" title={isAlreadyTopic(tag) ? "Already a topic" : "Promote to topic"} on:click={() => promoteWdToTopic(tag)} on:keydown={(event) => { if (event.key === 'Enter' || event.key === ' ') promoteWdToTopic(tag); }}>
-                  <span class="tag-label">{tag}</span>
-                  {#if countFor(fullItem.wd_tag_counts, tag)}
-                      <span class="tag-count">{countFor(fullItem.wd_tag_counts, tag)}</span>
-                  {/if}
-                  <button class="chip-remove" type="button" title="Remove WD tag" on:click={(event) => { stopChipRemove(event); removeDraftWdTag('general', tag); }}>
-                      <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
-                  </button>
-              </span>
-            {/each}
-          </div>
-          
-          {#if !draftWdRating && (!draftWdCharacters || draftWdCharacters.length === 0) && (!draftWdGeneral || draftWdGeneral.length === 0)}
-              <div class="value-text">No suggestions</div>
-          {/if}
-        </div>
-
-        </div>
 
         <div class="action-footer">
             <button class="tag-btn" on:click={runTagging} disabled={tagging}>
@@ -947,10 +823,6 @@
     gap: 8px;
   }
 
-  .legacy-inspector-blocks {
-    display: none;
-  }
-
   :global(.group-container.media-preview) {
     padding: 0;
     overflow: hidden;
@@ -1031,113 +903,6 @@
   :global(.group-nav .active-index) {
       color: #8b949e;
       font-weight: bold;
-  }
-
-  .section-label { font-size: 11px; color: var(--text-muted); font-weight: 500; }
-
-  .section-heading {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-  }
-
-  .add-topic-btn,
-  .topic-confirm-btn {
-    display: inline-grid;
-    place-items: center;
-    width: 22px;
-    height: 22px;
-    padding: 0;
-    border-radius: 6px;
-    border: 1px solid rgba(163, 113, 247, 0.4);
-    background: rgba(163, 113, 247, 0.07);
-    color: var(--accent-purple);
-    font-size: 15px;
-    line-height: 1;
-    font-weight: 700;
-    cursor: pointer;
-  }
-
-  .add-topic-btn:hover,
-  .topic-confirm-btn:hover {
-    border-color: var(--accent-purple);
-    background: rgba(163, 113, 247, 0.12);
-    color: var(--text-bright);
-  }
-
-  .topic-input-row {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-
-  .topic-input-wrap {
-    position: relative;
-  }
-
-  .topic-input {
-    flex: 1;
-    min-width: 0;
-    height: 26px;
-    padding: 3px 8px;
-    font-size: 12px;
-  }
-
-  .topic-suggestions {
-    position: absolute;
-    top: calc(100% + 4px);
-    left: 0;
-    right: 28px;
-    z-index: 20;
-    max-height: 180px;
-    overflow-y: auto;
-    border: 1px solid var(--border-dim);
-    border-radius: 6px;
-    background: var(--bg-panel);
-    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
-    padding: 4px 0;
-  }
-
-  .topic-suggestions.loading {
-    padding: 7px 10px;
-    color: var(--text-muted);
-    font-size: 12px;
-  }
-
-  .topic-suggestions button {
-    width: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    border: 0;
-    border-radius: 0;
-    background: transparent;
-    color: var(--text-main);
-    padding: 7px 10px;
-    font-size: 12px;
-    text-align: left;
-    cursor: pointer;
-  }
-
-  .topic-suggestions button:hover,
-  .topic-suggestions button.active {
-    background: rgba(163, 113, 247, 0.18);
-    color: var(--text-bright);
-  }
-
-  .suggestion-count {
-    color: var(--text-muted);
-    font-size: 11px;
-  }
-
-  .value-text {
-    color: #6a737d;
-    font-style: italic;
-    font-weight: normal;
-    font-size: 13px;
-    padding: 2px 0;
   }
 
   .horizontal { flex-direction: row; gap: 20px; }
@@ -1285,311 +1050,6 @@
     background: rgba(255, 255, 255, 0.08);
     color: var(--text-bright);
   }
-
-  .tags-list { display: flex; flex-wrap: wrap; gap: 6px; }
-
-  .tag-chip {
-      display: inline-flex;
-      align-items: center;
-      height: 26px;
-      border-radius: 6px;
-      font-size: 11px;
-      font-weight: 600;
-      background: rgba(255, 255, 255, 0.05);
-      color: var(--text-main);
-      border: 1px solid var(--border-dim);
-      user-select: none;
-      overflow: hidden;
-      gap: 4px;
-  }
-
-  .tag-chip.clickable { cursor: pointer; }
-
-  .tag-label {
-      display: flex;
-      align-items: center;
-      padding: 0 0 0 8px;
-      height: 100%;
-  }
-
-  /* Symmetrical even-even layout matching stats view chip counters */
-  .tag-count {
-      display: inline-grid;
-      place-items: center;
-      line-height: 1;
-      color: var(--text-muted);
-      background: rgba(255, 255, 255, 0.08);
-      border-radius: 10px;
-      font-size: 10px;
-      font-weight: 600;
-      min-width: 18px;
-      height: 18px;
-      padding: 0 6px;
-      margin-left: 4px;
-      margin-right: 2px;
-  }
-
-
-
-  /* Slide-out removal button using clean SVG graphics */
-  .chip-remove {
-      display: inline-grid;
-      place-items: center;
-      width: 0;
-      height: 24px !important;
-      align-self: stretch !important;
-      margin: 0 !important;
-      padding: 0 !important;
-      border: none !important;
-      background: transparent;
-      color: var(--text-muted);
-      cursor: pointer;
-      opacity: 0;
-      transition: none !important;
-      border-radius: 0 !important;
-      box-sizing: border-box !important;
-  }
-
-  /* Slide-out rename button using clean SVG graphics */
-  .chip-rename {
-      display: inline-grid;
-      place-items: center;
-      width: 0;
-      height: 24px !important;
-      align-self: stretch !important;
-      margin: 0 !important;
-      padding: 0 !important;
-      border: none !important;
-      background: transparent;
-      color: var(--text-muted);
-      cursor: pointer;
-      opacity: 0;
-      transition: none !important;
-      border-radius: 0 !important;
-      box-sizing: border-box !important;
-  }
-
-  /* Svelte-safe tag chip expansion on hover */
-  .tag-chip:hover .chip-remove,
-  .tag-chip:focus-within .chip-remove {
-      width: 24px;
-      opacity: 1;
-      border: none !important;
-      border-left: 1px solid rgba(255, 255, 255, 0.08) !important;
-      color: var(--text-muted);
-      transition: none !important;
-  }
-
-  .tag-chip:hover .chip-rename,
-  .tag-chip:focus-within .chip-rename {
-      width: 24px;
-      opacity: 1;
-      border: none !important;
-      border-left: 1px solid rgba(255, 255, 255, 0.08) !important;
-      color: var(--text-muted);
-      transition: none !important;
-  }
-
-  /* Cancel flexbox gap between adjacent action buttons to keep highlights perfectly seamless */
-  .tag-chip:hover .chip-rename + .chip-remove,
-  .tag-chip:focus-within .chip-rename + .chip-remove {
-      margin-left: -4px !important;
-  }
-
-  /* Expand right-side margin of count when remove button is hidden, compress when shown */
-  .tag-chip:hover .tag-count,
-  .tag-chip:focus-within .tag-count {
-      margin-right: 0;
-  }
-
-  .chip-remove:hover {
-      background: rgba(248, 81, 73, 0.15) !important;
-      color: var(--accent-danger) !important;
-      height: 24px !important;
-      border: none !important;
-      border-left: 1px solid rgba(255, 255, 255, 0.08) !important;
-  }
-
-  .chip-rename:hover {
-      background: rgba(255, 255, 255, 0.08) !important;
-      color: var(--accent-primary) !important;
-      height: 24px !important;
-      border: none !important;
-      border-left: 1px solid rgba(255, 255, 255, 0.08) !important;
-  }
-
-  /* Categories Hover & Color Harmonies */
-  .tag-chip:hover {
-      border-color: rgba(255, 255, 255, 0.2);
-      background: rgba(255, 255, 255, 0.08);
-      color: var(--text-bright);
-  }
-
-  .tag-chip:hover .tag-count {
-      color: var(--text-bright);
-      background: rgba(255, 255, 255, 0.15);
-  }
-
-  /* Topics (Purple) */
-  .tag-chip.topic {
-      color: var(--accent-purple);
-      border-color: rgba(163, 113, 247, 0.4);
-      background: rgba(163, 113, 247, 0.07);
-  }
-
-  .tag-chip.topic:hover {
-      border-color: var(--accent-purple);
-      background: rgba(163, 113, 247, 0.12);
-  }
-
-  /* Ratings (Warning Orange) */
-  .tag-chip.rating {
-      color: var(--accent-warning);
-      border-color: rgba(240, 139, 44, 0.35);
-      background: rgba(240, 139, 44, 0.07);
-  }
-
-  .tag-chip.rating:hover {
-      border-color: var(--accent-warning);
-      background: rgba(240, 139, 44, 0.12);
-  }
-
-  /* Character Tags (Accent Blue) */
-  .tag-chip.character {
-      color: var(--accent-primary);
-      border-color: rgba(31, 111, 235, 0.35);
-      background: rgba(31, 111, 235, 0.07);
-  }
-
-  .tag-chip.character:hover {
-      border-color: var(--accent-primary);
-      background: rgba(31, 111, 235, 0.12);
-  }
-
-  /* Visual/General Tags (Dim Gray) */
-  .tag-chip.visual {
-      color: var(--text-main);
-      border-color: var(--border-dim);
-      background: rgba(255, 255, 255, 0.04);
-  }
-
-  .tag-chip.visual:hover {
-      border-color: rgba(255, 255, 255, 0.25);
-      background: rgba(255, 255, 255, 0.08);
-  }
-
-  /* ================= Promoted / Unsaved Draft Highlights ================= */
-  /* Topic Draft (Purple) */
-  .tag-chip.topic.promoted {
-      background: var(--accent-purple) !important;
-      border-color: #c9a0ff !important;
-      color: #ffffff !important;
-  }
-  .tag-chip.topic.promoted .tag-count {
-      background: #ffffff !important;
-      color: var(--accent-purple) !important;
-  }
-  .tag-chip.topic.promoted .chip-remove {
-      color: rgba(255, 255, 255, 0.7) !important;
-      border: none !important;
-      border-left: 1px solid rgba(255, 255, 255, 0.25) !important;
-      height: 24px !important;
-  }
-  .tag-chip.topic.promoted .chip-remove:hover {
-      background: rgba(255, 255, 255, 0.15) !important;
-      color: #ffffff !important;
-      border: none !important;
-      border-left: 1px solid rgba(255, 255, 255, 0.25) !important;
-      height: 24px !important;
-  }
-
-  .tag-chip.topic.promoted .chip-rename {
-      color: rgba(255, 255, 255, 0.7) !important;
-      border: none !important;
-      border-left: 1px solid rgba(255, 255, 255, 0.25) !important;
-      height: 24px !important;
-  }
-  .tag-chip.topic.promoted .chip-rename:hover {
-      background: rgba(255, 255, 255, 0.15) !important;
-      color: #ffffff !important;
-      border: none !important;
-      border-left: 1px solid rgba(255, 255, 255, 0.25) !important;
-      height: 24px !important;
-  }
-
-  /* Rating Suggestion (Orange) */
-  .tag-chip.rating.promoted {
-      background: var(--accent-warning) !important;
-      border-color: #ffb454 !important;
-      color: #ffffff !important;
-  }
-  .tag-chip.rating.promoted .tag-count {
-      background: #ffffff !important;
-      color: var(--accent-warning) !important;
-  }
-  .tag-chip.rating.promoted .chip-remove {
-      color: rgba(255, 255, 255, 0.7) !important;
-      border: none !important;
-      border-left: 1px solid rgba(255, 255, 255, 0.25) !important;
-      height: 24px !important;
-  }
-  .tag-chip.rating.promoted .chip-remove:hover {
-      background: rgba(255, 255, 255, 0.15) !important;
-      color: #ffffff !important;
-      border: none !important;
-      border-left: 1px solid rgba(255, 255, 255, 0.25) !important;
-      height: 24px !important;
-  }
-
-  /* Character Suggestion (Blue) */
-  .tag-chip.character.promoted {
-      background: var(--accent-primary) !important;
-      border-color: #58a6ff !important;
-      color: #ffffff !important;
-  }
-  .tag-chip.character.promoted .tag-count {
-      background: #ffffff !important;
-      color: var(--accent-primary) !important;
-  }
-  .tag-chip.character.promoted .chip-remove {
-      color: rgba(255, 255, 255, 0.7) !important;
-      border: none !important;
-      border-left: 1px solid rgba(255, 255, 255, 0.25) !important;
-      height: 24px !important;
-  }
-  .tag-chip.character.promoted .chip-remove:hover {
-      background: rgba(255, 255, 255, 0.15) !important;
-      color: #ffffff !important;
-      border: none !important;
-      border-left: 1px solid rgba(255, 255, 255, 0.25) !important;
-      height: 24px !important;
-  }
-
-  /* Visual/General Suggestion (Dim Gray/Slate) */
-  .tag-chip.visual.promoted {
-      background: #8b949e !important;
-      border-color: #c9d1d9 !important;
-      color: #0d1117 !important;
-  }
-  .tag-chip.visual.promoted .tag-count {
-      background: #0d1117 !important;
-      color: #8b949e !important;
-  }
-  .tag-chip.visual.promoted .chip-remove {
-      color: rgba(13, 17, 23, 0.7) !important;
-      border: none !important;
-      border-left: 1px solid rgba(13, 17, 23, 0.2) !important;
-      height: 24px !important;
-  }
-  .tag-chip.visual.promoted .chip-remove:hover {
-      background: rgba(13, 17, 23, 0.1) !important;
-      color: #0d1117 !important;
-      border: none !important;
-      border-left: 1px solid rgba(13, 17, 23, 0.2) !important;
-      height: 24px !important;
-  }
-
-  input { background: var(--bg-input); border: 1px solid #30363d; font-weight: 500; }
 
   .action-footer {
     display: flex;

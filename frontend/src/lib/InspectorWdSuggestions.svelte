@@ -6,8 +6,10 @@
   export let characters: string[] = [];
   export let general: string[] = [];
   export let wdTagCounts: Record<string, number> | undefined = undefined;
-  export let isAlreadyTopic: (value: string) => boolean = () => false;
-  export let isTagPromoted: (value: string) => boolean = () => false;
+  export let draftTopics: string[] = [];
+  export let savedTopics: string[] = [];
+  export let isAlreadyTopic: (value: string, saved: string[]) => boolean = () => false;
+  export let isTagPromoted: (value: string, draft: string[], saved: string[]) => boolean = () => false;
 
   const dispatch = createEventDispatcher();
 
@@ -27,10 +29,10 @@
         label={rating}
         kind="rating"
         count={countFor(rating)}
-        clickable={!isAlreadyTopic(rating)}
-        promoted={isTagPromoted(rating)}
+        clickable={!isAlreadyTopic(rating, savedTopics)}
+        promoted={isTagPromoted(rating, draftTopics, savedTopics)}
         interactive
-        title={isAlreadyTopic(rating) ? "Already a topic" : "Promote to topic"}
+        title={isAlreadyTopic(rating, savedTopics) ? "Already a topic" : "Promote to topic"}
         removeTitle="Remove WD tag"
         on:activate={() => dispatch('promote', rating)}
         on:remove={() => dispatch('remove', { kind: 'rating', value: rating })}
@@ -42,10 +44,10 @@
         label={tag}
         kind="character"
         count={countFor(tag)}
-        clickable={!isAlreadyTopic(tag)}
-        promoted={isTagPromoted(tag)}
+        clickable={!isAlreadyTopic(tag, savedTopics)}
+        promoted={isTagPromoted(tag, draftTopics, savedTopics)}
         interactive
-        title={isAlreadyTopic(tag) ? "Already a topic" : "Promote to topic"}
+        title={isAlreadyTopic(tag, savedTopics) ? "Already a topic" : "Promote to topic"}
         removeTitle="Remove WD tag"
         on:activate={() => dispatch('promote', tag)}
         on:remove={() => dispatch('remove', { kind: 'character', value: tag })}
@@ -57,10 +59,10 @@
         label={tag}
         kind="visual"
         count={countFor(tag)}
-        clickable={!isAlreadyTopic(tag)}
-        promoted={isTagPromoted(tag)}
+        clickable={!isAlreadyTopic(tag, savedTopics)}
+        promoted={isTagPromoted(tag, draftTopics, savedTopics)}
         interactive
-        title={isAlreadyTopic(tag) ? "Already a topic" : "Promote to topic"}
+        title={isAlreadyTopic(tag, savedTopics) ? "Already a topic" : "Promote to topic"}
         removeTitle="Remove WD tag"
         on:activate={() => dispatch('promote', tag)}
         on:remove={() => dispatch('remove', { kind: 'general', value: tag })}

@@ -461,12 +461,11 @@ def _get_facets_sync(kind: str, q: str = "", limit: int = 100, scope: str = "use
                     workspace_conn.close()
             return {"kind": kind, "items": metadata_facets(conn, kind, needle.casefold(), limit)}
 
-        if metadata_index_ready(conn):
-            return {"kind": kind, "items": metadata_facets(conn, kind, needle.casefold(), limit)}
+        if not metadata_index_ready(conn):
+            start_metadata_repair_worker(full=False)
+            log_system("WARNING", "Metadata index not ready; starting background repair", kind=kind)
 
-        start_metadata_repair_worker(full=False)
-        log_system("WARNING", "Metadata index not ready; skipping facet scan and starting repair", kind=kind)
-        return {"kind": kind, "items": []}
+        return {"kind": kind, "items": metadata_facets(conn, kind, needle.casefold(), limit)}
     finally:
         conn.close()
 

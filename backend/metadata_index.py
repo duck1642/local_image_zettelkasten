@@ -1359,7 +1359,7 @@ def _repair_worker(full: bool = False, maintenance: bool = False, ctx: Workspace
                     )
             else:
                 while True:
-                    result = reindex_stale_metadata_batch(conn, REPAIR_BATCH_SIZE, allow_scan=maintenance)
+                    result = reindex_stale_metadata_batch(conn, REPAIR_BATCH_SIZE, allow_scan=True)
                     conn.commit()
                     if result.get("source") == "dirty_queue" and not result.get("dirty_remaining"):
                         continue
