@@ -345,34 +345,34 @@
       {#if mode === 'fullscreen' && isImageMedia(item)}
         <div class="zoom-controls">
           <button class="icon-btn" title="Zoom Out (-)" on:click={() => zoomFromCenter(-KEYBOARD_STEP)}>
-            <IconMinus size={16} />
+            <IconMinus size={14} />
           </button>
           <button type="button" class="zoom-pill" class:active={scale > 1} on:click={resetZoom} title="Reset Zoom">
             {Math.round(scale * 100)}%
           </button>
           <button class="icon-btn" title="Zoom In (+)" on:click={() => zoomFromCenter(KEYBOARD_STEP)}>
-            <IconPlus size={16} />
+            <IconPlus size={14} />
           </button>
         </div>
       {/if}
 
       <!-- Keyboard Shortcuts HUD Toggle -->
       <button class="icon-btn" class:active={showShortcutsLegend} title="Keyboard Shortcuts Legend" on:click={() => showShortcutsLegend = !showShortcutsLegend}>
-        <IconKeyboard size={21} strokeWidth={2.2} />
+        <IconKeyboard size={18} strokeWidth={2.2} />
       </button>
 
       <!-- Fullscreen / Wide Toggle -->
       <button class="icon-btn" title={mode === 'fullscreen' ? 'Exit Fullscreen (F)' : 'Enter Fullscreen (F)'} on:click={toggleMode}>
         {#if mode === 'fullscreen'}
-          <IconMinimizeDiagonal size={20} />
+          <IconMinimizeDiagonal size={18} />
         {:else}
-          <IconMaximizeDiagonal size={20} />
+          <IconMaximizeDiagonal size={18} />
         {/if}
       </button>
 
       <!-- Crisp Close Button -->
       <button class="close-btn-header" title="Exit (Esc)" on:click={() => close('Close Button Header Clicked')}>
-        <IconClose size={20} />
+        <IconClose size={18} />
       </button>
     </div>
   </header>
@@ -522,7 +522,7 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0 6px 0 16px;
+    padding: 0 7px 0 16px;
     gap: 20px;
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
     opacity: 1;
@@ -552,22 +552,27 @@
     font-size: 11px;
     font-weight: bold;
     color: var(--text-muted);
-    background: rgba(255, 255, 255, 0.06);
-    padding: 2px 8px;
+    background: rgba(255, 255, 255, 0.05);
+    height: 24px;
+    padding: 0 8px;
     border-radius: 6px;
     border: 1px solid rgba(255, 255, 255, 0.08);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
   }
 
   .header-right {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
   }
 
   /* Icon button styling */
   .icon-btn {
-    width: 34px;
-    height: 34px;
+    width: 30px;
+    height: 30px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -576,13 +581,15 @@
     color: var(--text-muted);
     border-radius: 6px;
     cursor: pointer;
+    padding: 0;
+    box-sizing: border-box;
   }
 
-  .icon-btn :global(svg),
+  .header-right > .icon-btn :global(svg),
   .close-btn-header :global(svg) {
-    width: 20px !important;
-    height: 20px !important;
-    stroke-width: 2.5px !important;
+    width: 18px !important;
+    height: 18px !important;
+    stroke-width: 2.2px !important;
     display: block;
   }
 
@@ -602,20 +609,51 @@
   .zoom-controls {
     display: flex;
     align-items: center;
-    background: rgba(0, 0, 0, 0.25);
+    background: rgba(255, 255, 255, 0.04);
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 6px;
-    padding: 2px;
+    height: 30px;
+    box-sizing: border-box;
+    padding: 0;
+  }
+
+  .zoom-controls .icon-btn {
+    width: 28px;
+    height: 28px;
+    border: none;
+    background: transparent;
+    border-radius: 5px;
+    cursor: pointer;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+  }
+
+  .zoom-controls .icon-btn:hover {
+    color: var(--text-bright);
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  .zoom-controls .icon-btn :global(svg) {
+    width: 14px !important;
+    height: 14px !important;
+    stroke-width: 2.2px !important;
+    display: block;
   }
 
   .zoom-pill {
     font-size: 11px;
     font-weight: bold;
     color: var(--text-muted);
-    padding: 0 8px;
+    padding: 0 6px;
     cursor: pointer;
-    min-width: 44px;
-    text-align: center;
+    min-width: 40px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     background: transparent;
     border: none;
     outline: none;
@@ -630,24 +668,24 @@
 
   /* Close Header button */
   .close-btn-header {
-    width: 34px;
-    height: 34px;
+    width: 30px;
+    height: 30px;
     display: flex;
     align-items: center;
     justify-content: center;
-    background: rgba(248, 81, 73, 0.1);
-    border: 1px solid rgba(248, 81, 73, 0.2);
-    color: var(--accent-danger);
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--text-muted);
     border-radius: 6px;
     cursor: pointer;
-    margin-left: 6px;
+    padding: 0;
+    box-sizing: border-box;
   }
 
   .close-btn-header:hover {
-    background: var(--accent-danger);
-    border-color: var(--accent-danger);
-    color: white;
-    transform: scale(1.05);
+    background: rgba(248, 81, 73, 0.15);
+    border-color: rgba(248, 81, 73, 0.25);
+    color: var(--accent-danger);
   }
 
   /* Keyboard HUD legend */
@@ -814,6 +852,7 @@
     z-index: 1010;
     box-shadow: 0 12px 36px rgba(0,0,0,0.5);
     opacity: 1;
+    padding: 0;
   }
 
   .nav-btn-rect.hidden {
