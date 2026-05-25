@@ -1584,7 +1584,10 @@ def metadata_facets(conn: sqlite3.Connection, kind: str, needle: str, limit: int
         (*params, needle, f"{needle}%", limit),
     ).fetchall()
     if rows:
-        return [{"value": row[0], "count": row[1]} for row in rows if row[0]]
+        items = [{"value": row[0], "count": row[1]} for row in rows if row[0]]
+        if kind == "wd_tag":
+            _attach_wd_tag_types(conn, items)
+        return items
     if count_rows_built:
         return []
 
@@ -1617,6 +1620,8 @@ def metadata_facets(conn: sqlite3.Connection, kind: str, needle: str, limit: int
         """
     rows = conn.execute(sql, params).fetchall()
     items = [{"value": row[0], "count": row[1]} for row in rows if row[0]]
+    if kind == "wd_tag":
+        _attach_wd_tag_types(conn, items)
     items.sort(
         key=lambda item: (
             0 if needle and item["value"].casefold().startswith(needle) else 1,
@@ -1625,6 +1630,33 @@ def metadata_facets(conn: sqlite3.Connection, kind: str, needle: str, limit: int
         )
     )
     return items[:limit]
+
+
+def _attach_wd_tag_types(conn: sqlite3.Connection, items: list[dict]):
+    if not items:
+        return
+    norms = [_norm(item["value"]) for item in items if item.get("value")]
+    if not norms:
+        return
+    placeholders = ",".join("?" for _ in norms)
+    rows = conn.execute(
+        f"""
+        SELECT tag_norm, tag_type
+        FROM item_wd_tags
+        WHERE tag_norm IN ({placeholders})
+        GROUP BY tag_norm, tag_type
+        """,
+        norms,
+    ).fetchall()
+    priority = {"rating": 0, "character": 1, "general": 2}
+    by_norm: dict[str, str] = {}
+    for tag_norm, tag_type in rows:
+        clean_type = str(tag_type or "general")
+        current = by_norm.get(tag_norm)
+        if current is None or priority.get(clean_type, 99) < priority.get(current, 99):
+            by_norm[tag_norm] = clean_type
+    for item in items:
+        item["tag_type"] = by_norm.get(_norm(item.get("value")), "general")
 
 
 def indexed_item_metadata(conn: sqlite3.Connection, item_hash: str) -> dict:

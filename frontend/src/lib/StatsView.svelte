@@ -9,7 +9,6 @@
   import MetadataActionModal from './stats/MetadataActionModal.svelte';
   import StatsControls from './stats/StatsControls.svelte';
   import StatsFilterBar from './stats/StatsFilterBar.svelte';
-  import { IconClose, IconPlus } from './icons';
   import {
     addArtistAlias,
     addArtistLink,
@@ -39,7 +38,8 @@
     isSelectableFacet,
     normalizeArtistListWidth,
     sortArtistItems,
-    sortFacetItems
+    sortFacetItems,
+    sortWdTagItems
   } from './stats/statsUtils';
   import {
     letterFilters,
@@ -184,7 +184,7 @@
       }
       const nextItems = await fetchFacets(activeKind, searchText, scopeMode);
       if (seq !== requestSeq) return;
-      items = sortFacetItems(nextItems, sortMode);
+      items = activeKind === 'wd_tag' ? sortWdTagItems(nextItems, sortMode) : sortFacetItems(nextItems, sortMode);
     } catch (err) {
       if (seq !== requestSeq) return;
       error = 'Failed to load stats';
@@ -208,7 +208,7 @@
       placeholderArtists = sortFacetItems(placeholderArtists, sortMode);
       return;
     }
-    items = sortFacetItems(items, sortMode);
+    items = activeKind === 'wd_tag' ? sortWdTagItems(items, sortMode) : sortFacetItems(items, sortMode);
   }
 
   function setScopeMode(mode: StatsScopeMode) {
@@ -716,32 +716,6 @@
       onOpenMerge={openMergeModal}
     />
   {:else}
-    {#if activeKind === 'topic'}
-      <div class="topic-create-bar">
-        {#if topicCreateOpen}
-          <input
-            type="text"
-            bind:value={topicCreateValue}
-            placeholder="Topic"
-            disabled={topicCreateBusy}
-            on:keydown={handleTopicCreateKeydown}
-          />
-          <button type="button" title="Create topic" aria-label="Create topic" disabled={topicCreateBusy || !topicCreateValue.trim()} on:click={confirmTopicCreate}>
-            <IconPlus size={12} />
-          </button>
-          <button type="button" title="Cancel" aria-label="Cancel" disabled={topicCreateBusy} on:click={closeTopicCreate}>
-            <IconClose size={12} />
-          </button>
-          {#if topicCreateError}
-            <span class="topic-create-error">{topicCreateError}</span>
-          {/if}
-        {:else}
-          <button class="topic-create-toggle" type="button" title="Create topic" aria-label="Create topic" on:click={openTopicCreate}>
-            <IconPlus size={12} />
-          </button>
-        {/if}
-      </div>
-    {/if}
     <FacetStatsPanel
       {activeKind}
       {visibleItems}
@@ -749,8 +723,16 @@
       {error}
       {selectedTopics}
       {selectedWdTags}
+      bind:topicCreateValue
+      {topicCreateOpen}
+      {topicCreateBusy}
+      {topicCreateError}
       onToggleFacet={toggleFacetSelection}
       onOpenMetadataAction={openMetadataAction}
+      onOpenTopicCreate={openTopicCreate}
+      onCloseTopicCreate={closeTopicCreate}
+      onConfirmTopicCreate={confirmTopicCreate}
+      onTopicCreateKeydown={handleTopicCreateKeydown}
     />
   {/if}
 </div>

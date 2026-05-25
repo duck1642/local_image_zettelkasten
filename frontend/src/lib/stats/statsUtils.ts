@@ -35,6 +35,16 @@ export function sortFacetItems(values: FacetItem[], sortMode: StatsSortMode) {
   return sorted;
 }
 
+export function sortWdTagItems(values: FacetItem[], sortMode: StatsSortMode) {
+  const typeOrder = { rating: 0, character: 1, general: 2 };
+  const sorted = sortFacetItems(values, sortMode);
+  return sorted.sort((a, b) => {
+    const aOrder = typeOrder[a.tag_type as keyof typeof typeOrder] ?? 2;
+    const bOrder = typeOrder[b.tag_type as keyof typeof typeOrder] ?? 2;
+    return aOrder - bOrder;
+  });
+}
+
 export function sortArtistItems(values: ArtistListItem[], sortMode: StatsSortMode) {
   const sorted = [...values];
   if (sortMode === 'alphabetical') {

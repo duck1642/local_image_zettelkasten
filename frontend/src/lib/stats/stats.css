@@ -24,7 +24,6 @@ body.artist-list-resizing {
     justify-content: space-between;
     gap: 16px;
     padding-bottom: 8px;
-    border-bottom: 1px solid var(--border-dim);
   }
 
   .stats-header .header-left {
@@ -247,45 +246,32 @@ body.artist-list-resizing {
     flex-grow: 1;
   }
 
-  .topic-create-bar {
-    display: flex;
+  .stats-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
-    gap: 6px;
+    gap: 12px;
+    min-height: 34px;
+    padding: 0 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    color: var(--text-main);
+    font-size: 13px;
   }
 
-  .topic-create-bar input {
-    width: 220px;
-    max-width: 100%;
-    height: 28px;
-    padding: 4px 8px;
-    font-size: 12px;
-    background: var(--bg-input);
-    border: 1px solid var(--border-dim);
+  .stats-row:last-child {
+    border-bottom: 0;
   }
 
-  .topic-create-bar button {
-    display: inline-grid;
-    place-items: center;
-    width: 28px;
-    height: 28px;
-    padding: 0;
-    border-radius: 6px;
-    font-size: 14px;
-    font-weight: 700;
-  }
-
-  .topic-create-toggle {
-    color: var(--accent-purple);
-    border-color: rgba(163, 113, 247, 0.45);
-    background: rgba(163, 113, 247, 0.08);
-  }
-
-  .topic-create-toggle:hover {
-    border-color: var(--accent-purple);
-    background: rgba(163, 113, 247, 0.14);
+  .stats-row .value {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .topic-create-error {
+    display: inline-flex;
+    align-items: center;
+    min-height: 26px;
     color: var(--accent-danger);
     font-size: 12px;
   }
@@ -298,30 +284,139 @@ body.artist-list-resizing {
     padding: 12px;
   }
 
+  .topic-create-inline {
+    display: inline-flex;
+    align-items: center;
+    height: 26px;
+    border: 1px solid rgba(163, 113, 247, 0.4);
+    border-radius: 6px;
+    background: rgba(163, 113, 247, 0.07);
+    overflow: hidden;
+  }
+
+  .topic-create-inline:hover,
+  .topic-create-inline.open {
+    border-color: var(--accent-purple);
+    background: rgba(163, 113, 247, 0.12);
+  }
+
+  .topic-create-inline input {
+    width: 180px;
+    height: 24px;
+    padding: 0 8px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: var(--text-main);
+    font-size: 12px;
+  }
+
+  .topic-create-inline input:focus {
+    outline: none;
+  }
+
+  .topic-create-inline button {
+    display: inline-grid;
+    place-items: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: 0;
+    border-left: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 0;
+    background: transparent;
+    color: var(--accent-purple);
+    cursor: pointer;
+  }
+
+  .topic-create-inline:not(.open) button {
+    border-left: 0;
+  }
+
+  .topic-create-inline button:hover:not(:disabled) {
+    background: rgba(163, 113, 247, 0.14);
+    color: #c9a0ff;
+  }
+
+  .topic-create-inline button:disabled {
+    cursor: default;
+    opacity: 0.45;
+  }
+
   .stat-chip-wrap {
+    --chip-color: var(--text-main);
+    --chip-border: var(--border-dim);
+    --chip-bg: rgba(255, 255, 255, 0.05);
+    --chip-hover-border: rgba(255, 255, 255, 0.2);
+    --chip-hover-bg: rgba(255, 255, 255, 0.08);
+    --chip-selected-bg: var(--accent-primary);
+    --chip-selected-border: #58a6ff;
+    --chip-selected-count-color: var(--accent-primary);
     display: inline-flex;
     align-items: center;
     max-width: 100%;
     min-width: 0;
-    border: 1px solid var(--border-dim);
+    height: 26px;
+    border: 1px solid var(--chip-border);
     border-radius: 6px;
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--chip-bg);
     overflow: hidden;
   }
 
   .stat-chip-wrap:hover {
-    border-color: rgba(31, 111, 235, 0.55);
-    background: rgba(255, 255, 255, 0.08);
+    border-color: var(--chip-hover-border);
+    background: var(--chip-hover-bg);
+  }
+
+  .stat-chip-wrap.topic {
+    --chip-color: var(--accent-purple);
+    --chip-border: rgba(163, 113, 247, 0.4);
+    --chip-bg: rgba(163, 113, 247, 0.07);
+    --chip-hover-border: var(--accent-purple);
+    --chip-hover-bg: rgba(163, 113, 247, 0.12);
+    --chip-selected-bg: var(--accent-purple);
+    --chip-selected-border: #c9a0ff;
+    --chip-selected-count-color: var(--accent-purple);
+  }
+
+  .stat-chip-wrap.wd-rating {
+    --chip-color: var(--accent-warning);
+    --chip-border: rgba(240, 139, 44, 0.35);
+    --chip-bg: rgba(240, 139, 44, 0.07);
+    --chip-hover-border: var(--accent-warning);
+    --chip-hover-bg: rgba(240, 139, 44, 0.12);
+    --chip-selected-bg: var(--accent-warning);
+    --chip-selected-border: #ffb454;
+    --chip-selected-count-color: var(--accent-warning);
+  }
+
+  .stat-chip-wrap.wd-character {
+    --chip-color: var(--accent-primary);
+    --chip-border: rgba(31, 111, 235, 0.35);
+    --chip-bg: rgba(31, 111, 235, 0.07);
+    --chip-hover-border: var(--accent-primary);
+    --chip-hover-bg: rgba(31, 111, 235, 0.12);
+    --chip-selected-bg: var(--accent-primary);
+    --chip-selected-border: #58a6ff;
+    --chip-selected-count-color: var(--accent-primary);
+  }
+
+  .stat-chip-wrap.wd-general {
+    --chip-color: var(--text-main);
+    --chip-border: var(--border-dim);
+    --chip-bg: rgba(255, 255, 255, 0.04);
+    --chip-hover-border: rgba(255, 255, 255, 0.25);
+    --chip-hover-bg: rgba(255, 255, 255, 0.08);
   }
 
   .stat-chip-wrap.selected {
-    background: var(--accent-primary);
-    border-color: #58a6ff;
+    background: var(--chip-selected-bg);
+    border-color: var(--chip-selected-border);
   }
 
   .stat-chip-wrap.selected:hover {
-    background: #388bfd;
-    border-color: #79c0ff;
+    background: var(--chip-selected-bg);
+    border-color: var(--chip-selected-border);
   }
 
   .stat-chip-wrap.selected .stat-chip {
@@ -337,9 +432,10 @@ body.artist-list-resizing {
     display: flex;
     align-items: center;
     gap: 4px;
+    height: 100%;
     border: 0;
     background: transparent;
-    color: var(--text-main);
+    color: var(--chip-color);
     padding: 0;
     font-size: 13px;
     line-height: 1.2;
@@ -373,7 +469,7 @@ body.artist-list-resizing {
     height: 18px;
     padding: 0 6px;
     margin-left: 0;
-    margin-right: 8px;
+    margin-right: 2px;
   }
 
   .stat-chip-wrap:hover .chip-count {
@@ -382,17 +478,17 @@ body.artist-list-resizing {
   }
 
   .stat-chip-wrap.selected .chip-count {
-    color: var(--accent-primary);
+    color: var(--chip-selected-count-color);
     background: #ffffff;
   }
 
   .stat-chip-wrap.selected:hover .chip-count {
-    color: #0969da;
+    color: var(--chip-selected-count-color);
     background: #f0f6fc;
   }
 
   .stat-chip-wrap.selected:hover .chip-actions {
-    border-left: 1px solid rgba(255, 255, 255, 0.3);
+    border-left-color: rgba(255, 255, 255, 0.3);
   }
 
   .stat-chip-wrap.selected .chip-action {
@@ -413,30 +509,26 @@ body.artist-list-resizing {
   .chip-actions {
     display: inline-flex;
     align-items: center;
-    gap: 2px;
     overflow: hidden;
-    max-width: 0;
+    width: 0;
     opacity: 0;
     height: 100%;
+    border-left: 1px solid transparent;
   }
 
   .stat-chip-wrap:hover .chip-actions {
-    max-width: 90px;
+    width: auto;
     opacity: 1;
-    border-left: 1px solid rgba(255, 255, 255, 0.06);
-    padding-left: 4px;
-    margin-left: 4px;
-    margin-right: 6px;
+    border-left-color: rgba(255, 255, 255, 0.08);
   }
 
   .chip-action {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 22px;
-    height: 22px;
+    display: inline-grid;
+    place-items: center;
+    width: 24px;
+    height: 24px;
     padding: 0;
-    border-radius: 4px;
+    border-radius: 0;
     border: 0;
     background: transparent;
     color: var(--text-muted);

@@ -3,7 +3,7 @@ export type StatsSortMode = 'popularity' | 'alphabetical';
 export type StatsScopeMode = 'used' | 'all';
 export type MetadataActionKind = 'rename' | 'delete' | 'merge';
 
-export type FacetItem = { value: string; count: number };
+export type FacetItem = { value: string; count: number; tag_type?: 'rating' | 'character' | 'general' | string };
 export type FilterVaultPayload = { topics: string[]; wd_tags: string[] };
 export type ArtistListItem = { id: number; name: string; kind: string; item_count: number; link_count: number; alias_count: number };
 export type ArtistAlias = { id: number; alias: string; alias_norm: string };
@@ -46,9 +46,9 @@ export type ArtistMergePreview = {
 
 export const statsKinds: { label: string; value: FacetKind }[] = [
   { label: 'WD Tags', value: 'wd_tag' },
+  { label: 'Topics', value: 'topic' },
   { label: 'Artists', value: 'artist' },
-  { label: 'Platforms', value: 'platform' },
-  { label: 'Topics', value: 'topic' }
+  { label: 'Platforms', value: 'platform' }
 ];
 
 export const letterFilters = ['all', '#', ...'abcdefghijklmnopqrstuvwxyz'.split('')];

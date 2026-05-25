@@ -390,7 +390,11 @@ def _topic_library_facets(conn, needle: str, limit: int) -> list[dict]:
 
 def _wd_dictionary_facets(workspace_conn, item_conn, needle: str, limit: int) -> list[dict]:
     used = {
-        str(item["value"]).casefold(): {"value": item["value"], "count": int(item["count"] or 0)}
+        str(item["value"]).casefold(): {
+            "value": item["value"],
+            "count": int(item["count"] or 0),
+            "tag_type": item.get("tag_type") or "general",
+        }
         for item in metadata_facets(item_conn, "wd_tag", needle.casefold(), 10000)
     }
     merged = dict(used)
@@ -399,9 +403,9 @@ def _wd_dictionary_facets(workspace_conn, item_conn, needle: str, limit: int) ->
     if needle:
         where_sql = "WHERE tag_norm LIKE ? OR LOWER(tag) LIKE ?"
         params.extend([f"%{needle}%", f"%{needle}%"])
-    for tag_norm, tag in workspace_conn.execute(
+    for tag_norm, tag, tag_type in workspace_conn.execute(
         f"""
-        SELECT tag_norm, tag
+        SELECT tag_norm, tag, tag_type
         FROM wd_tag_dictionary
         {where_sql}
         ORDER BY tag COLLATE NOCASE ASC
@@ -409,7 +413,7 @@ def _wd_dictionary_facets(workspace_conn, item_conn, needle: str, limit: int) ->
         """,
         params,
     ).fetchall():
-        merged.setdefault(str(tag_norm), {"value": tag, "count": 0})
+        merged.setdefault(str(tag_norm), {"value": tag, "count": 0, "tag_type": tag_type or "general"})
     items = list(merged.values())
     items.sort(
         key=lambda item: (

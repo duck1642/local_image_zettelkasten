@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { FacetItem, FacetKind } from './types';
-  import { IconMerge, IconPencil, IconTrash } from '../icons';
+  import { IconClose, IconMerge, IconPencil, IconPlus, IconTrash } from '../icons';
 
   export let activeKind: FacetKind;
   export let visibleItems: FacetItem[] = [];
@@ -8,14 +8,30 @@
   export let error = '';
   export let selectedTopics: string[] = [];
   export let selectedWdTags: string[] = [];
+  export let topicCreateOpen = false;
+  export let topicCreateValue = '';
+  export let topicCreateBusy = false;
+  export let topicCreateError = '';
   export let onToggleFacet: (kind: FacetKind, value: string) => void;
   export let onOpenMetadataAction: (kind: FacetKind, action: 'rename' | 'delete' | 'merge', value: string) => void;
+  export let onOpenTopicCreate: () => void = () => {};
+  export let onCloseTopicCreate: () => void = () => {};
+  export let onConfirmTopicCreate: () => void = () => {};
+  export let onTopicCreateKeydown: (event: KeyboardEvent) => void = () => {};
 
   $: isSelected = (value: string) => {
     if (activeKind === 'topic') return selectedTopics.includes(value);
     if (activeKind === 'wd_tag') return selectedWdTags.includes(value);
     return false;
   };
+
+  function chipKind(item: FacetItem) {
+    if (activeKind === 'topic') return 'topic';
+    if (activeKind !== 'wd_tag') return '';
+    if (item.tag_type === 'rating') return 'wd-rating';
+    if (item.tag_type === 'character') return 'wd-character';
+    return 'wd-general';
+  }
 </script>
 
 <div class="stats-list">
@@ -23,7 +39,7 @@
     <div class="empty-state">Loading...</div>
   {:else if error}
     <div class="empty-state error">{error}</div>
-  {:else if visibleItems.length === 0}
+  {:else if visibleItems.length === 0 && activeKind !== 'topic'}
     <div class="empty-state">No values</div>
   {:else}
     {#if activeKind === 'platform'}
@@ -35,8 +51,34 @@
       {/each}
     {:else}
       <div class="chip-cloud">
+        {#if activeKind === 'topic'}
+          <div class="topic-create-inline" class:open={topicCreateOpen}>
+            {#if topicCreateOpen}
+              <input
+                type="text"
+                bind:value={topicCreateValue}
+                placeholder="Topic"
+                disabled={topicCreateBusy}
+                on:keydown={onTopicCreateKeydown}
+              />
+              <button type="button" title="Create topic" aria-label="Create topic" disabled={topicCreateBusy || !topicCreateValue.trim()} on:click={onConfirmTopicCreate}>
+                <IconPlus size={12} />
+              </button>
+              <button type="button" title="Cancel" aria-label="Cancel" disabled={topicCreateBusy} on:click={onCloseTopicCreate}>
+                <IconClose size={12} />
+              </button>
+            {:else}
+              <button type="button" title="Create topic" aria-label="Create topic" on:click={onOpenTopicCreate}>
+                <IconPlus size={12} />
+              </button>
+            {/if}
+          </div>
+          {#if topicCreateError}
+            <span class="topic-create-error">{topicCreateError}</span>
+          {/if}
+        {/if}
         {#each visibleItems as item}
-          <div class="stat-chip-wrap" class:selected={isSelected(item.value)}>
+          <div class="stat-chip-wrap {chipKind(item)}" class:selected={isSelected(item.value)}>
             <button
               type="button"
               class="stat-chip"

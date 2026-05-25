@@ -18,7 +18,24 @@
 
   let filterOpen = false;
   $: filterActive = scopeMode !== 'used' || sortMode !== 'popularity' || alphabetFilterOpen;
+
+  function isEditableTarget(target: EventTarget | null) {
+    const element = target as HTMLElement | null;
+    if (!element) return false;
+    const tagName = element.tagName.toLowerCase();
+    return tagName === 'input' || tagName === 'textarea' || tagName === 'select' || element.isContentEditable;
+  }
+
+  function handleStatsShortcut(event: KeyboardEvent) {
+    if (event.ctrlKey || event.altKey || event.metaKey || !event.shiftKey) return;
+    if (isEditableTarget(event.target)) return;
+    if (event.key.toLowerCase() !== 'f') return;
+    event.preventDefault();
+    filterOpen = !filterOpen;
+  }
 </script>
+
+<svelte:window on:keydown={handleStatsShortcut} />
 
 <div class="stats-controls">
   <input
@@ -33,7 +50,7 @@
       class="stats-filter-button"
       class:active={filterOpen || filterActive}
       type="button"
-      title="Filter stats"
+      title="Filter stats (Shift+F)"
       aria-label="Filter stats"
       aria-expanded={filterOpen}
       on:click={() => filterOpen = !filterOpen}
