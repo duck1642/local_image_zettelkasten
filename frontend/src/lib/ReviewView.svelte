@@ -283,20 +283,26 @@
       {current}
       {isVideoMedia}
       {displayName}
+      currentIndex={currentSectionIndex}
+      totalCount={currentSectionItems.length}
       on:select={handleSelectItem}
+      on:prev={() => selectRelative(-1)}
+      on:next={() => selectRelative(1)}
     />
 
     <!-- Main Comparison Section -->
     {#if current}
       <section class="review-main">
-        <!-- Render Comparison Panes and Metadata card -->
-        <ReviewWorkspace
-          {current}
-          {mediaMounted}
-          {isVideoMedia}
-          {mediaUrl}
-          {displayName}
-        />
+        <div class="workspace-container">
+          <!-- Render Comparison Panes and Metadata card -->
+          <ReviewWorkspace
+            {current}
+            {mediaMounted}
+            {isVideoMedia}
+            {mediaUrl}
+            {displayName}
+          />
+        </div>
 
         <!-- Renders Bottom Action Bar -->
         <ReviewActionBar
@@ -305,21 +311,6 @@
           on:action={handleAction}
           on:retryCleanup={retryCleanup}
         />
-
-        <!-- Queue Nav Bar -->
-        <div class="nav-bar">
-          <button class="nav-arrow-btn" on:click={() => selectRelative(-1)} disabled={currentSectionIndex <= 0}>
-            <IconChevronLeft size={14} />
-            <span>Previous</span>
-          </button>
-          <div class="counter">
-            Item <span class="focus-number">{currentSectionIndex + 1}</span> of <span class="total-number">{currentSectionItems.length}</span>
-          </div>
-          <button class="nav-arrow-btn" on:click={() => selectRelative(1)} disabled={currentSectionIndex >= currentSectionItems.length - 1}>
-            <span>Next</span>
-            <IconChevronRight size={14} />
-          </button>
-        </div>
       </section>
     {/if}
   {/if}
@@ -343,62 +334,21 @@
     flex-direction: column;
     overflow: hidden;
     min-width: 0;
-  }
-
-  /* Nav arrow footer */
-  .nav-bar {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    background: rgba(0, 0, 0, 0.15);
-    padding: 8px 16px;
-    border-radius: 8px;
+    background: var(--bg-panel);
     border: 1px solid var(--border-dim);
-  }
-
-  .nav-arrow-btn {
-    flex: 1;
-    height: 32px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    color: var(--text-main);
     border-radius: 6px;
-    cursor: pointer;
-    font-size: 11px;
-    font-weight: 600;
   }
 
-  .nav-arrow-btn:hover:not(:disabled) {
-    background: rgba(255, 255, 255, 0.1);
-    color: var(--text-bright);
-    border-color: rgba(255, 255, 255, 0.2);
+  .workspace-container {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    padding: 16px;
+    min-height: 0;
+    overflow-y: auto;
   }
 
-  .nav-arrow-btn:disabled {
-    cursor: not-allowed;
-    opacity: 0.35;
-  }
-
-  .counter {
-    flex: 1.5;
-    text-align: center;
-    color: var(--text-muted);
-    font-size: 11px;
-    font-weight: 500;
-  }
-
-  .focus-number {
-    color: var(--text-bright);
-    font-weight: 700;
-  }
-
-  .total-number {
-    font-weight: bold;
-  }
+  /* Nav arrow footer removed - consolidated in ReviewInboxList footer */
 
   /* Centered Loader states */
   .centered-state {

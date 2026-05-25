@@ -50,19 +50,25 @@
   .action-bar {
     display: flex;
     gap: 12px;
-    margin: 12px 0;
+    padding: 9px 16px;
+    background: rgba(0, 0, 0, 0.2);
+    border-top: 1px solid var(--border-dim);
+    box-sizing: border-box;
+    height: 48px;
+    align-items: center;
+    width: 100%;
   }
 
   .action-big {
     flex: 1;
-    height: 40px;
+    height: 30px;
     display: flex;
     align-items: center;
     justify-content: center;
     gap: 8px;
     font-weight: 700;
-    font-size: 12px;
-    border-radius: 6px;
+    font-size: 11px;
+    border-radius: 4px;
     cursor: pointer;
   }
 

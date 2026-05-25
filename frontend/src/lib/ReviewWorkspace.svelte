@@ -36,159 +36,176 @@
 </script>
 
 {#if current.section === 'cleanup'}
-  <!-- Header titles -->
-  <div class="comparison-header">
-    <div class="column-title">
-      <span class="pill-badge warning">Review File (Active)</span>
-    </div>
-    <div class="column-title">
-      <span class="pill-badge neutral">Cleanup Error Details</span>
-    </div>
-  </div>
-
-  <!-- Comparison panes -->
-  <div class="panes">
-    <div class="pane">
-      {#if mediaMounted}
-        {#if isVideoMedia(current)}
-          <!-- svelte-ignore a11y-media-has-caption -->
-          <video src={mediaUrl(current)} controls preload="metadata"></video>
-        {:else}
-          <img src={mediaUrl(current)} alt="Review cleanup item" />
-        {/if}
-      {/if}
-    </div>
-    <div class="pane detail-pane">
-      <div class="cleanup-detail">
-        <div class="detail-label">Current State</div>
-        <div class="detail-val">{current.state || 'pending_cleanup'}</div>
-        <div class="detail-label">Last Action Attempt</div>
-        <div class="detail-val">{current.last_action || current.metadata?.last_action || 'unknown'}</div>
-        <div class="detail-label">Error Output</div>
-        <div class="error-text-box">
-          {current.last_cleanup_error || current.metadata?.last_cleanup_error || 'Cleanup failed.'}
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Cleanup info metadata card -->
-  <div class="meta-card">
-    <div class="meta-table">
-      <div class="meta-table-header cleanup-header-bar">
-        <div class="meta-col-label">Metadata Property</div>
-        <div class="meta-col-val text-warn">Active Staged File</div>
-        <div class="meta-col-val text-muted">Cleanup Reference Hash</div>
+  <div class="workspace-grid">
+    <!-- Left Column (Staged File) -->
+    <div class="workspace-column">
+      <div class="column-header">
+        <span class="pill-badge warning">Review File (Active)</span>
       </div>
       
-      <div class="meta-table-row">
-        <div class="meta-col-label">Original Filename</div>
-        <div class="meta-col-val truncate" title={displayName(current)}>{displayName(current)}</div>
-        <div class="meta-col-val truncate" title={current.metadata?.target_hash || current.metadata?.best_match || 'missing'}>
-          {current.metadata?.target_hash || current.metadata?.best_match || 'missing'}
+      <div class="pane">
+        {#if mediaMounted}
+          {#if isVideoMedia(current)}
+            <!-- svelte-ignore a11y-media-has-caption -->
+            <video src={mediaUrl(current)} controls preload="metadata"></video>
+          {:else}
+            <img src={mediaUrl(current)} alt="Review cleanup item" />
+          {/if}
+        {/if}
+      </div>
+
+      <div class="meta-card">
+        <div class="meta-card-title">Staged File Metadata</div>
+        <div class="meta-row">
+          <span class="meta-label">Original Filename:</span>
+          <span class="meta-val truncate" title={displayName(current)}>{displayName(current)}</span>
+        </div>
+        <div class="meta-row">
+          <span class="meta-label">Format / Ext:</span>
+          <span class="meta-val uppercase">{current.extension || extFromUrl(current.url) || 'unknown'}</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right Column (Error Details) -->
+    <div class="workspace-column">
+      <div class="column-header">
+        <span class="pill-badge neutral">Cleanup Error Details</span>
+      </div>
+
+      <div class="pane detail-pane">
+        <div class="cleanup-detail">
+          <div class="detail-label">Current State</div>
+          <div class="detail-val">{current.state || 'pending_cleanup'}</div>
+          <div class="detail-label">Last Action Attempt</div>
+          <div class="detail-val">{current.last_action || current.metadata?.last_action || 'unknown'}</div>
+          <div class="detail-label">Error Output</div>
+          <div class="error-text-box">
+            {current.last_cleanup_error || current.metadata?.last_cleanup_error || 'Cleanup failed.'}
+          </div>
         </div>
       </div>
 
-      <div class="meta-table-row">
-        <div class="meta-col-label">Format / Extension</div>
-        <div class="meta-col-val uppercase">{current.extension || extFromUrl(current.url) || 'unknown'}</div>
-        <div class="meta-col-val text-muted">-</div>
+      <div class="meta-card">
+        <div class="meta-card-title">Cleanup Reference</div>
+        <div class="meta-row">
+          <span class="meta-label">Target Hash:</span>
+          <span class="meta-val truncate" title={current.metadata?.target_hash || current.metadata?.best_match || 'missing'}>
+            {current.metadata?.target_hash || current.metadata?.best_match || 'missing'}
+          </span>
+        </div>
       </div>
     </div>
   </div>
 {:else}
-  <!-- Header titles -->
-  <div class="comparison-header">
-    <div class="column-title">
-      <span class="pill-badge primary">Incoming Item (Staged)</span>
-    </div>
-    <div class="column-title">
-      <span class="pill-badge info">Best Similarity Match in Vault</span>
-    </div>
-  </div>
-
-  <!-- Comparison panes -->
-  <div class="panes">
-    <div class="pane">
-      {#if mediaMounted}
-        {#if isVideoMedia(current)}
-          <!-- svelte-ignore a11y-media-has-caption -->
-          <video src={mediaUrl(current)} controls preload="metadata"></video>
-        {:else}
-          <img src={mediaUrl(current)} alt="New" />
-        {/if}
-      {/if}
-    </div>
-    <div class="pane">
-      {#if mediaMounted && current.best_match}
-        {#if isVideoMedia(current.best_match)}
-          <!-- svelte-ignore a11y-media-has-caption -->
-          <video src={mediaUrl(current.best_match)} controls preload="metadata"></video>
-        {:else}
-          <img src={mediaUrl(current.best_match)} alt="Match" />
-        {/if}
-      {:else if mediaMounted}
-        <div class="no-match">
-          <IconInfoCircle size={32} strokeWidth={1.5} />
-          <span class="no-match-title">No best-match duplicates detected in vault.</span>
-          <p class="sub-muted">This file appears to be entirely unique.</p>
-        </div>
-      {/if}
-    </div>
-  </div>
-
-  <!-- Comparative side-by-side metadata table -->
-  <div class="meta-card">
-    <div class="meta-table">
-      <div class="meta-table-header">
-        <div class="meta-col-label">Metadata Property</div>
-        <div class="meta-col-val text-primary">Incoming File (Staged)</div>
-        <div class="meta-col-val text-info">Vault Duplicate (Current)</div>
+  <div class="workspace-grid">
+    <!-- Left Column (Incoming) -->
+    <div class="workspace-column">
+      <div class="column-header">
+        <span class="pill-badge primary">Incoming Item (Staged)</span>
       </div>
       
-      <div class="meta-table-row">
-        <div class="meta-col-label">Filename / Hash</div>
-        <div class="meta-col-val truncate" title={displayName(current)}>{displayName(current)}</div>
-        <div class="meta-col-val truncate" title={current.best_match?.hash || 'none'}>
-          {current.best_match ? `${current.best_match.hash.slice(0, 16)}...${current.best_match.extension || ''}` : 'No matching copy'}
-        </div>
+      <div class="pane">
+        {#if mediaMounted}
+          {#if isVideoMedia(current)}
+            <!-- svelte-ignore a11y-media-has-caption -->
+            <video src={mediaUrl(current)} controls preload="metadata"></video>
+          {:else}
+            <img src={mediaUrl(current)} alt="New" />
+          {/if}
+        {/if}
       </div>
 
-      <div class="meta-table-row">
-        <div class="meta-col-label">Type / Extension</div>
-        <div class="meta-col-val uppercase">{current.extension || extFromUrl(current.url) || 'unknown'}</div>
-        <div class="meta-col-val uppercase">{current.best_match?.extension || 'none'}</div>
-      </div>
-
-      {#if current.best_match}
-        <div class="meta-table-row">
-          <div class="meta-col-label">Artist Attribution</div>
-          <div class="meta-col-val">{current.metadata?.artist || 'None detected'}</div>
-          <div class="meta-col-val">{current.best_match.artist || 'Unassigned'}</div>
+      <div class="meta-card">
+        <div class="meta-card-title">Staged File Metadata</div>
+        <div class="meta-row">
+          <span class="meta-label">Filename:</span>
+          <span class="meta-val truncate" title={displayName(current)}>{displayName(current)}</span>
         </div>
-      {/if}
-
-      {#if current.metadata?.validation_warning}
-        <div class="meta-table-row warn-row">
-          <div class="meta-col-label">Validation Alert</div>
-          <div class="meta-col-val text-warn span-two" title={current.metadata.validation_warning}>
-            {current.metadata.validation_warning}
+        <div class="meta-row">
+          <span class="meta-label">Format / Ext:</span>
+          <span class="meta-val uppercase">{current.extension || extFromUrl(current.url) || 'unknown'}</span>
+        </div>
+        <div class="meta-row">
+          <span class="meta-label">Artist:</span>
+          <span class="meta-val">{current.metadata?.artist || 'None detected'}</span>
+        </div>
+        {#if current.metadata?.validation_warning}
+          <div class="meta-row alert-row">
+            <span class="meta-label text-warn">Validation Alert:</span>
+            <span class="meta-val text-warn truncate" title={current.metadata.validation_warning}>
+              {current.metadata.validation_warning}
+            </span>
           </div>
-        </div>
-      {/if}
+        {/if}
+      </div>
+    </div>
+
+    <!-- Right Column (Vault Copy) -->
+    <div class="workspace-column">
+      <div class="column-header">
+        <span class="pill-badge info">Best Similarity Match in Vault</span>
+      </div>
+
+      <div class="pane">
+        {#if mediaMounted && current.best_match}
+          {#if isVideoMedia(current.best_match)}
+            <!-- svelte-ignore a11y-media-has-caption -->
+            <video src={mediaUrl(current.best_match)} controls preload="metadata"></video>
+          {:else}
+            <img src={mediaUrl(current.best_match)} alt="Match" />
+          {/if}
+        {:else if mediaMounted}
+          <div class="no-match">
+            <IconInfoCircle size={32} strokeWidth={1.5} />
+            <span class="no-match-title">No best-match duplicates detected in vault.</span>
+            <p class="sub-muted">This file appears to be entirely unique.</p>
+          </div>
+        {/if}
+      </div>
+
+      <div class="meta-card">
+        <div class="meta-card-title">Vault Copy Metadata</div>
+        {#if current.best_match}
+          <div class="meta-row">
+            <span class="meta-label">Hash ID:</span>
+            <span class="meta-val truncate" title={current.best_match.hash}>{current.best_match.hash}</span>
+          </div>
+          <div class="meta-row">
+            <span class="meta-label">Format / Ext:</span>
+            <span class="meta-val uppercase">{current.best_match.extension || 'unknown'}</span>
+          </div>
+          <div class="meta-row">
+            <span class="meta-label">Artist:</span>
+            <span class="meta-val">{current.best_match.artist || 'Unassigned'}</span>
+          </div>
+        {:else}
+          <div class="meta-row empty-meta">
+            <span>No matching duplicate in vault.</span>
+          </div>
+        {/if}
+      </div>
     </div>
   </div>
 {/if}
 
 <style>
-  .comparison-header {
+  .workspace-grid {
+    flex: 1;
     display: flex;
     gap: 16px;
-    margin-bottom: 12px;
+    min-height: 0;
   }
 
-  .column-title {
+  .workspace-column {
     flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    gap: 12px;
+  }
+
+  .column-header {
     display: flex;
     align-items: center;
   }
@@ -223,13 +240,6 @@
     color: var(--text-muted);
     background: rgba(255, 255, 255, 0.05);
     border-color: rgba(255, 255, 255, 0.08);
-  }
-
-  .panes {
-    flex: 1;
-    display: flex;
-    gap: 16px;
-    min-height: 0;
   }
 
   .pane {
@@ -334,87 +344,68 @@
     margin: 0;
   }
 
-  /* Comparative Metadata Table Layout */
+  /* Compact Metadata Cards */
   .meta-card {
     background: var(--bg-panel);
     border: 1px solid var(--border-dim);
     border-radius: 6px;
-    padding: 0;
-    margin-top: 16px;
-    overflow: hidden;
-  }
-
-  .meta-table {
+    padding: 12px;
     display: flex;
     flex-direction: column;
-    width: 100%;
-    font-size: 11px;
+    gap: 8px;
   }
 
-  .meta-table-header {
-    display: grid;
-    grid-template-columns: 180px 1fr 1fr;
-    background: rgba(0, 0, 0, 0.25);
-    border-bottom: 1px solid var(--border-dim);
-    padding: 8px 16px;
+  .meta-card-title {
+    font-size: 10px;
     font-weight: 700;
     color: var(--text-muted);
     text-transform: uppercase;
     letter-spacing: 0.5px;
-  }
-
-  .cleanup-header-bar {
-    grid-template-columns: 180px 1.5fr 0.5fr;
-  }
-
-  .meta-table-row {
-    display: grid;
-    grid-template-columns: 180px 1fr 1fr;
     border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-    padding: 8px 16px;
+    padding-bottom: 6px;
+    margin-bottom: 2px;
+  }
+
+  .meta-row {
+    display: flex;
+    justify-content: space-between;
     align-items: center;
+    font-size: 11px;
+    gap: 12px;
   }
 
-  .meta-table-row:last-child {
-    border-bottom: none;
-  }
-
-  .meta-col-label {
+  .meta-label {
     font-weight: 600;
     color: var(--text-muted);
+    flex-shrink: 0;
   }
 
-  .meta-col-val {
+  .meta-val {
     color: var(--text-main);
     font-family: monospace;
+    text-align: right;
   }
 
-  .meta-col-val.truncate {
+  .meta-val.truncate {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    padding-right: 12px;
+    max-width: 240px;
   }
 
-  .text-primary {
-    color: var(--accent-purple) !important;
+  .empty-meta {
+    justify-content: center;
+    color: var(--text-muted);
+    font-style: italic;
+    padding: 12px 0;
   }
 
-  .text-info {
-    color: var(--accent-primary) !important;
-  }
-
-  .text-warn {
-    color: var(--accent-warning) !important;
-  }
-
-  .span-two {
-    grid-column: span 2;
-  }
-
-  .warn-row {
+  .alert-row {
     background: rgba(240, 139, 44, 0.05);
-    border-top: 1px dashed rgba(240, 139, 44, 0.2);
+    border: 1px dashed rgba(240, 139, 44, 0.2);
+    border-radius: 4px;
+    padding: 4px 8px;
+    margin-top: 2px;
   }
 
   .uppercase {

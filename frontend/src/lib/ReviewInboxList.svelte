@@ -1,6 +1,6 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
-  import { IconAlertTriangle, IconImage, IconVideo } from './icons';
+  import { IconAlertTriangle, IconImage, IconVideo, IconChevronLeft, IconChevronRight } from './icons';
 
   interface ReviewItem {
     filename: string;
@@ -22,6 +22,8 @@
   export let current: ReviewItem | null = null;
   export let isVideoMedia: (item: any) => boolean;
   export let displayName: (item: any) => string;
+  export let currentIndex = 0;
+  export let totalCount = 0;
 
   const dispatch = createEventDispatcher();
 
@@ -81,6 +83,20 @@
       {/each}
     {/if}
   </div>
+
+  {#if totalCount > 0}
+    <div class="queue-footer">
+      <button class="nav-arrow-btn" on:click={() => dispatch('prev')} disabled={currentIndex <= 0} title="Previous Item">
+        <IconChevronLeft size={12} />
+      </button>
+      <div class="counter">
+        <span class="focus-number">{currentIndex + 1}</span> / <span class="total-number">{totalCount}</span>
+      </div>
+      <button class="nav-arrow-btn" on:click={() => dispatch('next')} disabled={currentIndex >= totalCount - 1} title="Next Item">
+        <IconChevronRight size={12} />
+      </button>
+    </div>
+  {/if}
 </aside>
 
 <style>
@@ -274,5 +290,57 @@
     font-size: 10px;
     color: var(--text-muted);
     padding-left: 26px;
+  }
+
+  /* Compact Footer Nav Elements */
+  .queue-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px;
+    border-top: 1px solid var(--border-dim);
+    background: rgba(0, 0, 0, 0.2);
+    gap: 12px;
+  }
+
+  .nav-arrow-btn {
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: var(--text-main);
+    border-radius: 4px;
+    cursor: pointer;
+    padding: 0;
+  }
+
+  .nav-arrow-btn:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--text-bright);
+    border-color: rgba(255, 255, 255, 0.2);
+  }
+
+  .nav-arrow-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.3;
+  }
+
+  .counter {
+    font-size: 11px;
+    font-weight: 400;
+    color: var(--text-muted);
+  }
+
+  .focus-number {
+    color: var(--text-main);
+    font-weight: 400;
+  }
+
+  .total-number {
+    color: var(--text-main);
+    font-weight: 400;
   }
 </style>
