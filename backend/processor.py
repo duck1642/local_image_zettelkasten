@@ -106,36 +106,43 @@ def calculate_tiles(filepath: Path, ratio_threshold: float = 3.0) -> list:
         bg_color = get_normalization_color(proc_config)
 
         tiles = []
-        with Image.open(filepath) as img:
-            if do_flatten:
-                img = flatten_image(img, bg_color)
+        with Image.open(filepath) as raw_img:
+            img = flatten_image(raw_img, bg_color) if do_flatten else raw_img
+            try:
+                w, h = img.size
 
-            w, h = img.size
+                if w == 0 or h == 0:
+                    from logger import log_system
+                    log_system("WARNING", "Degenerate image with 0-pixel dimension", file=str(filepath), width=w, height=h)
+                    return []
+                ratio = max(w, h) / min(w, h)
 
-            if w == 0 or h == 0:
-                from logger import log_system
-                log_system("WARNING", "Degenerate image with 0-pixel dimension", file=str(filepath), width=w, height=h)
-                return []
-            ratio = max(w, h) / min(w, h)
+                if ratio < ratio_threshold:
+                    return []
 
-            if ratio < ratio_threshold:
-                return []
-
-
-            if h > w:
-                num_tiles = h // w
-                for i in range(num_tiles):
-                    top = i * w
-                    bottom = top + w
-                    tile = img.crop((0, top, w, bottom))
-                    tiles.append((i, str(imagehash.phash(tile))))
-            else:
-                num_tiles = w // h
-                for i in range(num_tiles):
-                    left = i * h
-                    right = left + h
-                    tile = img.crop((left, 0, right, h))
-                    tiles.append((i, str(imagehash.phash(tile))))
+                if h > w:
+                    num_tiles = h // w
+                    for i in range(num_tiles):
+                        top = i * w
+                        bottom = top + w
+                        tile = img.crop((0, top, w, bottom))
+                        try:
+                            tiles.append((i, str(imagehash.phash(tile))))
+                        finally:
+                            tile.close()
+                else:
+                    num_tiles = w // h
+                    for i in range(num_tiles):
+                        left = i * h
+                        right = left + h
+                        tile = img.crop((left, 0, right, h))
+                        try:
+                            tiles.append((i, str(imagehash.phash(tile))))
+                        finally:
+                            tile.close()
+            finally:
+                if img is not raw_img:
+                    img.close()
         return tiles
     except Exception:
         return []

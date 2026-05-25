@@ -373,6 +373,10 @@
     const nextGroup = hashIndex.get(item.hash)?.group ?? null;
     if (nextGroup) {
       selectedGroup = nextGroup;
+      const idx = nextGroup.items.findIndex((i) => i.hash === item.hash);
+      if (idx !== -1) {
+        groupIndexes = { ...groupIndexes, [nextGroup.id]: idx };
+      }
     } else if (!selectedGroup || !selectedGroup.items.some((i) => i.hash === item.hash)) {
       selectedGroup = null;
     }

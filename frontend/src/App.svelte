@@ -1,4 +1,4 @@
-﻿<script lang="ts">
+<script lang="ts">
   import { onMount } from 'svelte';
   import Ingestion from './lib/Ingestion.svelte';
   import LogsView from './lib/LogsView.svelte';
@@ -10,6 +10,14 @@
   import { ramStats, startRamTracker } from './lib/ramStore';
   import { queueStats, reviewCount, reviewStats, startSharedStatsPolling } from './lib/statsStore';
   import { apiFetch } from './lib/api';
+  import {
+    IconFolder,
+    IconSparkles,
+    IconEye,
+    IconChart,
+    IconSettings,
+    IconFileText
+  } from './lib/icons';
 
   type AppTab = 'vault' | 'logs' | 'ingest' | 'review' | 'stats' | 'settings';
   type IngestMode = 'online' | 'local';
@@ -334,16 +342,36 @@
   <div class="app-container">
     <aside class="sidebar">
       <div class="nav-group">
-        <button class:active={activeTab === 'vault'} on:click={() => activeTab = 'vault'}>Vault</button>
+        <button class:active={activeTab === 'vault'} on:click={() => activeTab = 'vault'}>
+          <IconFolder size={14} />
+          <span>Vault</span>
+        </button>
         <button class:active={activeTab === 'ingest'} on:click={() => activeTab = 'ingest'}>
-          Ingestion {#if ($queueStats.normal + $queueStats.force) > 0}<span class="badge">{$queueStats.normal + $queueStats.force}</span>{/if}
+          <IconSparkles size={14} />
+          <span>Ingestion</span>
+          {#if ($queueStats.normal + $queueStats.force) > 0}
+            <span class="badge">{$queueStats.normal + $queueStats.force}</span>
+          {/if}
         </button>
         <button class:active={activeTab === 'review'} on:click={() => activeTab = 'review'}>
-          Review {#if $reviewCount > 0}<span class="badge warn">{$reviewCount}</span>{/if}
+          <IconEye size={14} />
+          <span>Review</span>
+          {#if $reviewCount > 0}
+            <span class="badge warn">{$reviewCount}</span>
+          {/if}
         </button>
-        <button class:active={activeTab === 'stats'} on:click={() => activeTab = 'stats'}>Stats</button>
-        <button class:active={activeTab === 'settings'} on:click={() => activeTab = 'settings'}>Settings</button>
-        <button class:active={activeTab === 'logs'} on:click={() => activeTab = 'logs'}>App Logs</button>
+        <button class:active={activeTab === 'stats'} on:click={() => activeTab = 'stats'}>
+          <IconChart size={14} />
+          <span>Stats</span>
+        </button>
+        <button class:active={activeTab === 'settings'} on:click={() => activeTab = 'settings'}>
+          <IconSettings size={14} />
+          <span>Settings</span>
+        </button>
+        <button class:active={activeTab === 'logs'} on:click={() => activeTab = 'logs'}>
+          <IconFileText size={14} />
+          <span>App Logs</span>
+        </button>
       </div>
     </aside>
 
@@ -395,9 +423,9 @@
   .drop-overlay { position: fixed; inset: 0; z-index: 1200; background: rgba(1, 4, 9, 0.62); display: flex; align-items: center; justify-content: center; pointer-events: none; }
   .drop-overlay-text { color: #e6edf3; font-size: 20px; font-weight: 700; letter-spacing: 0; text-align: center; padding: 16px 22px; border: 1px solid rgba(255, 255, 255, 0.25); border-radius: 10px; background: rgba(0, 0, 0, 0.25); }
   .app-container { display: flex; flex-grow: 1; overflow: hidden; }
-  .sidebar { width: 120px; background: var(--bg-main); border-right: 1px solid var(--border-dim); display: flex; flex-direction: column; padding: 15px 10px; flex-shrink: 0; }
+  .sidebar { width: 130px; background: var(--bg-main); border-right: 1px solid var(--border-dim); display: flex; flex-direction: column; padding: 15px 10px; flex-shrink: 0; }
   .nav-group { display: flex; flex-direction: column; gap: 10px; }
-  .nav-group button { width: 100%; padding: 10px 5px; font-size: 13px; border-radius: 6px; background: transparent; border: 1px solid rgba(255, 255, 255, 0.15); color: var(--text-main); text-align: center; }
+  .nav-group button { width: 100%; padding: 10px 12px; font-size: 13px; border-radius: 6px; background: transparent; border: 1px solid rgba(255, 255, 255, 0.15); color: var(--text-main); display: flex; align-items: center; gap: 10px; cursor: pointer; box-sizing: border-box; }
   .nav-group button.active { background: var(--accent-primary); color: white; border-color: var(--accent-primary); }
   .nav-group button:not(.active):hover { border-color: rgba(255, 255, 255, 0.3); background: var(--bg-panel); }
   .main-content { flex-grow: 1; display: flex; flex-direction: column; overflow: hidden; }
@@ -408,6 +436,6 @@
   .status-left { padding-left: 15px; }
   .status-right { padding-right: 15px; display: flex; align-items: center; gap: 14px; }
   .ram-status { color: var(--text-muted); white-space: nowrap; }
-  .badge { background: var(--accent-primary); color: white; font-size: 10px; padding: 1px 5px; border-radius: 10px; margin-left: 3px; }
+  .badge { background: var(--accent-primary); color: white; font-size: 10px; padding: 1px 5px; border-radius: 10px; margin-left: auto; }
   .badge.warn { background: var(--accent-warning); }
 </style>

@@ -1162,9 +1162,6 @@
 
   .empty-panel {
     flex-grow: 1;
-    border: 1px solid var(--border-dim);
-    border-radius: 8px;
-    background: var(--bg-panel);
     display: flex;
     align-items: center;
     justify-content: center;

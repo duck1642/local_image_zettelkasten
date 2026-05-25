@@ -18,7 +18,7 @@
   $: current = group.items[index];
   $: thumbnailUrl = current ? apiUrl(current.thumbnail_url) : '';
   $: fullUrl = current ? apiUrl(current.url) : '';
-  $: isSelected = current ? current.hash === selectedHash || selectedHashes.has(current.hash) : false;
+  $: isSelected = group.items.some(item => item.hash === selectedHash || selectedHashes.has(item.hash));
   $: aspectStyle = (current?.width && current?.height)
     ? `aspect-ratio: ${current.width} / ${current.height}`
     : '';

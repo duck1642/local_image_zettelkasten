@@ -32,9 +32,7 @@ def _early_load_config() -> dict:
 
 _config = _early_load_config()
 
-def _slug_vault_id(value: str) -> str:
-    cleaned = "".join(ch.casefold() if ch.isalnum() else "-" for ch in str(value or "").strip())
-    return "-".join(part for part in cleaned.split("-") if part) or "default"
+
 
 def _resolve_path(key: str, default: str) -> Path:
 
@@ -382,13 +380,14 @@ def calculate_phash(filepath: Path) -> Optional[str]:
         do_flatten = proc_config.get('flatten_transparency', False)
         bg_color = get_normalization_color(proc_config)
 
-        with Image.open(filepath) as img:
-            if do_flatten:
-                img = flatten_image(img, bg_color)
-
-
-            hash_obj = imagehash.phash(img)
-            return str(hash_obj)
+        with Image.open(filepath) as raw_img:
+            img = flatten_image(raw_img, bg_color) if do_flatten else raw_img
+            try:
+                hash_obj = imagehash.phash(img)
+                return str(hash_obj)
+            finally:
+                if img is not raw_img:
+                    img.close()
     except Exception:
         from logger import log_system
         log_system("WARNING", "Image perceptual hash failed", file=str(filepath), exc_info=True)

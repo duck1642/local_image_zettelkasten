@@ -25,3 +25,5 @@ export { default as IconTrash } from './IconTrash.svelte';
 export { default as IconVideo } from './IconVideo.svelte';
 export { default as IconWide } from './IconWide.svelte';
 export { default as IconCheckCircle } from './IconCheckCircle.svelte';
+export { default as IconChart } from './IconChart.svelte';
+export { default as IconSettings } from './IconSettings.svelte';
