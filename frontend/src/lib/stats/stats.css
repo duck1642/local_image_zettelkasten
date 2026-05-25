@@ -705,7 +705,31 @@ body.artist-list-resizing {
     color: var(--text-bright);
   }
 
-  .detail-grid {
+  .artist-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    color: var(--text-muted);
+    font-size: 12px;
+  }
+
+  .artist-summary span {
+    display: inline-flex;
+    align-items: center;
+  }
+
+  .artist-summary span + span::before {
+    content: "";
+    width: 3px;
+    height: 3px;
+    margin-right: 6px;
+    border-radius: 50%;
+    background: var(--text-muted);
+    opacity: 0.7;
+  }
+
+  .detail-grid,
+  .identity-section {
     display: grid;
     grid-template-columns: 80px minmax(0, 1fr);
     gap: 10px 12px;
@@ -734,6 +758,10 @@ body.artist-list-resizing {
     margin-top: 18px;
   }
 
+  .identity-section {
+    margin-top: 0;
+  }
+
   .detail-section h5 {
     margin: 0 0 8px 0;
     color: var(--text-bright);
@@ -749,6 +777,29 @@ body.artist-list-resizing {
     margin-bottom: 8px;
   }
 
+  .editable-list {
+    display: grid;
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+
+  .link-row {
+    min-height: 30px;
+    margin-bottom: 0;
+    padding: 0 0 0 10px;
+    border: 1px solid var(--border-dim);
+    border-radius: 6px;
+    background: var(--bg-main);
+    overflow: hidden;
+  }
+
+  .row-label {
+    color: var(--text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   .editable-row a {
     color: var(--text-main);
     overflow: hidden;
@@ -757,7 +808,36 @@ body.artist-list-resizing {
   }
 
   .link-add-row {
-    grid-template-columns: 120px minmax(0, 1fr) 120px auto;
+    grid-template-columns: 126px minmax(0, 1fr) 126px auto;
+  }
+
+  .alias-add-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .icon-row-button {
+    display: inline-grid;
+    place-items: center;
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    border-radius: 6px;
+  }
+
+  .link-row .icon-row-button {
+    width: 30px;
+    height: 30px;
+    border-radius: 0;
+    border-top: 0;
+    border-right: 0;
+    border-bottom: 0;
+    background: transparent;
+  }
+
+  .icon-row-button.danger:hover,
+  .alias-chip button:hover {
+    color: var(--accent-danger);
+    background: rgba(248, 81, 73, 0.12);
   }
 
   .alias-list {
@@ -771,27 +851,47 @@ body.artist-list-resizing {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    padding: 4px 8px;
+    min-height: 26px;
+    padding: 0 0 0 8px;
     border: 1px solid var(--border-dim);
     border-radius: 6px;
     color: var(--text-main);
     background: var(--bg-main);
+    overflow: hidden;
   }
 
   .alias-chip button {
-    padding: 0 2px;
+    display: inline-grid;
+    place-items: center;
+    align-self: stretch;
+    width: 24px;
+    padding: 0;
     border: 0;
+    border-left: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 0;
     background: transparent;
     color: var(--text-muted);
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
     cursor: pointer;
   }
 
+  .empty-inline {
+    color: var(--text-muted);
+    font-size: 12px;
+    font-style: italic;
+  }
+
+  .notes-section textarea {
+    min-height: 62px;
+  }
+
+  .maintenance-section {
+    margin-top: 14px;
+  }
+
   .merge-button {
-    margin-top: 8px;
-    width: 100%;
+    width: auto;
+    min-width: 220px;
+    color: var(--text-muted);
   }
 
   .modal-backdrop {
