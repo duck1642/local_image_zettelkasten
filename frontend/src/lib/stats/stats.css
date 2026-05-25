@@ -23,6 +23,25 @@ body.artist-list-resizing {
     align-items: center;
     justify-content: space-between;
     gap: 16px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border-dim);
+  }
+
+  .stats-header .header-left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .stats-header .value-count {
+    color: var(--text-muted);
+    font-size: 11px;
+    font-weight: 500;
+    background: rgba(255, 255, 255, 0.04);
+    padding: 3px 8px;
+    border-radius: 12px;
+    border: 1px solid var(--border-dim);
+    line-height: 1;
   }
 
   .stats-container h3 {
@@ -38,13 +57,12 @@ body.artist-list-resizing {
   .kind-tabs {
     display: flex;
     gap: 8px;
-    flex-wrap: wrap;
   }
 
   .stats-controls {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 12px;
   }
 
   .sort-tabs,
@@ -55,21 +73,47 @@ body.artist-list-resizing {
 
   .letter-tabs {
     display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    gap: 12px;
     align-items: center;
+    padding: 4px 0;
+    scrollbar-width: none;
+  }
+  .letter-tabs::-webkit-scrollbar {
+    display: none;
   }
 
-  .letter-tabs button {
-    min-width: 30px;
-    padding: 5px 7px;
-    font-size: 12px;
+  .letter-tab {
+    background: transparent;
+    border: none;
+    padding: 2px 4px;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-muted);
+    cursor: pointer;
+    min-width: auto;
+    border-radius: 0;
+    text-transform: uppercase;
+  }
+
+  .letter-tab:hover {
+    color: var(--text-bright);
+    border-color: transparent;
+    background: transparent;
+  }
+
+  .letter-tab.active {
+    color: var(--accent-primary);
+    font-weight: 700;
+    border-bottom: 2px solid var(--accent-primary);
+    background: transparent;
+    border-radius: 0;
   }
 
   .kind-tabs button.active,
   .sort-tabs button.active,
-  .scope-tabs button.active,
-  .letter-tabs button.active {
+  .scope-tabs button.active {
     background: var(--accent-primary);
     border-color: var(--accent-primary);
     color: white;
@@ -77,10 +121,9 @@ body.artist-list-resizing {
 
   .stats-search {
     width: 100%;
-    max-width: 520px;
+    max-width: none;
   }
 
-  .stats-list,
   .artist-list,
   .artist-detail {
     border: 1px solid var(--border-dim);
@@ -91,6 +134,11 @@ body.artist-list-resizing {
   }
 
   .stats-list {
+    border: 1px solid var(--border-dim);
+    border-radius: 6px;
+    background: var(--bg-panel);
+    overflow-y: auto;
+    min-height: 0;
     flex-grow: 1;
   }
 
@@ -322,7 +370,7 @@ body.artist-list-resizing {
     gap: 14px;
     padding: 8px 10px 8px 12px;
     border: 1px solid var(--border-dim);
-    border-radius: 8px;
+    border-radius: 6px;
     background: var(--bg-panel);
     box-shadow: 0 8px 28px rgba(0, 0, 0, 0.42);
     color: var(--text-main);
@@ -560,8 +608,7 @@ body.artist-list-resizing {
     padding: 24px;
   }
 
-  .merge-modal,
-  .rename-modal {
+  .merge-modal {
     width: min(760px, 100%);
     max-height: min(720px, calc(100vh - 48px));
     display: flex;
@@ -576,6 +623,15 @@ body.artist-list-resizing {
 
   .rename-modal {
     width: min(560px, 100%);
+    max-height: min(720px, calc(100vh - 48px));
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    border: 1px solid var(--border-dim);
+    border-radius: 6px;
+    background: var(--bg-panel);
+    padding: 16px;
+    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
   }
 
   .modal-header,

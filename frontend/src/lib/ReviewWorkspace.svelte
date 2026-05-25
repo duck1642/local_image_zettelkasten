@@ -19,6 +19,14 @@
       artist: string;
       mime_type?: string;
       extension?: string;
+      width?: number;
+      height?: number;
+      size_bytes?: number;
+      codec?: string;
+      duration?: number;
+      frames?: number;
+      wd_tags?: string[];
+      audio_present?: boolean;
     } | null;
     matches?: Array<{
       hash: string;
@@ -26,6 +34,14 @@
       artist: string;
       mime_type?: string;
       extension?: string;
+      width?: number;
+      height?: number;
+      size_bytes?: number;
+      codec?: string;
+      duration?: number;
+      frames?: number;
+      wd_tags?: string[];
+      audio_present?: boolean;
     }>;
   }
 
@@ -58,6 +74,54 @@
     : (current.best_match ? [current.best_match] : []);
 
   $: activeMatch = resolvedMatches[activeMatchIndex] || null;
+
+  $: stagedWidth = current.metadata?.width || current.metadata?.metadata?.width || 0;
+  $: stagedHeight = current.metadata?.height || current.metadata?.metadata?.height || 0;
+  $: stagedSize = current.metadata?.size_bytes || 0;
+  $: stagedCodec = current.metadata?.codec || '';
+  $: stagedDuration = current.metadata?.duration || 0;
+  $: stagedFrames = current.metadata?.frames || 0;
+  $: stagedWdTags = current.metadata?.wd_tags || current.metadata?.metadata?.wd_tags || [];
+
+  $: vaultWidth = activeMatch?.width || 0;
+  $: vaultHeight = activeMatch?.height || 0;
+  $: vaultSize = activeMatch?.size_bytes || 0;
+  $: vaultCodec = activeMatch?.codec || '';
+  $: vaultDuration = activeMatch?.duration || 0;
+  $: vaultFrames = activeMatch?.frames || 0;
+  $: vaultWdTags = activeMatch?.wd_tags || [];
+
+  $: stagedRes = stagedWidth * stagedHeight;
+  $: vaultRes = vaultWidth * vaultHeight;
+
+  $: resClassStaged = stagedRes > 0 && vaultRes > 0 
+    ? (stagedRes > vaultRes ? 'better' : (stagedRes < vaultRes ? 'worse' : ''))
+    : '';
+  $: resClassVault = stagedRes > 0 && vaultRes > 0 
+    ? (vaultRes > stagedRes ? 'better' : (vaultRes < stagedRes ? 'worse' : ''))
+    : '';
+
+  $: sizeClassStaged = stagedSize > 0 && vaultSize > 0
+    ? (stagedSize > vaultSize ? 'better' : (stagedSize < vaultSize ? 'worse' : ''))
+    : '';
+  $: sizeClassVault = stagedSize > 0 && vaultSize > 0
+    ? (vaultSize > stagedSize ? 'better' : (vaultSize < stagedSize ? 'worse' : ''))
+    : '';
+
+  function formatBytes(bytes: number | null | undefined): string {
+    if (bytes == null || bytes <= 0) return 'unknown size';
+    if (bytes < 1024 * 1024) {
+      return `${Math.round(bytes / 1024)} KB`;
+    }
+    return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+  }
+
+  function formatDuration(sec: number | null | undefined): string {
+    if (sec == null || sec <= 0) return '';
+    const m = Math.floor(sec / 60);
+    const s = Math.floor(sec % 60);
+    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  }
 </script>
 
 {#if current.section === 'cleanup'}
@@ -155,6 +219,42 @@
           <span class="meta-label">Format / Ext:</span>
           <span class="meta-val uppercase">{current.extension || extFromUrl(current.url) || 'unknown'}</span>
         </div>
+        {#if stagedWidth > 0 && stagedHeight > 0}
+          <div class="meta-row">
+            <span class="meta-label">Dimensions:</span>
+            <span class="meta-val {resClassStaged}">{stagedWidth} × {stagedHeight}</span>
+          </div>
+        {/if}
+        {#if stagedSize > 0}
+          <div class="meta-row">
+            <span class="meta-label">File Size:</span>
+            <span class="meta-val {sizeClassStaged}">{formatBytes(stagedSize)}</span>
+          </div>
+        {/if}
+        {#if stagedFrames > 1}
+          <div class="meta-row">
+            <span class="meta-label">Frame Count:</span>
+            <span class="meta-val">{stagedFrames} frames</span>
+          </div>
+        {/if}
+        {#if isVideoMedia(current)}
+          {#if stagedDuration > 0}
+            <div class="meta-row">
+              <span class="meta-label">Duration:</span>
+              <span class="meta-val">{formatDuration(stagedDuration)}</span>
+            </div>
+          {/if}
+          {#if stagedCodec}
+            <div class="meta-row">
+              <span class="meta-label">Video Codec:</span>
+              <span class="meta-val uppercase">{stagedCodec}</span>
+            </div>
+          {/if}
+          <div class="meta-row">
+            <span class="meta-label">Audio Track:</span>
+            <span class="meta-val">{current.metadata?.audio_present ? 'AAC Stereo' : 'Silent'}</span>
+          </div>
+        {/if}
         <div class="meta-row">
           <span class="meta-label">Artist:</span>
           <span class="meta-val">{current.metadata?.artist || 'None detected'}</span>
@@ -165,6 +265,16 @@
             <span class="meta-val text-warn truncate" title={current.metadata.validation_warning}>
               {current.metadata.validation_warning}
             </span>
+          </div>
+        {/if}
+        {#if stagedWdTags && stagedWdTags.length > 0}
+          <div class="wd-tags-container">
+            <span class="wd-tags-label">WD Tags Suggested:</span>
+            <div class="wd-chips">
+              {#each stagedWdTags as tag}
+                <span class="wd-chip">{tag}</span>
+              {/each}
+            </div>
           </div>
         {/if}
       </div>
@@ -215,10 +325,56 @@
             <span class="meta-label">Format / Ext:</span>
             <span class="meta-val uppercase">{activeMatch.extension || 'unknown'}</span>
           </div>
+          {#if vaultWidth > 0 && vaultHeight > 0}
+            <div class="meta-row">
+              <span class="meta-label">Dimensions:</span>
+              <span class="meta-val {resClassVault}">{vaultWidth} × {vaultHeight}</span>
+            </div>
+          {/if}
+          {#if vaultSize > 0}
+            <div class="meta-row">
+              <span class="meta-label">File Size:</span>
+              <span class="meta-val {sizeClassVault}">{formatBytes(vaultSize)}</span>
+            </div>
+          {/if}
+          {#if vaultFrames > 1}
+            <div class="meta-row">
+              <span class="meta-label">Frame Count:</span>
+              <span class="meta-val">{vaultFrames} frames</span>
+            </div>
+          {/if}
+          {#if isVideoMedia(activeMatch)}
+            {#if vaultDuration > 0}
+              <div class="meta-row">
+                <span class="meta-label">Duration:</span>
+                <span class="meta-val">{formatDuration(vaultDuration)}</span>
+              </div>
+            {/if}
+            {#if vaultCodec}
+              <div class="meta-row">
+                <span class="meta-label">Video Codec:</span>
+                <span class="meta-val uppercase">{vaultCodec}</span>
+              </div>
+            {/if}
+            <div class="meta-row">
+              <span class="meta-label">Audio Track:</span>
+              <span class="meta-val">{activeMatch.audio_present ? 'AAC Stereo' : 'Silent'}</span>
+            </div>
+          {/if}
           <div class="meta-row">
             <span class="meta-label">Artist:</span>
             <span class="meta-val">{activeMatch.artist || 'Unassigned'}</span>
           </div>
+          {#if vaultWdTags && vaultWdTags.length > 0}
+            <div class="wd-tags-container">
+              <span class="wd-tags-label">WD Tags Index:</span>
+              <div class="wd-chips">
+                {#each vaultWdTags as tag}
+                  <span class="wd-chip">{tag}</span>
+                {/each}
+              </div>
+            </div>
+          {/if}
         {:else}
           <div class="meta-row empty-meta">
             <span>No matching duplicate in vault.</span>
@@ -507,6 +663,53 @@
     border-radius: 4px;
     padding: 4px 8px;
     margin-top: 2px;
+  }
+
+  .meta-val.better {
+    color: var(--accent-success);
+    background: rgba(46, 160, 67, 0.15);
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+
+  .meta-val.worse {
+    color: var(--accent-danger);
+    background: rgba(248, 81, 73, 0.15);
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+
+  .wd-tags-container {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 8px;
+    border-top: 1px dashed rgba(255, 255, 255, 0.04);
+    padding-top: 8px;
+  }
+
+  .wd-tags-label {
+    font-size: 9px;
+    font-weight: 700;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    text-align: left;
+  }
+
+  .wd-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .wd-chip {
+    font-size: 10px;
+    padding: 2px 6px;
+    background: rgba(255, 255, 255, 0.03);
+    color: var(--text-main);
+    border-radius: 4px;
+    font-family: monospace;
   }
 
   .uppercase {

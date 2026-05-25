@@ -17,6 +17,14 @@ export interface ReviewItem {
     artist: string;
     mime_type?: string;
     extension?: string;
+    width?: number;
+    height?: number;
+    size_bytes?: number;
+    codec?: string;
+    duration?: number;
+    frames?: number;
+    wd_tags?: string[];
+    audio_present?: boolean;
   } | null;
   matches?: Array<{
     hash: string;
@@ -24,6 +32,14 @@ export interface ReviewItem {
     artist: string;
     mime_type?: string;
     extension?: string;
+    width?: number;
+    height?: number;
+    size_bytes?: number;
+    codec?: string;
+    duration?: number;
+    frames?: number;
+    wd_tags?: string[];
+    audio_present?: boolean;
   }>;
 }
 
@@ -49,7 +65,11 @@ export function getMockSandboxItems(): ReviewItem[] {
         matches: [
           'd3b07384d113edec49eaa6238ad5ff00',
           'ae88862f91a27e77a288fb82de711200'
-        ]
+        ],
+        width: 1920,
+        height: 1080,
+        size_bytes: 802816, // ~784 KB
+        wd_tags: ['illustration', 'sci-fi', 'spaceship', 'concept_art', 'original_character']
       },
       state: 'pending decision',
       section: 'pending',
@@ -58,7 +78,11 @@ export function getMockSandboxItems(): ReviewItem[] {
         url: `data:image/svg+xml;base64,${MATCH_SVG_B64}`,
         artist: 'Sandbox Artist A (Primary)',
         mime_type: 'image/png',
-        extension: '.png'
+        extension: '.png',
+        width: 1280,
+        height: 720,
+        size_bytes: 319488, // ~312 KB
+        wd_tags: ['illustration', 'spaceship', 'sky', 'clouds']
       },
       matches: [
         {
@@ -66,14 +90,22 @@ export function getMockSandboxItems(): ReviewItem[] {
           url: `data:image/svg+xml;base64,${MATCH_SVG_B64}`,
           artist: 'Sandbox Artist A (Primary Copy)',
           mime_type: 'image/png',
-          extension: '.png'
+          extension: '.png',
+          width: 1280,
+          height: 720,
+          size_bytes: 319488,
+          wd_tags: ['illustration', 'spaceship', 'sky', 'clouds']
         },
         {
           hash: 'ae88862f91a27e77a288fb82de711200',
           url: `data:image/svg+xml;base64,${ALT_SVG_B64}`,
           artist: 'Sandbox Artist B (Alternate Copy)',
           mime_type: 'image/png',
-          extension: '.png'
+          extension: '.png',
+          width: 2560,
+          height: 1440,
+          size_bytes: 1258291, // ~1.2 MB
+          wd_tags: ['illustration', 'sci-fi', 'spaceship', 'cyberpunk', 'cityscape']
         }
       ]
     },

@@ -112,14 +112,20 @@ def _get_review_items_sync(include_resolved: bool = False):
         try:
             placeholders = ",".join("?" for _ in best_hashes)
             cursor = conn.cursor()
-            cursor.execute(f"SELECT hash, file_extension, mime_type, source_artist, storage_id FROM items WHERE hash IN ({placeholders})", best_hashes)
+            cursor.execute(f"SELECT hash, file_extension, mime_type, source_artist, storage_id, width, height, size_bytes FROM items WHERE hash IN ({placeholders})", best_hashes)
             for row in cursor.fetchall():
+                cursor.execute("SELECT tag FROM item_wd_tags WHERE item_hash = ?", (row[0],))
+                tags = [r[0] for r in cursor.fetchall()]
                 match_map[row[0]] = {
                     "hash": row[0],
                     "url": asset_url_for(row[0], row[1] or "", row[2] or "", storage_id=row[4]),
                     "artist": row[3],
                     "mime_type": row[2] or "",
                     "extension": row[1] or "",
+                    "width": row[5],
+                    "height": row[6],
+                    "size_bytes": row[7],
+                    "wd_tags": tags,
                 }
         finally:
             conn.close()

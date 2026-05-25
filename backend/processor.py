@@ -13,7 +13,8 @@ from utils import (
 from runtime_context import get_runtime_context, WorkspaceContext
 from fingerprint import (
     get_audio_fingerprint, get_visual_embedding,
-    compare_embeddings, compare_audio_fingerprints
+    compare_embeddings, compare_audio_fingerprints,
+    get_video_duration
 )
 from validators import get_mime_type, is_allowed_mime
 from db.sqlite_operator import (
@@ -319,10 +320,12 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
     if mime_type.startswith('image/'):
         phash = calculate_phash(filepath)
         tiles = calculate_tiles(filepath)
+        frames = 1
         try:
             from PIL import Image as PILImage
             with PILImage.open(filepath) as img:
                 width, height = img.size
+                frames = getattr(img, "n_frames", 1)
         except Exception:
             pass
 
@@ -344,6 +347,10 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
                     "total_conflicts": total_conflicts,
                     "is_tiled": bool(tiles),
                     "matches": all_matches,
+                    "width": width,
+                    "height": height,
+                    "size_bytes": filepath.stat().st_size,
+                    "frames": frames,
                     },
                     ctx=ctx,
                 )
@@ -355,15 +362,28 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
 
         audio_hash = get_audio_fingerprint(filepath)
         visual_embedding = get_visual_embedding(filepath)
+        codec_name = ""
         try:
             import subprocess
             result = subprocess.run(
                 ['ffprobe', '-v', 'error', '-select_streams', 'v:0',
-                 '-show_entries', 'stream=width,height', '-of', 'csv=s=x:p=0',
+                 '-show_entries', 'stream=codec_name,width,height', '-of', 'csv=p=0',
                  str(filepath)], capture_output=True, text=True, timeout=10)
-            if result.returncode == 0 and 'x' in result.stdout.strip():
-                parts = result.stdout.strip().split('x')
-                width, height = int(parts[0]), int(parts[1])
+            if result.returncode == 0 and result.stdout.strip():
+                parts = result.stdout.strip().split(',')
+                if len(parts) >= 3:
+                    codec_name = parts[0].strip()
+                    width = int(parts[1].strip())
+                    height = int(parts[2].strip())
+                elif len(parts) == 2:
+                    width = int(parts[0].strip())
+                    height = int(parts[1].strip())
+        except Exception:
+            pass
+
+        duration = 0.0
+        try:
+            duration = get_video_duration(filepath)
         except Exception:
             pass
 
@@ -385,6 +405,11 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
                     "audio_present": bool(audio_hash),
                     "visual_embedding_present": bool(visual_embedding),
                     "matches": all_matches,
+                    "width": width,
+                    "height": height,
+                    "size_bytes": filepath.stat().st_size,
+                    "codec": codec_name,
+                    "duration": duration,
                     },
                     ctx=ctx,
                 )

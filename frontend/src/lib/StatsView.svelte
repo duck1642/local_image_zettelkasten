@@ -654,13 +654,20 @@
 
 <div class="stats-container">
   <div class="stats-header">
-    <h3>Vault Stats</h3>
-    <span class="muted">{activeKind === 'artist' ? visibleArtists.length + visiblePlaceholderArtists.length : visibleItems.length} values</span>
+    <div class="header-left">
+      <h3>Vault Stats</h3>
+      <span class="value-count">{activeKind === 'artist' ? visibleArtists.length + visiblePlaceholderArtists.length : visibleItems.length} values</span>
+    </div>
+    <div class="kind-tabs">
+      {#each statsKinds as kind}
+        <button type="button" class:active={activeKind === kind.value} on:click={() => setKind(kind.value)}>
+          {kind.label}
+        </button>
+      {/each}
+    </div>
   </div>
 
   <StatsControls
-    kinds={statsKinds}
-    {activeKind}
     {sortMode}
     {scopeMode}
     bind:letterFilter
@@ -668,7 +675,6 @@
     {letterFilters}
     {showLetterFilter}
     {showScopeFilter}
-    onKind={setKind}
     onSort={setSortMode}
     onScope={setScopeMode}
     onLetter={setLetterFilter}
