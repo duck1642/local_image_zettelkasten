@@ -460,9 +460,7 @@
     width: 290px;
     min-width: 260px;
     max-width: 320px;
-    background: rgba(22, 27, 34, 0.4);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
+    background: rgba(22, 27, 34, 0.92);
     border: 1px solid var(--border-dim);
     border-radius: 10px;
     display: flex;

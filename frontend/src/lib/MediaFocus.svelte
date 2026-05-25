@@ -13,7 +13,8 @@
     IconMaximizeDiagonal,
     IconMinimizeDiagonal,
     IconMinus,
-    IconPlus
+    IconPlus,
+    IconEye
   } from './icons';
 
   export let item: any;
@@ -52,6 +53,7 @@
   let appliedMode: 'wide' | 'fullscreen' | '' = '';
   let activeHash = '';
   let showShortcutsLegend = false;
+  let uiHidden = false;
   let controlsVisible = true;
   let controlsTimeout: number | null = null;
 
@@ -310,6 +312,9 @@
         e.preventDefault();
         handleToggleFilmstrip();
       }
+    } else if (e.key.toLowerCase() === 'h') {
+      e.preventDefault();
+      uiHidden = !uiHidden;
     } else if (e.key.toLowerCase() === 'a') {
       e.preventDefault();
       prevItem();
@@ -342,6 +347,12 @@
 
 <svelte:window on:keydown={handleKeydown}/>
 
+{#if uiHidden}
+  <button class="show-ui-btn" title="Show UI (H)" on:click={() => uiHidden = false}>
+    <IconEye size={18} strokeWidth={2.2} />
+  </button>
+{/if}
+
 <!-- svelte-ignore a11y-click-events-have-key-events -->
 <!-- svelte-ignore a11y-no-static-element-interactions -->
 <div
@@ -356,7 +367,7 @@
   tabindex="-1"
 >
   <!-- Premium Header Controls Bar -->
-  <header class="focus-header" class:hidden={!controlsVisible}>
+  <header class="focus-header" class:hidden={!controlsVisible || uiHidden}>
     <div class="header-left">
       <span class="media-title truncate" title={item?.title || item?.storage_id || item?.hash}>
         {item?.title || item?.storage_id || item?.hash?.slice(0, 8)}
@@ -384,6 +395,11 @@
         </div>
       {/if}
 
+      <!-- Hide UI Toggle -->
+      <button class="icon-btn" title="Hide UI (H)" on:click={() => uiHidden = true}>
+        <IconEye size={18} strokeWidth={2.2} />
+      </button>
+
       <!-- Keyboard Shortcuts HUD Toggle -->
       <button class="icon-btn" class:active={showShortcutsLegend} title="Keyboard Shortcuts" on:click={() => showShortcutsLegend = !showShortcutsLegend}>
         <IconKeyboard size={18} strokeWidth={2.2} />
@@ -406,7 +422,7 @@
   </header>
 
   <!-- Keyboard Shortcuts Floating HUD list -->
-  {#if showShortcutsLegend}
+  {#if showShortcutsLegend && !uiHidden}
     <!-- svelte-ignore a11y-no-static-element-interactions -->
     <div class="shortcuts-legend" on:click|stopPropagation on:keydown|stopPropagation>
       <h3>Keyboard Shortcuts</h3>
@@ -417,6 +433,7 @@
         <div class="legend-item"><kbd>W</kbd> <span>Toggle Wide mode</span></div>
         <div class="legend-item"><kbd>F</kbd> <span>Toggle Fullscreen</span></div>
         <div class="legend-item"><kbd>S</kbd> <span>Toggle Filmstrip</span></div>
+        <div class="legend-item"><kbd>H</kbd> <span>Hide UI</span></div>
         <div class="legend-item">
           <div class="keys">
             <kbd>+</kbd>
@@ -433,10 +450,10 @@
 
   <!-- Beautiful Circular Glass Navigation Arrows -->
   {#if hasGroupFilmstrip}
-    <button class="nav-btn-rect prev" class:hidden={!controlsVisible} aria-label="Previous item" on:click|stopPropagation={prevItem}>
+    <button class="nav-btn-rect prev" class:hidden={!controlsVisible || uiHidden} aria-label="Previous item" on:click|stopPropagation={prevItem}>
       <IconChevronLeft size={24} strokeWidth={3} />
     </button>
-    <button class="nav-btn-rect next" class:hidden={!controlsVisible} aria-label="Next item" on:click|stopPropagation={nextItem}>
+    <button class="nav-btn-rect next" class:hidden={!controlsVisible || uiHidden} aria-label="Next item" on:click|stopPropagation={nextItem}>
       <IconChevronRight size={24} strokeWidth={3} />
     </button>
   {/if}
@@ -477,14 +494,14 @@
 
   <!-- Premium Filmstrip Controls -->
   {#if hasGroupFilmstrip}
-    <button class="filmstrip-toggle" class:hidden={!controlsVisible} class:open={filmstripOpen} aria-label="Toggle filmstrip" on:click|stopPropagation={handleToggleFilmstrip}>
+    <button class="filmstrip-toggle" class:hidden={!controlsVisible || uiHidden} class:open={filmstripOpen} aria-label="Toggle filmstrip" on:click|stopPropagation={handleToggleFilmstrip}>
       <span class="toggle-text">{filmstripOpen ? 'Hide Filmstrip' : 'Show Filmstrip'}</span>
       <IconChevronUp size={14} className="chevron-icon" />
     </button>
 
     {#if filmstripOpen}
       <!-- svelte-ignore a11y-no-static-element-interactions -->
-      <div class="filmstrip" class:hidden={!controlsVisible} class:disable-clicks={disableFilmstripClicks} on:click|stopPropagation on:keydown|stopPropagation>
+      <div class="filmstrip" class:hidden={!controlsVisible || uiHidden} class:disable-clicks={disableFilmstripClicks} on:click|stopPropagation on:keydown|stopPropagation>
         <div class="filmstrip-row">
           {#each group.items as entry, index (entry.hash)}
             <button
@@ -530,12 +547,41 @@
     background: #040406;
   }
 
+  .focus-overlay.fullscreen.filmstrip-open {
+    padding-bottom: 118px;
+  }
+
   .hide-cursor {
     cursor: none !important;
   }
 
   .hide-cursor * {
     cursor: none !important;
+  }
+
+  .show-ui-btn {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    width: 30px;
+    height: 30px;
+    box-sizing: border-box;
+    background: rgba(13, 17, 23, 0.95);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 6px;
+    color: var(--text-muted);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1070;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  }
+
+  .show-ui-btn:hover {
+    color: var(--text-bright);
+    background: rgba(255, 255, 255, 0.15);
+    border-color: rgba(255, 255, 255, 0.25);
   }
 
   /* Premium Header bar */
@@ -548,9 +594,7 @@
     min-width: 320px;
     max-width: 90%;
     height: 44px;
-    background: rgba(13, 17, 23, 0.85);
-    backdrop-filter: blur(16px) saturate(180%);
-    -webkit-backdrop-filter: blur(16px) saturate(180%);
+    background: rgba(13, 17, 23, 0.95);
     border: 1px solid rgba(255, 255, 255, 0.15);
     border-radius: 8px;
     z-index: 1050;
@@ -730,9 +774,7 @@
     left: 50%;
     transform: translateX(-50%);
     width: 270px;
-    background: rgba(13, 17, 23, 0.75);
-    backdrop-filter: blur(20px) saturate(180%);
-    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    background: rgba(13, 17, 23, 0.95);
     border: 1px solid rgba(255, 255, 255, 0.12);
     border-radius: 12px;
     box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6);
@@ -864,9 +906,7 @@
     width: 48px;
     height: 48px;
     border-radius: 8px;
-    background: rgba(15, 17, 23, 0.45);
-    backdrop-filter: blur(12px) saturate(180%);
-    -webkit-backdrop-filter: blur(12px) saturate(180%);
+    background: rgba(15, 17, 23, 0.8);
     border: 1px solid rgba(255,255,255,0.12);
     color: rgba(255, 255, 255, 0.6);
     cursor: pointer;
@@ -886,13 +926,13 @@
 
   .nav-btn-rect:hover {
     color: var(--text-bright);
-    background: rgba(15, 17, 23, 0.8);
+    background: rgba(15, 17, 23, 0.95);
     border-color: rgba(255, 255, 255, 0.35);
     box-shadow: 0 12px 40px rgba(0,0,0,0.7);
   }
 
   .nav-btn-rect:active {
-    background: rgba(15, 17, 23, 0.95);
+    background: rgba(15, 17, 23, 1.0);
   }
 
   .nav-btn-rect.prev {
@@ -913,9 +953,7 @@
     height: 30px;
     min-width: 132px;
     border-radius: 6px;
-    background: rgba(13, 17, 23, 0.85);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
+    background: rgba(13, 17, 23, 0.95);
     border: 1px solid rgba(255, 255, 255, 0.15);
     color: var(--text-muted);
     cursor: pointer;
@@ -960,9 +998,7 @@
     bottom: 0;
     height: 96px;
     z-index: 1015;
-    background: rgba(13, 17, 23, 0.85);
-    backdrop-filter: blur(24px) saturate(180%);
-    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    background: rgba(13, 17, 23, 0.95);
     border-top: 1px solid rgba(255, 255, 255, 0.1);
     display: flex;
     align-items: center;
