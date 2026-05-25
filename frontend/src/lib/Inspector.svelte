@@ -254,11 +254,11 @@
     return typeof count === 'number' && count > 0 ? count : null;
   }
 
-  function isTagPromoted(value: string, _draft?: string[], _saved?: string[]) {
+  function isTagPromoted(value: string, draft = draftTopics, saved = savedTopics) {
     if (!value) return false;
     const key = value.toLocaleLowerCase();
-    return draftTopics.some((topic) => topic.toLocaleLowerCase() === key) &&
-           !savedTopics.some((topic) => topic.toLocaleLowerCase() === key);
+    return draft.some((topic) => topic.toLocaleLowerCase() === key) &&
+           !saved.some((topic) => topic.toLocaleLowerCase() === key);
   }
 
   function normalizeTopicLabel(value: string) {
@@ -271,11 +271,11 @@
     return cleaned || 'topic';
   }
 
-  function isAlreadyTopic(value: string, _saved?: string[]) {
+  function isAlreadyTopic(value: string, saved = savedTopics) {
     if (!value) return false;
     const clean = normalizeTopicLabel(value);
     const key = clean.toLocaleLowerCase();
-    return savedTopics.some((topic) => topic.toLocaleLowerCase() === key);
+    return saved.some((topic) => topic.toLocaleLowerCase() === key);
   }
 
   function promoteWdToTopic(value: string) {
@@ -502,9 +502,8 @@
       dispatch('updated', { hash: item.hash, artist, source_url: sourceUrl, platform });
       uiLog('INFO', `Metadata saved for ${item.hash.substring(0, 12)}`);
       
-      // Dispatch global refresh events to synchronize sibling panels (StatsView, VaultView)
+      // Refresh stats facets without resetting vault selection/scroll.
       window.dispatchEvent(new CustomEvent('lmz:refresh', { detail: { tab: 'stats' } }));
-      window.dispatchEvent(new CustomEvent('lmz:refresh', { detail: { tab: 'vault' } }));
     } catch (e) {
         uiLog('ERROR', 'Save failed', { error: String(e) });
         alert('Failed to save changes.');

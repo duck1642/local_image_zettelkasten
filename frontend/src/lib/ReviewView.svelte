@@ -16,56 +16,14 @@
   import ReviewWorkspace from './ReviewWorkspace.svelte';
   import ReviewActionBar from './ReviewActionBar.svelte';
   import { getMockSandboxItems, simulateSandboxAction } from './ReviewSandbox';
-
-  interface ReviewItem {
-    filename: string;
-    display_name?: string;
-    url: string;
-    mime_type?: string;
-    extension?: string;
-    metadata: any;
-    state?: string;
-    section?: 'pending' | 'cleanup';
-    last_action?: string;
-    last_cleanup_error?: string;
-    best_match: {
-      hash: string;
-      url: string;
-      artist: string;
-      mime_type?: string;
-      extension?: string;
-      width?: number;
-      height?: number;
-      size_bytes?: number;
-      codec?: string;
-      duration?: number;
-      frames?: number;
-      wd_tags?: string[];
-      audio_present?: boolean;
-    } | null;
-    matches?: Array<{
-      hash: string;
-      url: string;
-      artist: string;
-      mime_type?: string;
-      extension?: string;
-      width?: number;
-      height?: number;
-      size_bytes?: number;
-      codec?: string;
-      duration?: number;
-      frames?: number;
-      wd_tags?: string[];
-      audio_present?: boolean;
-    }>;
-  }
-
-  type MediaInfo = {
-    url?: string;
-    filename?: string;
-    mime_type?: string;
-    extension?: string;
-  } | null | undefined;
+  import {
+    extFromUrl,
+    formatBytes,
+    formatDuration,
+    reviewComparisonData,
+    type MediaInfo,
+    type ReviewItem
+  } from './reviewUtils';
 
   let items: ReviewItem[] = [];
   let selectedFilename = '';
@@ -76,69 +34,44 @@
   let isSandbox = false;
   let activeMatchIndex = 0;
   let fullscreenOpen = false;
+  let lastSelectedFilename = '';
+  let comparison = reviewComparisonData(null, 0);
 
-  $: if (selectedFilename) {
+  $: if (selectedFilename !== lastSelectedFilename) {
+    lastSelectedFilename = selectedFilename;
     activeMatchIndex = 0;
     fullscreenOpen = false;
   }
 
-  $: resolvedMatches = current?.matches && current.matches.length > 0
-    ? current.matches
-    : (current?.best_match ? [current.best_match] : []);
+  $: comparison = reviewComparisonData(current, activeMatchIndex);
+  $: resolvedMatches = comparison.resolvedMatches;
+  $: activeMatch = comparison.activeMatch;
+  $: stagedWidth = comparison.stagedWidth;
+  $: stagedHeight = comparison.stagedHeight;
+  $: stagedSize = comparison.stagedSize;
+  $: stagedCodec = comparison.stagedCodec;
+  $: stagedDuration = comparison.stagedDuration;
+  $: stagedFrames = comparison.stagedFrames;
+  $: stagedWdTags = comparison.stagedWdTags;
+  $: vaultWidth = comparison.vaultWidth;
+  $: vaultHeight = comparison.vaultHeight;
+  $: vaultSize = comparison.vaultSize;
+  $: vaultCodec = comparison.vaultCodec;
+  $: vaultDuration = comparison.vaultDuration;
+  $: vaultFrames = comparison.vaultFrames;
+  $: vaultWdTags = comparison.vaultWdTags;
+  $: resClassStaged = comparison.resClassStaged;
+  $: resClassVault = comparison.resClassVault;
+  $: sizeClassStaged = comparison.sizeClassStaged;
+  $: sizeClassVault = comparison.sizeClassVault;
 
-  $: activeMatch = resolvedMatches[activeMatchIndex] || null;
-
-  $: stagedWidth = current?.metadata?.width || current?.metadata?.metadata?.width || 0;
-  $: stagedHeight = current?.metadata?.height || current?.metadata?.metadata?.height || 0;
-  $: stagedSize = current?.metadata?.size_bytes || 0;
-  $: stagedCodec = current?.metadata?.codec || '';
-  $: stagedDuration = current?.metadata?.duration || 0;
-  $: stagedFrames = current?.metadata?.frames || 0;
-  $: stagedWdTags = current?.metadata?.wd_tags || current?.metadata?.metadata?.wd_tags || [];
-
-  $: vaultWidth = activeMatch?.width || 0;
-  $: vaultHeight = activeMatch?.height || 0;
-  $: vaultSize = activeMatch?.size_bytes || 0;
-  $: vaultCodec = activeMatch?.codec || '';
-  $: vaultDuration = activeMatch?.duration || 0;
-  $: vaultFrames = activeMatch?.frames || 0;
-  $: vaultWdTags = activeMatch?.wd_tags || [];
-
-  $: stagedRes = stagedWidth * stagedHeight;
-  $: vaultRes = vaultWidth * vaultHeight;
-
-  $: resClassStaged = stagedRes > 0 && vaultRes > 0 
-    ? (stagedRes > vaultRes ? 'better' : (stagedRes < vaultRes ? 'worse' : ''))
-    : '';
-  $: resClassVault = stagedRes > 0 && vaultRes > 0 
-    ? (vaultRes > stagedRes ? 'better' : (vaultRes < stagedRes ? 'worse' : ''))
-    : '';
-
-  $: sizeClassStaged = stagedSize > 0 && vaultSize > 0
-    ? (stagedSize > vaultSize ? 'better' : (stagedSize < vaultSize ? 'worse' : ''))
-    : '';
-  $: sizeClassVault = stagedSize > 0 && vaultSize > 0
-    ? (vaultSize > stagedSize ? 'better' : (vaultSize < stagedSize ? 'worse' : ''))
-    : '';
-
-  function formatBytes(bytes: number | null | undefined): string {
-    if (bytes == null || bytes <= 0) return 'unknown size';
-    if (bytes < 1024 * 1024) {
-      return `${Math.round(bytes / 1024)} KB`;
-    }
-    return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
-  }
-
-  function formatDuration(sec: number | null | undefined): string {
-    if (sec == null || sec <= 0) return '';
-    const m = Math.floor(sec / 60);
-    const s = Math.floor(sec % 60);
-    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  function setMatchIndex(index: number) {
+    if (!resolvedMatches.length) return;
+    activeMatchIndex = Math.max(0, Math.min(resolvedMatches.length - 1, index));
   }
 
   function changeMatchIndex(delta: number) {
-    if (!resolvedMatches.length) return;
-    activeMatchIndex = Math.max(0, Math.min(resolvedMatches.length - 1, activeMatchIndex + delta));
+    setMatchIndex(activeMatchIndex + delta);
   }
 
   function handleKeydown(event: KeyboardEvent) {
@@ -165,13 +98,6 @@
       resetForRuntimeSwitch();
     }
     currentRuntimeSessionKey = $runtimeSessionKey;
-  }
-
-  function extFromUrl(url: string) {
-    const clean = (url || '').split('?')[0].split('#')[0];
-    const dot = clean.lastIndexOf('.');
-    if (dot < 0) return '';
-    return clean.slice(dot).toLowerCase();
   }
 
   function isVideoMedia(item: MediaInfo) {
@@ -241,10 +167,6 @@
     const action = event.detail.action;
     if (!current || acting) return;
 
-    const resolvedMatches = current.matches && current.matches.length > 0
-      ? current.matches
-      : (current.best_match ? [current.best_match] : []);
-    const activeMatch = resolvedMatches[activeMatchIndex] || null;
     const targetHash = activeMatch?.hash || '';
 
     if (isSandbox) {
@@ -419,7 +341,7 @@
             {mediaUrl}
             {displayName}
             {activeMatchIndex}
-            on:changeMatch={(e) => activeMatchIndex = e.detail.index}
+            on:changeMatch={(e) => setMatchIndex(e.detail.index)}
             on:toggleFullscreen={() => fullscreenOpen = true}
           />
         </div>
@@ -477,7 +399,7 @@
             <div class="meta-row"><span class="meta-label">Original Filename:</span> <span class="meta-val truncate" title={displayName(current)}>{displayName(current)}</span></div>
             <div class="meta-row"><span class="meta-label">Format / Ext:</span> <span class="meta-val uppercase">{current.extension || extFromUrl(current.url) || 'unknown'}</span></div>
             {#if stagedWidth > 0 && stagedHeight > 0}
-              <div class="meta-row"><span class="meta-label">Dimensions:</span> <span class="meta-val {resClassStaged}">{stagedWidth} × {stagedHeight}</span></div>
+              <div class="meta-row"><span class="meta-label">Dimensions:</span> <span class="meta-val {resClassStaged}">{stagedWidth} x {stagedHeight}</span></div>
             {/if}
             {#if stagedSize > 0}
               <div class="meta-row"><span class="meta-label">File Size:</span> <span class="meta-val {sizeClassStaged}">{formatBytes(stagedSize)}</span></div>
@@ -528,7 +450,7 @@
               <div class="meta-row"><span class="meta-label">Hash ID:</span> <span class="meta-val truncate-hash" title={activeMatch.hash}>{activeMatch.hash}</span></div>
               <div class="meta-row"><span class="meta-label">Format:</span> <span class="meta-val uppercase">{activeMatch.extension || 'unknown'}</span></div>
               {#if vaultWidth > 0 && vaultHeight > 0}
-                <div class="meta-row"><span class="meta-label">Dimensions:</span> <span class="meta-val {resClassVault}">{vaultWidth} × {vaultHeight}</span></div>
+                <div class="meta-row"><span class="meta-label">Dimensions:</span> <span class="meta-val {resClassVault}">{vaultWidth} x {vaultHeight}</span></div>
               {/if}
               {#if vaultSize > 0}
                 <div class="meta-row"><span class="meta-label">File Size:</span> <span class="meta-val {sizeClassVault}">{formatBytes(vaultSize)}</span></div>

@@ -1,49 +1,13 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
   import { IconChevronLeft, IconChevronRight, IconInfoCircle, IconMaximizeDiagonal } from './icons';
-
-  interface ReviewItem {
-    filename: string;
-    display_name?: string;
-    url: string;
-    mime_type?: string;
-    extension?: string;
-    metadata: any;
-    state?: string;
-    section?: 'pending' | 'cleanup';
-    last_action?: string;
-    last_cleanup_error?: string;
-    best_match: {
-      hash: string;
-      url: string;
-      artist: string;
-      mime_type?: string;
-      extension?: string;
-      width?: number;
-      height?: number;
-      size_bytes?: number;
-      codec?: string;
-      duration?: number;
-      frames?: number;
-      wd_tags?: string[];
-      audio_present?: boolean;
-    } | null;
-    matches?: Array<{
-      hash: string;
-      url: string;
-      artist: string;
-      mime_type?: string;
-      extension?: string;
-      width?: number;
-      height?: number;
-      size_bytes?: number;
-      codec?: string;
-      duration?: number;
-      frames?: number;
-      wd_tags?: string[];
-      audio_present?: boolean;
-    }>;
-  }
+  import {
+    extFromUrl,
+    formatBytes,
+    formatDuration,
+    reviewComparisonData,
+    type ReviewItem
+  } from './reviewUtils';
 
   export let current: ReviewItem;
   export let mediaMounted = true;
@@ -54,13 +18,6 @@
 
   const dispatch = createEventDispatcher();
 
-  function extFromUrl(url: string) {
-    const clean = (url || '').split('?')[0].split('#')[0];
-    const dot = clean.lastIndexOf('.');
-    if (dot < 0) return '';
-    return clean.slice(dot).toLowerCase();
-  }
-
   function prevMatch() {
     dispatch('changeMatch', { index: activeMatchIndex - 1 });
   }
@@ -69,59 +26,28 @@
     dispatch('changeMatch', { index: activeMatchIndex + 1 });
   }
 
-  $: resolvedMatches = current.matches && current.matches.length > 0
-    ? current.matches
-    : (current.best_match ? [current.best_match] : []);
-
-  $: activeMatch = resolvedMatches[activeMatchIndex] || null;
-
-  $: stagedWidth = current.metadata?.width || current.metadata?.metadata?.width || 0;
-  $: stagedHeight = current.metadata?.height || current.metadata?.metadata?.height || 0;
-  $: stagedSize = current.metadata?.size_bytes || 0;
-  $: stagedCodec = current.metadata?.codec || '';
-  $: stagedDuration = current.metadata?.duration || 0;
-  $: stagedFrames = current.metadata?.frames || 0;
-  $: stagedWdTags = current.metadata?.wd_tags || current.metadata?.metadata?.wd_tags || [];
-
-  $: vaultWidth = activeMatch?.width || 0;
-  $: vaultHeight = activeMatch?.height || 0;
-  $: vaultSize = activeMatch?.size_bytes || 0;
-  $: vaultCodec = activeMatch?.codec || '';
-  $: vaultDuration = activeMatch?.duration || 0;
-  $: vaultFrames = activeMatch?.frames || 0;
-  $: vaultWdTags = activeMatch?.wd_tags || [];
-
-  $: stagedRes = stagedWidth * stagedHeight;
-  $: vaultRes = vaultWidth * vaultHeight;
-
-  $: resClassStaged = stagedRes > 0 && vaultRes > 0 
-    ? (stagedRes > vaultRes ? 'better' : (stagedRes < vaultRes ? 'worse' : ''))
-    : '';
-  $: resClassVault = stagedRes > 0 && vaultRes > 0 
-    ? (vaultRes > stagedRes ? 'better' : (vaultRes < stagedRes ? 'worse' : ''))
-    : '';
-
-  $: sizeClassStaged = stagedSize > 0 && vaultSize > 0
-    ? (stagedSize > vaultSize ? 'better' : (stagedSize < vaultSize ? 'worse' : ''))
-    : '';
-  $: sizeClassVault = stagedSize > 0 && vaultSize > 0
-    ? (vaultSize > stagedSize ? 'better' : (vaultSize < stagedSize ? 'worse' : ''))
-    : '';
-
-  function formatBytes(bytes: number | null | undefined): string {
-    if (bytes == null || bytes <= 0) return 'unknown size';
-    if (bytes < 1024 * 1024) {
-      return `${Math.round(bytes / 1024)} KB`;
-    }
-    return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
-  }
-
-  function formatDuration(sec: number | null | undefined): string {
-    if (sec == null || sec <= 0) return '';
-    const m = Math.floor(sec / 60);
-    const s = Math.floor(sec % 60);
-    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-  }
+  $: comparison = reviewComparisonData(current, activeMatchIndex);
+  $: resolvedMatches = comparison.resolvedMatches;
+  $: activeMatch = comparison.activeMatch;
+  $: stagedWidth = comparison.stagedWidth;
+  $: stagedHeight = comparison.stagedHeight;
+  $: stagedSize = comparison.stagedSize;
+  $: stagedCodec = comparison.stagedCodec;
+  $: stagedDuration = comparison.stagedDuration;
+  $: stagedFrames = comparison.stagedFrames;
+  $: stagedWdTags = comparison.stagedWdTags;
+  $: vaultWidth = comparison.vaultWidth;
+  $: vaultHeight = comparison.vaultHeight;
+  $: vaultSize = comparison.vaultSize;
+  $: vaultCodec = comparison.vaultCodec;
+  $: vaultDuration = comparison.vaultDuration;
+  $: vaultFrames = comparison.vaultFrames;
+  $: vaultWdTags = comparison.vaultWdTags;
+  $: resClassStaged = comparison.resClassStaged;
+  $: resClassVault = comparison.resClassVault;
+  $: sizeClassStaged = comparison.sizeClassStaged;
+  $: sizeClassVault = comparison.sizeClassVault;
+  $: validationWarning = current.validation_warning || current.metadata?.validation_warning || '';
 </script>
 
 {#if current.section === 'cleanup'}
@@ -222,7 +148,7 @@
         {#if stagedWidth > 0 && stagedHeight > 0}
           <div class="meta-row">
             <span class="meta-label">Dimensions:</span>
-            <span class="meta-val {resClassStaged}">{stagedWidth} × {stagedHeight}</span>
+            <span class="meta-val {resClassStaged}">{stagedWidth} x {stagedHeight}</span>
           </div>
         {/if}
         {#if stagedSize > 0}
@@ -259,11 +185,11 @@
           <span class="meta-label">Artist:</span>
           <span class="meta-val">{current.metadata?.artist || 'None detected'}</span>
         </div>
-        {#if current.metadata?.validation_warning}
+        {#if validationWarning}
           <div class="meta-row alert-row">
             <span class="meta-label text-warn">Validation Alert:</span>
-            <span class="meta-val text-warn truncate" title={current.metadata.validation_warning}>
-              {current.metadata.validation_warning}
+            <span class="meta-val text-warn truncate" title={validationWarning}>
+              {validationWarning}
             </span>
           </div>
         {/if}
@@ -328,7 +254,7 @@
           {#if vaultWidth > 0 && vaultHeight > 0}
             <div class="meta-row">
               <span class="meta-label">Dimensions:</span>
-              <span class="meta-val {resClassVault}">{vaultWidth} × {vaultHeight}</span>
+              <span class="meta-val {resClassVault}">{vaultWidth} x {vaultHeight}</span>
             </div>
           {/if}
           {#if vaultSize > 0}
