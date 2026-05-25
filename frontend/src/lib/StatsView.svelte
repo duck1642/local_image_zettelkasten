@@ -64,6 +64,7 @@
   let sortMode: StatsSortMode = 'popularity';
   let scopeMode: StatsScopeMode = 'used';
   let letterFilter = 'all';
+  let alphabetFilterOpen = false;
   let searchText = '';
   let items: FacetItem[] = [];
   let artists: ArtistListItem[] = [];
@@ -217,6 +218,11 @@
 
   function setLetterFilter(value: string) {
     letterFilter = value;
+  }
+
+  function setAlphabetFilterOpen(value: boolean) {
+    alphabetFilterOpen = value;
+    if (!value) letterFilter = 'all';
   }
 
 
@@ -382,6 +388,7 @@
     closeMetadataAction();
     searchText = '';
     letterFilter = 'all';
+    alphabetFilterOpen = false;
     items = [];
     artists = [];
     placeholderArtists = [];
@@ -672,12 +679,14 @@
     {scopeMode}
     bind:letterFilter
     bind:searchText
+    bind:alphabetFilterOpen
     {letterFilters}
     {showLetterFilter}
     {showScopeFilter}
     onSort={setSortMode}
     onScope={setScopeMode}
     onLetter={setLetterFilter}
+    onAlphabetToggle={setAlphabetFilterOpen}
     onSearchInput={handleSearchInput}
   />
 

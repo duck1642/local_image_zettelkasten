@@ -8,6 +8,7 @@ export { default as IconExpand } from './IconExpand.svelte';
 export { default as IconExternalLink } from './IconExternalLink.svelte';
 export { default as IconEye } from './IconEye.svelte';
 export { default as IconFileText } from './IconFileText.svelte';
+export { default as IconFilter } from './IconFilter.svelte';
 export { default as IconFolder } from './IconFolder.svelte';
 export { default as IconImage } from './IconImage.svelte';
 export { default as IconInfoCircle } from './IconInfoCircle.svelte';

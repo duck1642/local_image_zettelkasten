@@ -63,6 +63,7 @@ body.artist-list-resizing {
     display: flex;
     align-items: center;
     gap: 12px;
+    position: relative;
   }
 
   .sort-tabs,
@@ -73,11 +74,10 @@ body.artist-list-resizing {
 
   .letter-tabs {
     display: flex;
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    gap: 12px;
+    flex-wrap: wrap;
+    gap: 4px;
     align-items: center;
-    padding: 4px 0;
+    padding: 0;
     scrollbar-width: none;
   }
   .letter-tabs::-webkit-scrollbar {
@@ -87,28 +87,28 @@ body.artist-list-resizing {
   .letter-tab {
     background: transparent;
     border: none;
-    padding: 2px 4px;
-    font-size: 11px;
-    font-weight: 500;
+    display: inline-grid;
+    place-items: center;
+    min-width: 28px;
+    height: 28px;
+    padding: 0 8px;
+    font-size: 12px;
+    font-weight: 600;
     color: var(--text-muted);
     cursor: pointer;
-    min-width: auto;
-    border-radius: 0;
-    text-transform: uppercase;
+    border-radius: 5px;
+    line-height: 1;
   }
 
   .letter-tab:hover {
     color: var(--text-bright);
-    border-color: transparent;
-    background: transparent;
+    background: rgba(255, 255, 255, 0.04);
   }
 
   .letter-tab.active {
-    color: var(--accent-primary);
+    color: #ffffff;
     font-weight: 700;
-    border-bottom: 2px solid var(--accent-primary);
-    background: transparent;
-    border-radius: 0;
+    background: var(--accent-primary);
   }
 
   .kind-tabs button.active,
@@ -122,6 +122,111 @@ body.artist-list-resizing {
   .stats-search {
     width: 100%;
     max-width: none;
+  }
+
+  .stats-filter-button {
+    display: inline-grid;
+    place-items: center;
+    flex: 0 0 auto;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border: 1px solid var(--border-dim);
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--text-muted);
+    cursor: pointer;
+  }
+
+  .stats-filter-button.active {
+    background: rgba(31, 111, 235, 0.14);
+    border-color: rgba(88, 166, 255, 0.55);
+    color: var(--accent-primary);
+  }
+
+  .stats-filter-button:hover,
+  .stats-filter-button:focus-visible {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.18);
+    color: var(--text-bright);
+  }
+
+  .stats-filter-wrap {
+    position: relative;
+    flex: 0 0 auto;
+  }
+
+  .stats-filter-popover {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    z-index: 50;
+    width: 236px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 10px;
+    border: 1px solid var(--border-dim);
+    border-radius: 8px;
+    background: var(--bg-main);
+    box-shadow: 0 14px 36px rgba(0, 0, 0, 0.42);
+  }
+
+  .filter-section {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .filter-label {
+    color: var(--text-muted);
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+
+  .sort-tabs.compact,
+  .scope-tabs.compact {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 4px;
+  }
+
+  .sort-tabs.compact button,
+  .scope-tabs.compact button {
+    height: 28px;
+    padding: 0 8px;
+    border-radius: 5px;
+    font-size: 12px;
+  }
+
+  .sort-tabs.compact button.active,
+  .scope-tabs.compact button.active {
+    background: rgba(31, 111, 235, 0.85);
+    border-color: rgba(88, 166, 255, 0.45);
+  }
+
+  .filter-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    justify-content: flex-start;
+    color: var(--text-main);
+    font-size: 12px;
+    cursor: pointer;
+    min-height: 28px;
+  }
+
+  .filter-toggle span {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+
+  .filter-toggle input {
+    flex: 0 0 auto;
+    width: 13px !important;
+    height: 13px;
+    margin: 0;
   }
 
   .artist-list,
@@ -720,4 +825,3 @@ body.artist-list-resizing {
       grid-template-columns: 1fr;
     }
   }
-
