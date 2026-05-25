@@ -147,15 +147,16 @@ def calculate_tiles(filepath: Path, ratio_threshold: float = 3.0) -> list:
     except Exception:
         return []
 
-def find_visual_duplicate(new_phash: str, threshold: int = 5, new_tiles: list = None, ctx: WorkspaceContext | None = None) -> Tuple[Optional[str], Optional[str], int, Optional[int]]:
+def find_visual_duplicate(new_phash: str, threshold: int = 5, new_tiles: list = None, ctx: WorkspaceContext | None = None, return_all: bool = False) -> Tuple[Optional[str], Optional[str], int, Optional[int], List[str]] | Tuple[Optional[str], Optional[str], int, Optional[int]]:
 
     best_match = None
     match_type = None
     min_distance = None
     total_conflicts = 0
+    all_hashes = []
 
     try:
-
+        all_matches_dict = {}
 
         try:
             matches = search_manager.query_image(new_phash, threshold, ctx=ctx)
@@ -164,20 +165,23 @@ def find_visual_duplicate(new_phash: str, threshold: int = 5, new_tiles: list = 
 
         for f_hash, dist, m_type in matches:
             total_conflicts += 1
+            if f_hash not in all_matches_dict or dist < all_matches_dict[f_hash]:
+                all_matches_dict[f_hash] = dist
             if min_distance is None or dist < min_distance:
                 min_distance = dist
                 best_match = f_hash
                 match_type = f"{m_type} (Dist: {dist})"
 
-
         if not best_match and new_tiles:
             for t_index, t_phash in new_tiles:
-
                 try:
                     tile_matches = search_manager.query_global_only(t_phash, threshold, ctx=ctx)
                 except TypeError:
                     tile_matches = search_manager.query_global_only(t_phash, threshold)
                 if tile_matches:
+                    for fh, dist in tile_matches:
+                        if fh not in all_matches_dict or dist < all_matches_dict[fh]:
+                            all_matches_dict[fh] = dist
                     f_hash, dist = tile_matches[0]
                     total_conflicts += len(tile_matches)
                     best_match = f_hash
@@ -185,17 +189,28 @@ def find_visual_duplicate(new_phash: str, threshold: int = 5, new_tiles: list = 
                     match_type = f"Whole-to-Fragment (Tile #{t_index})"
                     break
 
+        sorted_keys = sorted(all_matches_dict.keys(), key=lambda h: all_matches_dict[h])
+        if best_match and best_match in sorted_keys:
+            sorted_keys.remove(best_match)
+            sorted_keys.insert(0, best_match)
+        elif best_match and best_match not in sorted_keys:
+            sorted_keys.insert(0, best_match)
+        all_hashes = sorted_keys
+
     except Exception as e:
         log_system("ERROR", f"Search error in find_visual_duplicate: {e}")
 
+    if return_all:
+        return best_match, match_type, total_conflicts, min_distance, all_hashes
     return best_match, match_type, total_conflicts, min_distance
 
-def find_video_duplicate(audio_hash: bytes, visual_embedding: bytes, ai_threshold: float = 0.08, ctx: WorkspaceContext | None = None) -> Tuple[Optional[str], Optional[str], int, Optional[float]]:
+def find_video_duplicate(audio_hash: bytes, visual_embedding: bytes, ai_threshold: float = 0.08, ctx: WorkspaceContext | None = None, return_all: bool = False) -> Tuple[Optional[str], Optional[str], int, Optional[float], List[str]] | Tuple[Optional[str], Optional[str], int, Optional[float]]:
 
     best_match = None
     match_type = None
     max_similarity = 0.0
     total_conflicts = 0
+    all_hashes = []
 
     try:
 
@@ -230,9 +245,24 @@ def find_video_duplicate(audio_hash: bytes, visual_embedding: bytes, ai_threshol
             max_similarity = data["similarity"]
             match_type = f"{data['types'][0]} Match"
 
+        sorted_conflicts_all = sorted(
+            conflict_map.items(),
+            key=lambda x: (len(x[1]["types"]) > 1, x[1]["similarity"]),
+            reverse=True
+        )
+        sorted_keys = [fh for fh, _ in sorted_conflicts_all]
+        if best_match and best_match in sorted_keys:
+            sorted_keys.remove(best_match)
+            sorted_keys.insert(0, best_match)
+        elif best_match and best_match not in sorted_keys:
+            sorted_keys.insert(0, best_match)
+        all_hashes = sorted_keys
+
     except Exception as e:
         log_system("ERROR", f"Search error in find_video_duplicate: {e}")
 
+    if return_all:
+        return best_match, match_type, total_conflicts, max_similarity if best_match else None, all_hashes
     return best_match, match_type, total_conflicts, max_similarity if best_match else None
 
 def process_file(filepath: Path, config: dict, metadata: dict = None, delete_source: bool = False, skip_similarity: bool = False, sync_index: bool = True, ctx: WorkspaceContext | None = None) -> Tuple[bool, str, Optional[dict]]:
@@ -297,7 +327,7 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
             pass
 
         if phash and not skip_similarity:
-            conflict_hash, match_type, total_conflicts, distance = find_visual_duplicate(phash, threshold=5, new_tiles=tiles, ctx=ctx)
+            conflict_hash, match_type, total_conflicts, distance, all_matches = find_visual_duplicate(phash, threshold=5, new_tiles=tiles, ctx=ctx, return_all=True)
             if conflict_hash:
 
                 conn.close()
@@ -313,6 +343,7 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
                     "distance": distance,
                     "total_conflicts": total_conflicts,
                     "is_tiled": bool(tiles),
+                    "matches": all_matches,
                     },
                     ctx=ctx,
                 )
@@ -337,7 +368,7 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
             pass
 
         if (audio_hash or visual_embedding) and not skip_similarity:
-            conflict_hash, match_type, total_conflicts, similarity = find_video_duplicate(audio_hash, visual_embedding, ai_threshold=0.08, ctx=ctx)
+            conflict_hash, match_type, total_conflicts, similarity, all_matches = find_video_duplicate(audio_hash, visual_embedding, ai_threshold=0.08, ctx=ctx, return_all=True)
             if conflict_hash:
 
                 conn.close()
@@ -353,6 +384,7 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
                     "total_conflicts": total_conflicts,
                     "audio_present": bool(audio_hash),
                     "visual_embedding_present": bool(visual_embedding),
+                    "matches": all_matches,
                     },
                     ctx=ctx,
                 )

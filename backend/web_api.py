@@ -139,9 +139,9 @@ async def local_ingest_retry_failed():
     return await _api_ingestion.local_ingest_retry_failed()
 
 
-def _review_action_sync(filename: str, action: str):
+def _review_action_sync(filename: str, action: str, target_hash: str = None):
     _sync_legacy_patches()
-    return _api_review._review_action_sync(filename, action)
+    return _api_review._review_action_sync(filename, action, target_hash)
 
 
 if __name__ == "__main__":

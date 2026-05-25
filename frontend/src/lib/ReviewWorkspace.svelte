@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { IconInfoCircle } from './icons';
+  import { createEventDispatcher } from 'svelte';
+  import { IconChevronLeft, IconChevronRight, IconInfoCircle, IconMaximizeDiagonal } from './icons';
 
   interface ReviewItem {
     filename: string;
@@ -19,6 +20,13 @@
       mime_type?: string;
       extension?: string;
     } | null;
+    matches?: Array<{
+      hash: string;
+      url: string;
+      artist: string;
+      mime_type?: string;
+      extension?: string;
+    }>;
   }
 
   export let current: ReviewItem;
@@ -26,6 +34,9 @@
   export let isVideoMedia: (item: any) => boolean;
   export let mediaUrl: (item: any) => string;
   export let displayName: (item: any) => string;
+  export let activeMatchIndex = 0;
+
+  const dispatch = createEventDispatcher();
 
   function extFromUrl(url: string) {
     const clean = (url || '').split('?')[0].split('#')[0];
@@ -33,6 +44,20 @@
     if (dot < 0) return '';
     return clean.slice(dot).toLowerCase();
   }
+
+  function prevMatch() {
+    dispatch('changeMatch', { index: activeMatchIndex - 1 });
+  }
+
+  function nextMatch() {
+    dispatch('changeMatch', { index: activeMatchIndex + 1 });
+  }
+
+  $: resolvedMatches = current.matches && current.matches.length > 0
+    ? current.matches
+    : (current.best_match ? [current.best_match] : []);
+
+  $: activeMatch = resolvedMatches[activeMatchIndex] || null;
 </script>
 
 {#if current.section === 'cleanup'}
@@ -103,6 +128,10 @@
     <div class="workspace-column">
       <div class="column-header">
         <span class="pill-badge primary">Incoming Item (Staged)</span>
+        <button class="fullscreen-toggle-btn" on:click={() => dispatch('toggleFullscreen')} title="Compare Symmetrically Fullscreen">
+          <IconMaximizeDiagonal size={12} />
+          <span>Compare Fullscreen</span>
+        </button>
       </div>
       
       <div class="pane">
@@ -145,15 +174,26 @@
     <div class="workspace-column">
       <div class="column-header">
         <span class="pill-badge info">Best Similarity Match in Vault</span>
+        {#if resolvedMatches.length > 1}
+          <div class="match-nav">
+            <button class="match-nav-btn" on:click={prevMatch} disabled={activeMatchIndex <= 0} title="Previous Similarity Match">
+              <IconChevronLeft size={10} />
+            </button>
+            <span class="match-counter">Match {activeMatchIndex + 1} of {resolvedMatches.length}</span>
+            <button class="match-nav-btn" on:click={nextMatch} disabled={activeMatchIndex >= resolvedMatches.length - 1} title="Next Similarity Match">
+              <IconChevronRight size={10} />
+            </button>
+          </div>
+        {/if}
       </div>
 
       <div class="pane">
-        {#if mediaMounted && current.best_match}
-          {#if isVideoMedia(current.best_match)}
+        {#if mediaMounted && activeMatch}
+          {#if isVideoMedia(activeMatch)}
             <!-- svelte-ignore a11y-media-has-caption -->
-            <video src={mediaUrl(current.best_match)} controls preload="metadata"></video>
+            <video src={mediaUrl(activeMatch)} controls preload="metadata"></video>
           {:else}
-            <img src={mediaUrl(current.best_match)} alt="Match" />
+            <img src={mediaUrl(activeMatch)} alt="Match" />
           {/if}
         {:else if mediaMounted}
           <div class="no-match">
@@ -166,18 +206,18 @@
 
       <div class="meta-card">
         <div class="meta-card-title">Vault Copy Metadata</div>
-        {#if current.best_match}
+        {#if activeMatch}
           <div class="meta-row">
             <span class="meta-label">Hash ID:</span>
-            <span class="meta-val truncate" title={current.best_match.hash}>{current.best_match.hash}</span>
+            <span class="meta-val truncate" title={activeMatch.hash}>{activeMatch.hash}</span>
           </div>
           <div class="meta-row">
             <span class="meta-label">Format / Ext:</span>
-            <span class="meta-val uppercase">{current.best_match.extension || 'unknown'}</span>
+            <span class="meta-val uppercase">{activeMatch.extension || 'unknown'}</span>
           </div>
           <div class="meta-row">
             <span class="meta-label">Artist:</span>
-            <span class="meta-val">{current.best_match.artist || 'Unassigned'}</span>
+            <span class="meta-val">{activeMatch.artist || 'Unassigned'}</span>
           </div>
         {:else}
           <div class="meta-row empty-meta">
@@ -208,6 +248,67 @@
   .column-header {
     display: flex;
     align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    height: 24px;
+  }
+
+  .match-nav {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    padding: 2px 8px;
+    border-radius: 4px;
+  }
+
+  .match-nav-btn {
+    width: 18px;
+    height: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 0;
+  }
+
+  .match-nav-btn:hover:not(:disabled) {
+    color: var(--text-bright);
+  }
+
+  .match-nav-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.3;
+  }
+
+  .match-counter {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text-muted);
+  }
+
+  .fullscreen-toggle-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    color: var(--text-muted);
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+
+  .fullscreen-toggle-btn:hover {
+    color: var(--text-bright);
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.15);
   }
 
   .pill-badge {

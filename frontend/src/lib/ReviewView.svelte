@@ -7,7 +7,9 @@
   import {
     IconCheckCircle,
     IconChevronLeft,
-    IconChevronRight
+    IconChevronRight,
+    IconClose,
+    IconMaximizeDiagonal
   } from './icons';
 
   import ReviewInboxList from './ReviewInboxList.svelte';
@@ -49,6 +51,36 @@
   let mediaMounted = true;
   let currentRuntimeSessionKey = '';
   let isSandbox = false;
+  let activeMatchIndex = 0;
+  let fullscreenOpen = false;
+
+  $: if (selectedFilename) {
+    activeMatchIndex = 0;
+    fullscreenOpen = false;
+  }
+
+  $: resolvedMatches = current?.matches && current.matches.length > 0
+    ? current.matches
+    : (current?.best_match ? [current.best_match] : []);
+
+  $: activeMatch = resolvedMatches[activeMatchIndex] || null;
+
+  function changeMatchIndex(delta: number) {
+    if (!resolvedMatches.length) return;
+    activeMatchIndex = Math.max(0, Math.min(resolvedMatches.length - 1, activeMatchIndex + delta));
+  }
+
+  function handleKeydown(event: KeyboardEvent) {
+    if (!fullscreenOpen) return;
+    const key = event.key.toLowerCase();
+    if (key === 'escape') {
+      fullscreenOpen = false;
+    } else if (key === 'a' || event.key === 'ArrowLeft') {
+      changeMatchIndex(-1);
+    } else if (key === 'd' || event.key === 'ArrowRight') {
+      changeMatchIndex(1);
+    }
+  }
 
   const VIDEO_EXTENSIONS = new Set(['.mp4', '.webm', '.ogv', '.mov', '.m4v', '.avi', '.mkv']);
 
@@ -138,10 +170,16 @@
     const action = event.detail.action;
     if (!current || acting) return;
 
+    const resolvedMatches = current.matches && current.matches.length > 0
+      ? current.matches
+      : (current.best_match ? [current.best_match] : []);
+    const activeMatch = resolvedMatches[activeMatchIndex] || null;
+    const targetHash = activeMatch?.hash || '';
+
     if (isSandbox) {
       acting = true;
       await unmountMediaForFileAction();
-      const result = await simulateSandboxAction(action, current.filename, items);
+      const result = await simulateSandboxAction(action, current.filename, items, targetHash);
       items = result.nextItems;
       isSandbox = result.isSandbox;
       acting = false;
@@ -151,10 +189,11 @@
 
     if (current.section === 'cleanup') return;
     if (action === 'replace') {
-      const target = String(current.metadata?.best_match || current.best_match?.hash || '').trim();
-      const message = target
-        ? `Replace target ${target.slice(0, 10)}... with ${displayName(current)}?`
-        : `Replace target is missing for ${displayName(current)}. Continue anyway?`;
+      if (!targetHash) {
+        alert('No visual match selected to replace.');
+        return;
+      }
+      const message = `Replace target copy ${targetHash.slice(0, 12)}... with ${displayName(current)}?`;
       if (!confirm(message)) return;
     }
 
@@ -162,7 +201,10 @@
     if (action !== 'keep') await unmountMediaForFileAction();
     try {
       const filename = encodeURIComponent(current.filename);
-      const res = await apiFetch(`/api/review/${filename}/action?action=${action}`, { method: 'POST' });
+      const url = action === 'replace'
+        ? `/api/review/${filename}/action?action=${action}&target_hash=${encodeURIComponent(targetHash)}`
+        : `/api/review/${filename}/action?action=${action}`;
+      const res = await apiFetch(url, { method: 'POST' });
       if (!res.ok) {
         const detail = await readErrorDetail(res);
         throw new Error(detail ? `HTTP ${res.status}: ${detail}` : `HTTP ${res.status}`);
@@ -254,8 +296,12 @@
 
   onMount(() => {
     window.addEventListener('lmz:refresh', handleGlobalRefresh);
+    window.addEventListener('keydown', handleKeydown);
     loadReview();
-    return () => window.removeEventListener('lmz:refresh', handleGlobalRefresh);
+    return () => {
+      window.removeEventListener('lmz:refresh', handleGlobalRefresh);
+      window.removeEventListener('keydown', handleKeydown);
+    };
   });
 </script>
 
@@ -301,6 +347,9 @@
             {isVideoMedia}
             {mediaUrl}
             {displayName}
+            {activeMatchIndex}
+            on:changeMatch={(e) => activeMatchIndex = e.detail.index}
+            on:toggleFullscreen={() => fullscreenOpen = true}
           />
         </div>
 
@@ -313,6 +362,83 @@
         />
       </section>
     {/if}
+  {/if}
+
+  {#if fullscreenOpen && current}
+    <!-- Symmetrical Fullscreen Comparison Overlay -->
+    <div class="comparison-overlay">
+      <div class="overlay-header">
+        <div class="overlay-header-left">
+          <span class="overlay-title">Symmetrical Duplicate Comparison</span>
+          <span class="overlay-subtitle">{current.filename}</span>
+        </div>
+        <div class="overlay-header-right">
+          {#if resolvedMatches.length > 1}
+            <div class="match-nav inverse">
+              <button class="match-nav-btn" on:click={() => changeMatchIndex(-1)} disabled={activeMatchIndex <= 0} title="Previous Match (A or ArrowLeft)">
+                <IconChevronLeft size={10} />
+              </button>
+              <span class="match-counter">Match {activeMatchIndex + 1} of {resolvedMatches.length}</span>
+              <button class="match-nav-btn" on:click={() => changeMatchIndex(1)} disabled={activeMatchIndex >= resolvedMatches.length - 1} title="Next Match (D or ArrowRight)">
+                <IconChevronRight size={10} />
+              </button>
+            </div>
+          {/if}
+          <button class="close-overlay-btn" on:click={() => fullscreenOpen = false} title="Close Comparison (Esc)">
+            <IconClose size={16} />
+          </button>
+        </div>
+      </div>
+
+      <div class="overlay-workspace">
+        <!-- Left side (Incoming Staged) -->
+        <div class="overlay-pane">
+          <div class="pane-badge purple">Incoming Staged File</div>
+          <div class="pane-media">
+            {#if isVideoMedia(current)}
+              <!-- svelte-ignore a11y-media-has-caption -->
+              <video src={mediaUrl(current)} controls preload="metadata"></video>
+            {:else}
+              <img src={mediaUrl(current)} alt="New staged item" />
+            {/if}
+          </div>
+          <div class="pane-meta">
+            <div class="meta-row"><span class="meta-label">Original Filename:</span> <span class="meta-val truncate" title={displayName(current)}>{displayName(current)}</span></div>
+            <div class="meta-row"><span class="meta-label">Format:</span> <span class="meta-val uppercase">{current.extension || extFromUrl(current.url) || 'unknown'}</span></div>
+            <div class="meta-row"><span class="meta-label">Artist:</span> <span class="meta-val">{current.metadata?.artist || 'None detected'}</span></div>
+          </div>
+        </div>
+
+        <!-- Right side (Vault Duplicate) -->
+        <div class="overlay-pane">
+          <div class="pane-badge blue">Vault Duplicate Copy</div>
+          <div class="pane-media">
+            {#if activeMatch}
+              {#if isVideoMedia(activeMatch)}
+                <!-- svelte-ignore a11y-media-has-caption -->
+                <video src={mediaUrl(activeMatch)} controls preload="metadata"></video>
+              {:else}
+                <img src={mediaUrl(activeMatch)} alt="Match copy" />
+              {/if}
+            {:else}
+              <div class="no-match-fullscreen">No matching duplicate copy.</div>
+            {/if}
+          </div>
+          <div class="pane-meta">
+            {#if activeMatch}
+              <div class="meta-row"><span class="meta-label">Hash ID:</span> <span class="meta-val truncate-hash" title={activeMatch.hash}>{activeMatch.hash}</span></div>
+              <div class="meta-row"><span class="meta-label">Format:</span> <span class="meta-val uppercase">{activeMatch.extension || 'unknown'}</span></div>
+              <div class="meta-row"><span class="meta-label">Artist:</span> <span class="meta-val">{activeMatch.artist || 'Unassigned'}</span></div>
+            {/if}
+          </div>
+        </div>
+      </div>
+      
+      <div class="overlay-footer-hud">
+        <span class="hud-item">[A] / [D] or Arrow keys to cycle duplicates</span>
+        <span class="hud-item">[Esc] to close symmetrical view</span>
+      </div>
+    </div>
   {/if}
 </div>
 
@@ -412,5 +538,180 @@
 
   @keyframes spin {
     to { transform: rotate(360deg); }
+  }
+
+  /* Fullscreen Symmetrical Comparison Overlay */
+  .comparison-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: #090c10;
+    z-index: 10000;
+    display: flex;
+    flex-direction: column;
+    padding: 24px;
+    box-sizing: border-box;
+  }
+
+  .overlay-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 48px;
+    border-bottom: 1px solid var(--border-dim);
+    padding-bottom: 16px;
+    margin-bottom: 24px;
+  }
+
+  .overlay-header-left {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .overlay-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text-bright);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .overlay-subtitle {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-family: monospace;
+  }
+
+  .overlay-header-right {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .match-nav.inverse {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .close-overlay-btn {
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--text-muted);
+    border-radius: 4px;
+    cursor: pointer;
+    padding: 0;
+  }
+
+  .close-overlay-btn:hover {
+    background: rgba(248, 81, 73, 0.15);
+    border-color: rgba(248, 81, 73, 0.25);
+    color: var(--accent-danger);
+  }
+
+  .overlay-workspace {
+    flex: 1;
+    display: flex;
+    gap: 24px;
+    min-height: 0;
+  }
+
+  .overlay-pane {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    gap: 14px;
+  }
+
+  .pane-badge {
+    align-self: flex-start;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 3px 10px;
+    border-radius: 4px;
+    text-transform: uppercase;
+  }
+
+  .pane-badge.purple {
+    color: var(--accent-purple);
+    background: rgba(163, 113, 247, 0.12);
+    border: 1px solid rgba(163, 113, 247, 0.25);
+  }
+
+  .pane-badge.blue {
+    color: var(--accent-primary);
+    background: rgba(88, 166, 255, 0.1);
+    border: 1px solid rgba(88, 166, 255, 0.2);
+  }
+
+  .pane-media {
+    flex: 1;
+    background: #000000;
+    border: 1px solid var(--border-dim);
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    position: relative;
+  }
+
+  .pane-media img,
+  .pane-media video {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+  }
+
+  .pane-meta {
+    background: var(--bg-panel);
+    border: 1px solid var(--border-dim);
+    border-radius: 6px;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .truncate-hash {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-family: monospace;
+    max-width: 400px;
+    color: var(--text-main);
+  }
+
+  .no-match-fullscreen {
+    color: var(--text-muted);
+    font-style: italic;
+    font-size: 13px;
+  }
+
+  .overlay-footer-hud {
+    display: flex;
+    justify-content: center;
+    gap: 32px;
+    margin-top: 24px;
+    font-size: 11px;
+    color: var(--text-muted);
+    font-weight: 600;
+    border-top: 1px solid var(--border-dim);
+    padding-top: 16px;
+  }
+
+  .hud-item {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    padding: 4px 12px;
+    border-radius: 4px;
   }
 </style>

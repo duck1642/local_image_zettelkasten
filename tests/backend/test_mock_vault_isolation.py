@@ -1650,6 +1650,75 @@ def test_review_replace_preserves_old_sqlite_identity_and_manual_indexed_metadat
     assert new_data["wd_tags"] == []
 
 
+def test_review_multi_match_and_safe_specific_replace(monkeypatch, tmp_path):
+    utils, sqlite_operator, web_api, processor, api_review = fresh_backend(
+        monkeypatch, tmp_path, "utils", "db.sqlite_operator", "web_api", "processor", "api.review"
+    )
+
+    # 1. Test processor.find_visual_duplicate with return_all=True
+    class FakeSearchManager:
+        def query_image(self, phash, threshold, ctx=None):
+            return [("hash-a", 2, "Global"), ("hash-b", 4, "Fragment-to-Whole")]
+
+        def query_global_only(self, phash, threshold, ctx=None):
+            return []
+
+    monkeypatch.setattr(processor, "search_manager", FakeSearchManager())
+
+    best, match_type, total, distance, all_hashes = processor.find_visual_duplicate("0" * 16, return_all=True)
+    assert best == "hash-a"
+    assert all_hashes == ["hash-a", "hash-b"]
+
+    # 2. Test api.review._get_review_items_sync resolving multiple matches
+    conn = insert_mock_item(sqlite_operator, "hash-a", artist="Artist A")
+    insert_mock_item(sqlite_operator, "hash-b", artist="Artist B")
+    conn.close()
+
+    review_file = utils.REVIEW_DIR / "staged.jpg"
+    review_file.write_bytes(b"staged")
+    sidecar_data = {
+        "best_match": "hash-a",
+        "matches": ["hash-a", "hash-b"],
+        "metadata": {"artist": "Staged Artist"}
+    }
+    review_file.with_suffix(".jpg.json").write_text(json.dumps(sidecar_data), encoding="utf-8")
+
+    items = api_review._get_review_items_sync()
+    staged_item = next(item for item in items if item["filename"] == "staged.jpg")
+    matches = staged_item["matches"]
+    assert len(matches) == 2
+    assert matches[0]["hash"] == "hash-a"
+    assert matches[0]["artist"] == "Artist A"
+    assert matches[1]["hash"] == "hash-b"
+    assert matches[1]["artist"] == "Artist B"
+
+    # 3. Test safe specific replacement action
+    def fake_process_file(path, config, metadata=None, delete_source=False, skip_similarity=False, **kwargs):
+        conn = insert_mock_item(sqlite_operator, "new-hash", artist="Staged Artist")
+        new_storage_id = storage_id_for(conn, "new-hash")
+        md = web_api.generate_markdown(conn, "new-hash")
+        note_path = utils.note_path_for("new-hash", new_storage_id)
+        note_path.parent.mkdir(parents=True, exist_ok=True)
+        utils.atomic_write_text(note_path, md)
+        conn.close()
+        if delete_source:
+            path.unlink()
+        return True, "ok", {"file_hash": "new-hash"}
+
+    deleted_targets = []
+    def fake_delete_item(target_hash, **kwargs):
+        deleted_targets.append(target_hash)
+        return {"hash": target_hash, "status": "deleted", "cleanup_errors": []}
+
+    monkeypatch.setattr(web_api, "process_file", fake_process_file)
+    monkeypatch.setattr(api_review, "process_file", fake_process_file)
+    monkeypatch.setattr(api_review, "_delete_item_after_replacement", fake_delete_item)
+
+    result = api_review._review_action_sync("staged.jpg", "replace", target_hash="hash-b")
+    assert result["status"] == "success"
+    assert deleted_targets == ["hash-b"]
+
+
 def test_wd_tagger_reuses_cached_session(monkeypatch, tmp_path):
     service, utils = fresh_backend(monkeypatch, tmp_path, "tagging.service", "utils")
     source = tmp_path / "tagged.jpg"

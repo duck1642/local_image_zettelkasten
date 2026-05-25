@@ -93,13 +93,19 @@ def _get_review_items_sync(include_resolved: bool = False):
         entries = [entry for entry in entries if _normalize_review_state(entry["state"]) in REVIEW_VISIBLE_STATES]
 
     items = []
-    best_hashes = sorted(
-        {
-            str(entry["sidecar"].get("best_match") or "").strip()
-            for entry in entries
-            if str(entry["sidecar"].get("best_match") or "").strip()
-        }
-    )
+    all_hashes_set = set()
+    for entry in entries:
+        sidecar = entry["sidecar"]
+        best_match = str(sidecar.get("best_match") or "").strip()
+        if best_match:
+            all_hashes_set.add(best_match)
+        matches = sidecar.get("matches") or []
+        for m in matches:
+            m_str = str(m).strip()
+            if m_str:
+                all_hashes_set.add(m_str)
+
+    best_hashes = sorted(list(all_hashes_set))
     match_map = {}
     if best_hashes:
         conn = connect_database()
@@ -122,6 +128,16 @@ def _get_review_items_sync(include_resolved: bool = False):
         p = entry["path"]
         sidecar = entry["sidecar"]
         best_match = str(sidecar.get("best_match") or "").strip()
+        matches_list = sidecar.get("matches") or []
+        if not matches_list and best_match:
+            matches_list = [best_match]
+        
+        resolved_matches = []
+        for m in matches_list:
+            m_str = str(m).strip()
+            if m_str in match_map:
+                resolved_matches.append(match_map[m_str])
+
         display_name = _review_display_name(p, sidecar)
         items.append({
             "filename": p.name,
@@ -129,6 +145,7 @@ def _get_review_items_sync(include_resolved: bool = False):
             "url": f"/review-assets/{p.name}",
             "metadata": sidecar,
             "best_match": match_map.get(best_match) if best_match else None,
+            "matches": resolved_matches,
             "mime_type": entry["mime_type"],
             "extension": entry["extension"],
             "state": entry["state"],
@@ -140,10 +157,10 @@ def _get_review_items_sync(include_resolved: bool = False):
     return items
 
 @router.post("/api/review/{filename}/action")
-async def review_action(filename: str, action: str):
-    return await asyncio.to_thread(_review_action_sync, filename, action)
+async def review_action(filename: str, action: str, target_hash: str = None):
+    return await asyncio.to_thread(_review_action_sync, filename, action, target_hash)
 
-def _review_action_sync(filename: str, action: str):
+def _review_action_sync(filename: str, action: str, target_hash: str = None):
     ctx = get_runtime_context()
     cfg = get_config(ctx)
     if action not in {"delete", "keep", "variant", "replace"}:
@@ -195,11 +212,12 @@ def _review_action_sync(filename: str, action: str):
         log_review("INFO", "Review action succeeded", action=action, filename=filename, display_name=display_name, state="deferred", detail=message)
         return {"status": "success", "action": action, "message": message}
 
-    target_hash = ""
+    target_hash = str(target_hash or "").strip()
     replacement_manual_fields = {}
     replacement_identity_fields = {}
     if action == "replace":
-        target_hash = str(sidecar.get("best_match") or "").strip()
+        if not target_hash:
+            target_hash = str(sidecar.get("best_match") or "").strip()
         if not target_hash:
             message = "Replace target is missing. Item kept pending."
             log_review("WARNING", "Review replace warning", action=action, filename=filename, display_name=display_name, detail=message)
