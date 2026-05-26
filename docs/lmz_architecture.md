@@ -380,8 +380,8 @@ Markdown asset links are relative to sharded notes:
 - Workspace SQLite: shared artist, platform, and WD tag dictionaries.
 - `items.hash`: permanent logical/API identity.
 - `items.storage_id`: internal physical filename identity.
-- Markdown frontmatter: source of truth for manual `topics`, distilled `wd_rating`, `wd_character_tags`, and `wd_tags`.
-- Markdown mirrors SQLite-owned artist/platform/source/date fields for readability.
+- Markdown frontmatter: source of truth for manual `title`, `topics`, distilled `wd_rating`, `wd_character_tags`, and `wd_tags`.
+- Markdown mirrors SQLite-owned artist/platform/source/date fields for readability; online scrapers do not own artist/title metadata.
 - WD JSON cache: detailed local WD tag report, including scores and frame-level video tag data. Used as fallback only when YAML has no WD fields.
 - Topic markdown files under `data/topics/`: shared topic library. Item notes store relative links to these files when topics are created or saved through LMZ.
 
@@ -404,7 +404,7 @@ Metadata maintenance that rewrites topic/WD frontmatter is centralized in `backe
 | `source_url` | Original user-facing URL |
 | `source_url_norm` | Normalized URL used for duplicate checks |
 | `platform` | Platform label |
-| `source_artist` | Creator/artist metadata |
+| `source_artist` | App/user-owned creator/artist metadata |
 | `phash` | Image perceptual hash |
 | `audio_hash` | Video audio signature |
 | `visual_embedding` | Video visual embedding |
@@ -693,6 +693,7 @@ Platform specifics:
 - Pinterest: count-only metadata; source URL identity remains exact.
 - X/Twitter: no metadata prefetch; original URL is preserved while gallery-dl receives its supported URL form.
 - YouTube community: extracts community image attachments and records per-image download failures.
+- Online downloaders pass only `source_url` and `platform` into item metadata; scraped artist/title values are ignored.
 
 ## Review Workflow
 

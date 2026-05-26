@@ -3647,6 +3647,28 @@ def test_hot_ingestion_paths_use_lightweight_db_helper(monkeypatch, tmp_path):
     assert "connect_database()" in inspect.getsource(external_ingestion.ExternalIngestor._rollback_batch)
 
 
+def test_online_process_metadata_keeps_only_online_identity(monkeypatch, tmp_path):
+    external_ingestion, = fresh_backend(monkeypatch, tmp_path, "external_ingestion")
+
+    metadata = external_ingestion._online_process_metadata(
+        {
+            "source_url": "https://example.test/item",
+            "platform": "Pixiv",
+            "artist": "Scraped Artist",
+            "title": "Scraped Title",
+            "unexpected": "raw scraper field",
+        },
+        "normal_pending_links",
+    )
+
+    assert metadata == {
+        "source_url": "https://example.test/item",
+        "platform": "Pixiv",
+        "ingest_type": "online",
+        "run_id": "normal_pending_links",
+    }
+
+
 def test_downloader_wrappers_use_configured_timeouts(monkeypatch, tmp_path):
     gallery, yt_dlp = fresh_backend(monkeypatch, tmp_path, "downloaders.gallery_dl_wrapper", "downloaders.yt_dlp_wrapper")
     gallery_timeouts = []

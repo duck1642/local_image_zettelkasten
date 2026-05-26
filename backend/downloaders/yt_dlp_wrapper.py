@@ -138,15 +138,6 @@ def _walk(value):
             yield from _walk(child)
 
 
-def _text_from_runs(value) -> str:
-    if not isinstance(value, dict):
-        return ""
-    runs = value.get('runs')
-    if isinstance(runs, list):
-        return "".join(str(run.get('text', '')) for run in runs if isinstance(run, dict)).strip()
-    return str(value.get('simpleText', '')).strip()
-
-
 def _community_renderers(data: dict) -> list:
     renderers = []
     for node in _walk(data):
@@ -252,22 +243,15 @@ def inspect_youtube_community(url: str) -> tuple[bool, dict]:
     if not image_urls:
         return False, {"error": "YouTube community post has no downloadable image attachments"}
 
-    artist = _text_from_runs(renderer.get('authorText')) or "Unknown"
-    title = _text_from_runs(renderer.get('contentText'))
-
     return True, {
         "original_url": url,
         "download_url": url,
         "platform": "YouTube",
-        "artist": artist,
-        "title": title,
         "expected_count": len(image_urls),
         "image_urls": image_urls,
         "metadata": {
             "source_url": url,
-            "platform": "YouTube",
-            "artist": artist,
-            "title": title
+            "platform": "YouTube"
         }
     }
 
@@ -362,15 +346,11 @@ def download_video(url: str, metadata_info: dict = None) -> tuple[bool, dict]:
         print(f"   [INFO] Fetching YouTube metadata...")
         meta_res = subprocess.run(meta_cmd, capture_output=True, text=True, timeout=_timeout("yt_dlp_metadata", 120))
 
-        artist = "Unknown"
-        title = ""
         expected_size = None
 
         if meta_res.returncode == 0:
             try:
                 metadata = json.loads(meta_res.stdout)
-                artist = metadata.get("uploader") or metadata.get("channel") or "Unknown"
-                title = metadata.get("title") or ""
                 expected_raw = metadata.get("filesize") or metadata.get("filesize_approx")
                 expected_size = int(float(expected_raw)) if expected_raw else None
             except (json.JSONDecodeError, ValueError, TypeError):
@@ -403,9 +383,7 @@ def download_video(url: str, metadata_info: dict = None) -> tuple[bool, dict]:
             "file_paths": [str(f) for f in actual_files],
             "metadata": {
                 "source_url": url,
-                "platform": "YouTube",
-                "artist": artist,
-                "title": title
+                "platform": "YouTube"
             },
             "expected_size": expected_size,
             "session_dir": str(session_dir)

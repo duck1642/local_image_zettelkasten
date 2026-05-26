@@ -24,6 +24,19 @@ from ingest_control import online_stop_event
 
 GLOBAL_WORKER_LIMIT: Optional[threading.Semaphore] = None
 
+
+def _online_process_metadata(metadata: dict, run_id: str) -> dict:
+    source = metadata or {}
+    process_metadata = {
+        key: source[key]
+        for key in ("source_url", "platform")
+        if key in source
+    }
+    process_metadata.setdefault("ingest_type", "online")
+    process_metadata.setdefault("run_id", run_id)
+    return process_metadata
+
+
 class ExternalIngestor:
     def __init__(self, links_file: str, skip_validation: bool = False, ctx: WorkspaceContext | None = None):
         self.ctx = ctx or get_runtime_context()
@@ -342,9 +355,7 @@ class ExternalIngestor:
                 for f_path in result['file_paths']:
                     target_file = Path(f_path)
 
-                    process_metadata = dict(result['metadata'])
-                    process_metadata.setdefault("ingest_type", "online")
-                    process_metadata.setdefault("run_id", self.links_file.stem)
+                    process_metadata = _online_process_metadata(result.get('metadata') or {}, self.links_file.stem)
                     import inspect
                     p_kwargs = {
                         "metadata": process_metadata,

@@ -299,6 +299,7 @@ VSCode-friendly test launchers:
   - SQLite-owned identity is active for `items.source_artist`, `items.platform`, `items.source_url`, file metadata, and storage identity.
   - Markdown mirrors artist/platform/source/date fields for readability.
   - normal metadata reindex no longer silently imports Markdown artist/platform/date back into SQLite.
+  - online ingestion only trusts scraper metadata for `source_url` and `platform`; artist/title are app/user-owned metadata.
   - topics and WD tags remain Markdown/index-owned.
   - workspace-level metadata DB is active for shared artists, platforms, and WD tag dictionaries.
   - shared topic library is active under `data/topics/`.
@@ -475,9 +476,9 @@ VSCode-friendly test launchers:
 - Sidecar/API startup:
   - simulated delayed backend does not permanently fail first production API calls.
 - P0 data integrity:
-  - Markdown-owned manual metadata implemented for `title`, `artist`, `date_added`, `topics`, and WD fields.
+  - Manual metadata editing is implemented for `title`, `artist`, `date_added`, `topics`, and WD fields.
   - PATCH artist/topics writes DB cache and Markdown through one rollback-capable path.
-  - metadata reindex reads Markdown `artist` and non-empty `date_added` back into SQLite.
+  - metadata reindex reads Markdown topics/WD data; SQLite remains authoritative for item identity fields.
   - WD YAML fields are authoritative, including explicit empty tag lists.
   - ingest note writes use `atomic_write_text`.
   - review replace preserves old manual YAML metadata onto the replacement.

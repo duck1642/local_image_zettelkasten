@@ -171,7 +171,7 @@ def test_generated_vault_rows_notes_and_media_are_consistent(tmp_path):
             assert frontmatter["storage_id"] == item["storage_id"]
             assert frontmatter["source_url"] == item["source_url"]
             assert frontmatter["platform"] == item["platform"]
-            assert frontmatter["source_artist"] == item["artist"]
+            assert frontmatter["artist"] == item["artist"]
             assert frontmatter["topics"] == item["topic_links"]
             assert all(value.startswith("[topic_") and "topics/topic_" in value for value in frontmatter["topics"])
             assert frontmatter["wd_rating"] == item["wd_tags"]["rating"]

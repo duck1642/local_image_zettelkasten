@@ -167,7 +167,7 @@ def _frontmatter(item: dict, topics: list[str], wd_tags: dict) -> str:
         "storage_id": item["storage_id"],
         "date_added": item["date_added"],
         "platform": item["platform"],
-        "source_artist": item["artist"],
+        "artist": item["artist"],
         "source_url": item["source_url"],
         "topics": topics,
     }
@@ -323,7 +323,7 @@ def _write_review_fixture(output: Path, index: int, item: dict):
         "metadata": {
             "source_url": item["source_url"],
             "platform": item["platform"],
-            "source_artist": item["artist"],
+            "artist": item["artist"],
         },
     }
     (review_dir / f"{media_name}.json").write_text(json.dumps(sidecar, indent=2), encoding="utf-8")

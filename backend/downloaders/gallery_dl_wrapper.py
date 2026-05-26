@@ -20,40 +20,6 @@ def _timeout(name: str, default: int) -> int:
         return default
 
 
-def _extract_artist(data: dict, platform: str) -> str:
-    def extract_from_field(field_val) -> str:
-        if isinstance(field_val, dict):
-            return field_val.get('name') or field_val.get('full_name') or field_val.get('nick') or field_val.get('username') or field_val.get('account')
-        if isinstance(field_val, str) and field_val.strip():
-            return field_val
-        return None
-
-    if platform == "X":
-        for field in ['author', 'user']:
-            res = extract_from_field(data.get(field))
-            if res: return res
-
-    elif platform == "Pixiv":
-        res = extract_from_field(data.get('user'))
-        if res: return res
-
-    elif platform == "Instagram":
-        for field in ['owner', 'user', 'fullname', 'username']:
-            res = extract_from_field(data.get(field))
-            if res: return res
-
-    elif platform == "Pinterest":
-        for field in ['creator', 'user', 'owner']:
-            res = extract_from_field(data.get(field))
-            if res: return res
-
-    for key in ['author', 'user', 'uploader', 'owner', 'creator', 'name', 'username', 'fullname', 'nick']:
-        res = extract_from_field(data.get(key))
-        if res: return res
-
-    return None
-
-
 def _normalized_url(url: str) -> str:
     parsed = urlparse(url)
     host = parsed.netloc.lower()
@@ -173,7 +139,6 @@ def _media_data_from_item(item):
 
 def _parse_metadata(meta_json: list, original_url: str, download_url: str) -> dict:
     platform = _platform_for_url(download_url)
-    artist = "Unknown"
     media_entries = []
     expected_sizes = {}
     is_ugoira = False
@@ -182,11 +147,6 @@ def _parse_metadata(meta_json: list, original_url: str, download_url: str) -> di
         data = _media_data_from_item(item)
         if not data:
             continue
-
-        if platform != "Pinterest":
-            extracted_artist = _extract_artist(data, platform)
-            if extracted_artist:
-                artist = extracted_artist
 
         is_media_event = isinstance(item, list) and len(item) > 0 and item[0] == 3
         has_media_fields = any(data.get(k) for k in ['extension', 'filename', 'url', 'file_url'])
@@ -213,15 +173,12 @@ def _parse_metadata(meta_json: list, original_url: str, download_url: str) -> di
         "original_url": original_url,
         "download_url": download_url,
         "platform": platform,
-        "artist": artist,
         "expected_count": expected_count,
         "expected_sizes": expected_sizes,
         "is_ugoira": is_ugoira,
         "metadata": {
             "source_url": original_url,
-            "platform": platform,
-            "artist": artist,
-            "title": ""
+            "platform": platform
         }
     }
 
@@ -254,15 +211,12 @@ def _minimal_download_info(url: str) -> dict:
         "original_url": original_url,
         "download_url": download_url,
         "platform": platform,
-        "artist": "Unknown",
         "expected_count": 0,
         "expected_sizes": {},
         "is_ugoira": False,
         "metadata": {
             "source_url": original_url,
-            "platform": platform,
-            "artist": "Unknown",
-            "title": ""
+            "platform": platform
         }
     }
 
