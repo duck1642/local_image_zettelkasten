@@ -6,7 +6,7 @@ router = APIRouter()
 
 class QueueUpdate(BaseModel):
     content: str
-from queue_service import read_queue, write_queue, queue_counts, INGESTION_LOCK, run_queue, clear_failed, move_failed_urls, parse_urls, queue_path
+from queue_service import read_queue, write_queue, queue_counts, INGESTION_LOCK, run_queue, clear_failed, move_failed_urls, parse_queue_preview, queue_path
 
 @router.get("/api/queue/{queue_name}")
 async def get_queue(queue_name: str):
@@ -31,7 +31,7 @@ async def parse_queue_content(queue_name: str, update: QueueUpdate):
 
 def _parse_queue_content_sync(queue_name: str, update: QueueUpdate):
     _queue_name(queue_name)
-    return {"count": len(parse_urls(update.content))}
+    return parse_queue_preview(update.content)
 
 @router.post("/api/queue/actions/clear-failed")
 async def api_clear_failed():

@@ -924,6 +924,57 @@ def test_queue_service_uses_mock_vault_queues(monkeypatch, tmp_path):
     assert queue_service.queue_path("normal").is_relative_to(utils.QUEUES_DIR)
 
 
+def test_queue_parser_groups_artist_platform_and_warnings(monkeypatch, tmp_path):
+    queue_service, = fresh_backend(monkeypatch, tmp_path, "queue_service")
+
+    parsed = queue_service.parse_queue_preview("""# pixiv artist
+@artist: Alex Flores
+# comment inside group
+@platform: pixiv
+https://site.test/a
+https://site.test/b
+
+---
+
+@artist angel master
+https://site.test/c # inline comment
+@unknown value
+random text
+https://site.test/d
+""")
+
+    assert parsed["count"] == 3
+    assert parsed["entries"][0]["artist"] == "Alex Flores"
+    assert parsed["entries"][0]["platform"] == "pixiv"
+    assert parsed["entries"][2]["artist"] == ""
+    assert [group["url_count"] for group in parsed["groups"]] == [2, 1]
+    assert {warning["code"] for warning in parsed["warnings"]} == {
+        "inline_comment",
+        "unknown_directive",
+        "ignored_line",
+    }
+
+
+def test_queue_parser_rewrites_remaining_entries_with_metadata(monkeypatch, tmp_path):
+    queue_service, external_ingestion = fresh_backend(monkeypatch, tmp_path, "queue_service", "external_ingestion")
+    path = tmp_path / "links.md"
+    entry_one = queue_service.QueueEntry("https://site.test/a", "Alex Flores", "pixiv", 0, 4)
+    entry_two = queue_service.QueueEntry("https://site.test/b", "angel master", "", 1, 9)
+    ingestor = external_ingestion.ExternalIngestor(str(path))
+
+    ingestor._write_back([entry_two, entry_one])
+
+    assert path.read_text(encoding="utf-8") == (
+        "# Remaining links for LMZ Ingestion\n"
+        "@artist Alex Flores\n"
+        "@platform pixiv\n"
+        "https://site.test/a\n"
+        "\n---\n\n"
+        "@artist angel master\n"
+        "https://site.test/b\n"
+    )
+
+
 def test_review_cleanup_state_and_orphan_sidecar(monkeypatch, tmp_path):
     web_api, utils = fresh_backend(monkeypatch, tmp_path, "web_api", "utils")
 
@@ -3659,13 +3710,69 @@ def test_online_process_metadata_keeps_only_online_identity(monkeypatch, tmp_pat
             "unexpected": "raw scraper field",
         },
         "normal_pending_links",
+        {"artist": "User Artist", "platform": "User Platform"},
     )
 
     assert metadata == {
         "source_url": "https://example.test/item",
-        "platform": "Pixiv",
+        "platform": "User Platform",
+        "artist": "User Artist",
         "ingest_type": "online",
         "run_id": "normal_pending_links",
+    }
+
+
+def test_online_worker_passes_explicit_queue_metadata_to_processor(monkeypatch, tmp_path):
+    queue_service, external_ingestion = fresh_backend(monkeypatch, tmp_path, "queue_service", "external_ingestion")
+    media_path = tmp_path / "download.jpg"
+    media_path.write_bytes(b"image")
+    captured = {}
+
+    monkeypatch.setattr(external_ingestion.random, "uniform", lambda *_args: 0)
+    monkeypatch.setattr(external_ingestion.time, "sleep", lambda *_args: None)
+    monkeypatch.setattr(external_ingestion.ExternalIngestor, "_url_complete", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(
+        external_ingestion,
+        "download_video",
+        lambda *_args, **_kwargs: (
+            True,
+            {
+                "file_paths": [str(media_path)],
+                "metadata": {
+                    "source_url": "https://youtube.com/watch?v=abc",
+                    "platform": "YouTube",
+                    "artist": "Scraped Artist",
+                    "title": "Scraped Title",
+                },
+            },
+        ),
+    )
+
+    def fake_process_file(_path, _config, **kwargs):
+        captured.update(kwargs.get("metadata") or {})
+        return True, "ok", {"hash": "11" * 32}
+
+    monkeypatch.setattr(external_ingestion, "process_file", fake_process_file)
+    ingestor = external_ingestion.ExternalIngestor(str(tmp_path / "links.md"))
+    entry = queue_service.QueueEntry(
+        "https://youtube.com/watch?v=abc",
+        "User Artist",
+        "User Platform",
+        0,
+        1,
+    )
+
+    success, _url, stats, index_data = ingestor._worker_item("youtube", entry, [0, 0])
+
+    assert success is True
+    assert stats["processed"] == 1
+    assert index_data == [{"hash": "11" * 32}]
+    assert captured == {
+        "source_url": "https://youtube.com/watch?v=abc",
+        "platform": "User Platform",
+        "artist": "User Artist",
+        "ingest_type": "online",
+        "run_id": "links",
     }
 
 

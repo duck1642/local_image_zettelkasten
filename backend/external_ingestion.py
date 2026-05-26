@@ -15,7 +15,7 @@ from db.sqlite_operator import connect_database, normalize_source_url
 from db.search_manager import search_manager
 from processor import process_file
 from logger import log_ingest_audit, log_ingest_online
-from queue_service import queue_path
+from queue_service import QueueEntry, parse_queue, queue_path
 from downloaders.gallery_dl_wrapper import download_gallery, inspect_gallery
 from downloaders.yt_dlp_wrapper import download_video, inspect_youtube_community
 import random
@@ -25,13 +25,17 @@ from ingest_control import online_stop_event
 GLOBAL_WORKER_LIMIT: Optional[threading.Semaphore] = None
 
 
-def _online_process_metadata(metadata: dict, run_id: str) -> dict:
+def _online_process_metadata(metadata: dict, run_id: str, user_metadata: dict | None = None) -> dict:
     source = metadata or {}
     process_metadata = {
         key: source[key]
         for key in ("source_url", "platform")
         if key in source
     }
+    for key in ("artist", "platform"):
+        value = str((user_metadata or {}).get(key) or "").strip()
+        if value:
+            process_metadata[key] = value
     process_metadata.setdefault("ingest_type", "online")
     process_metadata.setdefault("run_id", run_id)
     return process_metadata
@@ -79,7 +83,7 @@ class ExternalIngestor:
             )
 
 
-            remaining_urls = []
+            remaining_urls: List[QueueEntry] = []
             original_count = len(links)
 
             with ThreadPoolExecutor(max_workers=len(buckets)) as platform_executor:
@@ -146,7 +150,7 @@ class ExternalIngestor:
 
         return stats
 
-    def _manage_platform_queue(self, platform: str, urls: List[str]) -> Tuple[dict, List[str], List[dict]]:
+    def _manage_platform_queue(self, platform: str, urls: List[QueueEntry]) -> Tuple[dict, List[QueueEntry], List[dict]]:
 
         plat_config = self.config.get("ingestion_concurrency", {}).get("platforms", {}).get(platform,
                       self.config.get("ingestion_concurrency", {}).get("platforms", {}).get("default", {}))
@@ -176,7 +180,8 @@ class ExternalIngestor:
             while in_flight:
                 done, _ = wait(in_flight.keys(), return_when=FIRST_COMPLETED)
                 for future in done:
-                    current_url = in_flight.pop(future, "")
+                    current_entry = in_flight.pop(future, None)
+                    current_url = current_entry.url if current_entry else ""
                     try:
                         success, url_out, stats_out, index_list = future.result()
                     except Exception as exc:
@@ -210,9 +215,10 @@ class ExternalIngestor:
 
         return plat_stats, plat_remaining, plat_index_data
 
-    def _worker_item(self, platform: str, url: str, jitter_range: list) -> Tuple[bool, str, dict, List[dict]]:
+    def _worker_item(self, platform: str, entry: QueueEntry, jitter_range: list) -> Tuple[bool, str, dict, List[dict]]:
 
         item_stats = {"processed": 0, "skipped": 0, "errors": 0}
+        url = entry.url
 
 
         downloader_type = self._get_downloader_type(url)
@@ -355,7 +361,7 @@ class ExternalIngestor:
                 for f_path in result['file_paths']:
                     target_file = Path(f_path)
 
-                    process_metadata = _online_process_metadata(result.get('metadata') or {}, self.links_file.stem)
+                    process_metadata = _online_process_metadata(result.get('metadata') or {}, self.links_file.stem, entry.metadata())
                     import inspect
                     p_kwargs = {
                         "metadata": process_metadata,
@@ -560,14 +566,14 @@ class ExternalIngestor:
                 f.write(f"[{timestamp}] {url} | Reason: {reason}\n")
 
 
-    def _bucket_links(self, links: List[str]) -> Dict[str, List[str]]:
+    def _bucket_links(self, links: List[QueueEntry]) -> Dict[str, List[QueueEntry]]:
 
         buckets = {}
-        for url in links:
-            platform = self._get_platform_name(url)
+        for entry in links:
+            platform = self._get_platform_name(entry.url)
             if platform not in buckets:
                 buckets[platform] = []
-            buckets[platform].append(url)
+            buckets[platform].append(entry)
         return buckets
 
     def _get_platform_name(self, url: str) -> str:
@@ -580,29 +586,19 @@ class ExternalIngestor:
         if 'youtube.com' in u or 'youtu.be' in u: return 'youtube'
         return 'other'
 
-    def _parse_links(self) -> List[str]:
+    def _parse_links(self) -> List[QueueEntry]:
 
-        links = []
-        import re
-        list_marker_pattern = re.compile(r'^(\s*[-*+]|\s*\d+\.)\s+')
-
-        md_link_pattern = re.compile(r'\[.*?\]\((.*?)\)')
-
-        with open(self.links_file, 'r', encoding='utf-8') as f:
-            for line in f:
-                raw_line = line.strip()
-                if not raw_line or raw_line.startswith('#'): continue
-                processed_line = list_marker_pattern.sub('', raw_line)
-
-                md_match = md_link_pattern.search(processed_line)
-                if md_match:
-                    url = md_match.group(1).strip()
-                else:
-                    url = processed_line
-
-                if 'http' in url.lower():
-                    links.append(url.strip())
-        return links
+        text = self.links_file.read_text(encoding='utf-8', errors='replace')
+        parsed = parse_queue(text)
+        for warning in parsed["warnings"]:
+            log_ingest_online(
+                "WARNING",
+                warning.message,
+                queue=str(self.links_file.name),
+                line=warning.line,
+                code=warning.code,
+            )
+        return parsed["entries"]
 
     def _get_downloader_type(self, url: str) -> Optional[str]:
 
@@ -613,13 +609,22 @@ class ExternalIngestor:
             return 'yt-dlp'
         return None
 
-    def _write_back(self, links: List[str]):
+    def _write_back(self, links: List[QueueEntry]):
 
         with open(self.links_file, 'w', encoding='utf-8') as f:
             if links:
                 f.write("# Remaining links for LMZ Ingestion\n")
-                for link in links:
-                    f.write(f"{link}\n")
+                previous_group = None
+                for entry in sorted(links, key=lambda item: (item.line, item.url)):
+                    if previous_group is not None and previous_group != entry.group_index:
+                        f.write("\n---\n\n")
+                    if previous_group != entry.group_index:
+                        if entry.artist:
+                            f.write(f"@artist {entry.artist}\n")
+                        if entry.platform:
+                            f.write(f"@platform {entry.platform}\n")
+                    f.write(f"{entry.url}\n")
+                    previous_group = entry.group_index
             else:
                 f.write("# All links processed. \n")
 

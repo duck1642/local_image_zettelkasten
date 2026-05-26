@@ -1,5 +1,6 @@
 import re
 import threading
+from dataclasses import dataclass
 from pathlib import Path
 
 from runtime_context import WorkspaceContext, get_runtime_context
@@ -20,6 +21,48 @@ QUEUE_LABELS = {
 
 INGESTION_LOCK = threading.Lock()
 QUEUE_LOCK = threading.RLock()
+
+
+@dataclass(frozen=True)
+class QueueEntry:
+    url: str
+    artist: str = ""
+    platform: str = ""
+    group_index: int = 0
+    line: int = 0
+
+    def metadata(self) -> dict[str, str]:
+        data = {}
+        if self.artist:
+            data["artist"] = self.artist
+        if self.platform:
+            data["platform"] = self.platform
+        return data
+
+    def to_preview(self) -> dict:
+        return {
+            "url": self.url,
+            "artist": self.artist,
+            "platform": self.platform,
+            "group_index": self.group_index,
+            "line": self.line,
+        }
+
+
+@dataclass(frozen=True)
+class QueueWarning:
+    line: int
+    code: str
+    message: str
+    text: str = ""
+
+    def to_dict(self) -> dict:
+        return {
+            "line": self.line,
+            "code": self.code,
+            "message": self.message,
+            "text": self.text,
+        }
 
 
 def _ctx(ctx: WorkspaceContext | None = None) -> WorkspaceContext:
@@ -61,22 +104,137 @@ def write_queue(queue: str, text: str, ctx: WorkspaceContext | None = None):
         queue_path(queue, runtime).write_text(text, encoding="utf-8")
 
 
-def parse_urls(text: str) -> list[str]:
-    urls = []
+def _strip_list_marker(line: str) -> str:
+    return re.sub(r'^(\s*[-*+]|\s*\d+\.)\s+', '', line)
+
+
+def _line_has_inline_comment(line: str) -> bool:
+    return bool(re.search(r'\s#', line))
+
+
+def parse_queue(text: str) -> dict:
+    entries: list[QueueEntry] = []
+    warnings: list[QueueWarning] = []
+    group_warning_counts: dict[int, int] = {}
+    groups: list[dict] = []
+    current_artist = ""
+    current_platform = ""
+    current_group_index = 0
+    group_had_metadata = False
+    group_start_line = 1
     md_link_pattern = re.compile(r'\[.*?\]\((https?://.*?)\)')
     bare_pattern = re.compile(r'(https?://\S+)')
-    for line in text.splitlines():
+
+    def close_group(next_line: int):
+        nonlocal group_had_metadata, group_start_line
+        group_entries = [entry for entry in entries if entry.group_index == current_group_index]
+        if group_had_metadata and not group_entries:
+            warnings.append(QueueWarning(
+                group_start_line,
+                "empty_group",
+                "Metadata group has no URLs.",
+            ))
+            group_warning_counts[current_group_index] = group_warning_counts.get(current_group_index, 0) + 1
+        if group_entries or group_had_metadata:
+            groups.append({
+                "index": current_group_index,
+                "artist": current_artist,
+                "platform": current_platform,
+                "url_count": len(group_entries),
+                "urls": [entry.url for entry in group_entries],
+                "warnings": 0,
+            })
+        group_had_metadata = False
+        group_start_line = next_line
+
+    for line_number, line in enumerate(text.splitlines(), start=1):
         raw = line.strip()
         if not raw or raw.startswith("#"):
             continue
+        if raw == "---":
+            close_group(line_number + 1)
+            current_group_index += 1
+            current_artist = ""
+            current_platform = ""
+            continue
+
+        if _line_has_inline_comment(raw):
+            warnings.append(QueueWarning(
+                line_number,
+                "inline_comment",
+                "Inline comments are not supported; put comments on their own line.",
+                raw,
+            ))
+            group_warning_counts[current_group_index] = group_warning_counts.get(current_group_index, 0) + 1
+            continue
+
+        processed = _strip_list_marker(raw)
+        lower = processed.lower()
+        artist_match = re.match(r"^@artist:\s*(.+)$", processed, re.IGNORECASE)
+        if artist_match:
+            current_artist = artist_match.group(1).strip()
+            group_had_metadata = True
+            continue
+        platform_match = re.match(r"^@platform:\s*(.+)$", processed, re.IGNORECASE)
+        if platform_match:
+            current_platform = platform_match.group(1).strip()
+            group_had_metadata = True
+            continue
+        if processed.startswith("@"):
+            warnings.append(QueueWarning(
+                line_number,
+                "unknown_directive",
+                "Unknown queue directive.",
+                raw,
+            ))
+            group_warning_counts[current_group_index] = group_warning_counts.get(current_group_index, 0) + 1
+            continue
+
         md_match = md_link_pattern.search(raw)
         if md_match:
-            urls.append(clean_url(md_match.group(1)))
+            url = clean_url(md_match.group(1))
+            if url:
+                entries.append(QueueEntry(url, current_artist, current_platform, current_group_index, line_number))
             continue
-        bare_match = bare_pattern.search(raw)
+
+        bare_match = bare_pattern.search(processed)
         if bare_match:
-            urls.append(clean_url(bare_match.group(1)))
-    return [url for url in urls if url]
+            url = clean_url(bare_match.group(1))
+            if url:
+                entries.append(QueueEntry(url, current_artist, current_platform, current_group_index, line_number))
+            continue
+
+        warnings.append(QueueWarning(
+            line_number,
+            "ignored_line",
+            "Line is not a supported directive or URL.",
+            raw,
+        ))
+        group_warning_counts[current_group_index] = group_warning_counts.get(current_group_index, 0) + 1
+
+    close_group(len(text.splitlines()) + 1)
+    for group in groups:
+        group["warnings"] = group_warning_counts.get(group["index"], 0)
+    return {
+        "count": len(entries),
+        "entries": entries,
+        "groups": groups,
+        "warnings": warnings,
+    }
+
+
+def parse_urls(text: str) -> list[str]:
+    return [entry.url for entry in parse_queue(text)["entries"]]
+
+
+def parse_queue_preview(text: str) -> dict:
+    parsed = parse_queue(text)
+    return {
+        "count": parsed["count"],
+        "groups": parsed["groups"],
+        "warnings": [warning.to_dict() for warning in parsed["warnings"]],
+        "entries": [entry.to_preview() for entry in parsed["entries"]],
+    }
 
 
 def clean_url(url: str) -> str:

@@ -10,6 +10,11 @@
   type QueueName = 'normal' | 'force' | 'failed';
   type ArtistOption = { id: number; name: string; kind: string; item_count: number; link_count: number; alias_count: number };
   type PlatformOption = { id: number; key_norm: string; display_name: string; kind: string; item_count: number; alias_count: number };
+  type QueueParseWarning = { line: number; code: string; message: string; text?: string };
+  type QueueParseGroup = { index: number; artist: string; platform: string; url_count: number; warnings: number };
+  type QueueParsePreview = { count: number; groups: QueueParseGroup[]; warnings: QueueParseWarning[] };
+  type QueueDirectiveKind = 'artist' | 'platform';
+  type QueueDirectiveSuggestion = { value: string; detail?: string };
   type DropRequest = {
     id: string;
     session_id: string;
@@ -32,7 +37,21 @@
   let saving = false;
   let running = false;
   let isDirty = false;
+  let queueEditor: HTMLTextAreaElement;
   let parseTimer: number | null = null;
+  let parseRequestId = 0;
+  let queuePreview: QueueParsePreview = { count: 0, groups: [], warnings: [] };
+  let directiveSuggestionTimer: number | null = null;
+  let directiveSuggestionsOpen = false;
+  let directiveSuggestionKind: QueueDirectiveKind | null = null;
+  let directiveSuggestionQuery = '';
+  let directiveSuggestions: QueueDirectiveSuggestion[] = [];
+  let activeDirectiveSuggestionIndex = 0;
+  let directiveSuggestionTop = 34;
+  let directiveSuggestionLeft = 18;
+  let directiveMeasureCanvas: HTMLCanvasElement | null = null;
+  let directiveMeasureContext: CanvasRenderingContext2D | null = null;
+  let directiveSuggestionsListEl: HTMLDivElement;
   let monitorLogIdCounter = 0;
 
   let monitorLogs: any[] = [];
@@ -169,10 +188,18 @@
       clearTimeout(artistOptionsTimer);
       artistOptionsTimer = null;
     }
+    if (directiveSuggestionTimer !== null) {
+      clearTimeout(directiveSuggestionTimer);
+      directiveSuggestionTimer = null;
+    }
     stopLocalStatusPolling();
     queueContent = '';
     isDirty = false;
     running = false;
+    queuePreview = { count: 0, groups: [], warnings: [] };
+    directiveSuggestionsOpen = false;
+    directiveSuggestions = [];
+    directiveSuggestionKind = null;
     localPaths = [];
     localStatus = emptyLocalStatus();
     monitorLogs = [];
@@ -211,6 +238,7 @@
       const data = await res.json();
       queueContent = data.content;
       isDirty = false;
+      await parseQueueContent();
     } catch (e) {
       uiLog('ERROR', 'Failed to load queue', { queue: name, error: String(e) });
     }
@@ -237,11 +265,11 @@
     }
   }
 
-  function scheduleArtistOptions() {
+  function scheduleArtistOptions(q = localDefaults.artist) {
     if (artistOptionsTimer !== null) clearTimeout(artistOptionsTimer);
     artistOptionsTimer = window.setTimeout(() => {
       artistOptionsTimer = null;
-      loadArtistOptions();
+      loadArtistOptions(q);
     }, 180);
   }
 
@@ -273,6 +301,7 @@
         body: JSON.stringify({ content: queueContent })
       });
       isDirty = false;
+      await parseQueueContent();
       await refreshQueueStats();
       uiLog('INFO', `Queue ${currentQueue} saved`);
     } finally {
@@ -303,12 +332,199 @@
 
   function onEditorInput() {
     isDirty = true;
+    refreshDirectiveSuggestions();
     if (parseTimer !== null) clearTimeout(parseTimer);
     parseTimer = window.setTimeout(() => {
       parseTimer = null;
-      const count = queueContent.split('\n').filter((l) => l.trim().startsWith('http')).length;
-      setQueueStats({ ...counts, [currentQueue]: count });
+      parseQueueContent();
     }, 400);
+  }
+
+  async function parseQueueContent() {
+    const requestId = ++parseRequestId;
+    try {
+      const res = await apiFetch(`/api/queue/${currentQueue}/parse`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: queueContent })
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (requestId !== parseRequestId) return;
+      queuePreview = {
+        count: Number(data.count || 0),
+        groups: Array.isArray(data.groups) ? data.groups : [],
+        warnings: Array.isArray(data.warnings) ? data.warnings : []
+      };
+      setQueueStats({ ...counts, [currentQueue]: queuePreview.count });
+    } catch (e) {
+      uiLog('ERROR', 'Failed to parse queue content', { queue: currentQueue, error: String(e) });
+    }
+  }
+
+  function currentDirectiveLine() {
+    if (!queueEditor) return null;
+    const cursor = queueEditor.selectionStart ?? queueContent.length;
+    const lineStart = queueContent.lastIndexOf('\n', Math.max(0, cursor - 1)) + 1;
+    const lineEndRaw = queueContent.indexOf('\n', cursor);
+    const lineEnd = lineEndRaw === -1 ? queueContent.length : lineEndRaw;
+    const line = queueContent.slice(lineStart, lineEnd);
+    const match = line.match(/^(\s*)@(artist|platform):\s*(.*)$/i);
+    if (!match) return null;
+    return {
+      kind: match[2].toLowerCase() as QueueDirectiveKind,
+      query: String(match[3] || '').trimStart(),
+      lineStart,
+      lineEnd,
+      line,
+      valueColumn: line.length - String(match[3] || '').length + (String(match[3] || '').length - String(match[3] || '').trimStart().length),
+      indent: match[1] || ''
+    };
+  }
+
+  function measureEditorText(text: string) {
+    if (!queueEditor) return 0;
+    const style = window.getComputedStyle(queueEditor);
+    if (!directiveMeasureCanvas) {
+      directiveMeasureCanvas = document.createElement('canvas');
+      directiveMeasureContext = directiveMeasureCanvas.getContext('2d');
+    }
+    if (!directiveMeasureContext) return 0;
+    directiveMeasureContext.font = `${style.fontStyle} ${style.fontVariant} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+    return directiveMeasureContext.measureText(text).width;
+  }
+
+  function updateDirectiveSuggestionPosition(active: { lineStart: number; line: string; valueColumn: number }) {
+    if (!queueEditor) return;
+    const before = queueContent.slice(0, active.lineStart);
+    const lineNumber = before ? before.split('\n').length - 1 : 0;
+    const style = window.getComputedStyle(queueEditor);
+    const lineHeight = parseFloat(style.lineHeight || '0') || 18;
+    const paddingTop = parseFloat(style.paddingTop || '0') || 0;
+    const paddingLeft = parseFloat(style.paddingLeft || '0') || 0;
+    const valuePrefix = active.line.slice(0, active.valueColumn);
+    const rawLeft = paddingLeft + measureEditorText(valuePrefix) - queueEditor.scrollLeft;
+    const maxLeft = Math.max(0, queueEditor.clientWidth - 310);
+    directiveSuggestionTop = Math.max(34, paddingTop + ((lineNumber + 1) * lineHeight) - queueEditor.scrollTop + 4);
+    directiveSuggestionLeft = Math.max(8, Math.min(rawLeft, maxLeft));
+  }
+
+  function clearDirectiveSuggestions() {
+    if (directiveSuggestionTimer !== null) {
+      clearTimeout(directiveSuggestionTimer);
+      directiveSuggestionTimer = null;
+    }
+    directiveSuggestionsOpen = false;
+    directiveSuggestions = [];
+    directiveSuggestionKind = null;
+    directiveSuggestionQuery = '';
+    activeDirectiveSuggestionIndex = 0;
+  }
+
+  function platformDirectiveSuggestions(query: string): QueueDirectiveSuggestion[] {
+    const needle = query.trim().toLocaleLowerCase();
+    return platformOptions
+      .filter((platform) => {
+        const value = platform.display_name || '';
+        return value && (!needle || value.toLocaleLowerCase().includes(needle));
+      })
+      .slice(0, 8)
+      .map((platform) => ({
+        value: platform.display_name,
+        detail: `${platform.item_count || 0} items`
+      }));
+  }
+
+  function refreshDirectiveSuggestions() {
+    const active = currentDirectiveLine();
+    if (!active) {
+      clearDirectiveSuggestions();
+      return;
+    }
+    directiveSuggestionKind = active.kind;
+    directiveSuggestionQuery = active.query;
+    activeDirectiveSuggestionIndex = 0;
+    updateDirectiveSuggestionPosition(active);
+
+    if (directiveSuggestionTimer !== null) clearTimeout(directiveSuggestionTimer);
+
+    if (active.kind === 'platform') {
+      directiveSuggestions = platformDirectiveSuggestions(active.query);
+      directiveSuggestionsOpen = directiveSuggestions.length > 0;
+      return;
+    }
+
+    directiveSuggestionTimer = window.setTimeout(async () => {
+      directiveSuggestionTimer = null;
+      const request = currentDirectiveLine();
+      if (!request || request.kind !== 'artist') return;
+      try {
+        const params = new URLSearchParams({ q: request.query.trim(), limit: '8' });
+        const res = await apiFetch(`/api/artists?${params.toString()}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const latest = currentDirectiveLine();
+        if (!latest || latest.kind !== 'artist' || latest.query !== request.query) return;
+        directiveSuggestions = Array.isArray(data.items)
+          ? data.items.map((artist: ArtistOption) => ({
+              value: artist.name,
+              detail: `${artist.item_count || 0} items`
+            }))
+          : [];
+        directiveSuggestionsOpen = directiveSuggestions.length > 0;
+      } catch (error) {
+        uiLog('ERROR', 'Failed to load queue directive suggestions', { error: String(error) });
+        clearDirectiveSuggestions();
+      }
+    }, 150);
+  }
+
+  async function scrollActiveDirectiveSuggestionIntoView() {
+    await tick();
+    const active = directiveSuggestionsListEl?.querySelector('button.active');
+    active?.scrollIntoView({ block: 'nearest' });
+  }
+
+  async function applyDirectiveSuggestion(value: string) {
+    const active = currentDirectiveLine();
+    if (!active) return;
+    const before = queueContent.slice(0, active.lineStart);
+    const after = queueContent.slice(active.lineEnd);
+    const nextLine = `${active.indent}@${active.kind}: ${value}`;
+    queueContent = `${before}${nextLine}${after}`;
+    isDirty = true;
+    clearDirectiveSuggestions();
+    parseQueueContent();
+    await tick();
+    const position = before.length + nextLine.length;
+    queueEditor?.focus();
+    queueEditor?.setSelectionRange(position, position);
+  }
+
+  function handleEditorKeydown(event: KeyboardEvent) {
+    if (!directiveSuggestionsOpen || directiveSuggestions.length === 0) {
+      if (event.key === 'Escape') clearDirectiveSuggestions();
+      return;
+    }
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      event.stopPropagation();
+      activeDirectiveSuggestionIndex = (activeDirectiveSuggestionIndex + 1) % directiveSuggestions.length;
+      scrollActiveDirectiveSuggestionIntoView();
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      event.stopPropagation();
+      activeDirectiveSuggestionIndex = (activeDirectiveSuggestionIndex - 1 + directiveSuggestions.length) % directiveSuggestions.length;
+      scrollActiveDirectiveSuggestionIntoView();
+    } else if (event.key === 'Tab') {
+      event.preventDefault();
+      event.stopPropagation();
+      applyDirectiveSuggestion(directiveSuggestions[activeDirectiveSuggestionIndex]?.value || '');
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      clearDirectiveSuggestions();
+    }
   }
 
   async function openExternal() {
@@ -535,6 +751,7 @@
       if (logReconnectTimer !== null) clearTimeout(logReconnectTimer);
       if (parseTimer !== null) clearTimeout(parseTimer);
       if (artistOptionsTimer !== null) clearTimeout(artistOptionsTimer);
+      if (directiveSuggestionTimer !== null) clearTimeout(directiveSuggestionTimer);
       stopLocalStatusPolling();
     };
   });
@@ -572,7 +789,69 @@
     </div>
 
     <div class="editor-area">
-      <textarea bind:value={queueContent} on:input={onEditorInput} placeholder="Edit queue markdown here..."></textarea>
+      <div class="queue-editor-wrap">
+        <textarea
+          bind:this={queueEditor}
+          bind:value={queueContent}
+          on:input={onEditorInput}
+          on:click={refreshDirectiveSuggestions}
+          on:keydown={handleEditorKeydown}
+          on:blur={() => window.setTimeout(clearDirectiveSuggestions, 120)}
+          placeholder="Edit queue markdown here..."
+        ></textarea>
+        {#if directiveSuggestionsOpen && directiveSuggestions.length > 0}
+          <div bind:this={directiveSuggestionsListEl} class="directive-suggestions" style={`top: ${directiveSuggestionTop}px; left: ${directiveSuggestionLeft}px;`}>
+            {#each directiveSuggestions as suggestion, index}
+              <button
+                type="button"
+                class:active={index === activeDirectiveSuggestionIndex}
+                on:mousedown|preventDefault
+                on:click={() => applyDirectiveSuggestion(suggestion.value)}
+              >
+                <span>{suggestion.value}</span>
+                {#if suggestion.detail}
+                  <span>{suggestion.detail}</span>
+                {/if}
+              </button>
+            {/each}
+          </div>
+        {/if}
+      </div>
+      <div class="queue-preview">
+        <div class="preview-summary">
+          <span>{queuePreview.count} URLs</span>
+          {#if queuePreview.groups.length > 0}
+            <span>{queuePreview.groups.length} groups</span>
+          {/if}
+          {#if queuePreview.warnings.length > 0}
+            <span class="warning-count">{queuePreview.warnings.length} warnings</span>
+          {/if}
+        </div>
+        {#if queuePreview.groups.length > 0}
+          <div class="preview-groups">
+            {#each queuePreview.groups as group}
+              <div class="preview-group">
+                <span class="preview-artist">{group.artist || 'Unknown artist'}</span>
+                <span>{group.platform || 'infer platform'}</span>
+                <span>{group.url_count} URLs</span>
+                {#if group.warnings > 0}
+                  <span class="warning-count">{group.warnings} warnings</span>
+                {/if}
+              </div>
+            {/each}
+          </div>
+        {/if}
+        {#if queuePreview.warnings.length > 0}
+          <div class="preview-warnings">
+            {#each queuePreview.warnings.slice(0, 4) as warning}
+              <div>Line {warning.line}: {warning.message}</div>
+            {/each}
+            {#if queuePreview.warnings.length > 4}
+              <div>{queuePreview.warnings.length - 4} more warnings...</div>
+            {/if}
+          </div>
+        {/if}
+      </div>
     </div>
 
     <div class="monitor-area">
@@ -597,6 +876,7 @@
       <button on:click={retryFailed} disabled={running || counts.failed === 0}>Retry Failed</button>
       <button on:click={clearFailed} disabled={running || counts.failed === 0}>Clear Failed</button>
     </div>
+
   {:else}
     <div class="local-mode" data-drop-zone="ingest-local">
       <div class="local-toolbar">
@@ -615,7 +895,7 @@
       <div class="local-defaults">
         <label>
           Artist
-          <input list="local-artist-options" bind:value={localDefaults.artist} on:input={scheduleArtistOptions} placeholder="Optional default artist" />
+          <input list="local-artist-options" bind:value={localDefaults.artist} on:input={() => scheduleArtistOptions()} placeholder="Optional default artist" />
         </label>
         <datalist id="local-artist-options">
           {#each artistOptions as artist}
@@ -769,6 +1049,7 @@
     display: flex;
     flex-direction: column;
     flex-shrink: 1;
+    gap: 8px;
   }
 
   textarea {
@@ -783,6 +1064,106 @@
     resize: vertical;
     padding: 15px;
     color: var(--text-main);
+  }
+
+  .queue-editor-wrap {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .directive-suggestions {
+    position: absolute;
+    z-index: 20;
+    width: 300px;
+    max-width: calc(100% - 10px);
+    max-height: min(520px, calc(100vh - 110px));
+    overflow-y: auto;
+    background: var(--bg-panel);
+    border: 1px solid var(--border-dim);
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+    padding: 5px 0;
+  }
+
+  .directive-suggestions button {
+    width: 100%;
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: var(--text-main);
+    padding: 8px 15px;
+    text-align: left;
+    font-size: 13px;
+    cursor: pointer;
+  }
+
+  .directive-suggestions button span:last-child {
+    color: var(--text-muted);
+    flex-shrink: 0;
+  }
+
+  .directive-suggestions button:hover,
+  .directive-suggestions button.active {
+    background: var(--accent-primary);
+    color: white;
+  }
+
+  .directive-suggestions button:hover span:last-child,
+  .directive-suggestions button.active span:last-child {
+    color: rgba(255, 255, 255, 0.78);
+  }
+
+  .queue-preview {
+    background: #010409;
+    border: 1px solid var(--border-dim);
+    border-radius: 8px;
+    padding: 8px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+
+  .preview-summary,
+  .preview-groups,
+  .preview-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .preview-summary {
+    color: var(--text-main);
+    font-weight: 600;
+  }
+
+  .preview-group {
+    border: 1px solid var(--border-dim);
+    border-radius: 6px;
+    padding: 4px 7px;
+    background: var(--bg-panel);
+  }
+
+  .preview-artist {
+    color: var(--text-main);
+    font-weight: 600;
+  }
+
+  .warning-count,
+  .preview-warnings {
+    color: var(--accent-warning);
+  }
+
+  .preview-warnings {
+    display: grid;
+    gap: 3px;
+    font-size: 11px;
   }
 
   .monitor-area, .local-staging, .local-status {
