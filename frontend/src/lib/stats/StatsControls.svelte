@@ -17,7 +17,6 @@
   export let onSearchInput: () => void;
 
   let filterOpen = false;
-  $: filterActive = scopeMode !== 'used' || sortMode !== 'popularity' || alphabetFilterOpen;
 
   function isEditableTarget(target: EventTarget | null) {
     const element = target as HTMLElement | null;
@@ -48,7 +47,7 @@
   <div class="stats-filter-wrap">
     <button
       class="stats-filter-button"
-      class:active={filterOpen || filterActive}
+      class:active={filterOpen}
       type="button"
       title="Filter stats (Shift+F)"
       aria-label="Filter stats"
