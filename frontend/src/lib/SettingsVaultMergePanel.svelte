@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { IconMerge } from './icons';
   export let vaults: any[] = [];
   export let mergeTargetId = '';
   export let mergeSourceIds: string[] = [];
@@ -12,7 +13,12 @@
 </script>
 
 <div class="vault-tool-panel" style="margin-top: 0;">
-  <h4 class="settings-section-title">Merge Vaults</h4>
+  <h4 class="settings-section-title">
+    <span style="margin-right: 6px; display: inline-block; vertical-align: text-bottom;">
+      <IconMerge size={14} />
+    </span>
+    Merge Vaults
+  </h4>
   <div class="micro-desc" style="margin-bottom: 12px;">Merge media items, tags, and notes from source vaults into a target vault. Sources remain completely untouched.</div>
   
   <div class="vault-tool-row" style="margin-bottom: 12px;">

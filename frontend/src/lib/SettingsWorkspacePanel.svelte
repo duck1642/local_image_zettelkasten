@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { IconFolder, IconPlus } from './icons';
   export let workspaces: any[] = [];
   export let workspaceActive = '';
   export let workspaceBusy = false;
@@ -11,7 +12,12 @@
 </script>
 
 <div class="workspace-actions" style="margin-top: 18px; padding-top: 16px;">
-  <h4 class="settings-section-title">Registered Workspaces</h4>
+  <h4 class="settings-section-title">
+    <span style="margin-right: 6px; display: inline-block; vertical-align: text-bottom;">
+      <IconFolder size={14} />
+    </span>
+    Registered Workspaces
+  </h4>
   
   {#if workspaceRestartRequired}
     <div class="restart-banner" style="margin-bottom: 12px; padding: 8px 12px; background: rgba(210, 153, 34, 0.05); border: 1px solid rgba(210, 153, 34, 0.15); border-radius: 6px;">
@@ -50,7 +56,10 @@
   <div class="add-workspace" style="background: rgba(255, 255, 255, 0.01); border: 1px dashed var(--border-dim); border-radius: 6px; padding: 12px; margin-top: 4px;">
     <input type="text" placeholder="Full path to Obsidian vault" bind:value={obsidianPath} style="font-family: 'Consolas', monospace;" />
     <input type="text" placeholder="Workspace label" bind:value={obsidianName} />
-    <button type="button" on:click={onAddObsidianWorkspace} disabled={workspaceBusy || !obsidianPath.trim()} style="font-weight: 600;">Add Obsidian</button>
+    <button type="button" on:click={onAddObsidianWorkspace} disabled={workspaceBusy || !obsidianPath.trim()} style="font-weight: 600; display: inline-flex; align-items: center; gap: 4px; justify-content: center;">
+      <IconPlus size={11} />
+      Add Obsidian
+    </button>
   </div>
   
   {#if workspaceResult}
@@ -59,3 +68,4 @@
     </div>
   {/if}
 </div>
+

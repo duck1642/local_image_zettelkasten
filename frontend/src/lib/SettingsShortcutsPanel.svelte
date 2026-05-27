@@ -1,5 +1,14 @@
+<script lang="ts">
+  import { IconKeyboard } from './icons';
+</script>
+
 <div class="shortcuts-guide" style="max-width: 1000px;">
-  <h4 style="font-size: 14px; letter-spacing: 0.5px; margin-bottom: 16px; color: var(--text-bright);">Keyboard Shortcuts & Search Prefixes</h4>
+  <h4 class="settings-section-title" style="margin-bottom: 16px;">
+    <span style="margin-right: 6px; display: inline-block; vertical-align: text-bottom;">
+      <IconKeyboard size={14} />
+    </span>
+    Keyboard Shortcuts & Search Prefixes
+  </h4>
   
   <div class="shortcuts-container-grid">
     <!-- Navigation Column -->

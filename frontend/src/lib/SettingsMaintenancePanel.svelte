@@ -1,5 +1,6 @@
 <script lang="ts">
   import { metadataProgressPercent, type MetadataRebuildJob } from './settingsUtils';
+  import { IconEye, IconActivity, IconFolder, IconTrash, IconClose } from './icons';
 
   type MaintenanceAction = 'auth' | 'metadata' | 'workspaceMetadata' | 'workspacePrune' | 'review';
 
@@ -15,7 +16,8 @@
   <div class="maintenance-cards">
     <!-- Auth Card -->
     <div class="maintenance-card">
-      <button on:click={() => onRunMaintenance('auth')} disabled={maintenanceBusy.auth}>
+      <button on:click={() => onRunMaintenance('auth')} disabled={maintenanceBusy.auth} style="display: inline-flex; align-items: center; gap: 4px; justify-content: center;">
+        <IconEye size={11} />
         {maintenanceBusy.auth ? 'Scanning...' : 'Auth Scan'}
       </button>
       <div style="display: flex; flex-direction: column; gap: 4px;">
@@ -26,7 +28,8 @@
 
     <!-- Metadata Card -->
     <div class="maintenance-card" style="align-items: flex-start; padding-top: 14px; padding-bottom: 14px;">
-      <button on:click={() => onRunMaintenance('metadata')} disabled={maintenanceBusy.metadata}>
+      <button on:click={() => onRunMaintenance('metadata')} disabled={maintenanceBusy.metadata} style="display: inline-flex; align-items: center; gap: 4px; justify-content: center;">
+        <IconActivity size={11} />
         {maintenanceBusy.metadata ? 'Rebuilding...' : 'Rebuild Index'}
       </button>
       <div style="display: flex; flex-direction: column; gap: 4px; width: 100%;">
@@ -44,7 +47,8 @@
 
     <!-- Workspace Metadata Card -->
     <div class="maintenance-card">
-      <button on:click={() => onRunMaintenance('workspaceMetadata')} disabled={maintenanceBusy.workspaceMetadata}>
+      <button on:click={() => onRunMaintenance('workspaceMetadata')} disabled={maintenanceBusy.workspaceMetadata} style="display: inline-flex; align-items: center; gap: 4px; justify-content: center;">
+        <IconFolder size={11} />
         {maintenanceBusy.workspaceMetadata ? 'Syncing...' : 'Sync Workspace'}
       </button>
       <div style="display: flex; flex-direction: column; gap: 4px;">
@@ -55,7 +59,8 @@
 
     <!-- Workspace Prune Card -->
     <div class="maintenance-card">
-      <button on:click={() => onRunMaintenance('workspacePrune')} disabled={maintenanceBusy.workspacePrune}>
+      <button on:click={() => onRunMaintenance('workspacePrune')} disabled={maintenanceBusy.workspacePrune} style="display: inline-flex; align-items: center; gap: 4px; justify-content: center;">
+        <IconTrash size={11} />
         {maintenanceBusy.workspacePrune ? 'Pruning...' : 'Prune Registry'}
       </button>
       <div style="display: flex; flex-direction: column; gap: 4px;">
@@ -66,7 +71,8 @@
 
     <!-- Cleanup Review Card -->
     <div class="maintenance-card">
-      <button on:click={() => onRunMaintenance('review')} disabled={maintenanceBusy.review}>
+      <button on:click={() => onRunMaintenance('review')} disabled={maintenanceBusy.review} style="display: inline-flex; align-items: center; gap: 4px; justify-content: center;">
+        <IconClose size={11} />
         {maintenanceBusy.review ? 'Cleaning...' : 'Cleanup Review'}
       </button>
       <div style="display: flex; flex-direction: column; gap: 4px;">
@@ -76,3 +82,4 @@
     </div>
   </div>
 </div>
+

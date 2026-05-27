@@ -10,6 +10,7 @@
   import SettingsVaultPanel from './SettingsVaultPanel.svelte';
   import SettingsVaultToolsPanel from './SettingsVaultToolsPanel.svelte';
   import SettingsWorkspacePanel from './SettingsWorkspacePanel.svelte';
+  import { IconSettings, IconMerge } from './icons';
   import {
     activateVault,
     activateWorkspace,
@@ -505,7 +506,12 @@
     <div class="centered">Loading...</div>
   {:else}
     <div class="header-row">
-      <h3>System Settings</h3>
+      <h3 style="display: flex; align-items: center; gap: 8px;">
+        <span style="color: var(--text-bright); display: inline-flex; align-items: center;">
+          <IconSettings size={18} />
+        </span>
+        System Settings
+      </h3>
       {#if $configDirty}
         <span class="status-label unsaved">Unsaved Changes</span>
       {/if}
@@ -554,7 +560,12 @@
         />
       </div>
     {:else if activeSettingsTab === 'maintenance'}
-      <h4 class="settings-section-title">Vault Tools</h4>
+      <h4 class="settings-section-title">
+        <span style="margin-right: 6px; display: inline-block; vertical-align: text-bottom;">
+          <IconMerge size={14} />
+        </span>
+        Vault Tools
+      </h4>
       <div class="workspace-panel settings-tools-panel">
         <SettingsVaultToolsPanel
           {vaults}

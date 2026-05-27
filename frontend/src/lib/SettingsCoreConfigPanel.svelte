@@ -1,6 +1,7 @@
 <script lang="ts">
   import { TILE_MIN_WIDTH_CEILING, TILE_MIN_WIDTH_FLOOR } from './layout';
   import { config, configDirty, configSaving, saveCurrentConfig, updateConfig } from './configStore';
+  import { IconSparkles, IconCheckCircle, IconAlertTriangle } from './icons';
 
   function setConfig(mutator: (draft: any) => void) {
     updateConfig(mutator, false);
@@ -51,7 +52,12 @@
 </div>
 
 <div class="section-card">
-  <h4 class="settings-section-title">AI Tagging Engine</h4>
+  <h4 class="settings-section-title">
+    <span style="margin-right: 6px; display: inline-block; vertical-align: text-bottom;">
+      <IconSparkles size={14} />
+    </span>
+    AI Tagging Engine
+  </h4>
   <div class="form-grid">
     <label for="settings-flatten-transparency">
       Image Transcoding
@@ -117,10 +123,16 @@
 </div>
 
 <div class="save-bar" class:dirty={$configDirty}>
-  <div class="save-info">
+  <div class="save-info" style="display: flex; align-items: center; gap: 6px;">
     {#if $configDirty}
+      <span style="color: var(--accent-warning); display: inline-flex; align-items: center;">
+        <IconAlertTriangle size={13} />
+      </span>
       <span class="status-label unsaved">You have unsaved changes.</span>
     {:else}
+      <span style="color: var(--accent-success); display: inline-flex; align-items: center;">
+        <IconCheckCircle size={13} />
+      </span>
       <span class="micro-desc">All system configurations are up-to-date.</span>
     {/if}
   </div>
@@ -128,3 +140,4 @@
     {$configSaving ? 'Saving...' : 'Save Settings'}
   </button>
 </div>
+

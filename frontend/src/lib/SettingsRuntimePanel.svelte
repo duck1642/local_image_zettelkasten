@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { IconServer } from './icons';
   export let runtime: any;
 </script>
 
@@ -6,6 +7,9 @@
   <div class="workspace-panel">
     <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
       <h4 class="settings-section-title" style="margin: 0; display: flex; align-items: center; gap: 8px;">
+        <span style="display: inline-block; vertical-align: text-bottom;">
+          <IconServer size={14} />
+        </span>
         Active Workspace Session
       </h4>
       <span class="active-badge">Online</span>
