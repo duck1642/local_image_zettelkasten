@@ -232,6 +232,37 @@
     }
   }
 
+  async function startIngestion() {
+    if (currentQueue === 'failed') {
+      alert('Failed queue cannot be started directly. Use Retry Failed.');
+      return;
+    }
+    if (isDirty) await saveQueue();
+    if (queuePreview.warnings.length > 0) {
+      const lines = queuePreview.warnings
+        .slice(0, 5)
+        .map((warning) => `Line ${warning.line}: ${warning.message}`)
+        .join('\n');
+      const extra = queuePreview.warnings.length > 5 ? `\n${queuePreview.warnings.length - 5} more warnings...` : '';
+      if (!confirm(`Queue has ${queuePreview.warnings.length} warning${queuePreview.warnings.length === 1 ? '' : 's'}.\n\n${lines}${extra}\n\nContinue ingestion?`)) {
+        return;
+      }
+    }
+    running = true;
+    uiLog('INFO', `Starting ingestion for queue: ${currentQueue}`);
+    try {
+      const res = await apiFetch(`/api/ingest/${currentQueue}`, { method: 'POST' });
+      if (!res.ok) {
+        running = false;
+        throw new Error(`HTTP ${res.status}`);
+      }
+    } catch (e) {
+      running = false;
+      uiLog('ERROR', 'Failed to start ingestion', { error: String(e) });
+      alert('Failed to start ingestion. Check App Logs for details.');
+    }
+  }
+
   function onEditorInput() {
     isDirty = true;
     refreshDirectiveSuggestions();
@@ -478,14 +509,14 @@
 
   function artistPreviewLabel(group: QueueParseGroup) {
     if (group.artist_status === 'unknown' || !group.artist) return 'unknown artist';
-    if (group.artist_status === 'new') return `${group.artist} · new artist`;
+    if (group.artist_status === 'new') return `${group.artist} - new artist`;
     if (group.artist_status === 'alias') return `${group.artist} -> ${group.artist_label || group.artist}`;
     return group.artist_label || group.artist;
   }
 
   function platformPreviewLabel(group: QueueParseGroup) {
     if (group.platform_status === 'inferred' || !group.platform) return 'infer platform';
-    if (group.platform_status === 'new') return `${group.platform} · new platform`;
+    if (group.platform_status === 'new') return `${group.platform} - new platform`;
     if (group.platform_status === 'alias') return `${group.platform} -> ${group.platform_label || group.platform}`;
     return group.platform_label || group.platform;
   }
@@ -657,6 +688,9 @@
           </div>
         {/if}
       </div>
+      <button class="primary" on:click={startIngestion} disabled={running || currentQueue === 'failed'}>
+        {running ? 'Worker Active...' : 'Start Ingestion'}
+      </button>
     </div>
   </div>
 
@@ -672,8 +706,11 @@
           bind:this={queueEditor}
           bind:value={queueContent}
           on:input={onEditorInput}
+          on:click={refreshDirectiveSuggestions}
+          on:focus={refreshDirectiveSuggestions}
           on:scroll={syncQueueGutterScroll}
           on:keydown={handleEditorKeydown}
+          on:blur={() => window.setTimeout(clearDirectiveSuggestions, 120)}
           disabled={running}
           placeholder="Enter links to ingest..."
           spellcheck="false"
@@ -695,6 +732,7 @@
             <button
               type="button"
               class:active={i === activeDirectiveSuggestionIndex}
+              on:mousedown|preventDefault
               on:click={() => applyDirectiveSuggestion(suggestion.value)}
             >
               <span>{suggestion.value}</span>

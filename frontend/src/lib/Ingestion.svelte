@@ -19,10 +19,16 @@
 
   let ingestMode: IngestMode = 'online';
   let lastModeEmitted: IngestMode | null = null;
+  let lastDropRequestId = '';
 
   $: if (ingestMode !== lastModeEmitted) {
     lastModeEmitted = ingestMode;
     dispatch('modechange', { mode: ingestMode });
+  }
+
+  $: if (dropRequest && dropRequest.id !== lastDropRequestId) {
+    lastDropRequestId = dropRequest.id;
+    ingestMode = 'local';
   }
 </script>
 

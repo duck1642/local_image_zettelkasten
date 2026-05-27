@@ -5,7 +5,6 @@
   import { apiFetch } from './api';
   import { runtimeSessionKey } from './runtimeStore';
   import {
-    IconChevronUp,
     IconRefresh,
     IconTrash,
     IconPlus,
@@ -53,10 +52,6 @@
   let showArtistSuggestions = false;
   let activeArtistSuggestionIndex = 0;
   let artistSuggestionsListEl: HTMLDivElement;
-
-  let showPlatformSuggestions = false;
-  let activePlatformSuggestionIndex = 0;
-  let platformSuggestionsListEl: HTMLDivElement;
 
   let localPanelWidth = 380;
   let localSeparatorDragging = false;
@@ -205,60 +200,11 @@
     active?.scrollIntoView({ block: 'nearest' });
   }
 
-  function togglePlatformSuggestions() {
-    showPlatformSuggestions = !showPlatformSuggestions;
-    if (showPlatformSuggestions) {
-      activePlatformSuggestionIndex = platformSelectOptions.indexOf(localDefaults.platform || 'Local');
-      if (activePlatformSuggestionIndex === -1) activePlatformSuggestionIndex = 0;
-      scrollPlatformSuggestionIntoView();
-    }
-  }
-
-  function selectPlatformSuggestion(platform: string) {
-    localDefaults.platform = platform;
-    showPlatformSuggestions = false;
-  }
-
-  function handlePlatformKeydown(event: KeyboardEvent) {
-    if (showPlatformSuggestions && platformSelectOptions.length > 0) {
-      if (event.key === 'ArrowDown') {
-        event.preventDefault();
-        activePlatformSuggestionIndex = (activePlatformSuggestionIndex + 1) % platformSelectOptions.length;
-        scrollPlatformSuggestionIntoView();
-      } else if (event.key === 'ArrowUp') {
-        event.preventDefault();
-        activePlatformSuggestionIndex = (activePlatformSuggestionIndex - 1 + platformSelectOptions.length) % platformSelectOptions.length;
-        scrollPlatformSuggestionIntoView();
-      } else if (event.key === 'Enter' || event.key === 'Tab') {
-        event.preventDefault();
-        selectPlatformSuggestion(platformSelectOptions[activePlatformSuggestionIndex]);
-      } else if (event.key === 'Escape') {
-        event.preventDefault();
-        showPlatformSuggestions = false;
-      }
-    } else if (event.key === 'Enter' || event.key === 'ArrowDown' || event.key === ' ') {
-      event.preventDefault();
-      showPlatformSuggestions = true;
-      activePlatformSuggestionIndex = platformSelectOptions.indexOf(localDefaults.platform || 'Local');
-      if (activePlatformSuggestionIndex === -1) activePlatformSuggestionIndex = 0;
-      scrollPlatformSuggestionIntoView();
-    }
-  }
-
-  async function scrollPlatformSuggestionIntoView() {
-    await tick();
-    const active = platformSuggestionsListEl?.querySelector('button.active');
-    active?.scrollIntoView({ block: 'nearest' });
-  }
-
   function handleWindowClick(event: PointerEvent) {
     const target = event.target as HTMLElement;
     if (!target) return;
     if (showArtistSuggestions && !target.closest('.local-artist-wrap')) {
       showArtistSuggestions = false;
-    }
-    if (showPlatformSuggestions && !target.closest('.local-platform-wrap')) {
-      showPlatformSuggestions = false;
     }
   }
 
@@ -437,9 +383,10 @@
   <div class="local-config-panel" style={`width: ${localPanelWidth}px;`}>
     <div class="local-defaults">
       <div class="local-default-item local-artist-wrap">
-        <span class="field-label">Artist</span>
+        <label class="field-label" for="local-artist-input">Artist</label>
         <div class="custom-dropdown-wrap">
           <input
+            id="local-artist-input"
             class="local-artist-input"
             type="text"
             bind:value={localDefaults.artist}
@@ -466,31 +413,12 @@
       </div>
 
       <div class="local-default-item local-platform-wrap">
-        <span class="field-label">Platform</span>
-        <div class="custom-dropdown-wrap">
-          <button
-            type="button"
-            class="custom-select-trigger"
-            on:click={togglePlatformSuggestions}
-            on:keydown={handlePlatformKeydown}
-          >
-            <span>{localDefaults.platform || 'Local'}</span>
-            <IconChevronUp size={12} />
-          </button>
-          {#if showPlatformSuggestions && platformSelectOptions.length > 0}
-            <div bind:this={platformSuggestionsListEl} class="custom-dropdown-popover platform-suggestions">
-              {#each platformSelectOptions as platform, i}
-                <button
-                  type="button"
-                  class:active={i === activePlatformSuggestionIndex}
-                  on:click={() => selectPlatformSuggestion(platform)}
-                >
-                  <span class="option-name">{platform}</span>
-                </button>
-              {/each}
-            </div>
-          {/if}
-        </div>
+        <label class="field-label" for="local-platform-select">Platform</label>
+        <select id="local-platform-select" class="local-platform-select" bind:value={localDefaults.platform}>
+          {#each platformSelectOptions as platform}
+            <option value={platform}>{platform}</option>
+          {/each}
+        </select>
       </div>
     </div>
 
@@ -525,7 +453,7 @@
     </div>
 
     <button type="button" class="primary start-local-btn" on:click={startLocalIngestion} disabled={localStatus.running || localPaths.length === 0}>
-      Start Ingestion
+      Start Local Ingestion
     </button>
   </div>
 
@@ -545,13 +473,13 @@
       <div class="local-status-terminal">
         <div class="terminal-row pipeline-metrics">
           <span class="metric">PHASE: <strong class="uppercase text-bright">{localStatus.phase}</strong></span>
-          <span class="divider">·</span>
+          <span class="divider">-</span>
           <span class="metric">SCANNED: <strong>{localStatus.scanned}</strong></span>
-          <span class="divider">·</span>
+          <span class="divider">-</span>
           <span class="metric">STAGED: <strong>{localStatus.staged}</strong></span>
-          <span class="divider">·</span>
+          <span class="divider">-</span>
           <span class="metric">QUEUED: <strong>{localStatus.queued}</strong></span>
-          <span class="divider">·</span>
+          <span class="divider">-</span>
           <span class="metric">PROCESSED: <strong>{localStatus.processed}</strong></span>
         </div>
         <div class="terminal-row outcomes">
@@ -584,7 +512,7 @@
           <div class="result-line">
             <span class="result-status {result.status}">[{result.status}]</span>
             <span class="result-name">{result.name}</span>
-            <span class="result-message">— {result.message}</span>
+            <span class="result-message">- {result.message}</span>
           </div>
         {/each}
         {#if localStatus.results.length === 0}

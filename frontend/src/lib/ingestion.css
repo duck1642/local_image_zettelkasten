@@ -558,25 +558,17 @@ textarea:focus {
   height: 30px;
 }
 
-.custom-select-trigger {
+.local-platform-select {
   width: 100%;
   box-sizing: border-box;
   background: var(--bg-panel);
   border: 1px solid var(--border-dim);
   color: var(--text-main);
   border-radius: 6px;
-  padding: 0 10px;
+  padding: 0 8px;
   font-size: 12px;
   height: 30px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
   cursor: pointer;
-}
-
-.custom-select-trigger svg {
-  transform: rotate(180deg);
-  color: var(--text-muted);
 }
 
 .custom-dropdown-popover {
