@@ -995,6 +995,7 @@ test('settings maintenance actions call existing endpoints and show compact stat
   });
 
   await page.getByRole('button', { name: /Settings/ }).click();
+  await page.getByRole('button', { name: 'Maintenance' }).click();
   await page.getByRole('button', { name: 'Auth Scan' }).click();
   await page.getByRole('button', { name: 'Rebuild Metadata Index' }).click();
   await page.getByRole('button', { name: 'Cleanup Review' }).click();
@@ -1006,6 +1007,7 @@ test('settings maintenance actions call existing endpoints and show compact stat
 test('settings shows workspace paths from config runtime metadata', async ({ page }) => {
   await openMockVault(page);
   await page.getByRole('button', { name: /Settings/ }).click();
+  await page.getByRole('button', { name: 'Workspace' }).click();
 
   await expect(page.getByText('Obsidian workspace')).toBeVisible();
   await expect(page.getByText('C:/ObsidianVault/lmz/config.yaml').first()).toBeVisible();
@@ -1018,6 +1020,7 @@ test('settings registers and activates workspaces for next restart', async ({ pa
     onWorkspaceAction: (action, payload) => actions.push({ action, payload })
   });
   await page.getByRole('button', { name: /Settings/ }).click();
+  await page.getByRole('button', { name: 'Workspace' }).click();
 
   await expect(page.getByText('Default').first()).toBeVisible();
   await page.getByRole('button', { name: 'Activate' }).first().click();
@@ -1041,6 +1044,7 @@ test('settings previews vault merge and runs vault health package actions', asyn
   });
   page.on('dialog', async (dialog) => dialog.accept());
   await page.getByRole('button', { name: /Settings/ }).click();
+  await page.getByRole('button', { name: 'Maintenance' }).click();
 
   await page.getByRole('checkbox', { name: 'Archive' }).check();
   await page.getByRole('button', { name: 'Preview Merge' }).click();
@@ -1114,6 +1118,7 @@ test('settings metadata rebuild shows progress only for maintenance job', async 
   });
 
   await page.getByRole('button', { name: /Settings/ }).click();
+  await page.getByRole('button', { name: 'Maintenance' }).click();
   await expect(page.getByLabel('Metadata rebuild progress')).toHaveCount(0);
 
   await page.getByRole('button', { name: 'Rebuild Metadata Index' }).click();

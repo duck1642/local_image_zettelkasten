@@ -42,6 +42,7 @@
   } from './settingsUtils';
 
   type MaintenanceAction = 'auth' | 'metadata' | 'workspaceMetadata' | 'workspacePrune' | 'review';
+  type SettingsTab = 'general' | 'workspace' | 'vaults' | 'maintenance' | 'shortcuts';
   let maintenanceBusy: Record<MaintenanceAction, boolean> = {
     auth: false,
     metadata: false,
@@ -85,6 +86,14 @@
   let backupResult = '';
   let importPackagePath = '';
   let importVaultName = '';
+  let activeSettingsTab: SettingsTab = 'general';
+  const settingsTabs: Array<{ value: SettingsTab; label: string }> = [
+    { value: 'general', label: 'General' },
+    { value: 'workspace', label: 'Workspace' },
+    { value: 'vaults', label: 'Vaults' },
+    { value: 'maintenance', label: 'Maintenance' },
+    { value: 'shortcuts', label: 'Shortcuts' }
+  ];
 
   $: if (!mergeTargetId && vaultActive) mergeTargetId = vaultActive;
   $: if (!healthVaultId && vaultActive) healthVaultId = vaultActive;
@@ -500,8 +509,22 @@
       {#if $configDirty}
         <span class="status-label unsaved">Unsaved Changes</span>
       {/if}
+      <div class="settings-tabs">
+        {#each settingsTabs as tab}
+          <button
+            type="button"
+            class:active={activeSettingsTab === tab.value}
+            on:click={() => activeSettingsTab = tab.value}
+          >
+            {tab.label}
+          </button>
+        {/each}
+      </div>
     </div>
-    {#if $config._runtime}
+
+    {#if activeSettingsTab === 'general'}
+      <SettingsCoreConfigPanel />
+    {:else if activeSettingsTab === 'workspace' && $config._runtime}
       <SettingsRuntimePanel runtime={$config._runtime}>
         <SettingsWorkspacePanel
           {workspaces}
@@ -514,6 +537,9 @@
           onSetActiveWorkspace={setActiveWorkspace}
           onAddObsidianWorkspace={addObsidianWorkspace}
         />
+      </SettingsRuntimePanel>
+    {:else if activeSettingsTab === 'vaults'}
+      <div class="workspace-panel">
         <SettingsVaultPanel
           {vaults}
           {vaultActive}
@@ -525,45 +551,46 @@
           onSetActiveVault={setActiveVault}
           onDeleteVault={deleteVault}
           onAddVault={addVault}
-        >
-          <SettingsVaultToolsPanel
-            {vaults}
-            {vaultActive}
-            bind:mergeTargetId
-            bind:mergeSourceIds
-            bind:mergePreview
-            {mergeBusy}
-            {mergeResult}
-            bind:healthVaultId
-            {healthBusy}
-            {healthResult}
-            {healthReport}
-            bind:healthDetailsOpen
-            {repairErrors}
-            {backupResult}
-            bind:importPackagePath
-            bind:importVaultName
-            onToggleMergeSource={toggleMergeSource}
-            onPreviewVaultMerge={previewVaultMerge}
-            onConfirmVaultMerge={confirmVaultMerge}
-            onAuditVaultHealth={auditVaultHealth}
-            onRepairVaultHealth={repairVaultHealth}
-            onBackupVault={backupVault}
-            onImportVaultPackage={importVaultPackage}
-            {checkedValue}
-          />
-        </SettingsVaultPanel>
-      </SettingsRuntimePanel>
+        />
+      </div>
+    {:else if activeSettingsTab === 'maintenance'}
+      <SettingsMaintenancePanel
+        {maintenanceBusy}
+        {maintenanceResult}
+        {metadataRebuildJob}
+        onRunMaintenance={runMaintenance}
+      />
+      <div class="workspace-panel settings-tools-panel">
+        <h4>Vault Tools</h4>
+        <SettingsVaultToolsPanel
+          {vaults}
+          {vaultActive}
+          bind:mergeTargetId
+          bind:mergeSourceIds
+          bind:mergePreview
+          {mergeBusy}
+          {mergeResult}
+          bind:healthVaultId
+          {healthBusy}
+          {healthResult}
+          {healthReport}
+          bind:healthDetailsOpen
+          {repairErrors}
+          {backupResult}
+          bind:importPackagePath
+          bind:importVaultName
+          onToggleMergeSource={toggleMergeSource}
+          onPreviewVaultMerge={previewVaultMerge}
+          onConfirmVaultMerge={confirmVaultMerge}
+          onAuditVaultHealth={auditVaultHealth}
+          onRepairVaultHealth={repairVaultHealth}
+          onBackupVault={backupVault}
+          onImportVaultPackage={importVaultPackage}
+          {checkedValue}
+        />
+      </div>
+    {:else if activeSettingsTab === 'shortcuts'}
+      <SettingsShortcutsPanel />
     {/if}
-    <SettingsCoreConfigPanel />
-
-    <SettingsMaintenancePanel
-      {maintenanceBusy}
-      {maintenanceResult}
-      {metadataRebuildJob}
-      onRunMaintenance={runMaintenance}
-    />
-
-    <SettingsShortcutsPanel />
   {/if}
 </div>
