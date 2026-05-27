@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { IconFolder, IconPlus } from './icons';
+  import { IconFolder, IconPlus, IconCheckCircle } from './icons';
   export let workspaces: any[] = [];
   export let workspaceActive = '';
   export let workspaceBusy = false;
@@ -44,9 +44,19 @@
           type="button"
           disabled={workspaceBusy || workspace.id === workspaceActive || !workspace.exists}
           on:click={() => onSetActiveWorkspace(workspace.id)}
-          style="padding: 5px 12px; font-size: 11px; font-weight: 600;"
+          style="padding: 5px 12px; font-size: 11px; font-weight: 600; display: inline-flex; align-items: center; gap: 4px; justify-content: center;"
         >
-          {workspace.id === workspaceActive ? 'Selected' : 'Activate'}
+          {#if workspace.id === workspaceActive}
+            <span style="display: inline-flex; align-items: center;">
+              <IconCheckCircle size={11} />
+            </span>
+            Selected
+          {:else}
+            <span style="display: inline-flex; align-items: center;">
+              <IconFolder size={11} />
+            </span>
+            Activate
+          {/if}
         </button>
       </div>
     {/each}

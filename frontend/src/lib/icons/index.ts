@@ -30,3 +30,4 @@ export { default as IconChart } from './IconChart.svelte';
 export { default as IconSettings } from './IconSettings.svelte';
 export { default as IconServer } from './IconServer.svelte';
 export { default as IconActivity } from './IconActivity.svelte';
+export { default as IconDownload } from './IconDownload.svelte';

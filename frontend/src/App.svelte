@@ -12,7 +12,7 @@
   import { apiFetch } from './lib/api';
   import {
     IconFolder,
-    IconSparkles,
+    IconDownload,
     IconEye,
     IconChart,
     IconSettings,
@@ -347,7 +347,7 @@
           <span>Vault</span>
         </button>
         <button class:active={activeTab === 'ingest'} on:click={() => activeTab = 'ingest'}>
-          <IconSparkles size={14} />
+          <IconDownload size={14} />
           <span>Ingestion</span>
           {#if ($queueStats.normal + $queueStats.force) > 0}
             <span class="badge">{$queueStats.normal + $queueStats.force}</span>
@@ -423,9 +423,9 @@
   .drop-overlay { position: fixed; inset: 0; z-index: 1200; background: rgba(1, 4, 9, 0.62); display: flex; align-items: center; justify-content: center; pointer-events: none; }
   .drop-overlay-text { color: #e6edf3; font-size: 20px; font-weight: 700; letter-spacing: 0; text-align: center; padding: 16px 22px; border: 1px solid rgba(255, 255, 255, 0.25); border-radius: 10px; background: rgba(0, 0, 0, 0.25); }
   .app-container { display: flex; flex-grow: 1; overflow: hidden; }
-  .sidebar { width: 130px; background: var(--bg-main); border-right: 1px solid var(--border-dim); display: flex; flex-direction: column; padding: 15px 10px; flex-shrink: 0; }
+  .sidebar { width: 135px; background: var(--bg-main); border-right: 1px solid var(--border-dim); display: flex; flex-direction: column; padding: 15px 6px; flex-shrink: 0; }
   .nav-group { display: flex; flex-direction: column; gap: 10px; }
-  .nav-group button { width: 100%; padding: 10px 12px; font-size: 13px; border-radius: 6px; background: transparent; border: 1px solid rgba(255, 255, 255, 0.15); color: var(--text-main); display: flex; align-items: center; gap: 10px; cursor: pointer; box-sizing: border-box; }
+  .nav-group button { width: 100%; padding: 9px 8px; font-size: 13px; border-radius: 6px; background: transparent; border: 1px solid rgba(255, 255, 255, 0.15); color: var(--text-main); display: flex; align-items: center; gap: 8px; cursor: pointer; box-sizing: border-box; position: relative; }
   .nav-group button.active { background: var(--accent-primary); color: white; border-color: var(--accent-primary); }
   .nav-group button:not(.active):hover { border-color: rgba(255, 255, 255, 0.3); background: var(--bg-panel); }
   .main-content { flex-grow: 1; display: flex; flex-direction: column; overflow: hidden; }
@@ -436,6 +436,6 @@
   .status-left { padding-left: 15px; }
   .status-right { padding-right: 15px; display: flex; align-items: center; gap: 14px; }
   .ram-status { color: var(--text-muted); white-space: nowrap; }
-  .badge { background: var(--accent-primary); color: white; font-size: 10px; padding: 1px 5px; border-radius: 10px; margin-left: auto; }
+  .badge { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: var(--accent-primary); color: white; font-size: 10px; padding: 1px 5px; border-radius: 10px; }
   .badge.warn { background: var(--accent-warning); }
 </style>

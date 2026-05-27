@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { IconFolder, IconPlus, IconPencil, IconTrash } from './icons';
+  import { IconFolder, IconPlus, IconPencil, IconTrash, IconCheckCircle } from './icons';
   export let vaults: any[] = [];
   export let vaultActive = '';
   export let vaultBusy = false;
@@ -52,7 +52,7 @@
             type="button"
             disabled={vaultBusy}
             on:click={() => onRenameVault(vault.id, vault.name)}
-            style="padding: 5px 12px; font-size: 11px; font-weight: 600; display: inline-flex; align-items: center; gap: 4px;"
+            style="padding: 5px 12px; font-size: 11px; font-weight: 600; display: inline-flex; align-items: center; gap: 4px; justify-content: center;"
           >
             <IconPencil size={11} />
             Rename
@@ -61,16 +61,26 @@
             type="button"
             disabled={vaultBusy || vault.id === vaultActive || !vault.exists}
             on:click={() => onSetActiveVault(vault.id)}
-            style="padding: 5px 12px; font-size: 11px; font-weight: 600;"
+            style="padding: 5px 12px; font-size: 11px; font-weight: 600; display: inline-flex; align-items: center; gap: 4px; justify-content: center;"
           >
-            {vault.id === vaultActive ? 'Selected' : 'Activate'}
+            {#if vault.id === vaultActive}
+              <span style="display: inline-flex; align-items: center;">
+                <IconCheckCircle size={11} />
+              </span>
+              Selected
+            {:else}
+              <span style="display: inline-flex; align-items: center;">
+                <IconFolder size={11} />
+              </span>
+              Activate
+            {/if}
           </button>
           <button
             type="button"
             class="btn-danger"
             disabled={vaultBusy || vault.id === vaultActive}
             on:click={() => onDeleteVault(vault.id)}
-            style="padding: 5px 12px; font-size: 11px; font-weight: 600; display: inline-flex; align-items: center; gap: 4px;"
+            style="padding: 5px 12px; font-size: 11px; font-weight: 600; display: inline-flex; align-items: center; gap: 4px; justify-content: center;"
           >
             <IconTrash size={11} />
             Delete

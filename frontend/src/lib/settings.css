@@ -169,6 +169,20 @@
 
   .row-actions button {
     white-space: nowrap;
+    width: 96px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+  }
+
+  .workspace-row > button {
+    white-space: nowrap;
+    width: 96px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
   }
 
   .workspace-row code {
