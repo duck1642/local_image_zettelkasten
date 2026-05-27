@@ -50,7 +50,7 @@
         </div>
       {/each}
     {:else}
-      <div class="chip-cloud">
+      <div class="stats-chip-cloud">
         {#if activeKind === 'topic'}
           <div class="topic-create-inline" class:open={topicCreateOpen}>
             {#if topicCreateOpen}
@@ -88,13 +88,13 @@
               on:click={() => onToggleFacet(activeKind, item.value)}
             >
               <span class="value">{item.value}</span>
-              <span class="chip-count">{item.count}</span>
+              <span class="stats-chip-count">{item.count}</span>
             </button>
             {#if activeKind === 'topic' || activeKind === 'wd_tag'}
-              <span class="chip-actions">
+              <span class="stats-chip-actions">
                 <button
                   type="button"
-                  class="chip-action action-rename"
+                  class="stats-chip-action action-rename"
                   title={`Rename ${item.value}`}
                   aria-label={`Rename ${item.value}`}
                   on:click|stopPropagation={() => onOpenMetadataAction(activeKind, 'rename', item.value)}
@@ -104,7 +104,7 @@
                 {#if activeKind === 'topic'}
                   <button
                     type="button"
-                    class="chip-action action-merge"
+                    class="stats-chip-action action-merge"
                     title={`Merge ${item.value}`}
                     aria-label={`Merge ${item.value}`}
                     on:click|stopPropagation={() => onOpenMetadataAction(activeKind, 'merge', item.value)}
@@ -114,7 +114,7 @@
                 {/if}
                 <button
                   type="button"
-                  class="chip-action action-delete"
+                  class="stats-chip-action action-delete"
                   title={`Delete ${item.value}`}
                   aria-label={`Delete ${item.value}`}
                   on:click|stopPropagation={() => onOpenMetadataAction(activeKind, 'delete', item.value)}

@@ -34,7 +34,7 @@
   <span style="font-size: 11px; letter-spacing: 0.5px; color: var(--text-muted);">Select Source Vaults</span>
   <div class="chip-group">
     {#each vaults as vault}
-      <label class="tag-chip" class:active={mergeSourceIds.includes(vault.id)} style={vault.id === mergeTargetId ? 'opacity: 0.45; cursor: not-allowed; pointer-events: none;' : ''}>
+      <label class="vault-source-chip" class:active={mergeSourceIds.includes(vault.id)} style={vault.id === mergeTargetId ? 'opacity: 0.45; cursor: not-allowed; pointer-events: none;' : ''}>
         <input
           type="checkbox"
           disabled={mergeBusy || vault.id === mergeTargetId}

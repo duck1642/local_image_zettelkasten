@@ -276,7 +276,7 @@ body.artist-list-resizing {
     font-size: 12px;
   }
 
-  .chip-cloud {
+  .stats-chip-cloud {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
@@ -456,7 +456,7 @@ body.artist-list-resizing {
     white-space: nowrap;
   }
 
-  .chip-count {
+  .stats-chip-count {
     display: inline-grid;
     place-items: center;
     line-height: 1;
@@ -472,41 +472,41 @@ body.artist-list-resizing {
     margin-right: 2px;
   }
 
-  .stat-chip-wrap:hover .chip-count {
+  .stat-chip-wrap:hover .stats-chip-count {
     color: var(--text-bright);
     background: rgba(255, 255, 255, 0.15);
   }
 
-  .stat-chip-wrap.selected .chip-count {
+  .stat-chip-wrap.selected .stats-chip-count {
     color: var(--chip-selected-count-color);
     background: #ffffff;
   }
 
-  .stat-chip-wrap.selected:hover .chip-count {
+  .stat-chip-wrap.selected:hover .stats-chip-count {
     color: var(--chip-selected-count-color);
     background: #f0f6fc;
   }
 
-  .stat-chip-wrap.selected:hover .chip-actions {
+  .stat-chip-wrap.selected:hover .stats-chip-actions {
     border-left-color: rgba(255, 255, 255, 0.3);
   }
 
-  .stat-chip-wrap.selected .chip-action {
+  .stat-chip-wrap.selected .stats-chip-action {
     color: rgba(255, 255, 255, 0.85);
   }
 
-  .stat-chip-wrap.selected .chip-action.action-rename:hover,
-  .stat-chip-wrap.selected .chip-action.action-merge:hover {
+  .stat-chip-wrap.selected .stats-chip-action.action-rename:hover,
+  .stat-chip-wrap.selected .stats-chip-action.action-merge:hover {
     color: #ffffff;
     background: rgba(255, 255, 255, 0.25);
   }
 
-  .stat-chip-wrap.selected .chip-action.action-delete:hover {
+  .stat-chip-wrap.selected .stats-chip-action.action-delete:hover {
     color: #ff9e96;
     background: rgba(255, 255, 255, 0.25);
   }
 
-  .chip-actions {
+  .stats-chip-actions {
     display: inline-flex;
     align-items: center;
     overflow: hidden;
@@ -516,13 +516,13 @@ body.artist-list-resizing {
     border-left: 1px solid transparent;
   }
 
-  .stat-chip-wrap:hover .chip-actions {
+  .stat-chip-wrap:hover .stats-chip-actions {
     width: auto;
     opacity: 1;
     border-left-color: rgba(255, 255, 255, 0.08);
   }
 
-  .chip-action {
+  .stats-chip-action {
     display: inline-grid;
     place-items: center;
     width: 24px;
@@ -535,17 +535,17 @@ body.artist-list-resizing {
     cursor: pointer;
   }
 
-  .chip-action.action-rename:hover {
+  .stats-chip-action.action-rename:hover {
     color: #58a6ff;
     background: rgba(88, 166, 255, 0.15);
   }
 
-  .chip-action.action-merge:hover {
+  .stats-chip-action.action-merge:hover {
     color: #bc8cff;
     background: rgba(188, 140, 255, 0.15);
   }
 
-  .chip-action.action-delete:hover {
+  .stats-chip-action.action-delete:hover {
     color: #ff7b72;
     background: rgba(255, 123, 114, 0.15);
   }

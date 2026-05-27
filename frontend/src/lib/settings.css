@@ -633,7 +633,7 @@
     margin: 8px 0 12px;
   }
 
-  .tag-chip {
+  .vault-source-chip {
     display: inline-flex;
     align-items: center;
     gap: 6px;
@@ -647,18 +647,18 @@
     user-select: none;
   }
 
-  .tag-chip:hover {
+  .vault-source-chip:hover {
     border-color: var(--border-hover);
     color: var(--text-main);
   }
 
-  .tag-chip.active {
+  .vault-source-chip.active {
     background: rgba(31, 111, 235, 0.08);
     border-color: var(--accent-primary);
     color: #ffffff;
   }
 
-  .tag-chip input[type="checkbox"] {
+  .vault-source-chip input[type="checkbox"] {
     display: none;
   }
 

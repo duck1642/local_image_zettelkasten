@@ -106,7 +106,6 @@
       border: 1px solid var(--chip-border);
       user-select: none;
       overflow: hidden;
-      gap: 4px;
   }
 
   .tag-chip.clickable { cursor: pointer; }
@@ -114,7 +113,7 @@
   .tag-label {
       display: flex;
       align-items: center;
-      padding: 0 0 0 8px;
+      padding: 0 8px;
       height: 100%;
   }
 
@@ -130,15 +129,15 @@
       min-width: 18px;
       height: 18px;
       padding: 0 6px;
-      margin-left: 4px;
-      margin-right: 2px;
+      margin-left: -2px;
+      margin-right: 6px;
   }
 
   .chip-action {
       display: inline-grid;
       place-items: center;
       width: 0;
-      height: 24px !important;
+      height: 26px !important;
       align-self: stretch !important;
       margin: 0 !important;
       padding: 0 !important;
@@ -149,6 +148,7 @@
       opacity: 0;
       border-radius: 0 !important;
       box-sizing: border-box !important;
+      transition: width 0.12s ease, opacity 0.12s ease;
   }
 
   .tag-chip:hover .chip-action,
@@ -156,18 +156,18 @@
       width: 24px;
       opacity: 1;
       border: none !important;
-      border-left: 1px solid rgba(255, 255, 255, 0.08) !important;
+      border-left: 1px solid var(--chip-border) !important;
       color: var(--text-muted);
   }
 
   .tag-chip:hover .chip-rename + .chip-remove,
   .tag-chip:focus-within .chip-rename + .chip-remove {
-      margin-left: -4px !important;
+      margin-left: 0 !important;
   }
 
   .tag-chip:hover .tag-count,
   .tag-chip:focus-within .tag-count {
-      margin-right: 0;
+      margin-right: 2px;
   }
 
   .chip-remove:hover {
