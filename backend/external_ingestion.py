@@ -620,9 +620,9 @@ class ExternalIngestor:
                         f.write("\n---\n\n")
                     if previous_group != entry.group_index:
                         if entry.artist:
-                            f.write(f"@artist {entry.artist}\n")
+                            f.write(f"@artist: {entry.artist}\n")
                         if entry.platform:
-                            f.write(f"@platform {entry.platform}\n")
+                            f.write(f"@platform: {entry.platform}\n")
                     f.write(f"{entry.url}\n")
                     previous_group = entry.group_index
             else:

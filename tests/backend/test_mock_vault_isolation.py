@@ -966,13 +966,38 @@ def test_queue_parser_rewrites_remaining_entries_with_metadata(monkeypatch, tmp_
 
     assert path.read_text(encoding="utf-8") == (
         "# Remaining links for LMZ Ingestion\n"
-        "@artist Alex Flores\n"
-        "@platform pixiv\n"
+        "@artist: Alex Flores\n"
+        "@platform: pixiv\n"
         "https://site.test/a\n"
         "\n---\n\n"
-        "@artist angel master\n"
+        "@artist: angel master\n"
         "https://site.test/b\n"
     )
+
+
+def test_queue_parse_api_enriches_artist_preview_status(monkeypatch, tmp_path):
+    artists_module, ingestion_api = fresh_backend(monkeypatch, tmp_path, "artists", "api.ingestion")
+    conn = ingestion_api.connect_workspace_database()
+    try:
+        artists_module.resolve_artist_name(conn, "Known Artist", create=True)
+        conn.commit()
+    finally:
+        conn.close()
+
+    parsed = ingestion_api._parse_queue_content_sync(
+        "normal",
+        ingestion_api.QueueUpdate(content="""@artist: Known Artist
+https://site.test/a
+---
+@artist: New Artist
+https://site.test/b
+---
+https://site.test/c
+"""),
+    )
+
+    assert [group["artist_status"] for group in parsed["groups"]] == ["existing", "new", "unknown"]
+    assert [group["artist_label"] for group in parsed["groups"]] == ["Known Artist", "New Artist", ""]
 
 
 def test_review_cleanup_state_and_orphan_sidecar(monkeypatch, tmp_path):

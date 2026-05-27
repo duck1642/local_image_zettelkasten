@@ -1,6 +1,9 @@
 from fastapi import APIRouter
 
 from api.common import *
+from artists import ensure_artist_schema
+from platforms import ensure_platform_schema
+from platforms import normalize_platform_key
 
 router = APIRouter()
 
@@ -31,7 +34,66 @@ async def parse_queue_content(queue_name: str, update: QueueUpdate):
 
 def _parse_queue_content_sync(queue_name: str, update: QueueUpdate):
     _queue_name(queue_name)
-    return parse_queue_preview(update.content)
+    preview = parse_queue_preview(update.content)
+    workspace_conn = connect_workspace_database()
+    try:
+        ensure_artist_schema(workspace_conn, backfill=False)
+        ensure_platform_schema(workspace_conn, backfill=False)
+        for group in preview.get("groups", []):
+            artist = str(group.get("artist") or "").strip()
+            if artist:
+                artist_norm = normalize_artist_name(artist)
+                exact = workspace_conn.execute("SELECT name FROM artists WHERE name_norm = ?", (artist_norm,)).fetchone()
+                alias = workspace_conn.execute(
+                    """
+                    SELECT artists.name
+                    FROM artist_aliases
+                    JOIN artists ON artists.id = artist_aliases.artist_id
+                    WHERE artist_aliases.alias_norm = ?
+                    """,
+                    (artist_norm,),
+                ).fetchone()
+                if exact:
+                    group["artist_status"] = "existing"
+                    group["artist_label"] = str(exact[0])
+                elif alias:
+                    group["artist_status"] = "alias"
+                    group["artist_label"] = str(alias[0])
+                else:
+                    group["artist_status"] = "new"
+                    group["artist_label"] = artist
+            else:
+                group["artist_status"] = "unknown"
+                group["artist_label"] = ""
+
+            platform = str(group.get("platform") or "").strip()
+            if platform:
+                platform_norm = normalize_platform_key(platform)
+                exact = workspace_conn.execute("SELECT display_name FROM platforms WHERE key_norm = ?", (platform_norm,)).fetchone()
+                alias = workspace_conn.execute(
+                    """
+                    SELECT platforms.display_name
+                    FROM platform_aliases
+                    JOIN platforms ON platforms.id = platform_aliases.platform_id
+                    WHERE platform_aliases.alias_norm = ?
+                    """,
+                    (platform_norm,),
+                ).fetchone()
+                if exact:
+                    group["platform_status"] = "existing"
+                    group["platform_label"] = str(exact[0])
+                elif alias:
+                    group["platform_status"] = "alias"
+                    group["platform_label"] = str(alias[0])
+                else:
+                    group["platform_status"] = "new"
+                    group["platform_label"] = platform
+            else:
+                group["platform_status"] = "inferred"
+                group["platform_label"] = ""
+        return preview
+    finally:
+        workspace_conn.close()
 
 @router.post("/api/queue/actions/clear-failed")
 async def api_clear_failed():

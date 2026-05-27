@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte';
   import type { ArtistDetail, ArtistDraft, ArtistLinkDraft } from './types';
   import { IconPlus, IconTrash } from '../icons';
 
@@ -17,6 +18,15 @@
   export let onDeleteLink: (linkId: number) => void;
   export let onOpenMerge: () => void;
 
+  let notesHeightPx = 0;
+  let notesSplitterDragging = false;
+  let notesSplitterStartY = 0;
+  let notesSplitterStartHeight = 0;
+  let notesTextarea: HTMLTextAreaElement;
+  const DEFAULT_NOTES_HEIGHT = 92;
+  const MIN_NOTES_HEIGHT = 62;
+  const MAX_NOTES_HEIGHT = 360;
+
   function setArtistDraft(field: keyof ArtistDraft, value: string) {
     artistDraft = { ...artistDraft, [field]: value };
   }
@@ -24,6 +34,41 @@
   function setNewLink(field: keyof ArtistLinkDraft, value: string) {
     newLink = { ...newLink, [field]: value };
   }
+
+  function currentNotesHeight() {
+    return notesHeightPx || notesTextarea?.getBoundingClientRect().height || DEFAULT_NOTES_HEIGHT;
+  }
+
+  function clampNotesHeight(value: number) {
+    return Math.max(MIN_NOTES_HEIGHT, Math.min(MAX_NOTES_HEIGHT, Math.round(value)));
+  }
+
+  function handleNotesSplitterMove(event: PointerEvent) {
+    if (!notesSplitterDragging) return;
+    notesHeightPx = clampNotesHeight(notesSplitterStartHeight + event.clientY - notesSplitterStartY);
+  }
+
+  function stopNotesSplitterDrag() {
+    notesSplitterDragging = false;
+    window.removeEventListener('pointermove', handleNotesSplitterMove);
+    window.removeEventListener('pointerup', stopNotesSplitterDrag);
+  }
+
+  function startNotesSplitterDrag(event: PointerEvent) {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    notesSplitterDragging = true;
+    notesSplitterStartY = event.clientY;
+    notesSplitterStartHeight = currentNotesHeight();
+    window.addEventListener('pointermove', handleNotesSplitterMove);
+    window.addEventListener('pointerup', stopNotesSplitterDrag);
+  }
+
+  function resetNotesHeight() {
+    notesHeightPx = DEFAULT_NOTES_HEIGHT;
+  }
+
+  onDestroy(stopNotesSplitterDrag);
 </script>
 
 <div class="artist-detail">
@@ -111,7 +156,25 @@
 
     <div class="detail-section notes-section">
       <h5>Notes</h5>
-      <textarea id="artist-notes" value={artistDraft.notes} on:input={(event) => setArtistDraft('notes', (event.currentTarget as HTMLTextAreaElement).value)} rows="3"></textarea>
+      <div class="artist-notes-wrap">
+        <textarea
+          id="artist-notes"
+          bind:this={notesTextarea}
+          value={artistDraft.notes}
+          style={notesHeightPx ? `height: ${notesHeightPx}px;` : ''}
+          on:input={(event) => setArtistDraft('notes', (event.currentTarget as HTMLTextAreaElement).value)}
+          rows="3"
+        ></textarea>
+        <button
+          type="button"
+          class="artist-notes-splitter"
+          class:dragging={notesSplitterDragging}
+          title="Drag to resize notes. Double-click to reset."
+          aria-label="Resize artist notes"
+          on:pointerdown={startNotesSplitterDrag}
+          on:dblclick={resetNotesHeight}
+        ></button>
+      </div>
     </div>
 
     <div class="detail-section maintenance-section">

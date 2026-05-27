@@ -5,13 +5,24 @@
   import { apiFetch, apiUrl } from './api';
   import { queueStats, refreshQueueStats, setQueueStats } from './statsStore';
   import { runtimeSessionKey } from './runtimeStore';
+  import { IconInfoCircle } from './icons';
 
   type IngestMode = 'online' | 'local';
   type QueueName = 'normal' | 'force' | 'failed';
   type ArtistOption = { id: number; name: string; kind: string; item_count: number; link_count: number; alias_count: number };
   type PlatformOption = { id: number; key_norm: string; display_name: string; kind: string; item_count: number; alias_count: number };
   type QueueParseWarning = { line: number; code: string; message: string; text?: string };
-  type QueueParseGroup = { index: number; artist: string; platform: string; url_count: number; warnings: number };
+  type QueueParseGroup = {
+    index: number;
+    artist: string;
+    artist_label?: string;
+    artist_status?: 'unknown' | 'existing' | 'alias' | 'new';
+    platform: string;
+    platform_label?: string;
+    platform_status?: 'inferred' | 'existing' | 'alias' | 'new';
+    url_count: number;
+    warnings: number;
+  };
   type QueueParsePreview = { count: number; groups: QueueParseGroup[]; warnings: QueueParseWarning[] };
   type QueueDirectiveKind = 'artist' | 'platform';
   type QueueDirectiveSuggestion = { value: string; detail?: string };
@@ -38,9 +49,20 @@
   let running = false;
   let isDirty = false;
   let queueEditor: HTMLTextAreaElement;
+  let queueGutter: HTMLDivElement;
+  let onlinePanel: HTMLDivElement;
+  let toolbarElement: HTMLDivElement;
+  let editorAreaElement: HTMLDivElement;
+  let previewElement: HTMLDivElement;
+  let footerElement: HTMLDivElement;
+  let editorHeightPx = 0;
+  let splitterDragging = false;
+  let splitterStartY = 0;
+  let splitterStartHeight = 0;
   let parseTimer: number | null = null;
   let parseRequestId = 0;
   let queuePreview: QueueParsePreview = { count: 0, groups: [], warnings: [] };
+  let showQueueHelp = false;
   let directiveSuggestionTimer: number | null = null;
   let directiveSuggestionsOpen = false;
   let directiveSuggestionKind: QueueDirectiveKind | null = null;
@@ -61,6 +83,9 @@
   let monitorContainer: HTMLElement;
   const LOG_RECONNECT_BASE_MS = 800;
   const LOG_RECONNECT_MAX_MS = 8000;
+  const DEFAULT_EDITOR_HEIGHT = 280;
+  const MIN_EDITOR_HEIGHT = 120;
+  const MIN_MONITOR_HEIGHT = 120;
 
   type LocalStatus = {
     running: boolean;
@@ -105,6 +130,9 @@
 
   $: counts = $queueStats;
   $: readyCount = (counts.normal || 0) + (counts.force || 0);
+  $: queueLineNumbers = Array.from({ length: Math.max(1, queueContent.split('\n').length) }, (_, index) => index + 1);
+  $: queueGutterWidth = Math.max(24, Math.min(58, 14 + String(queueLineNumbers.length).length * 8));
+  $: warningLines = new Set(queuePreview.warnings.map((warning) => warning.line));
   $: {
     const values = new Set<string>(['Local']);
     for (const platform of platformOptions) {
@@ -315,6 +343,16 @@
       return;
     }
     if (isDirty) await saveQueue();
+    if (queuePreview.warnings.length > 0) {
+      const lines = queuePreview.warnings
+        .slice(0, 5)
+        .map((warning) => `Line ${warning.line}: ${warning.message}`)
+        .join('\n');
+      const extra = queuePreview.warnings.length > 5 ? `\n${queuePreview.warnings.length - 5} more warnings...` : '';
+      if (!confirm(`Queue has ${queuePreview.warnings.length} warning${queuePreview.warnings.length === 1 ? '' : 's'}.\n\n${lines}${extra}\n\nContinue ingestion?`)) {
+        return;
+      }
+    }
     running = true;
     uiLog('INFO', `Starting ingestion for queue: ${currentQueue}`);
     try {
@@ -340,6 +378,80 @@
     }, 400);
   }
 
+  function syncQueueGutterScroll() {
+    if (queueGutter && queueEditor) {
+      queueGutter.scrollTop = queueEditor.scrollTop;
+    }
+    const active = currentDirectiveLine();
+    if (active && directiveSuggestionsOpen) updateDirectiveSuggestionPosition(active);
+  }
+
+  function currentEditorHeight() {
+    return editorHeightPx || queueEditor?.closest('.queue-editor-shell')?.getBoundingClientRect().height || DEFAULT_EDITOR_HEIGHT;
+  }
+
+  function onlinePanelGap() {
+    if (!onlinePanel) return 10;
+    const style = window.getComputedStyle(onlinePanel);
+    return parseFloat(style.rowGap || style.gap || '0') || 0;
+  }
+
+  function editorAreaGap() {
+    if (!editorAreaElement) return 8;
+    const style = window.getComputedStyle(editorAreaElement);
+    return parseFloat(style.rowGap || style.gap || '0') || 0;
+  }
+
+  function maxEditorHeight() {
+    if (!onlinePanel) return DEFAULT_EDITOR_HEIGHT;
+    const gap = onlinePanelGap();
+    const panelHeight = onlinePanel.clientHeight;
+    const toolbarHeight = toolbarElement?.getBoundingClientRect().height || 0;
+    const previewHeight = previewElement?.getBoundingClientRect().height || 0;
+    const footerHeight = footerElement?.getBoundingClientRect().height || 0;
+    const nonEditorHeight = toolbarHeight + previewHeight + footerHeight + MIN_MONITOR_HEIGHT + (gap * 3) + editorAreaGap();
+    return Math.max(MIN_EDITOR_HEIGHT, panelHeight - nonEditorHeight);
+  }
+
+  function clampEditorHeight(value: number) {
+    return Math.max(MIN_EDITOR_HEIGHT, Math.min(maxEditorHeight(), Math.round(value)));
+  }
+
+  function clampCurrentEditorHeight() {
+    const current = currentEditorHeight();
+    const clamped = clampEditorHeight(current);
+    if (editorHeightPx || clamped < current) {
+      editorHeightPx = clamped;
+    }
+  }
+
+  function handleSplitterMove(event: PointerEvent) {
+    if (!splitterDragging) return;
+    editorHeightPx = clampEditorHeight(splitterStartHeight + event.clientY - splitterStartY);
+    syncQueueGutterScroll();
+  }
+
+  function stopSplitterDrag() {
+    splitterDragging = false;
+    window.removeEventListener('pointermove', handleSplitterMove);
+    window.removeEventListener('pointerup', stopSplitterDrag);
+  }
+
+  function startSplitterDrag(event: PointerEvent) {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    splitterDragging = true;
+    splitterStartY = event.clientY;
+    splitterStartHeight = currentEditorHeight();
+    window.addEventListener('pointermove', handleSplitterMove);
+    window.addEventListener('pointerup', stopSplitterDrag);
+  }
+
+  function resetEditorHeight() {
+    editorHeightPx = clampEditorHeight(DEFAULT_EDITOR_HEIGHT);
+    syncQueueGutterScroll();
+  }
+
   async function parseQueueContent() {
     const requestId = ++parseRequestId;
     try {
@@ -357,6 +469,8 @@
         warnings: Array.isArray(data.warnings) ? data.warnings : []
       };
       setQueueStats({ ...counts, [currentQueue]: queuePreview.count });
+      await tick();
+      clampCurrentEditorHeight();
     } catch (e) {
       uiLog('ERROR', 'Failed to parse queue content', { queue: currentQueue, error: String(e) });
     }
@@ -403,8 +517,8 @@
     const paddingTop = parseFloat(style.paddingTop || '0') || 0;
     const paddingLeft = parseFloat(style.paddingLeft || '0') || 0;
     const valuePrefix = active.line.slice(0, active.valueColumn);
-    const rawLeft = paddingLeft + measureEditorText(valuePrefix) - queueEditor.scrollLeft;
-    const maxLeft = Math.max(0, queueEditor.clientWidth - 310);
+    const rawLeft = queueEditor.offsetLeft + paddingLeft + measureEditorText(valuePrefix) - queueEditor.scrollLeft;
+    const maxLeft = Math.max(0, queueEditor.offsetLeft + queueEditor.clientWidth - 310);
     directiveSuggestionTop = Math.max(34, paddingTop + ((lineNumber + 1) * lineHeight) - queueEditor.scrollTop + 4);
     directiveSuggestionLeft = Math.max(8, Math.min(rawLeft, maxLeft));
   }
@@ -483,6 +597,29 @@
     await tick();
     const active = directiveSuggestionsListEl?.querySelector('button.active');
     active?.scrollIntoView({ block: 'nearest' });
+  }
+
+  async function goToQueueLine(line: number) {
+    const targetLine = Math.max(1, Number(line) || 1);
+    const lines = queueContent.split('\n');
+    const offset = lines.slice(0, targetLine - 1).reduce((sum, value) => sum + value.length + 1, 0);
+    await tick();
+    queueEditor?.focus();
+    queueEditor?.setSelectionRange(offset, offset);
+  }
+
+  function artistPreviewLabel(group: QueueParseGroup) {
+    if (group.artist_status === 'unknown' || !group.artist) return 'unknown artist';
+    if (group.artist_status === 'new') return `${group.artist} · new artist`;
+    if (group.artist_status === 'alias') return `${group.artist} -> ${group.artist_label || group.artist}`;
+    return group.artist_label || group.artist;
+  }
+
+  function platformPreviewLabel(group: QueueParseGroup) {
+    if (group.platform_status === 'inferred' || !group.platform) return 'infer platform';
+    if (group.platform_status === 'new') return `${group.platform} · new platform`;
+    if (group.platform_status === 'alias') return `${group.platform} -> ${group.platform_label || group.platform}`;
+    return group.platform_label || group.platform;
   }
 
   async function applyDirectiveSuggestion(value: string) {
@@ -739,15 +876,19 @@
 
   onMount(() => {
     window.addEventListener('lmz:refresh', handleGlobalRefresh);
+    window.addEventListener('resize', clampCurrentEditorHeight);
     loadQueue('normal');
     fetchStats();
     connectMonitor();
     refreshLocalStatus();
     loadArtistOptions('');
     loadPlatformOptions();
+    tick().then(clampCurrentEditorHeight);
     return () => {
       window.removeEventListener('lmz:refresh', handleGlobalRefresh);
+      window.removeEventListener('resize', clampCurrentEditorHeight);
       logSource?.close();
+      stopSplitterDrag();
       if (logReconnectTimer !== null) clearTimeout(logReconnectTimer);
       if (parseTimer !== null) clearTimeout(parseTimer);
       if (artistOptionsTimer !== null) clearTimeout(artistOptionsTimer);
@@ -764,7 +905,8 @@
   </div>
 
   {#if ingestMode === 'online'}
-    <div class="toolbar">
+    <div class="online-panel" bind:this={onlinePanel}>
+    <div class="toolbar" bind:this={toolbarElement}>
       <div class="queue-tabs">
         <button class:active={currentQueue === 'normal'} on:click={() => handleTabChange('normal')} disabled={running}>
           Normal {counts.normal || 0}
@@ -782,23 +924,65 @@
       <div class="action-group">
         <button on:click={() => handleTabChange(currentQueue)} disabled={running}>Reload</button>
         <button on:click={openExternal} disabled={running}>Open</button>
+        <div class="help-menu">
+          <button class="icon-help-btn" class:active={showQueueHelp} title="Queue syntax help" aria-label="Queue syntax help" on:click={() => showQueueHelp = !showQueueHelp}>
+            <IconInfoCircle size={14} />
+          </button>
+          {#if showQueueHelp}
+            <div class="queue-help-popover">
+              <div><code>@artist: name</code></div>
+              <div><code>@platform: name</code></div>
+              <div><code>---</code> separates groups</div>
+              <div><code># comment</code> for full-line comments</div>
+              <div><kbd>Tab</kbd> accepts suggestions</div>
+            </div>
+          {/if}
+        </div>
         <button class="primary" on:click={startIngestion} disabled={running || currentQueue === 'failed'}>
           {running ? 'Worker Active...' : 'Start Ingestion'}
         </button>
       </div>
     </div>
 
-    <div class="editor-area">
+    <div class="editor-area" bind:this={editorAreaElement}>
       <div class="queue-editor-wrap">
-        <textarea
-          bind:this={queueEditor}
-          bind:value={queueContent}
-          on:input={onEditorInput}
-          on:click={refreshDirectiveSuggestions}
-          on:keydown={handleEditorKeydown}
-          on:blur={() => window.setTimeout(clearDirectiveSuggestions, 120)}
-          placeholder="Edit queue markdown here..."
-        ></textarea>
+        <div
+          class="queue-editor-shell"
+          style={`--queue-gutter-width: ${queueGutterWidth}px; ${editorHeightPx ? `--queue-editor-height: ${editorHeightPx}px;` : ''}`}
+        >
+          <div class="line-gutter" bind:this={queueGutter} aria-hidden="true">
+            {#each queueLineNumbers as line}
+              <button
+                type="button"
+                class:warning={warningLines.has(line)}
+                tabindex="-1"
+                on:mousedown|preventDefault
+                on:click={() => goToQueueLine(line)}
+              >
+                {line}
+              </button>
+            {/each}
+          </div>
+          <textarea
+            bind:this={queueEditor}
+            bind:value={queueContent}
+            on:input={onEditorInput}
+            on:click={refreshDirectiveSuggestions}
+            on:keydown={handleEditorKeydown}
+            on:scroll={syncQueueGutterScroll}
+            on:blur={() => window.setTimeout(clearDirectiveSuggestions, 120)}
+            placeholder="Edit queue markdown here..."
+          ></textarea>
+          <button
+            type="button"
+            class="editor-splitter"
+            class:dragging={splitterDragging}
+            title="Drag to resize editor. Double-click to reset."
+            aria-label="Resize queue editor"
+            on:pointerdown={startSplitterDrag}
+            on:dblclick={resetEditorHeight}
+          ></button>
+        </div>
         {#if directiveSuggestionsOpen && directiveSuggestions.length > 0}
           <div bind:this={directiveSuggestionsListEl} class="directive-suggestions" style={`top: ${directiveSuggestionTop}px; left: ${directiveSuggestionLeft}px;`}>
             {#each directiveSuggestions as suggestion, index}
@@ -817,7 +1001,7 @@
           </div>
         {/if}
       </div>
-      <div class="queue-preview">
+      <div class="queue-preview" bind:this={previewElement}>
         <div class="preview-summary">
           <span>{queuePreview.count} URLs</span>
           {#if queuePreview.groups.length > 0}
@@ -831,8 +1015,8 @@
           <div class="preview-groups">
             {#each queuePreview.groups as group}
               <div class="preview-group">
-                <span class="preview-artist">{group.artist || 'Unknown artist'}</span>
-                <span>{group.platform || 'infer platform'}</span>
+                <span class="preview-artist" class:new={group.artist_status === 'new'} class:unknown={group.artist_status === 'unknown'}>{artistPreviewLabel(group)}</span>
+                <span class:new={group.platform_status === 'new'} class:unknown={group.platform_status === 'inferred'}>{platformPreviewLabel(group)}</span>
                 <span>{group.url_count} URLs</span>
                 {#if group.warnings > 0}
                   <span class="warning-count">{group.warnings} warnings</span>
@@ -844,7 +1028,12 @@
         {#if queuePreview.warnings.length > 0}
           <div class="preview-warnings">
             {#each queuePreview.warnings.slice(0, 4) as warning}
-              <div>Line {warning.line}: {warning.message}</div>
+              <button type="button" on:click={() => goToQueueLine(warning.line)}>
+                <span>Line {warning.line}: {warning.message}</span>
+                {#if warning.text}
+                  <code>{warning.text}</code>
+                {/if}
+              </button>
             {/each}
             {#if queuePreview.warnings.length > 4}
               <div>{queuePreview.warnings.length - 4} more warnings...</div>
@@ -871,10 +1060,11 @@
       </div>
     </div>
 
-    <div class="footer-btns">
+    <div class="footer-btns" bind:this={footerElement}>
       <button class:primary={isDirty} on:click={saveQueue} disabled={!isDirty || saving || running}>Save Changes</button>
       <button on:click={retryFailed} disabled={running || counts.failed === 0}>Retry Failed</button>
       <button on:click={clearFailed} disabled={running || counts.failed === 0}>Clear Failed</button>
+    </div>
     </div>
 
   {:else}
@@ -895,7 +1085,7 @@
       <div class="local-defaults">
         <label>
           Artist
-          <input list="local-artist-options" bind:value={localDefaults.artist} on:input={() => scheduleArtistOptions()} placeholder="Optional default artist" />
+          <input class="local-artist-input" list="local-artist-options" bind:value={localDefaults.artist} on:input={() => scheduleArtistOptions()} placeholder="Optional default artist" />
         </label>
         <datalist id="local-artist-options">
           {#each artistOptions as artist}
@@ -910,7 +1100,6 @@
             {/each}
           </select>
         </label>
-        <label>Source URL <input bind:value={localDefaults.source_url} placeholder="Optional default source url" /></label>
       </div>
 
       <div class="local-staging">
@@ -972,6 +1161,7 @@
     background: var(--bg-main);
     gap: 10px;
     overflow: hidden;
+    min-height: 0;
   }
 
   .mode-switch {
@@ -991,6 +1181,15 @@
     background: var(--accent-primary);
     border-color: var(--accent-primary);
     color: #ffffff;
+  }
+
+  .online-panel {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
+    gap: 10px;
+    overflow: hidden;
   }
 
   .toolbar, .local-toolbar {
@@ -1045,25 +1244,126 @@
     align-items: center;
   }
 
+  .help-menu {
+    position: relative;
+    display: inline-flex;
+  }
+
+  .icon-help-btn {
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .icon-help-btn.active {
+    color: var(--accent-primary);
+    border-color: rgba(88, 166, 255, 0.35);
+    background: rgba(88, 166, 255, 0.12);
+  }
+
   .editor-area {
     display: flex;
     flex-direction: column;
-    flex-shrink: 1;
+    flex-shrink: 0;
     gap: 8px;
   }
 
-  textarea {
-    height: 35vh;
+  .queue-editor-shell {
+    display: grid;
+    grid-template-columns: var(--queue-gutter-width, 24px) 1fr;
+    height: var(--queue-editor-height, 35vh);
     min-height: 100px;
-    max-height: calc(100vh - 320px);
     background: var(--bg-panel);
     border: 1px solid var(--border-dim);
     border-radius: 8px;
+    overflow: hidden;
+    position: relative;
+  }
+
+  .line-gutter {
+    overflow: hidden;
+    padding: 15px 0;
+    border-right: 1px solid var(--border-dim);
+    background: rgba(1, 4, 9, 0.22);
+    color: var(--text-muted);
     font-family: 'Consolas', monospace;
     font-size: 13px;
-    resize: vertical;
+    line-height: normal;
+    user-select: none;
+  }
+
+  .line-gutter button {
+    width: 100%;
+    height: 16px;
+    display: block;
+    padding: 0 6px 0 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    line-height: 16px;
+    text-align: right;
+  }
+
+  .line-gutter button.warning {
+    color: var(--accent-warning);
+    background: rgba(255, 171, 0, 0.12);
+  }
+
+  textarea {
+    height: 100%;
+    min-height: 0;
+    max-height: none;
+    width: 100%;
+    border: 0;
+    border-radius: 0;
+    font-family: 'Consolas', monospace;
+    font-size: 13px;
+    line-height: 16px;
+    resize: none;
     padding: 15px;
     color: var(--text-main);
+  }
+
+  textarea:focus {
+    outline: none;
+  }
+
+  .editor-splitter {
+    height: 8px;
+    width: 100%;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    cursor: row-resize;
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: -4px;
+    z-index: 15;
+  }
+
+  .editor-splitter::before {
+    content: '';
+    position: absolute;
+    left: 6px;
+    right: 6px;
+    top: 3px;
+    height: 1px;
+    background: transparent;
+  }
+
+  .editor-splitter:hover::before,
+  .editor-splitter.dragging::before {
+    height: 2px;
+    top: 3px;
+    background: var(--accent-primary);
+    box-shadow: 0 0 8px rgba(47, 129, 247, 0.45);
   }
 
   .queue-editor-wrap {
@@ -1155,6 +1455,15 @@
     font-weight: 600;
   }
 
+  .preview-group .new {
+    color: var(--accent-warning);
+  }
+
+  .preview-group .unknown {
+    color: var(--text-muted);
+    font-style: italic;
+  }
+
   .warning-count,
   .preview-warnings {
     color: var(--accent-warning);
@@ -1164,6 +1473,52 @@
     display: grid;
     gap: 3px;
     font-size: 11px;
+  }
+
+  .preview-warnings button {
+    display: grid;
+    gap: 2px;
+    justify-items: start;
+    border: 0;
+    background: transparent;
+    color: var(--accent-warning);
+    padding: 0;
+    font: inherit;
+    text-align: left;
+  }
+
+  .preview-warnings button:hover {
+    text-decoration: underline;
+  }
+
+  .preview-warnings code {
+    color: var(--text-muted);
+    font-family: 'Consolas', monospace;
+    text-decoration: none;
+  }
+
+  .queue-help-popover {
+    position: absolute;
+    top: calc(100% + 3px);
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 25;
+    display: grid;
+    gap: 6px;
+    width: 240px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border-dim);
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+    padding: 10px 12px;
+    color: var(--text-muted);
+    font-size: 12px;
+  }
+
+  .queue-help-popover code,
+  .queue-help-popover kbd {
+    color: var(--text-main);
+    font-family: 'Consolas', monospace;
   }
 
   .monitor-area, .local-staging, .local-status {
@@ -1244,12 +1599,11 @@
     gap: 10px;
     flex-shrink: 0;
     padding: 8px 10px;
-    border-top: 1px solid var(--border-dim);
   }
 
   .local-defaults {
     display: grid;
-    grid-template-columns: 1fr 1fr 1.5fr;
+    grid-template-columns: minmax(0, 1fr) minmax(180px, 260px);
     gap: 10px;
   }
 
@@ -1261,13 +1615,18 @@
     color: var(--text-muted);
   }
 
-  .local-defaults input {
+  .local-defaults input,
+  .local-defaults select {
     background: var(--bg-panel);
     border: 1px solid var(--border-dim);
     color: var(--text-main);
     border-radius: 6px;
     padding: 6px 8px;
     font-size: 12px;
+  }
+
+  .local-defaults select {
+    height: 28px;
   }
 
   .local-item {
