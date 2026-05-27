@@ -2595,7 +2595,7 @@ def test_metadata_facets_keep_counts_correct(monkeypatch, tmp_path):
 
     conn.close()
     assert topics == [{"value": "Alpha", "count": 2}]
-    assert wd_tags == [{"value": "Shared", "count": 1}]
+    assert wd_tags == [{"value": "Shared", "count": 1, "tag_type": "character"}]
 
 
 def test_metadata_facet_counts_refresh_and_fallback(monkeypatch, tmp_path):
@@ -2622,7 +2622,7 @@ def test_metadata_facet_counts_refresh_and_fallback(monkeypatch, tmp_path):
     conn.execute("DELETE FROM metadata_facet_counts")
     conn.commit()
     fallback = metadata_index.metadata_facets(conn, "wd_tag", "share", 10)
-    assert fallback == [{"value": "Shared", "count": 1}]
+    assert fallback == [{"value": "Shared", "count": 1, "tag_type": "general"}]
 
     write_compact_note(utils, conn, item_hash, "---\ntopics:\n  - Beta\nwd_tags:\n  - New Tag\n---\n")
     metadata_index.reindex_item_metadata(conn, item_hash)
@@ -2631,7 +2631,7 @@ def test_metadata_facet_counts_refresh_and_fallback(monkeypatch, tmp_path):
     conn.close()
 
     facet = web_api._get_facets_sync("wd_tag", "", 10)
-    assert facet == {"kind": "wd_tag", "items": [{"value": "New Tag", "count": 1}]}
+    assert facet == {"kind": "wd_tag", "items": [{"value": "New Tag", "count": 1, "tag_type": "general"}]}
 
 
 def test_item_details_include_topic_and_wd_counts(monkeypatch, tmp_path):
@@ -3332,7 +3332,7 @@ def test_stats_scope_used_and_all_for_artists_and_topics(monkeypatch, tmp_path):
     assert all(item["item_count"] > 0 for item in used_artists)
     assert any(item == {"value": "unused_topic", "count": 0} for item in all_topics)
     assert all(item["count"] > 0 for item in used_topics)
-    assert any(item == {"value": "unused wd tag", "count": 0} for item in all_wd)
+    assert any(item == {"value": "unused wd tag", "count": 0, "tag_type": "general"} for item in all_wd)
     assert all(item["count"] > 0 for item in used_wd)
 
 

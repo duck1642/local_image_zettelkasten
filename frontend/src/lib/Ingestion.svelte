@@ -1069,83 +1069,84 @@
 
   {:else}
     <div class="local-mode" data-drop-zone="ingest-local">
-      <div class="local-toolbar">
-        <div class="action-group">
-          <button on:click={pickLocalFiles} disabled={localStatus.running}>Add Files</button>
-          <button on:click={pickLocalFolders} disabled={localStatus.running}>Add Folder</button>
-          <button on:click={() => localPaths = []} disabled={localStatus.running || localPaths.length === 0}>Clear List</button>
-        </div>
-        <div class="action-group">
-          <button class="primary" on:click={startLocalIngestion} disabled={localStatus.running || localPaths.length === 0}>
-            {localStatus.running ? 'Local Ingest Running...' : 'Start Local Ingestion'}
-          </button>
-        </div>
-      </div>
-
-      <div class="local-defaults">
-        <label>
-          Artist
-          <input class="local-artist-input" list="local-artist-options" bind:value={localDefaults.artist} on:input={() => scheduleArtistOptions()} placeholder="Optional default artist" />
-        </label>
-        <datalist id="local-artist-options">
-          {#each artistOptions as artist}
-            <option value={artist.name}>{artist.item_count} items</option>
-          {/each}
-        </datalist>
-        <label>
-          Platform
-          <select bind:value={localDefaults.platform}>
-            {#each platformSelectOptions as platform}
-              <option value={platform}>{platform}</option>
+      <div class="local-config-panel">
+        <div class="local-defaults">
+          <label>
+            Artist
+            <input class="local-artist-input" list="local-artist-options" bind:value={localDefaults.artist} on:input={() => scheduleArtistOptions()} placeholder="Optional default artist" />
+          </label>
+          <datalist id="local-artist-options">
+            {#each artistOptions as artist}
+              <option value={artist.name}>{artist.item_count} items</option>
             {/each}
-          </select>
-        </label>
+          </datalist>
+          <label>
+            Platform
+            <select bind:value={localDefaults.platform}>
+              {#each platformSelectOptions as platform}
+                <option value={platform}>{platform}</option>
+              {/each}
+            </select>
+          </label>
+        </div>
+
+        <div class="local-toolbar">
+          <button type="button" on:click={pickLocalFiles} disabled={localStatus.running}>Add Files</button>
+          <button type="button" on:click={pickLocalFolders} disabled={localStatus.running}>Add Folder</button>
+          <button type="button" on:click={() => localPaths = []} disabled={localStatus.running || localPaths.length === 0}>Clear List</button>
+        </div>
+
+        <div class="local-staging">
+          <div class="monitor-header">Staged Paths ({localPaths.length})</div>
+          <div class="local-list">
+            {#if localPaths.length === 0}
+              <div class="empty-monitor">No files/folders selected yet.</div>
+            {:else}
+              {#each localPaths as path, index}
+                <div class="local-item">
+                  <span class="local-path" title={path}>{path}</span>
+                  <button type="button" on:click={() => removeLocalPath(index)} disabled={localStatus.running}>Remove</button>
+                </div>
+              {/each}
+            {/if}
+          </div>
+        </div>
+
+        <button type="button" class="primary start-local-btn" on:click={startLocalIngestion} disabled={localStatus.running || localPaths.length === 0}>
+          {localStatus.running ? 'Local Ingest Running...' : 'Start Local Ingestion'}
+        </button>
       </div>
 
-      <div class="local-staging">
-        <div class="monitor-header">Staged Paths ({localPaths.length})</div>
-        <div class="local-list">
-          {#if localPaths.length === 0}
-            <div class="empty-monitor">No files/folders selected yet.</div>
-          {:else}
-            {#each localPaths as path, index}
-              <div class="local-item">
-                <span class="local-path">{path}</span>
-                <button on:click={() => removeLocalPath(index)} disabled={localStatus.running}>Remove</button>
+      <div class="local-monitor-panel">
+        <div class="local-status">
+          <div class="monitor-header">Local Run Status</div>
+          <div class="status-grid">
+            <span>Phase: <strong class="uppercase text-bright">{localStatus.phase}</strong></span>
+            <span>Scanned: <strong>{localStatus.scanned}</strong></span>
+            <span>Staged: <strong>{localStatus.staged}</strong></span>
+            <span>Queued: <strong>{localStatus.queued}</strong></span>
+            <span>Processed: <strong>{localStatus.processed}</strong></span>
+            <span>Ingested: <strong class="accent-success">{localStatus.summary.ingested}</strong></span>
+            <span>Review: <strong class="accent-warning">{localStatus.summary.review}</strong></span>
+            <span>Failed: <strong class="accent-danger">{localStatus.summary.failed}</strong></span>
+            <span>Duplicate: <strong>{localStatus.summary.duplicate}</strong></span>
+          </div>
+          <div class="footer-btns">
+            <button type="button" on:click={refreshLocalStatus}>Refresh Status</button>
+            <button type="button" on:click={retryLocalFailed} disabled={localStatus.running || localStatus.failed_paths.length === 0}>Retry Failed Session</button>
+          </div>
+          <div class="local-results">
+            {#each localStatus.results.slice(-120).reverse() as result}
+              <div class="result-line">
+                <span class="result-status {result.status}">[{result.status}]</span>
+                <span class="result-name">{result.name}</span>
+                <span class="result-message">— {result.message}</span>
               </div>
             {/each}
-          {/if}
-        </div>
-      </div>
-
-      <div class="local-status">
-        <div class="monitor-header">Local Run Status</div>
-        <div class="status-grid">
-          <span>Phase: {localStatus.phase}</span>
-          <span>Scanned: {localStatus.scanned}</span>
-          <span>Staged: {localStatus.staged}</span>
-          <span>Queued: {localStatus.queued}</span>
-          <span>Processed: {localStatus.processed}</span>
-          <span>Ingested: {localStatus.summary.ingested}</span>
-          <span>Review: {localStatus.summary.review}</span>
-          <span>Failed: {localStatus.summary.failed}</span>
-          <span>Duplicate: {localStatus.summary.duplicate}</span>
-        </div>
-        <div class="footer-btns">
-          <button on:click={refreshLocalStatus}>Refresh</button>
-          <button on:click={retryLocalFailed} disabled={localStatus.running || localStatus.failed_paths.length === 0}>Retry Failed Session</button>
-        </div>
-        <div class="local-results">
-          {#each localStatus.results.slice(-120).reverse() as result}
-            <div class="result-line">
-              <span class="result-status {result.status}">{result.status}</span>
-              <span class="result-name">{result.name}</span>
-              <span class="result-message">{result.message}</span>
-            </div>
-          {/each}
-          {#if localStatus.results.length === 0}
-            <div class="empty-monitor">No local ingestion run yet.</div>
-          {/if}
+            {#if localStatus.results.length === 0}
+              <div class="empty-monitor">No local ingestion run yet.</div>
+            {/if}
+          </div>
         </div>
       </div>
     </div>
@@ -1192,19 +1193,62 @@
     overflow: hidden;
   }
 
-  .toolbar, .local-toolbar {
+  .toolbar {
     display: flex;
     justify-content: space-between;
     align-items: center;
     flex-shrink: 0;
   }
 
+  .local-toolbar {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-shrink: 0;
+  }
+
+  .local-toolbar button {
+    flex: 1;
+    height: 30px;
+    padding: 0;
+    font-size: 11px;
+    font-weight: 600;
+  }
+
   .local-mode {
     display: flex;
     flex: 1;
+    flex-direction: row;
+    min-height: 0;
+    gap: 16px;
+    overflow: hidden;
+  }
+
+  .local-config-panel {
+    width: 380px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-height: 0;
+  }
+
+  .local-monitor-panel {
+    flex: 1;
+    display: flex;
     flex-direction: column;
     min-height: 0;
-    gap: 10px;
+    gap: 12px;
+    overflow: hidden;
+  }
+
+  .start-local-btn {
+    width: 100%;
+    height: 32px;
+    font-size: 12px;
+    font-weight: 700;
+    margin-top: auto;
+    flex-shrink: 0;
   }
 
   .queue-tabs {
@@ -1603,8 +1647,9 @@
 
   .local-defaults {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(180px, 260px);
+    grid-template-columns: 1fr 1fr;
     gap: 10px;
+    flex-shrink: 0;
   }
 
   .local-defaults label {
@@ -1623,23 +1668,73 @@
     border-radius: 6px;
     padding: 6px 8px;
     font-size: 12px;
+    height: 30px;
   }
 
-  .local-defaults select {
-    height: 28px;
+  .local-staging {
+    flex: 1;
+    background: #010409;
+    border: 1px solid var(--border-dim);
+    border-radius: 6px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    min-height: 150px;
+  }
+
+  .local-list {
+    flex-grow: 1;
+    overflow-y: auto;
+    padding: 10px;
+    border: 1px dashed var(--border-dim);
+    border-radius: 6px;
+    margin: 8px;
+    background: rgba(255, 255, 255, 0.01);
   }
 
   .local-item {
     display: flex;
+    align-items: center;
     justify-content: space-between;
     gap: 10px;
-    margin-bottom: 8px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border-dim);
+    border-radius: 4px;
+    padding: 4px 8px;
+    margin-bottom: 6px;
   }
 
   .local-path {
     color: var(--text-main);
-    word-break: break-all;
+    font-size: 11px;
+    text-overflow: ellipsis;
+    overflow: hidden;
+    white-space: nowrap;
     flex-grow: 1;
+  }
+
+  .local-item button {
+    background: transparent;
+    border: 0;
+    color: var(--text-muted);
+    font-size: 11px;
+    padding: 2px 6px;
+    cursor: pointer;
+  }
+
+  .local-item button:hover {
+    color: var(--accent-danger);
+  }
+
+  .local-status {
+    flex: 1;
+    background: #010409;
+    border: 1px solid var(--border-dim);
+    border-radius: 6px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    min-height: 200px;
   }
 
   .status-grid {
@@ -1650,20 +1745,39 @@
     font-size: 12px;
     color: var(--text-main);
     border-bottom: 1px solid var(--border-dim);
+    background: rgba(255, 255, 255, 0.01);
+  }
+
+  .status-grid strong {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .local-results {
+    flex-grow: 1;
+    overflow-y: auto;
+    overflow-x: auto;
+    padding: 10px;
+    font-family: 'Consolas', monospace;
+    font-size: 11px;
+    background: #090c10;
   }
 
   .result-line {
-    display: grid;
-    grid-template-columns: 92px 200px 1fr;
+    display: flex;
     gap: 8px;
-    margin-bottom: 6px;
-    align-items: start;
+    margin-bottom: 4px;
+    align-items: center;
+    white-space: pre;
+    width: max-content;
+    padding-right: 15px;
   }
 
   .result-status {
     font-weight: 700;
     text-transform: uppercase;
-    font-size: 11px;
+    font-size: 10px;
+    min-width: 82px;
+    display: inline-block;
   }
 
   .result-status.ingested { color: var(--accent-success); }
@@ -1672,12 +1786,11 @@
   .result-status.duplicate { color: #8b949e; }
 
   .result-name {
-    color: var(--text-main);
-    word-break: break-word;
+    color: var(--text-bright);
+    font-weight: 500;
   }
 
   .result-message {
     color: var(--text-muted);
-    word-break: break-word;
   }
 </style>
