@@ -554,14 +554,8 @@
         />
       </div>
     {:else if activeSettingsTab === 'maintenance'}
-      <SettingsMaintenancePanel
-        {maintenanceBusy}
-        {maintenanceResult}
-        {metadataRebuildJob}
-        onRunMaintenance={runMaintenance}
-      />
+      <h4 class="settings-section-title">Vault Tools</h4>
       <div class="workspace-panel settings-tools-panel">
-        <h4>Vault Tools</h4>
         <SettingsVaultToolsPanel
           {vaults}
           {vaultActive}
@@ -589,6 +583,12 @@
           {checkedValue}
         />
       </div>
+      <SettingsMaintenancePanel
+        {maintenanceBusy}
+        {maintenanceResult}
+        {metadataRebuildJob}
+        onRunMaintenance={runMaintenance}
+      />
     {:else if activeSettingsTab === 'shortcuts'}
       <SettingsShortcutsPanel />
     {/if}

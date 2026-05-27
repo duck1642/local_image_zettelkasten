@@ -13,7 +13,7 @@
 
 <div class="vault-tool-panel">
   <h5>Merge Vaults</h5>
-  <div class="add-workspace">
+  <div class="vault-tool-row">
     <select bind:value={mergeTargetId} on:change={() => { mergeSourceIds = mergeSourceIds.filter((id) => id !== mergeTargetId); mergePreview = null; }}>
       {#each vaults as vault}
         <option value={vault.id}>{vault.name}</option>

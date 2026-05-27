@@ -21,7 +21,7 @@
 
 <div class="vault-tool-panel">
   <h5>Vault Health</h5>
-  <div class="add-workspace">
+  <div class="vault-tool-row">
     <select bind:value={healthVaultId}>
       {#each vaults as vault}
         <option value={vault.id}>{vault.name}</option>
@@ -47,11 +47,11 @@
   {#if healthResult}
     <div class="workspace-result">{healthResult}</div>
   {/if}
-  <div class="add-workspace">
+  <div class="vault-tool-row vault-package-row">
     <button type="button" on:click={() => onBackupVault('backup')} disabled={healthBusy || !healthVaultId}>Backup Vault</button>
     <button type="button" on:click={() => onBackupVault('export')} disabled={healthBusy || !healthVaultId}>Export Vault</button>
   </div>
-  <div class="add-workspace">
+  <div class="vault-tool-row">
     <input type="text" placeholder="Vault package path" bind:value={importPackagePath} />
     <input type="text" placeholder="Imported vault name" bind:value={importVaultName} />
     <button type="button" on:click={onImportVaultPackage} disabled={healthBusy || !importPackagePath.trim()}>Import Vault</button>

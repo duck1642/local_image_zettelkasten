@@ -10,7 +10,7 @@
 </script>
 
 <div class="maintenance-panel">
-  <h4>Maintenance</h4>
+  <h4 class="settings-section-title">Maintenance</h4>
   <div class="maintenance-grid">
     <button on:click={() => onRunMaintenance('auth')} disabled={maintenanceBusy.auth}>
       {maintenanceBusy.auth ? 'Running...' : 'Auth Scan'}

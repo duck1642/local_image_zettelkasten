@@ -58,6 +58,21 @@
     padding: 14px;
   }
 
+  .settings-tools-panel + .maintenance-panel {
+    margin-top: 14px;
+  }
+
+  .settings-tools-panel,
+  .maintenance-panel {
+    max-width: 900px;
+  }
+
+  .settings-section-title {
+    margin: 0 0 12px 0;
+    color: var(--text-bright);
+    font-size: 14px;
+  }
+
   .workspace-panel h4 {
     margin: 0 0 12px 0;
     color: var(--text-bright);
@@ -201,29 +216,26 @@
   .centered { flex-grow: 1; display: flex; align-items: center; justify-content: center; color: var(--text-muted); }
 
   .shortcuts-guide {
-    margin-top: 40px;
-    padding-top: 25px;
-    border-top: 1px solid var(--border-dim);
+    margin-top: 0;
+    padding-top: 0;
     max-width: 600px;
   }
 
   .maintenance-panel {
-    margin-top: 26px;
-    max-width: 600px;
-    border-top: 1px solid var(--border-dim);
-    padding-top: 18px;
+    margin-top: 0;
+    display: inline-block;
+    width: fit-content;
+    max-width: 100%;
+    padding-top: 0;
   }
 
-  .maintenance-panel h4 {
-    margin: 0 0 12px 0;
-    color: var(--text-bright);
-    font-size: 14px;
+  .settings-tools-panel + .maintenance-panel .settings-section-title {
+    margin-top: 12px;
   }
 
   .vault-tool-panel {
     margin-top: 14px;
-    border-top: 1px solid var(--border-dim);
-    padding-top: 12px;
+    padding-top: 0;
   }
 
   .vault-tool-panel h5 {
@@ -232,11 +244,24 @@
     font-size: 13px;
   }
 
+  .vault-tool-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1.4fr) minmax(150px, 1fr) 136px;
+    gap: 8px;
+    margin-top: 10px;
+  }
+
+  .vault-package-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .merge-source-list {
     display: flex;
     flex-wrap: wrap;
     gap: 8px 12px;
-    margin: 8px 0;
+    min-height: 34px;
+    margin: 8px 0 10px;
+    padding: 6px 0;
   }
 
   .merge-source-list label {
@@ -352,7 +377,7 @@
 
   .maintenance-grid {
     display: grid;
-    grid-template-columns: 210px 1fr;
+    grid-template-columns: 180px 1fr;
     gap: 8px 12px;
     align-items: center;
     background: var(--bg-panel);
