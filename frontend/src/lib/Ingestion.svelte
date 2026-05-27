@@ -5,7 +5,16 @@
   import { apiFetch, apiUrl } from './api';
   import { queueStats, refreshQueueStats, setQueueStats } from './statsStore';
   import { runtimeSessionKey } from './runtimeStore';
-  import { IconInfoCircle, IconChevronUp } from './icons';
+  import {
+    IconInfoCircle,
+    IconChevronUp,
+    IconRefresh,
+    IconExternalLink,
+    IconTrash,
+    IconPlus,
+    IconFolder,
+    IconClose
+  } from './icons';
 
   type IngestMode = 'online' | 'local';
   type QueueName = 'normal' | 'force' | 'failed';
@@ -1057,21 +1066,25 @@
     <div class="toolbar" bind:this={toolbarElement}>
       <div class="queue-tabs">
         <button class:active={currentQueue === 'normal'} on:click={() => handleTabChange('normal')} disabled={running}>
-          Normal {counts.normal || 0}
+          Normal <span class="tab-count">{counts.normal || 0}</span>
         </button>
         <button class:active={currentQueue === 'force'} on:click={() => handleTabChange('force')} disabled={running}>
-          Force {counts.force || 0}
+          Force <span class="tab-count">{counts.force || 0}</span>
         </button>
         <button class:active={currentQueue === 'failed'} on:click={() => handleTabChange('failed')} disabled={running}>
-          Failed {counts.failed || 0}
+          Failed <span class="tab-count">{counts.failed || 0}</span>
         </button>
-        <span class="status-label online-bold">Ready: {readyCount}</span>
-        <span class="status-label saved">{isDirty ? '* Unsaved' : 'Saved'}</span>
+        <span class="status-label online-bold">READY: {readyCount}</span>
+        <span class="save-state-dot" class:dirty={isDirty} title={isDirty ? 'Unsaved changes' : 'All changes saved'}></span>
       </div>
 
       <div class="action-group">
-        <button on:click={() => handleTabChange(currentQueue)} disabled={running}>Reload</button>
-        <button on:click={openExternal} disabled={running}>Open</button>
+        <button type="button" class="icon-btn-chip" on:click={() => handleTabChange(currentQueue)} disabled={running} title="Reload active queue">
+          <IconRefresh size={14} />
+        </button>
+        <button type="button" class="icon-btn-chip" on:click={openExternal} disabled={running} title="Open queue in external editor">
+          <IconExternalLink size={14} />
+        </button>
         <div class="help-menu">
           <button class="icon-help-btn" class:active={showQueueHelp} title="Queue syntax help" aria-label="Queue syntax help" on:click={() => showQueueHelp = !showQueueHelp}>
             <IconInfoCircle size={14} />
@@ -1279,21 +1292,32 @@
 
 
         <div class="local-toolbar">
-          <button type="button" on:click={pickLocalFiles} disabled={localStatus.running}>Add Files</button>
-          <button type="button" on:click={pickLocalFolders} disabled={localStatus.running}>Add Folder</button>
-          <button type="button" on:click={() => localPaths = []} disabled={localStatus.running || localPaths.length === 0}>Clear List</button>
+          <button type="button" class="icon-btn-chip-text" on:click={pickLocalFiles} disabled={localStatus.running}>
+            <IconPlus size={12} />
+            <span>Files</span>
+          </button>
+          <button type="button" class="icon-btn-chip-text" on:click={pickLocalFolders} disabled={localStatus.running}>
+            <IconFolder size={12} />
+            <span>Folder</span>
+          </button>
+          <button type="button" class="icon-btn-chip-text" on:click={() => localPaths = []} disabled={localStatus.running || localPaths.length === 0}>
+            <IconTrash size={12} />
+            <span>Clear</span>
+          </button>
         </div>
 
         <div class="local-staging">
-          <div class="monitor-header">Staged Paths ({localPaths.length})</div>
+          <div class="monitor-header">STAGED ({localPaths.length})</div>
           <div class="local-list">
             {#if localPaths.length === 0}
-              <div class="empty-monitor">No files/folders selected yet.</div>
+              <div class="empty-monitor">Drop paths here to stage</div>
             {:else}
               {#each localPaths as path, index}
                 <div class="local-item">
                   <span class="local-path" title={path}>{path}</span>
-                  <button type="button" on:click={() => removeLocalPath(index)} disabled={localStatus.running}>Remove</button>
+                  <button type="button" class="remove-path-btn" on:click={() => removeLocalPath(index)} disabled={localStatus.running} title="Remove path">
+                    <IconClose size={12} />
+                  </button>
                 </div>
               {/each}
             {/if}
@@ -1318,20 +1342,42 @@
       <div class="local-monitor-panel">
         <div class="local-status">
           <div class="monitor-header">Local Run Status</div>
-          <div class="status-grid">
-            <span>Phase: <strong class="uppercase text-bright">{localStatus.phase}</strong></span>
-            <span>Scanned: <strong>{localStatus.scanned}</strong></span>
-            <span>Staged: <strong>{localStatus.staged}</strong></span>
-            <span>Queued: <strong>{localStatus.queued}</strong></span>
-            <span>Processed: <strong>{localStatus.processed}</strong></span>
-            <span>Ingested: <strong class="accent-success">{localStatus.summary.ingested}</strong></span>
-            <span>Review: <strong class="accent-warning">{localStatus.summary.review}</strong></span>
-            <span>Failed: <strong class="accent-danger">{localStatus.summary.failed}</strong></span>
-            <span>Duplicate: <strong>{localStatus.summary.duplicate}</strong></span>
+          <div class="local-status-terminal">
+            <div class="terminal-row pipeline-metrics">
+              <span class="metric">PHASE: <strong class="uppercase text-bright">{localStatus.phase}</strong></span>
+              <span class="divider">·</span>
+              <span class="metric">SCANNED: <strong>{localStatus.scanned}</strong></span>
+              <span class="divider">·</span>
+              <span class="metric">STAGED: <strong>{localStatus.staged}</strong></span>
+              <span class="divider">·</span>
+              <span class="metric">QUEUED: <strong>{localStatus.queued}</strong></span>
+              <span class="divider">·</span>
+              <span class="metric">PROCESSED: <strong>{localStatus.processed}</strong></span>
+            </div>
+            <div class="terminal-row outcomes">
+              <span class="outcome-pill ingested">
+                <strong>{localStatus.summary.ingested}</strong> INGESTED
+              </span>
+              <span class="outcome-pill review">
+                <strong>{localStatus.summary.review}</strong> REVIEW
+              </span>
+              <span class="outcome-pill duplicate">
+                <strong>{localStatus.summary.duplicate}</strong> DUP
+              </span>
+              <span class="outcome-pill failed">
+                <strong>{localStatus.summary.failed}</strong> FAILED
+              </span>
+            </div>
           </div>
           <div class="footer-btns">
-            <button type="button" on:click={refreshLocalStatus}>Refresh Status</button>
-            <button type="button" on:click={retryLocalFailed} disabled={localStatus.running || localStatus.failed_paths.length === 0}>Retry Failed Session</button>
+            <button type="button" class="icon-btn-chip-text" on:click={refreshLocalStatus}>
+              <IconRefresh size={12} />
+              <span>Refresh</span>
+            </button>
+            <button type="button" class="icon-btn-chip-text" on:click={retryLocalFailed} disabled={localStatus.running || localStatus.failed_paths.length === 0}>
+              <IconRefresh size={12} />
+              <span>Retry Session</span>
+            </button>
           </div>
           <div class="local-results">
             {#each localStatus.results.slice(-120).reverse() as result}
@@ -1342,7 +1388,7 @@
               </div>
             {/each}
             {#if localStatus.results.length === 0}
-              <div class="empty-monitor">No local ingestion run yet.</div>
+              <div class="empty-monitor">Console idle</div>
             {/if}
           </div>
         </div>
@@ -2056,20 +2102,180 @@
     min-height: 200px;
   }
 
-  .status-grid {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+  .local-status-terminal {
+    display: flex;
+    flex-direction: column;
     gap: 8px;
-    padding: 10px;
-    font-size: 12px;
-    color: var(--text-main);
+    padding: 12px;
+    background: #010409;
     border-bottom: 1px solid var(--border-dim);
-    background: rgba(255, 255, 255, 0.01);
+    font-family: 'Consolas', monospace;
   }
 
-  .status-grid strong {
+  .terminal-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .terminal-row.pipeline-metrics {
+    gap: 8px;
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  .terminal-row.pipeline-metrics strong {
+    color: var(--text-bright);
     font-variant-numeric: tabular-nums;
   }
+
+  .terminal-row.pipeline-metrics .divider {
+    color: #30363d;
+  }
+
+  .terminal-row.outcomes {
+    gap: 10px;
+    margin-top: 2px;
+  }
+
+  .outcome-pill {
+    font-size: 10px;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border-dim);
+    color: var(--text-muted);
+  }
+
+  .outcome-pill.ingested {
+    color: var(--accent-success);
+    background: rgba(46, 160, 67, 0.1);
+    border-color: rgba(46, 160, 67, 0.2);
+  }
+
+  .outcome-pill.review {
+    color: var(--accent-warning);
+    background: rgba(210, 153, 34, 0.1);
+    border-color: rgba(210, 153, 34, 0.2);
+  }
+
+  .outcome-pill.duplicate {
+    color: #8b949e;
+    background: rgba(139, 148, 158, 0.1);
+    border-color: rgba(139, 148, 158, 0.2);
+  }
+
+  .outcome-pill.failed {
+    color: var(--accent-danger);
+    background: rgba(248, 81, 73, 0.1);
+    border-color: rgba(248, 81, 73, 0.2);
+  }
+
+  .outcome-pill strong {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .tab-count {
+    display: inline-block;
+    padding: 2px 6px;
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    font-size: 10px;
+    font-weight: 500;
+    margin-left: 6px;
+    color: var(--text-muted);
+  }
+
+  .active .tab-count {
+    background: rgba(255, 255, 255, 0.18);
+    color: #ffffff;
+  }
+
+  .save-state-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent-success);
+    display: inline-block;
+    margin-left: 8px;
+    vertical-align: middle;
+    align-self: center;
+  }
+
+  .save-state-dot.dirty {
+    background: var(--accent-warning);
+    box-shadow: 0 0 6px var(--accent-warning);
+  }
+
+  .icon-btn-chip {
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-panel);
+    border: 1px solid var(--border-dim);
+    border-radius: 6px;
+    color: var(--text-muted);
+    cursor: pointer;
+    box-sizing: border-box;
+  }
+
+  .icon-btn-chip:hover {
+    color: var(--text-main);
+    border-color: var(--border-medium);
+  }
+
+  .icon-btn-chip-text {
+    height: 30px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border-dim);
+    border-radius: 6px;
+    color: var(--text-main);
+    padding: 0 12px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    box-sizing: border-box;
+  }
+
+  .icon-btn-chip-text:hover {
+    border-color: var(--border-medium);
+    background: rgba(255, 255, 255, 0.02);
+  }
+
+  .icon-btn-chip-text:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .icon-btn-chip-text :global(svg) {
+    color: var(--text-muted);
+  }
+
+  .remove-path-btn {
+    background: transparent;
+    border: 0;
+    padding: 4px;
+    cursor: pointer;
+    color: var(--text-muted);
+    opacity: 0.4;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .remove-path-btn:hover {
+    color: var(--accent-danger);
+    opacity: 1;
+  }
+
 
   .local-results {
     flex-grow: 1;
@@ -2078,7 +2284,7 @@
     padding: 10px;
     font-family: 'Consolas', monospace;
     font-size: 11px;
-    background: #090c10;
+    background: #010409;
   }
 
   .result-line {
