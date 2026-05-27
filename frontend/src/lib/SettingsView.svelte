@@ -1116,7 +1116,7 @@
 <style>
   .settings-container {
     flex-grow: 1;
-    padding: 25px;
+    padding: 20px 15px;
     background: var(--bg-main);
     overflow-y: auto;
   }
