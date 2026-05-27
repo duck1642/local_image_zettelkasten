@@ -200,13 +200,37 @@ local_media_zettelkasten/
         VaultView.svelte
         VaultGroupTile.svelte
         Inspector.svelte
+        InspectorMediaPreview.svelte
+        InspectorMetadataGrid.svelte
+        InspectorTagChip.svelte
+        InspectorTopicEditor.svelte
+        InspectorWdSuggestions.svelte
         MediaFocus.svelte
         SearchBar.svelte
         Ingestion.svelte
+        OnlineIngestion.svelte
+        LocalIngestion.svelte
+        ingestion.css
         ReviewView.svelte
+        ReviewWorkspace.svelte
+        ReviewActionBar.svelte
+        ReviewInboxList.svelte
         StatsView.svelte
         LogsView.svelte
         SettingsView.svelte
+        SettingsCoreConfigPanel.svelte
+        SettingsMaintenancePanel.svelte
+        SettingsRuntimePanel.svelte
+        SettingsShortcutsPanel.svelte
+        SettingsVaultPanel.svelte
+        SettingsVaultToolsPanel.svelte
+        SettingsVaultMergePanel.svelte
+        SettingsVaultHealthPanel.svelte
+        SettingsWorkspacePanel.svelte
+        VaultHealthDetailsModal.svelte
+        settingsApi.ts
+        settingsUtils.ts
+        settings.css
         api.ts
         configStore.ts
         layout.ts
@@ -219,6 +243,7 @@ local_media_zettelkasten/
         selection.ts
         statsStore.ts
         types.ts
+        icons/
         stats/
           statsApi.ts
           statsUtils.ts
@@ -514,13 +539,26 @@ Top-level structure:
 - `SearchBar.svelte` and `search.ts`: structured search parsing, commands, suggestions, Tab autocomplete.
   - Live syntax hint: `/cmd; a:artist; p:platform; t:topic; #wd-tag`.
 - `VaultGroupTile.svelte`: shared visual tile for grouped and single media.
-- `Inspector.svelte`: metadata, topics, WD tags, grouped navigation, tag/open/copy/save actions.
+- `Inspector.svelte`: orchestration owner for metadata loading/saving, topic suggestions, WD edits, grouped navigation, tag/open/copy/delete actions, and keyboard shortcuts.
+  - `InspectorMediaPreview.svelte`: media preview and group navigation UI.
+  - `InspectorMetadataGrid.svelte`: editable/read-only item metadata grid.
+  - `InspectorTopicEditor.svelte`: manual topic chips, add input, and suggestion dropdown.
+  - `InspectorWdSuggestions.svelte`: WD rating/character/general chips and promote/remove events.
+  - `InspectorTagChip.svelte`: shared Inspector chip UI with local icons and color semantics.
 - `MediaFocus.svelte`: wide/fullscreen media view, grouped navigation, filmstrip, fullscreen zoom/pan.
-- `Ingestion.svelte`: markdown queue editor, queue runner, local ingest staging, and drag-drop intake target.
-- `ReviewView.svelte`: duplicate/review workflow.
+- `Ingestion.svelte`: ingestion page shell and mode switcher.
+  - `OnlineIngestion.svelte`: markdown URL queue editor, directive suggestions, parser preview/warnings, queue runner, and ingestion monitor.
+  - `LocalIngestion.svelte`: local file/folder staging, artist autocomplete, platform selection, drag-drop intake, and local run status.
+  - `ingestion.css`: shared ingestion layout, editor, splitter, dropdown, preview, monitor, and local staging styles.
+- `ReviewView.svelte`: duplicate/review workflow orchestration.
+  - `ReviewWorkspace.svelte`: current review comparison UI.
+  - `ReviewActionBar.svelte`: review action buttons.
+  - `ReviewInboxList.svelte`: pending/cleanup queue list and item navigation.
 - `StatsView.svelte`: orchestration shell for Stats tabs, runtime-session reset, facet filtering handoff, artist flows, and topic/WD maintenance modals.
 - `LogsView.svelte`: structured/raw log viewer.
-- `SettingsView.svelte`: config editing, workspace/vault selection, maintenance actions.
+- `SettingsView.svelte`: Settings page owner for config/workspace/vault loading, refresh lifecycle, tab state, and action handlers.
+  - Settings panels: core config, runtime paths, workspaces, vaults, vault tools, merge, health/package tools, maintenance, shortcuts, and vault health details modal.
+  - `settingsApi.ts`, `settingsUtils.ts`, and `settings.css`: Settings API wrappers, summary helpers, and shared styles.
 
 Shared frontend infrastructure:
 
@@ -533,6 +571,7 @@ Shared frontend infrastructure:
 - `selection.ts`: pure selection helpers.
 - `observers.ts`: reusable intersection/resize observer helpers.
 - `logger.ts`: batched frontend UI logging.
+- `icons/`: local named Svelte icon components. The app does not depend on a runtime icon package by default; selected SVG paths are vendored into local components.
 - `stats/`: split Stats components, API helpers, types, utilities, and CSS.
 
 ## Vault Renderers

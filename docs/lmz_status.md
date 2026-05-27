@@ -1,6 +1,6 @@
   # LMZ Current Status
 
-Last updated: 2026-05-24
+Last updated: 2026-05-27
 
 ## Current Status
 
@@ -211,12 +211,8 @@ VSCode-friendly test launchers:
 
 - Review panel design refinement.
 - Fullscreen board/view refinements.
-- Inspector polish and better tag workflows.
-- Icon system policy:
-  - use local named Svelte icon components from `frontend/src/lib/icons/`.
-  - keep the app local-first: do not add `lucide-svelte` as a runtime dependency by default.
-  - use Lucide as a source/catalog when useful, but vendor only selected SVG paths into local icon components.
-  - do not dump the full Lucide icon pack into the repo unless a future broad icon-browser workflow needs it.
+- Remaining Inspector fine polish and tag workflow edge cases.
+- Remaining Stats/Settings fine polish after real use.
 - Custom context menu for vault tiles.
 - Animation-aware GIF handling beyond first-frame thumbnail/tag behavior.
 - Video hover preview strategy:
@@ -294,6 +290,29 @@ VSCode-friendly test launchers:
   - Stats topic/WD panels expose explicit actions for topic delete/merge and WD tag rename/delete.
   - backend rewrites affected Markdown frontmatter, refreshes metadata indexes/facets, and preserves existing API search semantics.
   - targeted backend and mock-vault frontend tests pass; needs real-vault smoke for dynamic workspace/vault switching, Stats metadata actions, and metadata maintenance rollback behavior.
+
+- Phase D UI polish/refactor work started:
+  - local named Svelte icon components are active under `frontend/src/lib/icons/`.
+  - icon policy is local-first: no `lucide-svelte` runtime dependency by default; selected Lucide-style SVG paths may be vendored into local components.
+  - Settings UI was split into focused panels and helpers:
+    - `SettingsCoreConfigPanel.svelte`
+    - `SettingsMaintenancePanel.svelte`
+    - `SettingsRuntimePanel.svelte`
+    - `SettingsShortcutsPanel.svelte`
+    - `SettingsVaultPanel.svelte`
+    - `SettingsVaultToolsPanel.svelte`
+    - `SettingsVaultMergePanel.svelte`
+    - `SettingsVaultHealthPanel.svelte`
+    - `SettingsWorkspacePanel.svelte`
+    - `VaultHealthDetailsModal.svelte`
+    - `settingsApi.ts`, `settingsUtils.ts`, and `settings.css`.
+  - Settings now uses tabbed sections and reduced text-heavy actions while preserving existing API behavior.
+  - Ingestion UI is split between `OnlineIngestion.svelte`, `LocalIngestion.svelte`, and shared `ingestion.css`.
+  - Inspector was split into media preview, metadata grid, topic editor, WD suggestions, and shared tag chip components.
+  - Inspector topic/WD chips share `InspectorTagChip.svelte`, with rating/character/general/topic color semantics and local icon actions.
+  - Stats UI is split into controls, facet panel, artist panel/detail/merge modal, metadata action modal, filter bar, API helpers, utilities, and `stats.css`.
+  - Stats chip CSS is namespaced separately from Inspector chips to avoid cross-panel style leakage.
+  - targeted frontend checks were run during refactor; still needs real-vault smoke for Settings, Stats, Inspector, and Ingestion UI paths.
 
 - Phase B - Knowledge tools core:
   - SQLite-owned identity is active for `items.source_artist`, `items.platform`, `items.source_url`, file metadata, and storage identity.
