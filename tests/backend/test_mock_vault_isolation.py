@@ -1599,6 +1599,40 @@ def test_ingest_result_reports_wd_tagging_status(monkeypatch, tmp_path):
     assert utils.note_path_for(item_hash, storage_id).exists()
 
 
+def test_ingest_index_update_ignores_wd_tagging_status(monkeypatch, tmp_path):
+    utils, sqlite_operator, processor = fresh_backend(monkeypatch, tmp_path, "utils", "db.sqlite_operator", "processor")
+    item_hash = "7" * 64
+    source = tmp_path / "source.jpg"
+    source.write_bytes(b"fake image")
+    index_calls = []
+
+    class TagResult:
+        status = "ok"
+        error = ""
+        tags = [{"name": "tag-a"}]
+
+    monkeypatch.setattr(processor, "calculate_file_hash", lambda path: item_hash)
+    monkeypatch.setattr(processor, "get_mime_type", lambda path: "image/jpeg")
+    monkeypatch.setattr(processor, "calculate_phash", lambda path: None)
+    monkeypatch.setattr(processor, "calculate_tiles", lambda path: [])
+    monkeypatch.setattr(processor, "tag_media", lambda *args, **kwargs: TagResult())
+    monkeypatch.setattr(processor, "_pending_review_match", lambda file_hash: None)
+    monkeypatch.setattr(processor.search_manager, "update_indexes", lambda **kwargs: index_calls.append(kwargs))
+
+    ok, _, idx_data = processor.process_file(
+        source,
+        {"firewall": {"allowed_mimes": ["image/jpeg"], "allowed_extensions": ["jpg"]}, "tagging": {}},
+        metadata={"artist": "Ingest Artist", "platform": "local", "source_url": ""},
+    )
+
+    assert ok
+    assert idx_data["tagging_status"] == "ok"
+    assert index_calls
+    assert "tagging_status" not in index_calls[0]
+    assert "tagging_error" not in index_calls[0]
+    assert "tagging_tag_count" not in index_calls[0]
+
+
 def test_storage_id_backfill_and_compact_asset_path(monkeypatch, tmp_path):
     utils, sqlite_operator = fresh_backend(monkeypatch, tmp_path, "utils", "db.sqlite_operator")
     item_hash = "a1" * 32

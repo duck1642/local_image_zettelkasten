@@ -503,10 +503,18 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
             log_system("WARNING", "Ingest thumbnail pregeneration failed", hash=file_hash, error=str(thumb_exc))
 
         if sync_index:
+            search_index_data = {
+                "file_hash": index_data["file_hash"],
+                "phash": index_data["phash"],
+                "url": index_data["url"],
+                "tiles": index_data["tiles"],
+                "audio_hash": index_data["audio_hash"],
+                "visual_embedding": index_data["visual_embedding"],
+            }
             try:
-                search_manager.update_indexes(**index_data, ctx=ctx)
+                search_manager.update_indexes(**search_index_data, ctx=ctx)
             except TypeError:
-                search_manager.update_indexes(**index_data)
+                search_manager.update_indexes(**search_index_data)
 
         if delete_source:
             cleanup_error = None
