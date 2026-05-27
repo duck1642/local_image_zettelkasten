@@ -5,7 +5,7 @@
   import { apiFetch, apiUrl } from './api';
   import { queueStats, refreshQueueStats, setQueueStats } from './statsStore';
   import { runtimeSessionKey } from './runtimeStore';
-  import { IconInfoCircle } from './icons';
+  import { IconInfoCircle, IconChevronUp } from './icons';
 
   type IngestMode = 'online' | 'local';
   type QueueName = 'normal' | 'force' | 'failed';
@@ -111,6 +111,23 @@
   let platformOptions: PlatformOption[] = [];
   let platformSelectOptions: string[] = ['Local'];
   let artistOptionsTimer: number | null = null;
+
+  let showArtistSuggestions = false;
+  let activeArtistSuggestionIndex = 0;
+  let artistSuggestionsListEl: HTMLDivElement;
+
+  let showPlatformSuggestions = false;
+  let activePlatformSuggestionIndex = 0;
+  let platformSuggestionsListEl: HTMLDivElement;
+
+  let localPanelWidth = 380;
+  let localSeparatorDragging = false;
+  let localSeparatorStartX = 0;
+  let localSeparatorStartWidth = 0;
+  const MIN_LOCAL_PANEL_WIDTH = 280;
+  const MAX_LOCAL_PANEL_WIDTH = 600;
+
+
   let localStatus: LocalStatus = {
     running: false,
     phase: 'idle',
@@ -300,6 +317,134 @@
       loadArtistOptions(q);
     }, 180);
   }
+
+  function handleArtistInput() {
+    showArtistSuggestions = true;
+    activeArtistSuggestionIndex = 0;
+    scheduleArtistOptions(localDefaults.artist);
+  }
+
+  function handleArtistFocus() {
+    showArtistSuggestions = true;
+    activeArtistSuggestionIndex = 0;
+    loadArtistOptions(localDefaults.artist);
+  }
+
+  function selectArtistSuggestion(name: string) {
+    localDefaults.artist = name;
+    showArtistSuggestions = false;
+  }
+
+  function handleArtistKeydown(event: KeyboardEvent) {
+    if (showArtistSuggestions && artistOptions.length > 0) {
+      if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        activeArtistSuggestionIndex = (activeArtistSuggestionIndex + 1) % artistOptions.length;
+        scrollArtistSuggestionIntoView();
+      } else if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        activeArtistSuggestionIndex = (activeArtistSuggestionIndex - 1 + artistOptions.length) % artistOptions.length;
+        scrollArtistSuggestionIntoView();
+      } else if (event.key === 'Enter' || event.key === 'Tab') {
+        event.preventDefault();
+        selectArtistSuggestion(artistOptions[activeArtistSuggestionIndex].name);
+      } else if (event.key === 'Escape') {
+        event.preventDefault();
+        showArtistSuggestions = false;
+      }
+    }
+  }
+
+  async function scrollArtistSuggestionIntoView() {
+    await tick();
+    const active = artistSuggestionsListEl?.querySelector('button.active');
+    active?.scrollIntoView({ block: 'nearest' });
+  }
+
+  function togglePlatformSuggestions() {
+    showPlatformSuggestions = !showPlatformSuggestions;
+    if (showPlatformSuggestions) {
+      activePlatformSuggestionIndex = platformSelectOptions.indexOf(localDefaults.platform || 'Local');
+      if (activePlatformSuggestionIndex === -1) activePlatformSuggestionIndex = 0;
+      scrollPlatformSuggestionIntoView();
+    }
+  }
+
+  function selectPlatformSuggestion(platform: string) {
+    localDefaults.platform = platform;
+    showPlatformSuggestions = false;
+  }
+
+  function handlePlatformKeydown(event: KeyboardEvent) {
+    if (showPlatformSuggestions && platformSelectOptions.length > 0) {
+      if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        activePlatformSuggestionIndex = (activePlatformSuggestionIndex + 1) % platformSelectOptions.length;
+        scrollPlatformSuggestionIntoView();
+      } else if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        activePlatformSuggestionIndex = (activePlatformSuggestionIndex - 1 + platformSelectOptions.length) % platformSelectOptions.length;
+        scrollPlatformSuggestionIntoView();
+      } else if (event.key === 'Enter' || event.key === 'Tab') {
+        event.preventDefault();
+        selectPlatformSuggestion(platformSelectOptions[activePlatformSuggestionIndex]);
+      } else if (event.key === 'Escape') {
+        event.preventDefault();
+        showPlatformSuggestions = false;
+      }
+    } else if (event.key === 'Enter' || event.key === 'ArrowDown' || event.key === ' ') {
+      event.preventDefault();
+      showPlatformSuggestions = true;
+      activePlatformSuggestionIndex = platformSelectOptions.indexOf(localDefaults.platform || 'Local');
+      if (activePlatformSuggestionIndex === -1) activePlatformSuggestionIndex = 0;
+      scrollPlatformSuggestionIntoView();
+    }
+  }
+
+  async function scrollPlatformSuggestionIntoView() {
+    await tick();
+    const active = platformSuggestionsListEl?.querySelector('button.active');
+    active?.scrollIntoView({ block: 'nearest' });
+  }
+
+  function handleWindowClick(event: PointerEvent) {
+    const target = event.target as HTMLElement;
+    if (!target) return;
+    if (showArtistSuggestions && !target.closest('.local-artist-wrap')) {
+      showArtistSuggestions = false;
+    }
+    if (showPlatformSuggestions && !target.closest('.local-platform-wrap')) {
+      showPlatformSuggestions = false;
+    }
+  }
+
+  function handleLocalSeparatorMove(event: PointerEvent) {
+    if (!localSeparatorDragging) return;
+    const deltaX = event.clientX - localSeparatorStartX;
+    localPanelWidth = Math.max(MIN_LOCAL_PANEL_WIDTH, Math.min(MAX_LOCAL_PANEL_WIDTH, localSeparatorStartWidth + deltaX));
+  }
+
+  function stopLocalSeparatorDrag() {
+    localSeparatorDragging = false;
+    window.removeEventListener('pointermove', handleLocalSeparatorMove);
+    window.removeEventListener('pointerup', stopLocalSeparatorDrag);
+  }
+
+  function startLocalSeparatorDrag(event: PointerEvent) {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    localSeparatorDragging = true;
+    localSeparatorStartX = event.clientX;
+    localSeparatorStartWidth = localPanelWidth;
+    window.addEventListener('pointermove', handleLocalSeparatorMove);
+    window.addEventListener('pointerup', stopLocalSeparatorDrag);
+  }
+
+  function resetLocalPanelWidth() {
+    localPanelWidth = 380;
+  }
+
+
 
   async function loadPlatformOptions() {
     try {
@@ -889,6 +1034,7 @@
       window.removeEventListener('resize', clampCurrentEditorHeight);
       logSource?.close();
       stopSplitterDrag();
+      stopLocalSeparatorDrag();
       if (logReconnectTimer !== null) clearTimeout(logReconnectTimer);
       if (parseTimer !== null) clearTimeout(parseTimer);
       if (artistOptionsTimer !== null) clearTimeout(artistOptionsTimer);
@@ -897,6 +1043,8 @@
     };
   });
 </script>
+
+<svelte:window on:pointerdown={handleWindowClick} />
 
 <div class="ingestion-container">
   <div class="mode-switch">
@@ -1069,26 +1217,66 @@
 
   {:else}
     <div class="local-mode" data-drop-zone="ingest-local">
-      <div class="local-config-panel">
+      <div class="local-config-panel" style={`width: ${localPanelWidth}px;`}>
         <div class="local-defaults">
-          <label>
-            Artist
-            <input class="local-artist-input" list="local-artist-options" bind:value={localDefaults.artist} on:input={() => scheduleArtistOptions()} placeholder="Optional default artist" />
-          </label>
-          <datalist id="local-artist-options">
-            {#each artistOptions as artist}
-              <option value={artist.name}>{artist.item_count} items</option>
-            {/each}
-          </datalist>
-          <label>
-            Platform
-            <select bind:value={localDefaults.platform}>
-              {#each platformSelectOptions as platform}
-                <option value={platform}>{platform}</option>
-              {/each}
-            </select>
-          </label>
+          <div class="local-default-item local-artist-wrap">
+            <span class="field-label">Artist</span>
+            <div class="custom-dropdown-wrap">
+              <input
+                class="local-artist-input"
+                type="text"
+                bind:value={localDefaults.artist}
+                on:input={handleArtistInput}
+                on:keydown={handleArtistKeydown}
+                on:focus={handleArtistFocus}
+                placeholder="Optional default artist"
+              />
+              {#if showArtistSuggestions && artistOptions.length > 0}
+                <div bind:this={artistSuggestionsListEl} class="custom-dropdown-popover artist-suggestions">
+                  {#each artistOptions as artist, i}
+                    <button
+                      type="button"
+                      class:active={i === activeArtistSuggestionIndex}
+                      on:click={() => selectArtistSuggestion(artist.name)}
+                    >
+                      <span class="option-name">{artist.name}</span>
+                      <span class="option-detail">{artist.item_count} items</span>
+                    </button>
+                  {/each}
+                </div>
+              {/if}
+            </div>
+          </div>
+
+          <div class="local-default-item local-platform-wrap">
+            <span class="field-label">Platform</span>
+            <div class="custom-dropdown-wrap">
+              <button
+                type="button"
+                class="custom-select-trigger"
+                on:click={togglePlatformSuggestions}
+                on:keydown={handlePlatformKeydown}
+              >
+                <span>{localDefaults.platform || 'Local'}</span>
+                <IconChevronUp size={12} />
+              </button>
+              {#if showPlatformSuggestions && platformSelectOptions.length > 0}
+                <div bind:this={platformSuggestionsListEl} class="custom-dropdown-popover platform-suggestions">
+                  {#each platformSelectOptions as platform, i}
+                    <button
+                      type="button"
+                      class:active={i === activePlatformSuggestionIndex}
+                      on:click={() => selectPlatformSuggestion(platform)}
+                    >
+                      <span class="option-name">{platform}</span>
+                    </button>
+                  {/each}
+                </div>
+              {/if}
+            </div>
+          </div>
         </div>
+
 
         <div class="local-toolbar">
           <button type="button" on:click={pickLocalFiles} disabled={localStatus.running}>Add Files</button>
@@ -1116,6 +1304,16 @@
           {localStatus.running ? 'Local Ingest Running...' : 'Start Local Ingestion'}
         </button>
       </div>
+
+      <button
+        type="button"
+        class="local-separator-handle"
+        class:active={localSeparatorDragging}
+        title="Drag to resize panels. Double-click to reset."
+        aria-label="Resize local staging panel"
+        on:pointerdown={startLocalSeparatorDrag}
+        on:dblclick={resetLocalPanelWidth}
+      ></button>
 
       <div class="local-monitor-panel">
         <div class="local-status">
@@ -1220,18 +1418,51 @@
     flex: 1;
     flex-direction: row;
     min-height: 0;
-    gap: 16px;
+    gap: 0;
     overflow: hidden;
   }
 
+  .local-separator-handle {
+    width: 14px;
+    flex: 0 0 14px;
+    cursor: col-resize;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    padding: 0;
+    margin: 0;
+    align-self: stretch;
+    flex-shrink: 0;
+    position: relative;
+  }
+
+  .local-separator-handle::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 6px;
+    width: 1px;
+    background: transparent;
+  }
+
+  .local-separator-handle:hover::before,
+  .local-separator-handle.active::before {
+    width: 2px;
+    left: 6px;
+    background: var(--accent-primary);
+    box-shadow: 0 0 8px rgba(47, 129, 247, 0.45);
+  }
+
+
   .local-config-panel {
-    width: 380px;
     flex-shrink: 0;
     display: flex;
     flex-direction: column;
     gap: 12px;
     min-height: 0;
   }
+
 
   .local-monitor-panel {
     flex: 1;
@@ -1652,16 +1883,26 @@
     flex-shrink: 0;
   }
 
-  .local-defaults label {
+  .local-default-item {
     display: flex;
     flex-direction: column;
     gap: 4px;
+    position: relative;
+  }
+
+  .field-label {
     font-size: 11px;
     color: var(--text-muted);
   }
 
-  .local-defaults input,
-  .local-defaults select {
+  .custom-dropdown-wrap {
+    position: relative;
+    width: 100%;
+  }
+
+  .custom-dropdown-wrap input {
+    width: 100%;
+    box-sizing: border-box;
     background: var(--bg-panel);
     border: 1px solid var(--border-dim);
     color: var(--text-main);
@@ -1670,6 +1911,84 @@
     font-size: 12px;
     height: 30px;
   }
+
+  .custom-select-trigger {
+    width: 100%;
+    box-sizing: border-box;
+    background: var(--bg-panel);
+    border: 1px solid var(--border-dim);
+    color: var(--text-main);
+    border-radius: 6px;
+    padding: 0 10px;
+    font-size: 12px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    cursor: pointer;
+  }
+
+  .custom-select-trigger :global(svg) {
+    transform: rotate(180deg);
+    color: var(--text-muted);
+  }
+
+  .custom-dropdown-popover {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    width: 100%;
+    box-sizing: border-box;
+    background: var(--bg-panel);
+    border: 1px solid var(--border-dim);
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+    z-index: 100;
+    padding: 4px 0;
+    max-height: 200px;
+    overflow-y: auto;
+  }
+
+  .custom-dropdown-popover button {
+    width: 100%;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: var(--text-main);
+    padding: 6px 10px;
+    font-size: 12px;
+    cursor: pointer;
+    text-align: left;
+  }
+
+  .custom-dropdown-popover button.active,
+  .custom-dropdown-popover button:hover {
+    background: var(--accent-primary);
+    color: #ffffff;
+  }
+
+  .option-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+  }
+
+  .option-detail {
+    font-size: 10px;
+    color: var(--text-muted);
+    margin-left: 10px;
+  }
+
+  .custom-dropdown-popover button:hover .option-detail,
+  .custom-dropdown-popover button.active .option-detail {
+    color: rgba(255, 255, 255, 0.8);
+  }
+
 
   .local-staging {
     flex: 1;

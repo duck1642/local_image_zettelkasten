@@ -618,31 +618,31 @@ body.artist-list-resizing {
     cursor: col-resize;
     border: 0;
     border-radius: 0;
-    background: linear-gradient(
-      90deg,
-      transparent 0,
-      transparent 6px,
-      var(--border-dim) 6px,
-      var(--border-dim) 7px,
-      transparent 7px
-    );
+    background: transparent;
     padding: 0;
     margin: 0 4px;
     position: relative;
     z-index: 20;
   }
 
-  .artist-resize-handle:hover,
-  .artist-resize-handle.active {
-    background: linear-gradient(
-      90deg,
-      transparent 0,
-      transparent 6px,
-      var(--accent-primary) 6px,
-      var(--accent-primary) 7px,
-      transparent 7px
-    );
+  .artist-resize-handle::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 6px;
+    width: 1px;
+    background: transparent;
   }
+
+  .artist-resize-handle:hover::before,
+  .artist-resize-handle.active::before {
+    width: 2px;
+    left: 6px;
+    background: var(--accent-primary);
+    box-shadow: 0 0 8px rgba(47, 129, 247, 0.45);
+  }
+
 
   .artist-group-label {
     padding: 8px 12px 6px;
