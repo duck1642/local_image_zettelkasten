@@ -213,6 +213,7 @@ stable_layout_notes.ts.txt
 stable_masonry.svelte.txt
 test_input/
 test_videos/
+graphify-out/
 
 # Tracked deterministic test fixtures
 !tests/fixtures/mock-vault/config.yaml
@@ -221,4 +222,5 @@ test_videos/
 
 # Screenshots and temporary inspection files
 last_screen.png
+.graphify_detect.json
 
