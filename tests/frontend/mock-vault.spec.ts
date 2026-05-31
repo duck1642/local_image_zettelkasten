@@ -737,11 +737,19 @@ test('inspector drafts WD promotion and removal until save', async ({ page }) =>
   const inspector = page.locator('aside.inspector');
   const visualTag = inspector.locator('.tag-chip.visual').filter({ hasText: 'mock_tag' });
 
-  await visualTag.getByRole('button', { name: /mock_tag/ }).click();
+  await visualTag.click();
   await expect(inspector.locator('.tag-chip.topic').filter({ hasText: 'mock_tag' })).toBeVisible();
   await expect(inspector.getByRole('button', { name: 'Revert' })).toBeVisible();
   await expect(inspector.getByRole('button', { name: 'Save' })).toBeEnabled();
   expect(patches).toHaveLength(0);
+
+  await visualTag.click();
+  await expect(inspector.locator('.tag-chip.topic').filter({ hasText: 'mock_tag' })).toHaveCount(0);
+  await expect(inspector.getByRole('button', { name: 'Save' })).toBeDisabled();
+
+  await visualTag.click();
+  await expect(inspector.locator('.tag-chip.topic').filter({ hasText: 'mock_tag' })).toBeVisible();
+  await expect(inspector.getByRole('button', { name: 'Save' })).toBeEnabled();
 
   await visualTag.hover();
   await visualTag.getByTitle('Remove WD tag').click();

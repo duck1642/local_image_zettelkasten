@@ -67,14 +67,16 @@
   class:has-actions={removable || renameable}
   class:has-two-actions={removable && renameable}
   title={interactive ? undefined : title || undefined}
-  on:pointerdown={activatePointer}
-  on:click={activateClick}
+  onpointerdown={activatePointer}
+  onclick={activateClick}
 >
   {#if interactive}
     <button
       class="chip-main"
       type="button"
       title={title || undefined}
+      onpointerdown={activatePointer}
+      onclick={activateClick}
     >
       <span class="tag-label">{label}</span>
       {#if count}
@@ -95,8 +97,8 @@
       type="button"
       title={renameTitle}
       aria-label={renameTitle}
-      on:pointerdown={stopActionPointer}
-      on:click={(event) => emitAction(event, 'rename')}
+      onpointerdown={stopActionPointer}
+      onclick={(event) => emitAction(event, 'rename')}
     >
       <IconPencil size={10} />
     </button>
@@ -107,8 +109,8 @@
       type="button"
       title={removeTitle}
       aria-label={removeTitle}
-      on:pointerdown={stopActionPointer}
-      on:click={(event) => emitAction(event, 'remove')}
+      onpointerdown={stopActionPointer}
+      onclick={(event) => emitAction(event, 'remove')}
     >
       <IconTrash size={10} />
     </button>
@@ -193,18 +195,18 @@
       display: inline-grid;
       place-items: center;
       width: 0;
-      height: 26px !important;
-      align-self: stretch !important;
-      margin: 0 !important;
-      padding: 0 !important;
-      border: none !important;
+      height: 26px;
+      align-self: stretch;
+      margin: 0;
+      padding: 0;
+      border: none;
       background: transparent;
       color: var(--text-muted);
       cursor: pointer;
       opacity: 0;
       pointer-events: none;
-      border-radius: 0 !important;
-      box-sizing: border-box !important;
+      border-radius: 0;
+      box-sizing: border-box;
   }
 
   .tag-chip:hover .chip-action,
@@ -212,28 +214,28 @@
       width: 24px;
       opacity: 1;
       pointer-events: auto;
-      border: none !important;
-      border-left: 1px solid var(--chip-border) !important;
+      border: none;
+      border-left: 1px solid var(--chip-border);
       color: var(--text-muted);
   }
 
   .tag-chip:hover .chip-rename + .chip-remove,
   .tag-chip:focus-within .chip-rename + .chip-remove {
-      margin-left: 0 !important;
+      margin-left: 0;
   }
 
   .chip-remove:hover {
-      background: rgba(248, 81, 73, 0.15) !important;
-      color: var(--accent-danger) !important;
-      border: none !important;
-      border-left: 1px solid rgba(255, 255, 255, 0.08) !important;
+      background: rgba(248, 81, 73, 0.15);
+      color: var(--accent-danger);
+      border: none;
+      border-left: 1px solid rgba(255, 255, 255, 0.08);
   }
 
   .chip-rename:hover {
-      background: rgba(255, 255, 255, 0.08) !important;
-      color: var(--accent-primary) !important;
-      border: none !important;
-      border-left: 1px solid rgba(255, 255, 255, 0.08) !important;
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--accent-primary);
+      border: none;
+      border-left: 1px solid rgba(255, 255, 255, 0.08);
   }
 
   .tag-chip:hover {

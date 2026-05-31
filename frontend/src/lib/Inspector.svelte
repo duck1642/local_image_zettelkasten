@@ -288,7 +288,10 @@
       return;
     }
     
-    if (draftTopics.some((topic) => topic.toLocaleLowerCase() === key)) return;
+    if (draftTopics.some((topic) => topic.toLocaleLowerCase() === key)) {
+      removeDraftTopic(clean);
+      return;
+    }
     draftTopics = [...draftTopics, clean];
   }
 
