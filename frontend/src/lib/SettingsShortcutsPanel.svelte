@@ -1,10 +1,10 @@
 <script lang="ts">
-  import { IconKeyboard } from './icons';
+  import { IconInfoCircle, IconKeyboard } from './icons';
 </script>
 
-<div class="shortcuts-guide" style="max-width: 1000px;">
-  <h4 class="settings-section-title" style="margin-bottom: 16px;">
-    <span style="margin-right: 6px; display: inline-block; vertical-align: text-bottom;">
+<div class="shortcuts-guide shortcuts-guide-wide">
+  <h4 class="settings-section-title">
+    <span class="settings-title-icon">
       <IconKeyboard size={14} />
     </span>
     Keyboard Shortcuts & Search Prefixes
@@ -28,7 +28,7 @@
     <!-- Console Commands Column -->
     <div class="shortcuts-column">
       <h5>Vault Commands (/)</h5>
-      <div class="shortcuts-list-scroll" style="display: flex; flex-direction: column; gap: 8px; max-height: 380px; overflow-y: auto; padding-right: 4px;">
+      <div class="shortcuts-list-scroll">
         <div class="shortcut-row"><span class="key">/grid</span><span class="desc">Switch Vault Grid</span></div>
         <div class="shortcut-row"><span class="key">/masonry</span><span class="desc">Switch Vault Masonry</span></div>
         <div class="shortcut-row"><span class="key">/zoom-in</span><span class="desc">Increase Tile Size</span></div>
@@ -55,8 +55,9 @@
       <div class="shortcut-row"><span class="key">t:</span><span class="desc">Topic Prefix</span></div>
       <div class="shortcut-row"><span class="key">#</span><span class="desc">WD Tag Prefix</span></div>
       
-      <div class="restart-banner" style="margin-top: 14px; padding: 10px; background: rgba(31, 111, 235, 0.03); border: 1px solid rgba(31, 111, 235, 0.1); border-radius: 6px; color: var(--text-muted); font-size: 11px; line-height: 1.4;">
-        💡 <strong>Quick tip:</strong> Type search prefixes inside the main search bar to filter by metadata categories instantly.
+      <div class="restart-banner settings-tip">
+        <IconInfoCircle size={12} />
+        <span><strong>Quick tip:</strong> Type search prefixes inside the main search bar to filter by metadata categories instantly.</span>
       </div>
     </div>
   </div>

@@ -10,12 +10,24 @@
   export let savedTopics: string[] = [];
   export let isAlreadyTopic: (value: string, saved: string[]) => boolean = () => false;
   export let isTagPromoted: (value: string, draft: string[], saved: string[]) => boolean = () => false;
+  export let promoteHandler: (value: string) => void = () => {};
+  export let removeTagHandler: (kind: 'rating' | 'character' | 'general', value: string) => void = () => {};
 
   const dispatch = createEventDispatcher();
 
   function countFor(value: string) {
     const count = wdTagCounts?.[value];
     return typeof count === 'number' && count > 0 ? count : null;
+  }
+
+  function promote(value: string) {
+    promoteHandler(value);
+    dispatch('promote', value);
+  }
+
+  function remove(kind: 'rating' | 'character' | 'general', value: string) {
+    removeTagHandler(kind, value);
+    dispatch('remove', { kind, value });
   }
 </script>
 
@@ -34,8 +46,8 @@
         interactive
         title={isAlreadyTopic(rating, savedTopics) ? "Already a topic" : "Promote to topic"}
         removeTitle="Remove WD tag"
-        on:activate={() => dispatch('promote', rating)}
-        on:remove={() => dispatch('remove', { kind: 'rating', value: rating })}
+        activateHandler={() => promote(rating)}
+        removeHandler={() => remove('rating', rating)}
       />
     {/if}
 
@@ -49,8 +61,8 @@
         interactive
         title={isAlreadyTopic(tag, savedTopics) ? "Already a topic" : "Promote to topic"}
         removeTitle="Remove WD tag"
-        on:activate={() => dispatch('promote', tag)}
-        on:remove={() => dispatch('remove', { kind: 'character', value: tag })}
+        activateHandler={() => promote(tag)}
+        removeHandler={() => remove('character', tag)}
       />
     {/each}
 
@@ -64,8 +76,8 @@
         interactive
         title={isAlreadyTopic(tag, savedTopics) ? "Already a topic" : "Promote to topic"}
         removeTitle="Remove WD tag"
-        on:activate={() => dispatch('promote', tag)}
-        on:remove={() => dispatch('remove', { kind: 'general', value: tag })}
+        activateHandler={() => promote(tag)}
+        removeHandler={() => remove('general', tag)}
       />
     {/each}
   </div>

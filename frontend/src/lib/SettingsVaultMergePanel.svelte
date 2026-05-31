@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { IconMerge } from './icons';
+  import { IconChart, IconMerge } from './icons';
   export let vaults: any[] = [];
   export let mergeTargetId = '';
   export let mergeSourceIds: string[] = [];
@@ -12,29 +12,29 @@
   export let checkedValue: (event: Event) => boolean;
 </script>
 
-<div class="vault-tool-panel" style="margin-top: 0;">
+<div class="vault-tool-panel vault-tool-panel-first">
   <h4 class="settings-section-title">
-    <span style="margin-right: 6px; display: inline-block; vertical-align: text-bottom;">
+    <span class="settings-title-icon">
       <IconMerge size={14} />
     </span>
     Merge Vaults
   </h4>
-  <div class="micro-desc" style="margin-bottom: 12px;">Merge media items, tags, and notes from source vaults into a target vault. Sources remain completely untouched.</div>
+  <div class="micro-desc settings-block-desc">Merge media items, tags, and notes from source vaults into a target vault. Sources remain completely untouched.</div>
   
-  <div class="vault-tool-row" style="margin-bottom: 12px;">
+  <div class="vault-tool-row settings-row-spaced">
     <select bind:value={mergeTargetId} on:change={() => { mergeSourceIds = mergeSourceIds.filter((id) => id !== mergeTargetId); mergePreview = null; }}>
       {#each vaults as vault}
         <option value={vault.id}>Target: {vault.name}</option>
       {/each}
     </select>
-    <button type="button" on:click={onPreviewVaultMerge} disabled={mergeBusy || !mergeTargetId || !mergeSourceIds.length} style="font-weight: 600;">Preview Merge</button>
-    <button type="button" class="primary" on:click={onConfirmVaultMerge} disabled={mergeBusy || !mergeTargetId || !mergeSourceIds.length} style="font-weight: 600;">Merge Vaults</button>
+    <button class="settings-bold-button" type="button" on:click={onPreviewVaultMerge} disabled={mergeBusy || !mergeTargetId || !mergeSourceIds.length}>Preview Merge</button>
+    <button class="primary settings-bold-button" type="button" on:click={onConfirmVaultMerge} disabled={mergeBusy || !mergeTargetId || !mergeSourceIds.length}>Merge Vaults</button>
   </div>
 
-  <span style="font-size: 11px; letter-spacing: 0.5px; color: var(--text-muted);">Select Source Vaults</span>
+  <span class="settings-mini-label settings-source-label">Select Source Vaults</span>
   <div class="chip-group">
     {#each vaults as vault}
-      <label class="vault-source-chip" class:active={mergeSourceIds.includes(vault.id)} style={vault.id === mergeTargetId ? 'opacity: 0.45; cursor: not-allowed; pointer-events: none;' : ''}>
+      <label class="vault-source-chip" class:active={mergeSourceIds.includes(vault.id)} class:target-disabled={vault.id === mergeTargetId}>
         <input
           type="checkbox"
           disabled={mergeBusy || vault.id === mergeTargetId}
@@ -47,16 +47,17 @@
   </div>
 
   {#if mergePreview}
-    <div class="workspace-note" style="padding: 10px 12px; background: rgba(31, 111, 235, 0.04); border: 1px solid rgba(31, 111, 235, 0.15); border-radius: 6px; color: var(--text-bright); font-family: 'Consolas', monospace; font-size: 11px; display: inline-block;">
-      📊 Import preview: 
+    <div class="workspace-note merge-preview">
+      <IconChart size={12} />
+      <span>Import preview:</span>
       <strong>{Number(mergePreview.total_items || 0).toLocaleString()}</strong> total items | 
       <strong>{Number(mergePreview.duplicates || 0).toLocaleString()}</strong> duplicates | 
-      <strong style="color: var(--accent-success);">{Number(mergePreview.importable || 0).toLocaleString()}</strong> importable
+      <strong class="text-success">{Number(mergePreview.importable || 0).toLocaleString()}</strong> importable
     </div>
   {/if}
   
   {#if mergeResult}
-    <div class="workspace-result" style="margin-top: 10px; padding: 6px 12px; border-radius: 4px; background: var(--bg-panel); border: 1px solid var(--border-dim); color: var(--text-bright); font-family: 'Consolas', monospace; font-size: 11px;">
+    <div class="workspace-result settings-result">
       {mergeResult}
     </div>
   {/if}

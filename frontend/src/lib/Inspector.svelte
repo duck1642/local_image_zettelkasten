@@ -288,10 +288,7 @@
       return;
     }
     
-    if (draftTopics.some((topic) => topic.toLocaleLowerCase() === key)) {
-      removeDraftTopic(clean);
-      return;
-    }
+    if (draftTopics.some((topic) => topic.toLocaleLowerCase() === key)) return;
     draftTopics = [...draftTopics, clean];
   }
 
@@ -718,8 +715,8 @@
           {savedTopics}
           {isAlreadyTopic}
           {isTagPromoted}
-          on:promote={(event) => promoteWdToTopic(event.detail)}
-          on:remove={(event) => removeDraftWdTag(event.detail.kind, event.detail.value)}
+          promoteHandler={promoteWdToTopic}
+          removeTagHandler={removeDraftWdTag}
         />
 
         <div class="action-footer">

@@ -76,6 +76,139 @@
     font-size: 14px;
   }
 
+  .settings-page-title,
+  .settings-title-inline {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .settings-page-title {
+    margin: 0;
+  }
+
+  .settings-title-icon,
+  .settings-button-icon,
+  .settings-status-icon {
+    display: inline-flex;
+    align-items: center;
+  }
+
+  .settings-title-icon {
+    margin-right: 6px;
+    vertical-align: text-bottom;
+  }
+
+  .settings-status-icon.warning {
+    color: var(--accent-warning);
+  }
+
+  .settings-status-icon.success {
+    color: var(--accent-success);
+  }
+
+  .settings-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+  }
+
+  .settings-panel-header .settings-section-title {
+    margin: 0;
+  }
+
+  .settings-inline-banner {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 12px;
+    padding: 8px 12px;
+    background: rgba(210, 153, 34, 0.05);
+    border: 1px solid rgba(210, 153, 34, 0.15);
+    border-radius: 6px;
+  }
+
+  .settings-code,
+  .settings-mono-input {
+    font-family: 'Consolas', monospace;
+    font-size: 11px;
+  }
+
+  .settings-result {
+    margin-top: 10px;
+    padding: 6px 12px;
+    border-radius: 4px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border-dim);
+    color: var(--text-bright);
+    font-family: 'Consolas', monospace;
+    font-size: 11px;
+  }
+
+  .settings-small-action,
+  .settings-icon-button,
+  .settings-bold-button {
+    font-weight: 600;
+  }
+
+  .settings-small-action,
+  .settings-icon-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    justify-content: center;
+  }
+
+  .settings-small-action {
+    padding: 5px 12px;
+    font-size: 11px;
+  }
+
+  .settings-row-main {
+    gap: 6px;
+  }
+
+  .settings-row-title {
+    display: flex !important;
+    align-items: center;
+    gap: 8px;
+    flex-direction: row !important;
+    min-width: 0;
+    flex-wrap: wrap;
+  }
+
+  .settings-row-name {
+    color: var(--text-bright);
+    font-size: 13px;
+  }
+
+  .settings-subsection-muted {
+    margin-top: 20px;
+    color: var(--text-muted);
+  }
+
+  .settings-dashed-panel {
+    background: rgba(255, 255, 255, 0.01);
+    border: 1px dashed var(--border-dim);
+    border-radius: 6px;
+    padding: 12px;
+    margin-top: 4px;
+  }
+
+  .settings-add-vault {
+    grid-template-columns: minmax(0, 1.4fr) 130px;
+  }
+
+  .settings-list-spacing {
+    margin-bottom: 16px;
+  }
+
+  .settings-row-compact {
+    padding: 10px 12px;
+    border-radius: 6px;
+  }
+
   .workspace-panel h4 {
     margin: 0 0 12px 0;
     color: var(--text-bright);
@@ -123,6 +256,17 @@
     border-top: 1px solid var(--border-dim);
   }
 
+  .settings-workspace-actions {
+    margin-top: 18px;
+    padding-top: 16px;
+  }
+
+  .settings-flat-actions {
+    margin-top: 0;
+    padding-top: 0;
+    border-top: 0;
+  }
+
   .workspace-panel > .workspace-actions:first-child,
   .settings-tools-panel > .vault-tool-panel:first-of-type {
     margin-top: 0;
@@ -165,6 +309,10 @@
     flex-direction: row;
     gap: 6px;
     justify-content: flex-end;
+  }
+
+  .row-actions-centered {
+    align-items: center;
   }
 
   .row-actions button {
@@ -238,6 +386,10 @@
     max-width: 600px;
   }
 
+  .shortcuts-guide-wide {
+    max-width: 1000px;
+  }
+
   .maintenance-panel {
     margin-top: 0;
     display: inline-block;
@@ -255,6 +407,16 @@
     padding-top: 0;
   }
 
+  .vault-tool-panel-first {
+    margin-top: 0;
+  }
+
+  .vault-tool-panel-separated {
+    margin-top: 24px;
+    padding-top: 18px;
+    border-top: 1px solid var(--border-dim);
+  }
+
   .vault-tool-panel h5 {
     margin: 0 0 8px 0;
     color: var(--text-bright);
@@ -270,6 +432,61 @@
 
   .vault-package-row {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .settings-row-spaced {
+    margin-bottom: 12px;
+  }
+
+  .settings-row-spaced-large {
+    margin-bottom: 16px;
+  }
+
+  .settings-block-desc {
+    margin-bottom: 12px;
+  }
+
+  .settings-mini-label {
+    display: block;
+    margin-top: 18px;
+    margin-bottom: 6px;
+    color: var(--text-muted);
+    font-size: 11px;
+    letter-spacing: 0.5px;
+  }
+
+  .settings-source-label {
+    display: inline-block;
+    margin-top: 0;
+    margin-bottom: 0;
+  }
+
+  .settings-import-row {
+    background: rgba(255, 255, 255, 0.01);
+    border: 1px dashed var(--border-dim);
+    border-radius: 6px;
+    padding: 12px;
+  }
+
+  .merge-preview,
+  .health-result {
+    color: var(--text-bright);
+    font-family: 'Consolas', monospace;
+    font-size: 11px;
+  }
+
+  .merge-preview {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 12px;
+    background: rgba(31, 111, 235, 0.04);
+    border: 1px solid rgba(31, 111, 235, 0.15);
+    border-radius: 6px;
+  }
+
+  .text-success {
+    color: var(--accent-success);
   }
 
   .merge-source-list {
@@ -731,6 +948,36 @@
     color: var(--accent-warning);
   }
 
+  .health-status-text {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .health-status-icon {
+    display: inline-flex;
+    align-items: center;
+    margin-right: 4px;
+  }
+
+  .health-status-icon.healthy {
+    color: var(--accent-success);
+  }
+
+  .health-status-icon.warning {
+    color: var(--accent-warning);
+  }
+
+  .health-status-icon.danger {
+    color: var(--accent-danger);
+  }
+
+  .vault-source-chip.target-disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    pointer-events: none;
+  }
+
   /* Maintenance Cards */
   .maintenance-cards {
     display: flex;
@@ -753,6 +1000,28 @@
   .maintenance-card button {
     margin: 0;
     font-weight: 600;
+  }
+
+  .maintenance-card.expanded {
+    align-items: flex-start;
+    padding-top: 14px;
+    padding-bottom: 14px;
+  }
+
+  .maintenance-card-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .maintenance-card-copy.wide {
+    width: 100%;
+  }
+
+  .maintenance-card-title {
+    font-weight: 600;
+    color: var(--text-bright);
+    font-size: 12px;
   }
 
   /* Shortcuts redesigned grid */
@@ -825,4 +1094,26 @@
   .health-modal .health-detail::-webkit-scrollbar-thumb:hover,
   .shortcuts-list-scroll::-webkit-scrollbar-thumb:hover {
     background: #484f58;
+  }
+
+  .shortcuts-list-scroll {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 380px;
+    overflow-y: auto;
+    padding-right: 4px;
+  }
+
+  .settings-tip {
+    display: flex;
+    gap: 6px;
+    margin-top: 14px;
+    padding: 10px;
+    background: rgba(31, 111, 235, 0.03);
+    border: 1px solid rgba(31, 111, 235, 0.1);
+    border-radius: 6px;
+    color: var(--text-muted);
+    font-size: 11px;
+    line-height: 1.4;
   }

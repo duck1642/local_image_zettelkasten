@@ -53,7 +53,7 @@
 
 <div class="section-card">
   <h4 class="settings-section-title">
-    <span style="margin-right: 6px; display: inline-block; vertical-align: text-bottom;">
+    <span class="settings-title-icon">
       <IconSparkles size={14} />
     </span>
     AI Tagging Engine
@@ -123,14 +123,14 @@
 </div>
 
 <div class="save-bar" class:dirty={$configDirty}>
-  <div class="save-info" style="display: flex; align-items: center; gap: 6px;">
+  <div class="save-info settings-title-inline">
     {#if $configDirty}
-      <span style="color: var(--accent-warning); display: inline-flex; align-items: center;">
+      <span class="settings-status-icon warning">
         <IconAlertTriangle size={13} />
       </span>
       <span class="status-label unsaved">You have unsaved changes.</span>
     {:else}
-      <span style="color: var(--accent-success); display: inline-flex; align-items: center;">
+      <span class="settings-status-icon success">
         <IconCheckCircle size={13} />
       </span>
       <span class="micro-desc">All system configurations are up-to-date.</span>
@@ -140,4 +140,3 @@
     {$configSaving ? 'Saving...' : 'Save Settings'}
   </button>
 </div>
-

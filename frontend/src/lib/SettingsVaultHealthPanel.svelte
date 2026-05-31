@@ -22,42 +22,42 @@
   $: hasIssues = healthReport ? (healthReport.issue_count > 0) : false;
 </script>
 
-<div class="vault-tool-panel" style="margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--border-dim);">
+<div class="vault-tool-panel vault-tool-panel-separated">
   <h4 class="settings-section-title">
-    <span style="margin-right: 6px; display: inline-block; vertical-align: text-bottom;">
+    <span class="settings-title-icon">
       <IconAlertTriangle size={14} />
     </span>
     Vault Health & Portability
   </h4>
-  <div class="micro-desc" style="margin-bottom: 12px;">Audit files, detect stale entries, quarantine orphaned records, and perform backups/restores.</div>
+  <div class="micro-desc settings-block-desc">Audit files, detect stale entries, quarantine orphaned records, and perform backups/restores.</div>
   
-  <div class="vault-tool-row" style="margin-bottom: 16px;">
+  <div class="vault-tool-row settings-row-spaced-large">
     <select bind:value={healthVaultId}>
       {#each vaults as vault}
         <option value={vault.id}>Vault: {vault.name}</option>
       {/each}
     </select>
-    <button type="button" on:click={onAuditVaultHealth} disabled={healthBusy || !healthVaultId} style="font-weight: 600;">Audit Health</button>
-    <button type="button" class="primary" on:click={onRepairVaultHealth} disabled={healthBusy || !healthVaultId || healthVaultId !== vaultActive} style="font-weight: 600;">Repair Active Vault</button>
+    <button class="settings-bold-button" type="button" on:click={onAuditVaultHealth} disabled={healthBusy || !healthVaultId}>Audit Health</button>
+    <button class="primary settings-bold-button" type="button" on:click={onRepairVaultHealth} disabled={healthBusy || !healthVaultId || healthVaultId !== vaultActive}>Repair Active Vault</button>
   </div>
 
   {#if healthReport}
     <div class="health-scorecard">
-      <div class="health-scorecard-header" class:healthy={!hasIssues} class:warning={hasIssues && healthReport.issue_count < 10} class:danger={hasIssues && healthReport.issue_count >= 10} style="display: flex; align-items: center; justify-content: space-between;">
-        <span style="display: flex; align-items: center; gap: 6px;">
+      <div class="health-scorecard-header" class:healthy={!hasIssues} class:warning={hasIssues && healthReport.issue_count < 10} class:danger={hasIssues && healthReport.issue_count >= 10}>
+        <span class="health-status-text">
           {#if !hasIssues}
-            <span style="color: var(--accent-success); display: inline-flex; align-items: center; margin-right: 4px;">
+            <span class="health-status-icon healthy">
               <IconCheckCircle size={14} />
             </span>
             Vault Health Check: Healthy & Consistent
           {:else}
-            <span style="color: {healthReport.issue_count < 10 ? 'var(--accent-warning)' : 'var(--accent-danger)'}; display: inline-flex; align-items: center; margin-right: 4px;">
+            <span class="health-status-icon" class:warning={healthReport.issue_count < 10} class:danger={healthReport.issue_count >= 10}>
               <IconAlertTriangle size={14} />
             </span>
             Vault Health Check: Attention Required ({Number(healthReport.issue_count || 0).toLocaleString()} issue{healthReport.issue_count === 1 ? '' : 's'} found)
           {/if}
         </span>
-        <button type="button" class="compact-action" on:click={() => healthDetailsOpen = true} style="font-weight: 600;">
+        <button type="button" class="compact-action settings-bold-button" on:click={() => healthDetailsOpen = true}>
           Inspect Issues
         </button>
       </div>
@@ -88,37 +88,36 @@
   {/if}
 
   {#if healthResult}
-    <div class="workspace-result" style="margin-bottom: 14px; padding: 6px 12px; border-radius: 4px; background: var(--bg-panel); border: 1px solid var(--border-dim); color: var(--text-bright); font-family: 'Consolas', monospace; font-size: 11px;">
+    <div class="workspace-result settings-result health-result">
       {healthResult}
     </div>
   {/if}
 
-  <span style="font-size: 11px; letter-spacing: 0.5px; color: var(--text-muted); display: block; margin-top: 18px; margin-bottom: 6px;">Backup & Portability Packager</span>
+  <span class="settings-mini-label">Backup & Portability Packager</span>
   
-  <div class="vault-tool-row vault-package-row" style="margin-bottom: 12px;">
-    <button type="button" on:click={() => onBackupVault('backup')} disabled={healthBusy || !healthVaultId} style="font-weight: 600; display: inline-flex; align-items: center; gap: 4px;">
+  <div class="vault-tool-row vault-package-row settings-row-spaced">
+    <button class="settings-icon-button" type="button" on:click={() => onBackupVault('backup')} disabled={healthBusy || !healthVaultId}>
       <IconCopy size={11} />
       Backup Vault Folder
     </button>
-    <button type="button" on:click={() => onBackupVault('export')} disabled={healthBusy || !healthVaultId} style="font-weight: 600; display: inline-flex; align-items: center; gap: 4px;">
+    <button class="settings-icon-button" type="button" on:click={() => onBackupVault('export')} disabled={healthBusy || !healthVaultId}>
       <IconFileText size={11} />
       Export Vault Database
     </button>
   </div>
 
-  <div class="vault-tool-row" style="background: rgba(255, 255, 255, 0.01); border: 1px dashed var(--border-dim); border-radius: 6px; padding: 12px;">
-    <input type="text" placeholder="Path to imported .zip vault package" bind:value={importPackagePath} style="font-family: 'Consolas', monospace;" />
+  <div class="vault-tool-row settings-import-row">
+    <input class="settings-mono-input" type="text" placeholder="Path to imported .zip vault package" bind:value={importPackagePath} />
     <input type="text" placeholder="Imported vault display name" bind:value={importVaultName} />
-    <button type="button" on:click={onImportVaultPackage} disabled={healthBusy || !importPackagePath.trim()} style="font-weight: 600; display: inline-flex; align-items: center; gap: 4px; justify-content: center;">
+    <button class="settings-icon-button" type="button" on:click={onImportVaultPackage} disabled={healthBusy || !importPackagePath.trim()}>
       <IconPlus size={11} />
       Import Vault
     </button>
   </div>
 
   {#if backupResult}
-    <div class="workspace-result" style="margin-top: 10px; padding: 6px 12px; border-radius: 4px; background: var(--bg-panel); border: 1px solid var(--border-dim); color: var(--text-bright); font-family: 'Consolas', monospace; font-size: 11px;">
+    <div class="workspace-result settings-result">
       {backupResult}
     </div>
   {/if}
 </div>
-

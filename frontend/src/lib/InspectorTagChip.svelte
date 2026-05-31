@@ -13,47 +13,81 @@
   export let renameable = false;
   export let removeTitle = 'Remove tag';
   export let renameTitle = 'Rename tag';
+  export let activateHandler: (() => void) | undefined = undefined;
+  export let removeHandler: (() => void) | undefined = undefined;
+  export let renameHandler: (() => void) | undefined = undefined;
 
   const dispatch = createEventDispatcher<{
     activate: void;
     remove: void;
     rename: void;
   }>();
+  let pointerActivated = false;
 
   function activate() {
     if (!interactive) return;
+    activateHandler?.();
     dispatch('activate');
   }
 
-  function handleKeydown(event: KeyboardEvent) {
-    if (!interactive) return;
-    if (event.key !== 'Enter' && event.key !== ' ') return;
-    event.preventDefault();
-    dispatch('activate');
+  function activatePointer(event: PointerEvent) {
+    if (!interactive || event.button !== 0) return;
+    if ((event.target as HTMLElement | null)?.closest('.chip-action')) return;
+    pointerActivated = true;
+    activate();
+  }
+
+  function activateClick() {
+    if (pointerActivated) {
+      pointerActivated = false;
+      return;
+    }
+    activate();
+  }
+
+  function stopActionPointer(event: PointerEvent) {
+    event.stopPropagation();
   }
 
   function emitAction(event: Event, action: 'remove' | 'rename') {
     event.preventDefault();
     event.stopPropagation();
+    if (action === 'remove') removeHandler?.();
+    if (action === 'rename') renameHandler?.();
     dispatch(action);
   }
 </script>
 
-<!-- svelte-ignore a11y-no-noninteractive-tabindex -->
-<!-- svelte-ignore a11y-no-noninteractive-element-to-interactive-role -->
+<!-- svelte-ignore a11y-click-events-have-key-events -->
+<!-- svelte-ignore a11y-no-static-element-interactions -->
 <span
   class="tag-chip {kind}"
   class:promoted
   class:clickable
-  role={interactive ? 'button' : undefined}
-  tabindex={interactive ? 0 : undefined}
-  title={title || undefined}
-  on:click={activate}
-  on:keydown={handleKeydown}
+  class:has-actions={removable || renameable}
+  class:has-two-actions={removable && renameable}
+  title={interactive ? undefined : title || undefined}
+  on:pointerdown={activatePointer}
+  on:click={activateClick}
 >
-  <span class="tag-label">{label}</span>
-  {#if count}
-    <span class="tag-count">{count}</span>
+  {#if interactive}
+    <button
+      class="chip-main"
+      type="button"
+      title={title || undefined}
+    >
+      <span class="tag-label">{label}</span>
+      {#if count}
+        <span class="tag-count">{count}</span>
+      {/if}
+    </button>
+  {:else}
+    <span class="chip-main">
+      <span class="tag-label">{label}</span>
+      {#if count}
+        <span class="tag-count">{count}</span>
+      {/if}
+    </span>
   {/if}
   {#if renameable}
     <button
@@ -61,6 +95,7 @@
       type="button"
       title={renameTitle}
       aria-label={renameTitle}
+      on:pointerdown={stopActionPointer}
       on:click={(event) => emitAction(event, 'rename')}
     >
       <IconPencil size={10} />
@@ -72,6 +107,7 @@
       type="button"
       title={removeTitle}
       aria-label={removeTitle}
+      on:pointerdown={stopActionPointer}
       on:click={(event) => emitAction(event, 'remove')}
     >
       <IconTrash size={10} />
@@ -110,6 +146,26 @@
 
   .tag-chip.clickable { cursor: pointer; }
 
+  .chip-main {
+      display: inline-flex;
+      align-items: center;
+      height: 100%;
+      min-width: 0;
+      margin: 0;
+      padding: 0;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      cursor: inherit;
+  }
+
+  button.chip-main:focus-visible {
+      outline: 1px solid var(--accent-primary);
+      outline-offset: -2px;
+  }
+
   .tag-label {
       display: flex;
       align-items: center;
@@ -146,15 +202,16 @@
       color: var(--text-muted);
       cursor: pointer;
       opacity: 0;
+      pointer-events: none;
       border-radius: 0 !important;
       box-sizing: border-box !important;
-      transition: width 0.12s ease, opacity 0.12s ease;
   }
 
   .tag-chip:hover .chip-action,
   .tag-chip:focus-within .chip-action {
       width: 24px;
       opacity: 1;
+      pointer-events: auto;
       border: none !important;
       border-left: 1px solid var(--chip-border) !important;
       color: var(--text-muted);
@@ -163,11 +220,6 @@
   .tag-chip:hover .chip-rename + .chip-remove,
   .tag-chip:focus-within .chip-rename + .chip-remove {
       margin-left: 0 !important;
-  }
-
-  .tag-chip:hover .tag-count,
-  .tag-chip:focus-within .tag-count {
-      margin-right: 2px;
   }
 
   .chip-remove:hover {

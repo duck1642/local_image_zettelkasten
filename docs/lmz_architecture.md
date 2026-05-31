@@ -144,6 +144,8 @@ Repeatable validation across the other domains.
 - Frontend Playwright tests.
 - Mock vault fixtures.
 - Generated large-vault fixtures.
+- Generated-vault generator and perf harnesses under `tests/generators/` and `tests/perf/`.
+- Generated vaults and perf results are disposable ignored artifacts.
 - Real-vault smoke checklists.
 - Performance baselines.
 - Regression scenarios for review, ingest, search, and packaging.
@@ -268,6 +270,10 @@ local_media_zettelkasten/
     frontend/
     fixtures/
       mock-vault/
+    generators/
+    generated/
+    perf/
+    perf-results/
     *.bat
   data/
     workspace.db
@@ -299,7 +305,6 @@ local_media_zettelkasten/
 
 ## Entry Points
 
-- `start-lmz.bat` prompts for a registered workspace before startup.
 - `python dev.py` launches the development stack.
 - `python main.py` runs CLI ingestion.
 - `lmz` runs the installed CLI entry point.
@@ -316,6 +321,8 @@ local files / native drag-drop / markdown URL queues / Tauri UI actions
         |
         v
 backend/core.py / backend/queue_service.py / backend/web_api.py
+        |
+        +--> queue parser: URLs plus optional user metadata directives
         |
         +--> backend/external_ingestion.py
         |       +--> gallery-dl wrapper
@@ -407,6 +414,8 @@ Markdown asset links are relative to sharded notes:
 - `items.storage_id`: internal physical filename identity.
 - Markdown frontmatter: source of truth for manual `title`, `topics`, distilled `wd_rating`, `wd_character_tags`, and `wd_tags`.
 - Markdown mirrors SQLite-owned artist/platform/source/date fields for readability; online scrapers do not own artist/title metadata.
+- Explicit user-provided artist/platform metadata from queue directives or local ingest defaults is app-owned item metadata.
+- Downloader/scraper metadata is limited to online identity fields such as `source_url` and inferred `platform`; scraper artist/title is not trusted.
 - WD JSON cache: detailed local WD tag report, including scores and frame-level video tag data. Used as fallback only when YAML has no WD fields.
 - Topic markdown files under `data/topics/`: shared topic library. Item notes store relative links to these files when topics are created or saved through LMZ.
 
@@ -505,6 +514,7 @@ Core API areas:
 - Logs: SSE streaming, log open, log clear, frontend UI log ingest.
 - Auth status: `/api/auth/scan` writes credential availability checks to `auth.jsonl`.
 - Queue ingestion: queue read/write/parse/open/retry/clear/start.
+  - Parse preview uses the shared queue parser and returns URL count, groups, entries, and warnings.
 - Local ingestion: local start/status/retry plus drag-drop preflight through `/api/local-ingest/drop-intake`.
 - Review workflow: review count, review item list, review actions.
 - Review cleanup: `/api/review/cleanup`.
@@ -547,8 +557,8 @@ Top-level structure:
   - `InspectorTagChip.svelte`: shared Inspector chip UI with local icons and color semantics.
 - `MediaFocus.svelte`: wide/fullscreen media view, grouped navigation, filmstrip, fullscreen zoom/pan.
 - `Ingestion.svelte`: ingestion page shell and mode switcher.
-  - `OnlineIngestion.svelte`: markdown URL queue editor, directive suggestions, parser preview/warnings, queue runner, and ingestion monitor.
-  - `LocalIngestion.svelte`: local file/folder staging, artist autocomplete, platform selection, drag-drop intake, and local run status.
+  - `OnlineIngestion.svelte`: markdown URL queue editor, `@artist:` / `@platform:` directive suggestions, grouped parser preview, warning line gutter, syntax help, queue runner, and ingestion monitor.
+  - `LocalIngestion.svelte`: local file/folder staging, artist autocomplete, platform selection, drag-drop intake, and local run status. The local UI currently treats source URL as empty/local.
   - `ingestion.css`: shared ingestion layout, editor, splitter, dropdown, preview, monitor, and local staging styles.
 - `ReviewView.svelte`: duplicate/review workflow orchestration.
   - `ReviewWorkspace.svelte`: current review comparison UI.
@@ -697,7 +707,6 @@ Refinement still expected:
 
 - `config/workspaces.yaml` stores registered workspaces and active workspace.
 - `LMZ_CONFIG_PATH` overrides the registry.
-- `start-lmz.bat` can prompt for the workspace.
 - Settings can register Obsidian workspaces and switch the active workspace dynamically when runtime preflight allows it.
 
 Each workspace has a `config.yaml` with one active vault:
@@ -714,6 +723,15 @@ Vault switching is dynamic through Settings/API when runtime preflight allows it
 External ingestion is platform-aware and batch-safe for multi-media posts.
 
 Local ingestion stages files under the active vault's `local_ingest/{run_id}/` before processing. Native drag/drop first calls the backend drop-intake preflight endpoint, then switches the UI to Local Ingestion with accepted paths staged for manual start. Re-dropping a file already pending in Review is guarded by the review sidecar hash and is reported as already pending instead of inserting or creating another review copy.
+
+Markdown URL queues support lightweight metadata groups:
+
+- `@artist: name`
+- `@platform: name`
+- `---` group separator
+- full-line `#` comments
+
+Inline comments are unsupported and produce parser warnings. Deferred queue rewrites preserve remaining grouped artist/platform metadata.
 
 Protected batch platforms:
 
@@ -849,7 +867,8 @@ Known packaging caveat:
 
 - Keep runtime data out of source.
 - Keep credentials under `secrets/`.
-- Keep `backups/` and `docs/` local/ignored.
+- Keep `backups/`, generated test vaults, and perf outputs local/ignored.
+- Keep `docs/` tracked as the durable project handoff.
 - Keep runtime workspace configs and `config/workspaces.yaml` untracked.
 - Keep active-vault data isolated under `data/vaults/<vault_id>/`.
 - Keep workspace metadata dictionaries shared per workspace, not per vault.

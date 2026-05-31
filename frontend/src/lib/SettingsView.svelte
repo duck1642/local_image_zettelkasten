@@ -506,8 +506,8 @@
     <div class="centered">Loading...</div>
   {:else}
     <div class="header-row">
-      <h3 style="display: flex; align-items: center; gap: 8px;">
-        <span style="color: var(--text-bright); display: inline-flex; align-items: center;">
+      <h3 class="settings-page-title">
+        <span class="settings-status-icon">
           <IconSettings size={18} />
         </span>
         System Settings
@@ -561,7 +561,7 @@
       </div>
     {:else if activeSettingsTab === 'maintenance'}
       <h4 class="settings-section-title">
-        <span style="margin-right: 6px; display: inline-block; vertical-align: text-bottom;">
+        <span class="settings-title-icon">
           <IconMerge size={14} />
         </span>
         Vault Tools

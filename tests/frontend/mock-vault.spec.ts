@@ -695,7 +695,7 @@ test('artist edit refreshes tile while source URL and platform stay read-only', 
   await expect(page.locator('aside.inspector')).toContainText('Platform');
   await expect(page.locator('aside.inspector input#inspector-platform')).toHaveCount(0);
   await page.getByLabel('Artist').fill(String(manifest.expectations.editedArtist));
-  await page.getByRole('button', { name: 'Save Changes' }).click();
+  await page.getByRole('button', { name: 'Save' }).click();
 
   await expect(page.getByText(String(manifest.expectations.editedArtist))).toBeVisible();
   await expect(page.getByLabel('Artist')).toHaveValue(String(manifest.expectations.editedArtist));
@@ -737,17 +737,17 @@ test('inspector drafts WD promotion and removal until save', async ({ page }) =>
   const inspector = page.locator('aside.inspector');
   const visualTag = inspector.locator('.tag-chip.visual').filter({ hasText: 'mock_tag' });
 
-  await visualTag.click();
+  await visualTag.getByRole('button', { name: /mock_tag/ }).click();
   await expect(inspector.locator('.tag-chip.topic').filter({ hasText: 'mock_tag' })).toBeVisible();
   await expect(inspector.getByRole('button', { name: 'Revert' })).toBeVisible();
-  await expect(inspector.getByRole('button', { name: 'Save Changes' })).toBeEnabled();
+  await expect(inspector.getByRole('button', { name: 'Save' })).toBeEnabled();
   expect(patches).toHaveLength(0);
 
   await visualTag.hover();
   await visualTag.getByTitle('Remove WD tag').click();
   await expect(inspector.locator('.tag-chip.visual').filter({ hasText: 'mock_tag' })).toHaveCount(0);
 
-  await inspector.getByRole('button', { name: 'Save Changes' }).click();
+  await inspector.getByRole('button', { name: 'Save' }).click();
   await expect.poll(() => patches.length).toBe(1);
   expect(patches[0]).toMatchObject({
     topics: ['mock-topic', 'mock_tag'],
@@ -780,7 +780,7 @@ test('masonry keeps current data after metadata update cache reuse', async ({ pa
 
   await page.getByText('Mock Solo').click();
   await page.getByLabel('Artist').fill('Cache Fresh Artist');
-  await page.getByRole('button', { name: 'Save Changes' }).click();
+  await page.getByRole('button', { name: 'Save' }).click();
   await page.getByTestId('virtual-scroller').evaluate((node) => {
     const el = node as HTMLElement;
     el.scrollTop = 200;
@@ -997,7 +997,7 @@ test('settings maintenance actions call existing endpoints and show compact stat
   await page.getByRole('button', { name: /Settings/ }).click();
   await page.getByRole('button', { name: 'Maintenance' }).click();
   await page.getByRole('button', { name: 'Auth Scan' }).click();
-  await page.getByRole('button', { name: 'Rebuild Metadata Index' }).click();
+  await page.getByRole('button', { name: 'Rebuild Index' }).click();
   await page.getByRole('button', { name: 'Cleanup Review' }).click();
 
   await expect(page.locator('.maintenance-status')).toContainText(['OK (available)', 'started', 'cleaned 0, failed 0']);
@@ -1009,7 +1009,7 @@ test('settings shows workspace paths from config runtime metadata', async ({ pag
   await page.getByRole('button', { name: /Settings/ }).click();
   await page.getByRole('button', { name: 'Workspace' }).click();
 
-  await expect(page.getByText('Obsidian workspace')).toBeVisible();
+  await expect(page.getByText('Obsidian workspace', { exact: true })).toBeVisible();
   await expect(page.getByText('C:/ObsidianVault/lmz/config.yaml').first()).toBeVisible();
   await expect(page.getByText('C:/ObsidianVault/lmz/data/topics')).toBeVisible();
 });
@@ -1024,10 +1024,10 @@ test('settings registers and activates workspaces for next restart', async ({ pa
 
   await expect(page.getByText('Default').first()).toBeVisible();
   await page.getByRole('button', { name: 'Activate' }).first().click();
-  await expect(page.getByText('Restart required to use the selected workspace.')).toBeVisible();
+  await expect(page.getByText('Restart required to apply changes to the active workspace.')).toBeVisible();
 
-  await page.getByPlaceholder('Obsidian vault path').fill('F:/Archive/Main');
-  await page.getByPlaceholder('Workspace name').fill('Main Vault');
+  await page.getByPlaceholder('Full path to Obsidian vault').fill('F:/Archive/Main');
+  await page.getByPlaceholder('Workspace label').fill('Main Vault');
   await page.getByRole('button', { name: 'Add Obsidian' }).click();
 
   await expect(page.getByText('Main Vault')).toBeVisible();
@@ -1046,21 +1046,21 @@ test('settings previews vault merge and runs vault health package actions', asyn
   await page.getByRole('button', { name: /Settings/ }).click();
   await page.getByRole('button', { name: 'Maintenance' }).click();
 
-  await page.getByRole('checkbox', { name: 'Archive' }).check();
+  await page.locator('.vault-source-chip').filter({ hasText: 'Archive' }).click();
   await page.getByRole('button', { name: 'Preview Merge' }).click();
   await expect(page.getByText('1 importable').first()).toBeVisible();
-  await page.getByRole('button', { name: 'Merge', exact: true }).click();
+  await page.getByRole('button', { name: 'Merge Vaults' }).click();
   await expect(page.getByText('merged 1 items')).toBeVisible();
 
-  await page.getByRole('button', { name: 'Audit Vault Health' }).click();
+  await page.getByRole('button', { name: 'Audit Health' }).click();
   await expect(page.getByText('3 issues').first()).toBeVisible();
   await page.getByRole('button', { name: 'Repair Active Vault' }).click();
   await expect(page.getByText(/0 total remain/)).toBeVisible();
 
-  await page.getByRole('button', { name: 'Backup Vault' }).click();
+  await page.getByRole('button', { name: 'Backup Vault Folder' }).click();
   await expect(page.getByText(/backup: C:\/ObsidianVault/)).toBeVisible();
-  await page.getByPlaceholder('Vault package path').fill('C:/Exports/default.lmzvault.zip');
-  await page.getByPlaceholder('Imported vault name').fill('Imported');
+  await page.getByPlaceholder('Path to imported .zip vault package').fill('C:/Exports/default.lmzvault.zip');
+  await page.getByPlaceholder('Imported vault display name').fill('Imported');
   await page.getByRole('button', { name: 'Import Vault' }).click();
   await expect(page.getByText('imported imported')).toBeVisible();
 
@@ -1121,7 +1121,7 @@ test('settings metadata rebuild shows progress only for maintenance job', async 
   await page.getByRole('button', { name: 'Maintenance' }).click();
   await expect(page.getByLabel('Metadata rebuild progress')).toHaveCount(0);
 
-  await page.getByRole('button', { name: 'Rebuild Metadata Index' }).click();
+  await page.getByRole('button', { name: 'Rebuild Index' }).click();
   await expect(page.getByLabel('Metadata rebuild progress')).toBeVisible();
   await expect(page.locator('.maintenance-status').nth(1)).toContainText('40 / 100');
   await expect(page.locator('.metadata-progress-fill')).toHaveAttribute('style', /40%/);
@@ -1153,7 +1153,7 @@ test('stats artists tab shows compact detail editor and saves artist changes', a
   const detail = page.locator('.artist-detail');
   await detail.getByLabel('Link platform').selectOption('Pixiv');
   await detail.getByPlaceholder('url').fill('https://www.pixiv.net/users/canonical_artist');
-  await detail.getByRole('button', { name: 'Add', exact: true }).click();
+  await detail.getByRole('button', { name: 'Add link' }).click();
   await expect(page.locator('.artist-detail')).toContainText('canonical_artist');
 });
 
@@ -1221,6 +1221,7 @@ test('stats sort toggles between popularity and alphabetical', async ({ page }) 
   await page.getByRole('button', { name: 'Artists' }).click();
 
   await expect(page.locator('.artist-row .value').first()).toHaveText('Mock Group B');
+  await page.getByRole('button', { name: 'Filter stats' }).click();
   await page.getByRole('button', { name: 'Alphabetical' }).click();
   await expect(page.locator('.artist-row .value').first()).toHaveText('Mock Group B');
   await page.getByRole('button', { name: 'Platforms' }).click();
@@ -1235,6 +1236,8 @@ test('stats letter filter applies to artists and tag chips but not platforms', a
 
   await page.getByRole('button', { name: 'Artists' }).click();
   await expect(page.locator('.artist-row:not(.placeholder-row)')).toHaveCount(3);
+  await page.getByRole('button', { name: 'Filter stats' }).click();
+  await page.getByLabel('A-Z').check();
   await page.locator('.letter-tabs').getByRole('button', { name: 'M' }).click();
   await expect(page.locator('.artist-row:not(.placeholder-row)')).toHaveCount(3);
   await expect(page.locator('.artist-row .value').first()).toContainText('Mock');
@@ -1269,7 +1272,9 @@ test('stats selected topics and wd tags filter the vault', async ({ page }) => {
   await expect(page.locator('.stats-filter-bar')).toContainText('1 topics');
   await expect(page.locator('.stats-filter-bar')).toContainText('1 WD tags');
 
+  await page.getByRole('button', { name: 'Filter stats' }).click();
   await page.getByRole('button', { name: 'Alphabetical' }).click();
+  await page.getByLabel('A-Z').check();
   await page.locator('.letter-tabs').getByRole('button', { name: 'M' }).click();
   await expect(page.locator('.stats-filter-bar')).toContainText('2 selected');
 

@@ -24,11 +24,17 @@ function delay(ms: number, signal?: AbortSignal | null) {
       reject(new DOMException('The operation was aborted.', 'AbortError'));
       return;
     }
-    const timer = window.setTimeout(resolve, ms);
-    signal?.addEventListener('abort', () => {
+    let timer: number;
+    const onAbort = () => {
       window.clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
       reject(new DOMException('The operation was aborted.', 'AbortError'));
-    }, { once: true });
+    };
+    timer = window.setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener('abort', onAbort, { once: true });
   });
 }
 

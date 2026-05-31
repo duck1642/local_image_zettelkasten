@@ -1,6 +1,6 @@
   # LMZ Current Status
 
-Last updated: 2026-05-27
+Last updated: 2026-05-31
 
 ## Current Status
 
@@ -123,6 +123,21 @@ VSCode-friendly test launchers:
 
 ## Current Test Results
 
+### 2026-05-31 Crosscheck
+
+- Frontend `npm.cmd run check`: passes with 0 Svelte/TS warnings.
+- Backend AST parse check: passes.
+- Backend import smoke: passes when `LMZ_CONFIG_PATH` is pointed at the mock-vault config.
+  - Note: running the import smoke against the active real config may try to open real vault logs.
+- Frontend findings fix validation:
+  - `npm.cmd run check`: passes.
+  - `git diff --check`: passes; Git reports only normal LF/CRLF working-copy warnings.
+  - `npm.cmd run test:mock-vault -- --grep "inspector drafts WD promotion"`: passes.
+  - `npm.cmd run test:mock-vault -- --grep "settings"`: passes.
+  - `npm.cmd run test:mock-vault -- --grep "stats"`: passes.
+  - `npm.cmd run test:mock-vault -- --output test-results-full-fix`: `29 passed`.
+  - Fixed stale Inspector, Settings, and Stats Playwright selectors after current UI copy/layout changes.
+
 ### Phase A Generated-Vault Performance Findings
 
 - Completed real generated-vault runs:
@@ -177,16 +192,14 @@ VSCode-friendly test launchers:
 ### Remaining Optimization Sequence
 
 - Pass 3 - remaining metadata/query scale:
-  - Pass 3A - low-risk cleanup and measurements:
-    - make facet fallback scan only when the count table is missing or unbuilt, not when a query simply has zero matches.
-    - inspect `EXPLAIN QUERY PLAN` for exact topic/WD filters, topic/WD plus newest paging, and media plus topic/WD filters.
-    - add stage timing around full metadata rebuild: item fetch, file stat/signature, frontmatter read/parse, WD extraction, row building, DB flushes, facet rebuild, and post-rebuild validation.
-    - make post-full deep stale validation optional for normal perf runs so a successful rebuild does not immediately re-scan the whole vault.
-    - validate with `10k`, then `50k`.
-  - Pass 3B - measured optimization:
-    - add or adjust composite indexes for topic/WD filtered paging only if query plans show they help.
-    - optimize the measured full-rebuild hotspot before considering parallel rebuild.
-    - evaluate FTS5 for broad text discovery only after exact filters and rebuild measurement are stable.
+  - Pass 3A low-risk cleanup is mostly implemented:
+    - facet fallback scan avoids scanning when ready count tables simply have zero matches.
+    - full metadata rebuild reports stage timing.
+    - normal full rebuild skips deep stale validation by default.
+  - Still pending:
+    - inspect query plans for topic/WD filtered paging.
+    - decide on composite indexes from measured plans.
+    - evaluate FTS5 for broad text search.
   - defer `100k` until Pass 3A/3B results are clean.
 
 ## Deferred / Will Do Later
@@ -308,8 +321,20 @@ VSCode-friendly test launchers:
     - `settingsApi.ts`, `settingsUtils.ts`, and `settings.css`.
   - Settings now uses tabbed sections and reduced text-heavy actions while preserving existing API behavior.
   - Ingestion UI is split between `OnlineIngestion.svelte`, `LocalIngestion.svelte`, and shared `ingestion.css`.
+  - Online queue metadata directives are implemented:
+    - shared queue parser supports comments, `@artist: name`, `@platform: name`, URL groups, and `---`.
+    - queue count, parse preview, and ingestion use the same parser.
+    - explicit queue artist/platform metadata reaches online ingestion.
+    - scraper-derived artist/title remains stripped before `process_file()`.
+    - frontend queue editor shows grouped preview, warnings, warning line numbers, directive suggestions, and syntax help.
+    - alias-aware artist matching remains deferred.
   - Inspector was split into media preview, metadata grid, topic editor, WD suggestions, and shared tag chip components.
   - Inspector topic/WD chips share `InspectorTagChip.svelte`, with rating/character/general/topic color semantics and local icon actions.
+  - Frontend findings fix pass is implemented:
+    - WD suggestion promotion works again through stable `InspectorTagChip` main-button hit targets.
+    - Inspector save, Settings, and Stats mock-vault selectors were updated to current UI copy/layout.
+    - `api.ts` retry delay now removes abort listeners after normal timeout resolution.
+    - Settings static inline styles and inline emoji glyphs were moved to `settings.css` and local icon components where practical.
   - Stats UI is split into controls, facet panel, artist panel/detail/merge modal, metadata action modal, filter bar, API helpers, utilities, and `stats.css`.
   - Stats chip CSS is namespaced separately from Inspector chips to avoid cross-panel style leakage.
   - targeted frontend checks were run during refactor; still needs real-vault smoke for Settings, Stats, Inspector, and Ingestion UI paths.
@@ -556,7 +581,8 @@ VSCode-friendly test launchers:
 
 ## Current Issues
 
-- No active low-level backend inconsistency batch after review/search-index regression fix.
+- Mojibake check: no actual mojibake found in project source/docs during 2026-05-31 scan; apparent warning-icon mojibake was terminal encoding.
+- Data-flow ownership audit is needed after current findings are fixed; DB, Markdown, metadata index, RAM/search index, and frontend draft state should be mapped flow-by-flow.
 
 ## Issue Remediation Plan
 
@@ -568,7 +594,11 @@ VSCode-friendly test launchers:
 
 ### Recommended Fix Batches
 
-1. Real-vault drag-drop/restart/re-ingest smoke for review/search-index regression fix.
-2. Architecture/status docs drift review.
-3. Real-vault corrupt-media/log smoke for P3.
-4. Real-vault validation of remaining P0/P1/P2 smoke items.
+1. Run focused real-vault smoke for Settings, Stats, Inspector, Ingestion.
+2. Do a data-flow audit:
+   - Inspector save.
+   - online queue ingest.
+   - local ingest.
+   - artist merge/rename.
+   - WD tag promotion/removal.
+3. Continue remaining real-vault validation for P0/P1/P2/P3 smoke items.
