@@ -294,6 +294,8 @@ def _api_key() -> str:
     return value
 
 def _validate_origin(origin: str | None):
+    if origin and origin.startswith("chrome-extension://"):
+        return
     if origin and origin not in ALLOWED_ORIGINS:
         raise HTTPException(status_code=403, detail="Origin not allowed")
 

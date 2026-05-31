@@ -164,11 +164,11 @@ Check how paths handled. Everything must be relative to project folder
 
 ---
 
-## Phase 8 — Modern Management UI, Local Tagging, and API Hardening
+## Phase 8 — Tauri Vault App, Metadata System, Stability, and Scale
 
 ### Task
 
-Build a practical desktop interface for vault management, add local AI tagging, and harden the local API/runtime boundary.
+Build and stabilize the local-first Tauri/Svelte vault app, backend API, metadata/indexing system, workspace/vault model, and scale validation harnesses.
 
 ### Completed So Far
 
@@ -186,6 +186,9 @@ Build a practical desktop interface for vault management, add local AI tagging, 
 - Added Stats view for WD tag, artist, platform, and topic counts.
 - Added Stats topic/WD multi-select handoff into Vault search.
 - Added artist editing, alias/link management, and merge workflow in Stats.
+- Added Stats topic rename/delete/merge workflows and WD tag rename/delete tooling.
+- Split Stats into focused components, API helpers, utilities, and CSS.
+- Added color-sensitive Stats/Inspector chip styling for rating, character, topic, and general tags.
 - Split logs into raw terminal output and structured JSONL streams.
 - Added readable and raw log display modes in the UI.
 - Added a reusable local WD tagging service with local model storage under `data/models/`.
@@ -195,8 +198,24 @@ Build a practical desktop interface for vault management, add local AI tagging, 
 - Kept manual topics separate from WD tags.
 - Added a disposable SQLite metadata index for topic/WD queries while keeping markdown/YAML as source of truth.
 - Added precomputed metadata facet counts for topic/WD/artist/platform counters and suggestions.
+- Added workspace DB `data/workspace.db` for shared artist, platform, and WD tag dictionaries.
+- Added shared topic library under `data/topics/`.
+- Added topic file creation/reuse, relative topic links in notes, and legacy plain topic parsing.
+- Added workspace chooser, Obsidian workspace setup, and restart-based workspace selection.
+- Added multiple vault support under `data/vaults/<vault_id>/`.
+- Added per-workspace shared metadata with active-vault usage counts.
 - Added compact `storage_id` runtime storage paths while preserving SHA256 hashes as public/API identity.
 - Added a metadata index rebuild maintenance tool for status, stale repair, and full persistent metadata rebuilds.
+- Added deterministic generated-vault generator under `tests/generators/`.
+- Added generated configs, DB rows, notes, assets, thumbnails, review fixtures, logs, and manifests isolated under ignored `tests/generated/`.
+- Added generated-scale Playwright tests for layout switching, filtering, grouped media, mixed image/video handling, cursor pagination, and overlap checks.
+- Added headed Tauri WebView performance harness and split perf commands under `tests/perf/`.
+- Added RAM tracking to perf runs.
+- Validated generated vaults at `800`, `10k`, and `50k`; `100k` remains deferred until needed.
+- Added realistic WD tag generation and validation for generated vaults.
+- Added cached metadata counters, dirty queue, and bulk full metadata rebuild path.
+- Added stage timing and fast default maintenance rebuild behavior.
+- Added artist/platform exact-first filtering and indexed paging support.
 - Hardened local API mutating endpoints with a local session key and allowlisted origins.
 - Validated log, queue, and review paths to prevent traversal.
 - Fixed false-success API behavior for missing items.
@@ -216,61 +235,259 @@ Build a practical desktop interface for vault management, add local AI tagging, 
 - Replaced sidecar startup panics with logged errors.
 - Added a practical Tauri CSP for local backend/media access.
 - Added Settings maintenance actions for auth scan, metadata rebuild, review cleanup, workspace metadata rebuild, and workspace metadata prune.
+- Added Settings vault tools for merge preview/merge, vault health audit/repair details, backup/export/import, create/rename/delete, and active vault selection.
+- Split Settings into focused panels, shared API wrappers, utilities, and CSS.
+- Added tabbed Settings navigation to reduce visible panel bloat while preserving existing tools.
 - Added config cache with mtime invalidation after Settings writes.
 - Added log stream heartbeats, truncate/rotation handling, tail-on-connect, and bounded frontend reconnects.
 - Added native drag-and-drop preflight into Local Ingestion.
+- Split Online/Local Ingestion into focused components and shared ingestion CSS.
+- Added queue metadata syntax for `@artist:`, `@platform:`, full-line comments, `---` groups, grouped preview, warnings, line numbers, and help popover.
+- Stripped scraper-derived online `artist`/`title` metadata while preserving app/user-owned editable artist/title metadata.
+- Added Local Ingestion artist autocomplete and platform dropdown cleanup.
 - Added review workflow hardening for keep/variant/replace/delete/cleanup and restart-safe pending sidecars.
+- Split Inspector into focused media preview, metadata grid, topic editor, and WD suggestion components.
+- Added shared Inspector tag chip component and local named Svelte icon components.
+- Documented local-first icon policy while keeping external icon packs deferred unless vendored locally.
 - Added mock-vault and generated-vault Playwright/backend validation harnesses.
 
 ### Still In Progress / Needs Refinement
 
 - Virtual masonry/grid renderers passed generated-vault and headed Tauri performance runs, but still need continued real-vault validation.
-- Fullscreen zoom/pan and wide/fullscreen filmstrip work, but can still use UI polish.
+- Settings, Stats, Inspector, Ingestion, workspace/vault switching, and metadata maintenance flows need more real-vault smoke after the refactors.
+- Inspector chip/action UX is stable again, but still needs final manual pointer-hit and hover/focus smoke.
+- Review panel needs polish after the main Inspector/Stats/Settings/Ingestion work.
+- Fullscreen zoom/pan and wide/fullscreen filmstrip work, but still need UI polish.
 - GIFs ingest and preserve originals, but vault/inspector previews are still static first-frame thumbnails and tagging/dedupe inspect only the first frame.
 - Search/index hydration still bulk-loads runtime signatures into RAM.
 - Video frame sampling now uses one ffmpeg subprocess per sampled batch; embedding/tagging still depends on sampled original frames.
+- Decide video hover preview strategy.
 - YouTube community posts still fail/retry if one expected image fails.
 - Existing `source_url_norm` values are backfilled lazily on DB init, not through a standalone migration tool.
-- Production sidecar packaging exists but still needs release-build validation.
+- Cleanup old compatibility paths after more real-vault use.
+- Production sidecar packaging exists but still needs release-build and clean-machine validation.
 
 ---
 
-## Phase 9 — Stability, Performance Harnesses, and Knowledge Metadata
+## Phase 9 — Browser Extension Integration
 
 ### Task
 
-Stabilize the Tauri/Svelte app at large-vault scale, add repeatable generated-vault/performance validation, and build the workspace metadata foundation for artists, platforms, topics, and WD tag dictionaries.
+Build a browser extension that captures active-page/media URLs and sends them to LMZ's local queue/API, reducing dependence on fragile backend scrapers.
 
-### Completed So Far
+### Planned Scope
 
-- Added deterministic generated-vault generator under `tests/generators/`.
-- Added generated configs, DB rows, notes, assets, thumbnails, review fixtures, logs, and manifests isolated under ignored `tests/generated/`.
-- Added generated-scale Playwright tests for layout switching, filtering, grouped media, mixed image/video handling, cursor pagination, and overlap checks.
-- Added headed Tauri WebView performance harness and split perf commands under `tests/perf/`.
-- Added RAM tracking to perf runs.
-- Validated generated vaults at `800`, `10k`, and `50k`; `100k` remains deferred until needed.
-- Added realistic WD tag generation and validation for generated vaults.
-- Added cached metadata counters, dirty queue, and bulk full metadata rebuild path.
-- Added precomputed facet counts for topic, WD, artist, and platform interactive counters.
-- Added stage timing and fast default maintenance rebuild behavior.
-- Added artist/platform exact-first filtering and indexed paging support.
-- Added workspace DB `data/workspace.db` for shared artist, platform, and WD tag dictionaries.
-- Added shared topic library under `data/topics/`.
-- Added topic file creation/reuse, relative topic links in notes, and legacy plain topic parsing.
-- Added workspace chooser, Obsidian workspace setup, and restart-based workspace selection.
-- Added multiple vault support under `data/vaults/<vault_id>/`.
-- Added per-workspace shared metadata with active-vault usage counts.
-- Added topic rename from Stats Topics, backed by `POST /api/topics/rename`, rewriting linked/plain refs across all registered vaults.
+- Start with Chromium-based browsers: Edge/Chrome.
+- Capture active tab URL, selected media URLs, and page media candidates.
+- Send URLs and metadata groups into the online queue/local API.
+- Handle local API base discovery and session/auth safely.
+- Pass source/platform metadata where reliable.
+- Keep online scraper-derived `artist`/`title` out of item metadata; explicit user/app metadata remains owner.
+- Defer Firefox until the Chromium flow is stable.
 
-### Still Deferred
+### Temporary Design Decisions
 
-- Topic delete, WD tag rename/delete, and optional tag/topic merge.
-- Live workspace/vault switching without restart.
-- Cleanup old compatibility paths after more real-vault use.
-- Proper source URL normalization maintenance tool.
-- Reduce RAM search hydration pressure with batching or persistent indexes if needed.
-- Decide video hover preview strategy.
-- Validate production Tauri sidecar packaging on a clean machine.
+The extension should live under:
+
+```text
+tools/browser_extension/
+```
+
+The first target browser is Microsoft Edge because it is the primary browser in current use. Chrome should remain a near-term secondary target because the extension will start on Chromium Manifest V3. Firefox is explicitly deferred until the Edge/Chrome path is stable, because Firefox extension behavior and Manifest V3 support differ enough to distract from the MVP.
+
+Initial folder direction:
+
+```text
+tools/browser_extension/
+  README.md
+  shared/
+    background.js
+    popup.html
+    popup.js
+    styles.css
+    icons/
+  edge/
+    manifest.json
+  chrome/
+    manifest.json
+  firefox/
+    manifest.json
+```
+
+Only the Edge manifest needs to be production-real at first. Chrome can be kept close to Edge. Firefox can remain a placeholder until a later compatibility phase.
+
+The product split is:
+
+- **Online queue**: supported platform page/post URLs go into LMZ's existing online queue.
+- **Capture**: browser-selected media is uploaded/staged through the local LMZ backend, then committed through LMZ's existing ingest/review path.
+
+Do not call the second flow "local queue" in code or UI. "Local ingestion" already means filesystem paths selected from the local machine. Browser media is not local until LMZ receives and stages it. Use "Capture" for the extension-driven media flow.
+
+#### Online Queue Flow
+
+Online queue is for platforms where LMZ already has downloader logic:
+
+- Instagram
+- X/Twitter
+- Pixiv
+- Pinterest
+
+The extension sends the page/post URL plus explicit user metadata. LMZ should append a queue block compatible with the current markdown queue parser, for example:
+
+```text
+@artist: creator name
+@platform: X
+https://x.com/creator/status/123
+---
+```
+
+The backend, not the extension, should own final queue formatting. The extension should send structured JSON such as URL, queue name, artist, and platform. The backend can then preserve existing queue parser semantics and avoid duplicating queue syntax rules in extension code.
+
+For online ingestion, the source URL is the page/post URL. Downloader-derived artist/title metadata should remain untrusted. Explicit user/app-provided artist/platform metadata is the owner.
+
+#### Capture Flow
+
+Capture is for unsupported or arbitrary sites.
+
+MVP capture should start with right-click image capture only:
+
+```text
+right-click image -> Capture media to LMZ -> extension fetches image bytes -> upload to backend staging -> popup metadata -> commit to vault
+```
+
+Videos are deferred beyond the image MVP. Many site videos are HLS/DASH streams, blob URLs, segmented media, or protected players. A context-menu video item can be added later, but should not be part of the first stability target.
+
+Capture payload should preserve two URLs:
+
+- `source_url`: parent page/post URL, used for provenance and UI grouping.
+- `media_url`: raw selected media URL, used only as transport/debug metadata.
+
+The backend should stage uploaded bytes under the active vault, for example:
+
+```text
+data/vaults/<vault_id>/capture_staging/
+```
+
+Staging should include a backend-owned sidecar so extension storage and backend disk state can recover from drift:
+
+```json
+{
+  "staged_id": "staged_...",
+  "source_url": "https://site/page",
+  "media_url": "https://cdn/site/image.jpg",
+  "original_name": "image.jpg",
+  "mime_type": "image/jpeg",
+  "captured_at": "...",
+  "platform_guess": "General Web"
+}
+```
+
+The extension may also keep a lightweight `staged_captures` list in extension storage for popup navigation and badge count, but that storage is not the source of truth.
+
+Commit should call existing LMZ ingest/review behavior. It should not reimplement storage ID allocation, SHA256 insert logic, pHash checks, note generation, thumbnail generation, WD tagging, or RAM index hydration. The capture commit endpoint should validate the staged file and metadata, then route through the existing processor/review helpers.
+
+#### Capture Limitations
+
+Browser-assisted capture reduces scraper brittleness, but it is not guaranteed to work on every site. Avoid promising a 100% success rate.
+
+Expected failure or later-fallback cases:
+
+- `blob:` URLs.
+- Canvas-rendered images.
+- Auth-gated media where extension `fetch()` cannot reproduce the page request.
+- Hotlink or referer-protected assets.
+- Expiring signed CDN URLs.
+- Service-worker-only assets.
+- HLS/DASH video streams.
+- DRM-like or protected media players.
+
+For MVP, failed captures should produce clear errors. A later fallback can upload bytes directly from content-script/page context where possible, or add specialized handling for blob/canvas cases.
+
+#### Security Decisions
+
+The backend must allow browser extension requests without allowing arbitrary web pages.
+
+Requirements:
+
+- Mutating extension endpoints require `X-LMZ-API-KEY`.
+- Normal webpage origins remain rejected.
+- Extension origins are allowed only for authenticated local API use.
+- Do not put the API key in preview URLs or query strings.
+
+Preview should use authenticated fetch from the popup:
+
+```javascript
+const res = await fetch(previewUrl, {
+  headers: { "X-LMZ-API-KEY": apiKey }
+});
+const blob = await res.blob();
+img.src = URL.createObjectURL(blob);
+```
+
+This avoids leaking the API key through URLs, logs, browser history, or devtools traces.
+
+If possible, later restrict allowed extension IDs instead of allowing every `chrome-extension://` origin. The API key remains the primary guard.
+
+#### Implementation Phases
+
+1. **Scaffold extension files**
+   - Create `tools/browser_extension/`.
+   - Add Edge-first Manifest V3 files.
+   - Add placeholder Chrome/Firefox manifest folders.
+   - Add minimal popup/background skeleton.
+
+2. **Backend capture staging**
+   - Add capture stage endpoint.
+   - Add preview endpoint with header auth.
+   - Add discard endpoint.
+   - Store staged file plus sidecar under active-vault `capture_staging/`.
+   - Validate staged IDs to prevent traversal.
+
+3. **Basic right-click image capture**
+   - Add Edge context menu for image capture.
+   - Fetch selected image with browser extension permissions.
+   - Upload bytes to backend staging.
+   - Store staged item reference and update badge count.
+
+4. **Stability loop**
+   - Test direct `.jpg`, `.png`, and `.webp` URLs.
+   - Test CDN URLs with query strings.
+   - Test authenticated pages where practical.
+   - Ensure blob/canvas/protected failures are clear and non-destructive.
+
+5. **Basic popup UI**
+   - Show staged capture preview.
+   - Add artist and platform fields.
+   - Add discard and commit actions.
+   - Add connection indicator and API settings.
+
+6. **Capture commit**
+   - Commit staged file through existing LMZ processing/review path.
+   - Preserve explicit artist/platform/source metadata.
+   - Return `ingested`, `duplicate`, or `quarantined` status clearly.
+   - Clean up staging after success where appropriate.
+
+7. **Online queue support**
+   - Add "Send page to LMZ online queue".
+   - Limit to supported platform intent first.
+   - Backend appends queue blocks with explicit artist/platform metadata.
+   - Keep auto-start disabled unless deliberately added later.
+
+8. **Metadata hardening**
+   - Improve platform guessing from page URL.
+   - Preserve original filename/extension/MIME where possible.
+   - Add artist/platform autocomplete from LMZ.
+   - Consider topics only after the basic metadata path is stable.
+
+9. **UI refinement**
+   - Improve error states, loading states, batch navigation, and settings.
+   - Match LMZ visual language without pulling in the full Tauri frontend stack.
+
+10. **Tests and iteration**
+   - Add backend tests for stage, preview, discard, commit, auth, and traversal rejection.
+   - Manual Edge smoke first.
+   - Chrome smoke second.
+   - Firefox compatibility later.
 
 ---
 
@@ -278,7 +495,7 @@ Stabilize the Tauri/Svelte app at large-vault scale, add repeatable generated-va
 
 ### Task
 
-Recover the "Exact Source" of orphan files using pHash-based reverse lookups and auto-filling missing metadata from online databases.
+Recover the "Exact Source" of orphan files using pHash-based reverse lookups and provenance hints after the browser extension flow is usable.
 
 ---
 
@@ -298,16 +515,8 @@ Encrypt `.secrets.yaml` and `cookies.txt` at rest and implement improved credent
 
 ---
 
-## Phase 13 — Maintenance & Vault Health
+## Phase 13 — Runtime / Packaging / Vault Health Hardening
 
 ### Task
 
-Implement "Orphan/Ghost" integrity checks and periodic SHA256 re-verification to detect bit-rot.
-
----
-
-## Phase 14 — Browser Extension Integration (Resilient Ingestion)
-
-### Task
-
-Develop a browser extension to capture media URLs directly from the active webpage and send them to the backend. This provides a resilient fallback for media ingestion, bypassing the need for backend scrapers (e.g., `gallery-dl`, `yt-dlp`) that are vulnerable to platform rate-limiting, CAPTCHAs, and API breakages.
+Finish release/runtime hardening, clean-machine packaging validation, and any remaining vault-health integrity checks not already covered by Phase 8.

@@ -55,6 +55,8 @@ tests/.drivers/
 tests/generated/
 tests/perf-results/
 tests/perf/tauri_webview_perf/node_modules/
+/test-results/*
+!/test-results/.last-run.json
 pytest-cache-files-*/
 cover/
 
@@ -219,6 +221,21 @@ graphify-out/
 !tests/fixtures/mock-vault/config.yaml
 !tests/fixtures/mock-vault/data/
 !tests/fixtures/mock-vault/data/**
+
+# Runtime/generated artifacts inside otherwise tracked fixture trees
+capture_staging/
+tests/fixtures/**/capture_staging/
+tests/fixtures/**/logs/raw/*.log
+tests/fixtures/**/logs/structured/*.jsonl
+
+# Browser extension local/package artifacts
+tools/browser_extension/**/*.crx
+tools/browser_extension/**/*.pem
+tools/browser_extension/**/web-ext-artifacts/
+tools/browser_extension/**/node_modules/
+tools/browser_extension/**/dist/
+tools/browser_extension/**/build/
+tools/browser_extension/**/.env
 
 # Screenshots and temporary inspection files
 last_screen.png

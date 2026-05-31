@@ -264,6 +264,26 @@ def append_urls(queue: str, urls: list[str], ctx: WorkspaceContext | None = None
         path.write_text(f"{existing}\n\n{body}\n" if existing else f"{body}\n", encoding="utf-8")
 
 
+def append_queue_block(queue: str, url: str, artist: str = "", platform: str = "", ctx: WorkspaceContext | None = None):
+    runtime = _ctx(ctx)
+    clean = clean_url(url)
+    if not clean:
+        return
+    with QUEUE_LOCK:
+        ensure_queue_files(runtime)
+        path = queue_path(queue, runtime)
+        existing = path.read_text(encoding="utf-8", errors="replace").rstrip()
+        lines = []
+        if artist:
+            lines.append(f"@artist: {artist.strip()}")
+        if platform:
+            lines.append(f"@platform: {platform.strip()}")
+        lines.append(clean)
+        lines.append("---")
+        body = "\n".join(lines)
+        path.write_text(f"{existing}\n\n{body}\n" if existing else f"{body}\n", encoding="utf-8")
+
+
 def move_failed_urls(target_queue: str, ctx: WorkspaceContext | None = None) -> int:
     runtime = _ctx(ctx)
     with QUEUE_LOCK:

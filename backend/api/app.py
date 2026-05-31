@@ -21,7 +21,7 @@ from api.common import (
     _validate_origin,
     configure_terminal_logging,
 )
-from api import ingestion, library, logs, review, runtime
+from api import capture, ingestion, library, logs, review, runtime
 
 
 async def startup_auth_scan():
@@ -64,6 +64,7 @@ app = FastAPI(title="LMZ API", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=sorted(ALLOWED_ORIGINS),
+    allow_origin_regex=r"^chrome-extension://[a-z]{32}$",
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -98,6 +99,7 @@ app.include_router(library.router)
 app.include_router(logs.router)
 app.include_router(ingestion.router)
 app.include_router(review.router)
+app.include_router(capture.router)
 
 
 @app.get("/")

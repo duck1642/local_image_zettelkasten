@@ -36,7 +36,7 @@ def fresh_backend(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *module_names
     if str(BACKEND) not in sys.path:
         sys.path.insert(0, str(BACKEND))
     for name in list(sys.modules):
-        if name in {"utils", "runtime_context", "web_api", "queue_service", "md_generator", "metadata_index", "metadata_maintenance", "processor", "external_ingestion", "thumbnails", "fingerprint", "artists", "platforms", "review_cache", "topics", "vaults", "workspace_db", "ingest_control"} or name.startswith(("logger", "db.", "tagging", "downloaders")):
+        if name in {"api", "utils", "runtime_context", "web_api", "queue_service", "md_generator", "metadata_index", "metadata_maintenance", "processor", "external_ingestion", "thumbnails", "fingerprint", "artists", "platforms", "review_cache", "topics", "vaults", "workspace_db", "ingest_control"} or name.startswith(("api.", "logger", "db.", "tagging", "downloaders")):
             del sys.modules[name]
     return [importlib.import_module(name) for name in module_names]
 

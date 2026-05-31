@@ -1,4 +1,5 @@
 from fastapi import APIRouter
+from urllib.parse import urlparse
 
 from api.common import *
 from artists import ensure_artist_schema
@@ -9,7 +10,15 @@ router = APIRouter()
 
 class QueueUpdate(BaseModel):
     content: str
-from queue_service import read_queue, write_queue, queue_counts, INGESTION_LOCK, run_queue, clear_failed, move_failed_urls, parse_queue_preview, queue_path
+
+
+class QueueAppendRequest(BaseModel):
+    url: str
+    artist: str | None = None
+    platform: str | None = None
+
+
+from queue_service import read_queue, write_queue, queue_counts, INGESTION_LOCK, run_queue, clear_failed, move_failed_urls, parse_queue_preview, queue_path, append_queue_block
 
 @router.get("/api/queue/{queue_name}")
 async def get_queue(queue_name: str):
@@ -27,6 +36,51 @@ def _save_queue_sync(queue_name: str, update: QueueUpdate):
     queue_name = _queue_name(queue_name)
     write_queue(queue_name, update.content)
     return {"status": "success", "count": queue_counts().get(queue_name, 0)}
+
+
+@router.post("/api/queue/{queue_name}/append")
+async def append_queue_entry(queue_name: str, body: QueueAppendRequest):
+    return await asyncio.to_thread(_append_queue_entry_sync, queue_name, body)
+
+
+def _append_queue_entry_sync(queue_name: str, body: QueueAppendRequest):
+    queue_name = _queue_name(queue_name, allow_failed=False)
+    url = clean_extension_queue_url(body.url)
+    if not _is_supported_extension_online_host(url):
+        raise HTTPException(status_code=400, detail="Unsupported online queue host")
+    append_queue_block(
+        queue_name,
+        url,
+        artist=str(body.artist or "").strip(),
+        platform=str(body.platform or "").strip(),
+    )
+    return {"status": "success", "count": queue_counts().get(queue_name, 0)}
+
+
+def clean_extension_queue_url(url: str) -> str:
+    value = str(url or "").strip()
+    parsed = urlparse(value)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise HTTPException(status_code=400, detail="Invalid URL")
+    return value
+
+
+def _is_supported_extension_online_host(url: str) -> bool:
+    host = (urlparse(url).hostname or "").casefold()
+    return (
+        host == "x.com"
+        or host.endswith(".x.com")
+        or host == "twitter.com"
+        or host.endswith(".twitter.com")
+        or host == "pixiv.net"
+        or host.endswith(".pixiv.net")
+        or host == "instagram.com"
+        or host.endswith(".instagram.com")
+        or host == "pinterest.com"
+        or host.endswith(".pinterest.com")
+        or host == "pin.it"
+        or host.endswith(".pin.it")
+    )
 
 @router.post("/api/queue/{queue_name}/parse")
 async def parse_queue_content(queue_name: str, update: QueueUpdate):

@@ -137,6 +137,10 @@ VSCode-friendly test launchers:
   - `npm.cmd run test:mock-vault -- --grep "stats"`: passes.
   - `npm.cmd run test:mock-vault -- --output test-results-full-fix`: `29 passed`.
   - Fixed stale Inspector, Settings, and Stats Playwright selectors after current UI copy/layout changes.
+- Latest Inspector chip stabilization check:
+  - `npm.cmd run check`: passes.
+  - `npm.cmd run test:mock-vault -- --grep "inspector drafts WD promotion"`: passes.
+  - Full mock-vault suite has not been rerun after the latest chip stabilization edits.
 
 ### Phase A Generated-Vault Performance Findings
 
@@ -331,7 +335,8 @@ VSCode-friendly test launchers:
   - Inspector was split into media preview, metadata grid, topic editor, WD suggestions, and shared tag chip components.
   - Inspector topic/WD chips share `InspectorTagChip.svelte`, with rating/character/general/topic color semantics and local icon actions.
   - Frontend findings fix pass is implemented:
-    - WD suggestion promotion works again through stable `InspectorTagChip` main-button hit targets.
+    - WD suggestion promotion toggle is covered by a targeted mock-vault test.
+    - Real pointer-hit behavior still needs manual smoke after chip UI changes because the current targeted test uses synthetic click events.
     - Inspector save, Settings, and Stats mock-vault selectors were updated to current UI copy/layout.
     - `api.ts` retry delay now removes abort listeners after normal timeout resolution.
     - Settings static inline styles and inline emoji glyphs were moved to `settings.css` and local icon components where practical.
@@ -583,6 +588,10 @@ VSCode-friendly test launchers:
 
 - Mojibake check: no actual mojibake found in project source/docs during 2026-05-31 scan; apparent warning-icon mojibake was terminal encoding.
 - Data-flow ownership audit is needed after current findings are fixed; DB, Markdown, metadata index, RAM/search index, and frontend draft state should be mapped flow-by-flow.
+- Inspector chip action UX is still not fully settled long-term:
+  - WD promotion toggle is covered by targeted mock-vault tests.
+  - Current test validates handler wiring through synthetic click events, not real mouse hit stability.
+  - Real-vault/manual smoke should verify WD promote/unpromote, WD remove, saved topic rename/remove, and hover action behavior.
 
 ## Issue Remediation Plan
 
@@ -601,4 +610,5 @@ VSCode-friendly test launchers:
    - local ingest.
    - artist merge/rename.
    - WD tag promotion/removal.
-3. Continue remaining real-vault validation for P0/P1/P2/P3 smoke items.
+3. Rerun full `npm.cmd run test:mock-vault` after the current Inspector chip stabilization is finalized.
+4. Continue remaining real-vault validation for P0/P1/P2/P3 smoke items.

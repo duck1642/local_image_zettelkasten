@@ -19,6 +19,7 @@ dependencies = [
     "pillow>=9.0.0",
     "playwright",
     "psutil",
+    "python-multipart",
     "pyyaml",
     "sentence-transformers",
     "torch",
