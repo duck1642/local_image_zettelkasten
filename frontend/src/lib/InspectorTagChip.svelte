@@ -22,7 +22,6 @@
     remove: void;
     rename: void;
   }>();
-  let pointerActivated = false;
 
   function activate() {
     if (!interactive) return;
@@ -30,23 +29,10 @@
     dispatch('activate');
   }
 
-  function activatePointer(event: PointerEvent) {
-    if (!interactive || event.button !== 0) return;
-    if ((event.target as HTMLElement | null)?.closest('.chip-action')) return;
-    pointerActivated = true;
-    activate();
-  }
-
-  function activateClick() {
-    if (pointerActivated) {
-      pointerActivated = false;
-      return;
-    }
-    activate();
-  }
-
-  function stopActionPointer(event: PointerEvent) {
+  function handleActivate(event: Event) {
+    event.preventDefault();
     event.stopPropagation();
+    activate();
   }
 
   function emitAction(event: Event, action: 'remove' | 'rename') {
@@ -67,16 +53,14 @@
   class:has-actions={removable || renameable}
   class:has-two-actions={removable && renameable}
   title={interactive ? undefined : title || undefined}
-  onpointerdown={activatePointer}
-  onclick={activateClick}
+  on:click={handleActivate}
 >
   {#if interactive}
     <button
       class="chip-main"
       type="button"
       title={title || undefined}
-      onpointerdown={activatePointer}
-      onclick={activateClick}
+      on:click={handleActivate}
     >
       <span class="tag-label">{label}</span>
       {#if count}
@@ -97,8 +81,7 @@
       type="button"
       title={renameTitle}
       aria-label={renameTitle}
-      onpointerdown={stopActionPointer}
-      onclick={(event) => emitAction(event, 'rename')}
+      on:click={(event) => emitAction(event, 'rename')}
     >
       <IconPencil size={10} />
     </button>
@@ -109,8 +92,7 @@
       type="button"
       title={removeTitle}
       aria-label={removeTitle}
-      onpointerdown={stopActionPointer}
-      onclick={(event) => emitAction(event, 'remove')}
+      on:click={(event) => emitAction(event, 'remove')}
     >
       <IconTrash size={10} />
     </button>
@@ -309,26 +291,26 @@
   }
 
   .tag-chip.promoted {
-      background: var(--chip-promoted-bg) !important;
-      border-color: var(--chip-promoted-border) !important;
-      color: var(--chip-promoted-color) !important;
+      background: var(--chip-promoted-bg);
+      border-color: var(--chip-promoted-border);
+      color: var(--chip-promoted-color);
   }
 
   .tag-chip.promoted .tag-count {
-      background: var(--chip-promoted-count-bg) !important;
-      color: var(--chip-promoted-count-color) !important;
+      background: var(--chip-promoted-count-bg);
+      color: var(--chip-promoted-count-color);
   }
 
   .tag-chip.promoted .chip-action {
-      color: var(--chip-promoted-action-color) !important;
-      border: none !important;
-      border-left: 1px solid var(--chip-promoted-action-border) !important;
+      color: var(--chip-promoted-action-color);
+      border: none;
+      border-left: 1px solid var(--chip-promoted-action-border);
   }
 
   .tag-chip.promoted .chip-action:hover {
-      background: var(--chip-promoted-action-hover-bg) !important;
-      color: var(--chip-promoted-action-hover-color) !important;
-      border: none !important;
-      border-left: 1px solid var(--chip-promoted-action-border) !important;
+      background: var(--chip-promoted-action-hover-bg);
+      color: var(--chip-promoted-action-hover-color);
+      border: none;
+      border-left: 1px solid var(--chip-promoted-action-border);
   }
 </style>

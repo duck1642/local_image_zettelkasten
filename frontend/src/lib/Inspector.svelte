@@ -256,7 +256,8 @@
 
   function isTagPromoted(value: string, draft = draftTopics, saved = savedTopics) {
     if (!value) return false;
-    const key = value.toLocaleLowerCase();
+    const clean = normalizeTopicLabel(value);
+    const key = clean.toLocaleLowerCase();
     return draft.some((topic) => topic.toLocaleLowerCase() === key) &&
            !saved.some((topic) => topic.toLocaleLowerCase() === key);
   }

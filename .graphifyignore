@@ -1,0 +1,26 @@
+# Ignore everything by default
+*
+
+# Allow folders we want to include
+!backend/
+!backend/**
+!frontend/
+!frontend/src/
+!frontend/src/**
+!docs/
+!docs/**
+!tools/
+!tools/**
+
+# Allow root files
+!main.py
+!dev.py
+!pyproject.toml
+
+# Exclude specific subdirectories inside allowed folders
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/src-tauri/
+backend/__pycache__/
+tools/__pycache__/
