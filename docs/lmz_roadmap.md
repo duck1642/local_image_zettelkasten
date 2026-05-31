@@ -352,8 +352,30 @@ Capture is for unsupported or arbitrary sites.
 MVP capture should start with right-click image capture only:
 
 ```text
-right-click image -> Capture media to LMZ -> extension fetches image bytes -> upload to backend staging -> popup metadata -> commit to vault
+right-click image -> extension fetches image bytes -> save Blob in extension cache -> sync to LMZ backend staging when available -> popup metadata -> commit to vault
 ```
+
+Capture must work when LMZ is closed. The extension should not require the backend to be online at right-click time. The browser/extension download step and local cache write happen first; backend upload is a later sync step.
+
+The extension-side source of truth for unsynced captures should be IndexedDB, not `chrome.storage.local`. `chrome.storage.local` is acceptable for lightweight settings, badge/popup summaries, and status pointers, but image bytes should live in IndexedDB as Blob/File data.
+
+Normal browser download can be used as a secondary fallback/backup, not as the main automation queue:
+
+```text
+try fetch -> Blob -> IndexedDB cache
+if Blob cache fails -> try chrome.downloads.download() to Downloads/LMZ Capture/
+```
+
+If the fallback only downloads to disk and no Blob is cached, the item should be marked as `downloaded` / `download_only`: useful for manual recovery, but not automatically syncable to LMZ unless a later file-picker/native-helper path is added.
+
+Suggested extension capture states:
+
+- `cached`: Blob is stored in IndexedDB and can sync to LMZ later.
+- `downloaded`: visible backup copy was saved, but no Blob is available for automatic sync.
+- `uploading`: extension is currently sending cached Blob to LMZ.
+- `uploaded`: LMZ has staged the file and returned `staged_id`.
+- `committed`: LMZ handled the item through ingest/review/duplicate logic.
+- `failed`: last cache/sync/commit attempt failed and is retryable where possible.
 
 Videos are deferred beyond the image MVP. Many site videos are HLS/DASH streams, blob URLs, segmented media, or protected players. A context-menu video item can be added later, but should not be part of the first stability target.
 
@@ -382,7 +404,7 @@ Staging should include a backend-owned sidecar so extension storage and backend 
 }
 ```
 
-The extension may also keep a lightweight `staged_captures` list in extension storage for popup navigation and badge count, but that storage is not the source of truth.
+The extension may also keep a lightweight staged list in `chrome.storage.local` for popup navigation and badge count, but that storage is not the source of truth for cached bytes.
 
 Commit should call existing LMZ ingest/review behavior. It should not reimplement storage ID allocation, SHA256 insert logic, pHash checks, note generation, thumbnail generation, WD tagging, or RAM index hydration. The capture commit endpoint should validate the staged file and metadata, then route through the existing processor/review helpers.
 
@@ -402,6 +424,13 @@ Expected failure or later-fallback cases:
 - DRM-like or protected media players.
 
 For MVP, failed captures should produce clear errors. A later fallback can upload bytes directly from content-script/page context where possible, or add specialized handling for blob/canvas cases.
+
+Offline/cache-specific risks:
+
+- IndexedDB quota can fill up.
+- Very large images/GIFs should have a size policy before caching.
+- Downloaded fallback copies are user-visible and should not be auto-deleted unless the user opts in.
+- A `downloaded` item may require manual Local Ingestion from `Downloads/LMZ Capture/`.
 
 #### Security Decisions
 
@@ -446,8 +475,9 @@ If possible, later restrict allowed extension IDs instead of allowing every `chr
 3. **Basic right-click image capture**
    - Add Edge context menu for image capture.
    - Fetch selected image with browser extension permissions.
-   - Upload bytes to backend staging.
-   - Store staged item reference and update badge count.
+   - Store Blob/File bytes in IndexedDB first.
+   - If Blob cache fails, try normal browser download to `Downloads/LMZ Capture/`.
+   - Store pending item reference/status and update badge count.
 
 4. **Stability loop**
    - Test direct `.jpg`, `.png`, and `.webp` URLs.
@@ -456,12 +486,14 @@ If possible, later restrict allowed extension IDs instead of allowing every `chr
    - Ensure blob/canvas/protected failures are clear and non-destructive.
 
 5. **Basic popup UI**
-   - Show staged capture preview.
+   - Show cached capture preview from IndexedDB when not uploaded.
+   - Show backend preview after upload to LMZ staging.
    - Add artist and platform fields.
-   - Add discard and commit actions.
+   - Add sync/upload, discard, and commit actions.
    - Add connection indicator and API settings.
 
 6. **Capture commit**
+   - Upload cached Blob to backend staging when LMZ is online.
    - Commit staged file through existing LMZ processing/review path.
    - Preserve explicit artist/platform/source metadata.
    - Return `ingested`, `duplicate`, or `quarantined` status clearly.

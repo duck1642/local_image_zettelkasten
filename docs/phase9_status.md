@@ -38,10 +38,13 @@ docs/phase8_status.md
   - Pinterest
 - Capture is for arbitrary sites:
   - user right-clicks an image.
-  - extension uploads bytes to LMZ backend.
+  - extension fetches image bytes into a Blob.
+  - extension stores the Blob in local browser/extension cache first.
+  - when LMZ is online, extension syncs cached bytes to backend staging.
   - backend stages the file under the active vault.
   - popup collects metadata.
   - commit routes through existing LMZ ingest/review logic.
+- If Blob caching fails, extension can fall back to a normal browser download under `Downloads/LMZ Capture/`, but that is a manual backup path, not the main automation queue.
 - MVP is image capture only. Video capture is deferred.
 - Do not promise 100% capture success. Blob/canvas/auth-gated/protected media need later fallback work.
 - API keys must not be placed in preview URLs or query strings.
@@ -74,6 +77,8 @@ docs/lmz_roadmap.md
   - discard and commit/append actions.
 - Added Chrome and Firefox placeholder folders.
 - Added `python-multipart` dependency.
+
+Important gap: the current extension still uploads to LMZ immediately. It must be revised to cache captures locally first so right-click capture works while LMZ is closed.
 
 ## Extension Shape
 
@@ -113,19 +118,24 @@ Implementation rule: capture commit must call existing processor/review helpers.
 
 ## Immediate Work
 
-1. Manual Edge smoke with unpacked `tools/browser_extension/edge/`.
-2. Test direct `.jpg`, `.png`, and `.webp` image capture on real pages.
-3. Test CDN URLs with query strings.
-4. Test supported online page queue append for X/Pixiv/Instagram/Pinterest.
-5. Verify committed real captures produce vault asset, note, DB row, thumbnail, and metadata.
-6. Verify duplicate/similar real captures route to existing duplicate/review behavior.
-7. Iterate on popup UX after real browser use.
+1. Add extension-side IndexedDB cache for captured Blob/File bytes.
+2. Change right-click image capture to cache locally first and sync/upload later.
+3. Add fallback normal download to `Downloads/LMZ Capture/` when Blob cache fails.
+4. Add capture statuses: `cached`, `downloaded`, `uploading`, `uploaded`, `committed`, `failed`.
+5. Update popup states for offline LMZ:
+   - cached item: preview locally, allow discard, sync when online.
+   - downloaded-only item: explain manual Local Ingestion fallback.
+   - uploaded item: allow commit.
+6. Manual Edge smoke with LMZ closed, then opened for sync.
+7. Test supported online page queue append for X/Pixiv/Instagram/Pinterest.
 
 ## Current Risks
 
 - Extension fetch may fail for blob URLs, canvas images, expiring CDN links, hotlink protection, and auth-gated media.
 - Video capture is likely messy and should stay out of the MVP.
 - Extension has not had real Edge smoke yet.
+- IndexedDB quota and large image/GIF behavior need a clear size policy.
+- Download fallback copies are user-visible and should not be auto-deleted by default.
 
 ## Useful Checks
 
