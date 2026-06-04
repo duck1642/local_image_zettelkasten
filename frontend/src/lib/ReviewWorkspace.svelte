@@ -54,259 +54,275 @@
   <div class="workspace-grid">
     <!-- Left Column (Staged File) -->
     <div class="workspace-column">
-      <div class="column-header">
-        <span class="pill-badge warning">Review File (Active)</span>
-      </div>
-      
-      <div class="pane">
-        {#if mediaMounted}
-          {#if isVideoMedia(current)}
-            <!-- svelte-ignore a11y-media-has-caption -->
-            <video src={mediaUrl(current)} controls preload="metadata"></video>
-          {:else}
-            <img src={mediaUrl(current)} alt="Review cleanup item" />
+      <section class="media-panel staged-panel">
+        <div class="column-header">
+          <span class="pill-badge warning">Review File (Active)</span>
+        </div>
+        
+        <div class="pane">
+          {#if mediaMounted}
+            {#if isVideoMedia(current)}
+              <!-- svelte-ignore a11y-media-has-caption -->
+              <video src={mediaUrl(current)} controls preload="metadata"></video>
+            {:else}
+              <img src={mediaUrl(current)} alt="Review cleanup item" />
+            {/if}
           {/if}
-        {/if}
-      </div>
+        </div>
+      </section>
 
-      <div class="meta-card">
-        <div class="meta-card-title">Staged File Metadata</div>
-        <div class="meta-row">
-          <span class="meta-label">Original Filename:</span>
-          <span class="meta-val truncate" title={displayName(current)}>{displayName(current)}</span>
+      <section class="metadata-panel">
+        <div class="meta-card">
+          <div class="meta-card-title">Staged File Metadata</div>
+          <div class="meta-row">
+            <span class="meta-label">Original Filename:</span>
+            <span class="meta-val truncate" title={displayName(current)}>{displayName(current)}</span>
+          </div>
+          <div class="meta-row">
+            <span class="meta-label">Format / Ext:</span>
+            <span class="meta-val uppercase">{current.extension || extFromUrl(current.url) || 'unknown'}</span>
+          </div>
         </div>
-        <div class="meta-row">
-          <span class="meta-label">Format / Ext:</span>
-          <span class="meta-val uppercase">{current.extension || extFromUrl(current.url) || 'unknown'}</span>
-        </div>
-      </div>
+      </section>
     </div>
 
     <!-- Right Column (Error Details) -->
     <div class="workspace-column">
-      <div class="column-header">
-        <span class="pill-badge neutral">Cleanup Error Details</span>
-      </div>
+      <section class="media-panel match-panel">
+        <div class="column-header">
+          <span class="pill-badge neutral">Cleanup Error Details</span>
+        </div>
 
-      <div class="pane detail-pane">
-        <div class="cleanup-detail">
-          <div class="detail-label">Current State</div>
-          <div class="detail-val">{current.state || 'pending_cleanup'}</div>
-          <div class="detail-label">Last Action Attempt</div>
-          <div class="detail-val">{current.last_action || current.metadata?.last_action || 'unknown'}</div>
-          <div class="detail-label">Error Output</div>
-          <div class="error-text-box">
-            {current.last_cleanup_error || current.metadata?.last_cleanup_error || 'Cleanup failed.'}
+        <div class="pane detail-pane">
+          <div class="cleanup-detail">
+            <div class="detail-label">Current State</div>
+            <div class="detail-val">{current.state || 'pending_cleanup'}</div>
+            <div class="detail-label">Last Action Attempt</div>
+            <div class="detail-val">{current.last_action || current.metadata?.last_action || 'unknown'}</div>
+            <div class="detail-label">Error Output</div>
+            <div class="error-text-box">
+              {current.last_cleanup_error || current.metadata?.last_cleanup_error || 'Cleanup failed.'}
+            </div>
           </div>
         </div>
-      </div>
+      </section>
 
-      <div class="meta-card">
-        <div class="meta-card-title">Cleanup Reference</div>
-        <div class="meta-row">
-          <span class="meta-label">Target Hash:</span>
-          <span class="meta-val truncate" title={current.metadata?.target_hash || current.metadata?.best_match || 'missing'}>
-            {current.metadata?.target_hash || current.metadata?.best_match || 'missing'}
-          </span>
+      <section class="metadata-panel">
+        <div class="meta-card">
+          <div class="meta-card-title">Cleanup Reference</div>
+          <div class="meta-row">
+            <span class="meta-label">Target Hash:</span>
+            <span class="meta-val truncate" title={current.metadata?.target_hash || current.metadata?.best_match || 'missing'}>
+              {current.metadata?.target_hash || current.metadata?.best_match || 'missing'}
+            </span>
+          </div>
         </div>
-      </div>
+      </section>
     </div>
   </div>
 {:else}
   <div class="workspace-grid">
     <!-- Left Column (Incoming) -->
     <div class="workspace-column">
-      <div class="column-header">
-        <span class="pill-badge primary">Incoming Item (Staged)</span>
-        <button class="fullscreen-toggle-btn" on:click={() => dispatch('toggleFullscreen')} title="Compare Symmetrically Fullscreen">
-          <IconMaximizeDiagonal size={12} />
-          <span>Compare Fullscreen</span>
-        </button>
-      </div>
-      
-      <div class="pane">
-        {#if mediaMounted}
-          {#if isVideoMedia(current)}
-            <!-- svelte-ignore a11y-media-has-caption -->
-            <video src={mediaUrl(current)} controls preload="metadata"></video>
-          {:else}
-            <img src={mediaUrl(current)} alt="New" />
-          {/if}
-        {/if}
-      </div>
-
-      <div class="meta-card">
-        <div class="meta-card-title">Staged File Metadata</div>
-        <div class="meta-row">
-          <span class="meta-label">Filename:</span>
-          <span class="meta-val truncate" title={displayName(current)}>{displayName(current)}</span>
+      <section class="media-panel staged-panel">
+        <div class="column-header">
+          <span class="pill-badge primary">Incoming Item (Staged)</span>
+          <button class="fullscreen-toggle-btn" on:click={() => dispatch('toggleFullscreen')} title="Compare Symmetrically Fullscreen">
+            <IconMaximizeDiagonal size={12} />
+            <span>Compare Fullscreen</span>
+          </button>
         </div>
-        <div class="meta-row">
-          <span class="meta-label">Format / Ext:</span>
-          <span class="meta-val uppercase">{current.extension || extFromUrl(current.url) || 'unknown'}</span>
+        
+        <div class="pane">
+          {#if mediaMounted}
+            {#if isVideoMedia(current)}
+              <!-- svelte-ignore a11y-media-has-caption -->
+              <video src={mediaUrl(current)} controls preload="metadata"></video>
+            {:else}
+              <img src={mediaUrl(current)} alt="New" />
+            {/if}
+          {/if}
         </div>
-        {#if stagedWidth > 0 && stagedHeight > 0}
-          <div class="meta-row">
-            <span class="meta-label">Dimensions:</span>
-            <span class="meta-val {resClassStaged}">{stagedWidth} x {stagedHeight}</span>
-          </div>
-        {/if}
-        {#if stagedSize > 0}
-          <div class="meta-row">
-            <span class="meta-label">File Size:</span>
-            <span class="meta-val {sizeClassStaged}">{formatBytes(stagedSize)}</span>
-          </div>
-        {/if}
-        {#if stagedFrames > 1}
-          <div class="meta-row">
-            <span class="meta-label">Frame Count:</span>
-            <span class="meta-val">{stagedFrames} frames</span>
-          </div>
-        {/if}
-        {#if isVideoMedia(current)}
-          {#if stagedDuration > 0}
-            <div class="meta-row">
-              <span class="meta-label">Duration:</span>
-              <span class="meta-val">{formatDuration(stagedDuration)}</span>
-            </div>
-          {/if}
-          {#if stagedCodec}
-            <div class="meta-row">
-              <span class="meta-label">Video Codec:</span>
-              <span class="meta-val uppercase">{stagedCodec}</span>
-            </div>
-          {/if}
-          <div class="meta-row">
-            <span class="meta-label">Audio Track:</span>
-            <span class="meta-val">{current.metadata?.audio_present ? 'AAC Stereo' : 'Silent'}</span>
-          </div>
-        {/if}
-        <div class="meta-row">
-          <span class="meta-label">Artist:</span>
-          <span class="meta-val">{current.metadata?.artist || 'None detected'}</span>
-        </div>
-        {#if validationWarning}
-          <div class="meta-row alert-row">
-            <span class="meta-label text-warn">Validation Alert:</span>
-            <span class="meta-val text-warn truncate" title={validationWarning}>
-              {validationWarning}
-            </span>
-          </div>
-        {/if}
-        {#if stagedWdTags && stagedWdTags.length > 0}
-          <div class="wd-tags-container">
-            <span class="wd-tags-label">WD Tags Suggested:</span>
-            <div class="wd-chips">
-              {#each stagedWdTags as tag}
-                <span class="wd-chip">{tag}</span>
-              {/each}
-            </div>
-          </div>
-        {/if}
-      </div>
-    </div>
+      </section>
 
-    <!-- Right Column (Vault Copy) -->
-    <div class="workspace-column">
-      <div class="column-header">
-        <span class="pill-badge info">Best Similarity Match in Vault</span>
-        {#if resolvedMatches.length > 1}
-          <div class="match-nav">
-            <button class="match-nav-btn" on:click={prevMatch} disabled={activeMatchIndex <= 0} title="Previous Similarity Match">
-              <IconChevronLeft size={10} />
-            </button>
-            <span class="match-counter">Match {activeMatchIndex + 1} of {resolvedMatches.length}</span>
-            <button class="match-nav-btn" on:click={nextMatch} disabled={activeMatchIndex >= resolvedMatches.length - 1} title="Next Similarity Match">
-              <IconChevronRight size={10} />
-            </button>
-          </div>
-        {/if}
-      </div>
-
-      <div class="pane">
-        {#if mediaMounted && activeMatch}
-          {#if isVideoMedia(activeMatch)}
-            <!-- svelte-ignore a11y-media-has-caption -->
-            <video src={mediaUrl(activeMatch)} controls preload="metadata"></video>
-          {:else}
-            <img src={mediaUrl(activeMatch)} alt="Match" />
-          {/if}
-        {:else if mediaMounted}
-          <div class="no-match">
-            <IconInfoCircle size={32} strokeWidth={1.5} />
-            <span class="no-match-title">No best-match duplicates detected in vault.</span>
-            <p class="sub-muted">This file appears to be entirely unique.</p>
-          </div>
-        {/if}
-      </div>
-
-      <div class="meta-card">
-        <div class="meta-card-title">Vault Copy Metadata</div>
-        {#if activeMatch}
+      <section class="metadata-panel">
+        <div class="meta-card">
+          <div class="meta-card-title">Staged File Metadata</div>
           <div class="meta-row">
-            <span class="meta-label">Hash ID:</span>
-            <span class="meta-val truncate" title={activeMatch.hash}>{activeMatch.hash}</span>
+            <span class="meta-label">Filename:</span>
+            <span class="meta-val truncate" title={displayName(current)}>{displayName(current)}</span>
           </div>
           <div class="meta-row">
             <span class="meta-label">Format / Ext:</span>
-            <span class="meta-val uppercase">{activeMatch.extension || 'unknown'}</span>
+            <span class="meta-val uppercase">{current.extension || extFromUrl(current.url) || 'unknown'}</span>
           </div>
-          {#if vaultWidth > 0 && vaultHeight > 0}
+          {#if stagedWidth > 0 && stagedHeight > 0}
             <div class="meta-row">
               <span class="meta-label">Dimensions:</span>
-              <span class="meta-val {resClassVault}">{vaultWidth} x {vaultHeight}</span>
+              <span class="meta-val {resClassStaged}">{stagedWidth} x {stagedHeight}</span>
             </div>
           {/if}
-          {#if vaultSize > 0}
+          {#if stagedSize > 0}
             <div class="meta-row">
               <span class="meta-label">File Size:</span>
-              <span class="meta-val {sizeClassVault}">{formatBytes(vaultSize)}</span>
+              <span class="meta-val {sizeClassStaged}">{formatBytes(stagedSize)}</span>
             </div>
           {/if}
-          {#if vaultFrames > 1}
+          {#if stagedFrames > 1}
             <div class="meta-row">
               <span class="meta-label">Frame Count:</span>
-              <span class="meta-val">{vaultFrames} frames</span>
+              <span class="meta-val">{stagedFrames} frames</span>
             </div>
           {/if}
-          {#if isVideoMedia(activeMatch)}
-            {#if vaultDuration > 0}
+          {#if isVideoMedia(current)}
+            {#if stagedDuration > 0}
               <div class="meta-row">
                 <span class="meta-label">Duration:</span>
-                <span class="meta-val">{formatDuration(vaultDuration)}</span>
+                <span class="meta-val">{formatDuration(stagedDuration)}</span>
               </div>
             {/if}
-            {#if vaultCodec}
+            {#if stagedCodec}
               <div class="meta-row">
                 <span class="meta-label">Video Codec:</span>
-                <span class="meta-val uppercase">{vaultCodec}</span>
+                <span class="meta-val uppercase">{stagedCodec}</span>
               </div>
             {/if}
             <div class="meta-row">
               <span class="meta-label">Audio Track:</span>
-              <span class="meta-val">{activeMatch.audio_present ? 'AAC Stereo' : 'Silent'}</span>
+              <span class="meta-val">{current.metadata?.audio_present ? 'AAC Stereo' : 'Silent'}</span>
             </div>
           {/if}
           <div class="meta-row">
             <span class="meta-label">Artist:</span>
-            <span class="meta-val">{activeMatch.artist || 'Unassigned'}</span>
+            <span class="meta-val">{current.metadata?.artist || 'None detected'}</span>
           </div>
-          {#if vaultWdTags && vaultWdTags.length > 0}
+          {#if validationWarning}
+            <div class="meta-row alert-row">
+              <span class="meta-label text-warn">Validation Alert:</span>
+              <span class="meta-val text-warn truncate" title={validationWarning}>
+                {validationWarning}
+              </span>
+            </div>
+          {/if}
+          {#if stagedWdTags && stagedWdTags.length > 0}
             <div class="wd-tags-container">
-              <span class="wd-tags-label">WD Tags Index:</span>
+              <span class="wd-tags-label">WD Tags Suggested:</span>
               <div class="wd-chips">
-                {#each vaultWdTags as tag}
+                {#each stagedWdTags as tag}
                   <span class="wd-chip">{tag}</span>
                 {/each}
               </div>
             </div>
           {/if}
-        {:else}
-          <div class="meta-row empty-meta">
-            <span>No matching duplicate in vault.</span>
-          </div>
-        {/if}
-      </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- Right Column (Vault Copy) -->
+    <div class="workspace-column">
+      <section class="media-panel match-panel">
+        <div class="column-header">
+          <span class="pill-badge info">Best Similarity Match in Vault</span>
+          {#if resolvedMatches.length > 1}
+            <div class="match-nav">
+              <button class="match-nav-btn" on:click={prevMatch} disabled={activeMatchIndex <= 0} title="Previous Similarity Match">
+                <IconChevronLeft size={10} />
+              </button>
+              <span class="match-counter">Match {activeMatchIndex + 1} of {resolvedMatches.length}</span>
+              <button class="match-nav-btn" on:click={nextMatch} disabled={activeMatchIndex >= resolvedMatches.length - 1} title="Next Similarity Match">
+                <IconChevronRight size={10} />
+              </button>
+            </div>
+          {/if}
+        </div>
+
+        <div class="pane">
+          {#if mediaMounted && activeMatch}
+            {#if isVideoMedia(activeMatch)}
+              <!-- svelte-ignore a11y-media-has-caption -->
+              <video src={mediaUrl(activeMatch)} controls preload="metadata"></video>
+            {:else}
+              <img src={mediaUrl(activeMatch)} alt="Match" />
+            {/if}
+          {:else if mediaMounted}
+            <div class="no-match">
+              <IconInfoCircle size={32} strokeWidth={1.5} />
+              <span class="no-match-title">No best-match duplicates detected in vault.</span>
+              <p class="sub-muted">This file appears to be entirely unique.</p>
+            </div>
+          {/if}
+        </div>
+      </section>
+
+      <section class="metadata-panel">
+        <div class="meta-card">
+          <div class="meta-card-title">Vault Copy Metadata</div>
+          {#if activeMatch}
+            <div class="meta-row">
+              <span class="meta-label">Hash ID:</span>
+              <span class="meta-val truncate" title={activeMatch.hash}>{activeMatch.hash}</span>
+            </div>
+            <div class="meta-row">
+              <span class="meta-label">Format / Ext:</span>
+              <span class="meta-val uppercase">{activeMatch.extension || 'unknown'}</span>
+            </div>
+            {#if vaultWidth > 0 && vaultHeight > 0}
+              <div class="meta-row">
+                <span class="meta-label">Dimensions:</span>
+                <span class="meta-val {resClassVault}">{vaultWidth} x {vaultHeight}</span>
+              </div>
+            {/if}
+            {#if vaultSize > 0}
+              <div class="meta-row">
+                <span class="meta-label">File Size:</span>
+                <span class="meta-val {sizeClassVault}">{formatBytes(vaultSize)}</span>
+              </div>
+            {/if}
+            {#if vaultFrames > 1}
+              <div class="meta-row">
+                <span class="meta-label">Frame Count:</span>
+                <span class="meta-val">{vaultFrames} frames</span>
+              </div>
+            {/if}
+            {#if isVideoMedia(activeMatch)}
+              {#if vaultDuration > 0}
+                <div class="meta-row">
+                  <span class="meta-label">Duration:</span>
+                  <span class="meta-val">{formatDuration(vaultDuration)}</span>
+                </div>
+              {/if}
+              {#if vaultCodec}
+                <div class="meta-row">
+                  <span class="meta-label">Video Codec:</span>
+                  <span class="meta-val uppercase">{vaultCodec}</span>
+                </div>
+              {/if}
+              <div class="meta-row">
+                <span class="meta-label">Audio Track:</span>
+                <span class="meta-val">{activeMatch.audio_present ? 'AAC Stereo' : 'Silent'}</span>
+              </div>
+            {/if}
+            <div class="meta-row">
+              <span class="meta-label">Artist:</span>
+              <span class="meta-val">{activeMatch.artist || 'Unassigned'}</span>
+            </div>
+            {#if vaultWdTags && vaultWdTags.length > 0}
+              <div class="wd-tags-container">
+                <span class="wd-tags-label">WD Tags Index:</span>
+                <div class="wd-chips">
+                  {#each vaultWdTags as tag}
+                    <span class="wd-chip">{tag}</span>
+                  {/each}
+                </div>
+              </div>
+            {/if}
+          {:else}
+            <div class="meta-row empty-meta">
+              <span>No matching duplicate in vault.</span>
+            </div>
+          {/if}
+        </div>
+      </section>
     </div>
   </div>
 {/if}
@@ -314,16 +330,33 @@
 <style>
   .workspace-grid {
     flex: 1;
-    display: flex;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 16px;
+    align-items: start;
     min-height: 0;
   }
 
   .workspace-column {
-    flex: 1;
     display: flex;
     flex-direction: column;
     min-width: 0;
+    min-height: 0;
+    gap: 16px;
+  }
+
+  .media-panel,
+  .metadata-panel {
+    min-width: 0;
+  }
+
+  .media-panel {
+    background: rgba(13, 17, 23, 0.45);
+    border: 1px solid var(--border-dim);
+    border-radius: 6px;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
     gap: 12px;
   }
 
@@ -332,7 +365,8 @@
     align-items: center;
     justify-content: space-between;
     width: 100%;
-    height: 24px;
+    min-height: 24px;
+    gap: 12px;
   }
 
   .match-nav {
@@ -426,9 +460,10 @@
   }
 
   .pane {
-    flex: 1;
+    height: clamp(260px, 42vh, 480px);
+    min-height: 0;
     background: #090c10;
-    border: 1px solid var(--border-dim);
+    border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 6px;
     display: flex;
     align-items: center;
@@ -536,6 +571,8 @@
     display: flex;
     flex-direction: column;
     gap: 8px;
+    min-height: 0;
+    overflow: visible;
   }
 
   .meta-card-title {
@@ -640,5 +677,16 @@
 
   .uppercase {
     text-transform: uppercase;
+  }
+
+  @media (max-width: 980px) {
+    .workspace-grid {
+      grid-template-columns: 1fr;
+      overflow-y: auto;
+    }
+
+    .pane {
+      height: clamp(240px, 44vh, 440px);
+    }
   }
 </style>

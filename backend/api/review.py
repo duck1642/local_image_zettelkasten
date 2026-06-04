@@ -249,6 +249,8 @@ def _review_action_sync(filename: str, action: str, target_hash: str = None):
         }
         if "ctx" in inspect.signature(process_file).parameters:
             p_kwargs["ctx"] = ctx
+        if "allow_pending_review" in inspect.signature(process_file).parameters:
+            p_kwargs["allow_pending_review"] = True
         ok, process_message, idx_data = process_file(
             file_path,
             cfg,

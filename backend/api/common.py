@@ -32,6 +32,7 @@ from logger import log_auth, log_ingest_audit, log_ingest_local, log_review, log
 from md_generator import MANUAL_FRONTMATTER_FIELDS, load_note_frontmatter, load_note_topics, load_note_wd_tags, generate_markdown, normalize_topic_list
 from metadata_index import (
     ensure_metadata_schema,
+    item_facet_values,
     item_core_facet_values,
     indexed_item_metadata,
     metadata_facets,

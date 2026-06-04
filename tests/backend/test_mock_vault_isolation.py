@@ -1468,6 +1468,37 @@ def test_processor_skips_file_already_pending_review(monkeypatch, tmp_path):
     assert idx_data is None
 
 
+def test_processor_can_bypass_pending_review_guard_for_review_action(monkeypatch, tmp_path):
+    utils, sqlite_operator, processor = fresh_backend(monkeypatch, tmp_path, "utils", "db.sqlite_operator", "processor")
+    source = tmp_path / "pending.webp"
+    source.write_bytes(b"pending review bytes")
+    file_hash = utils.calculate_file_hash(source)
+    review_file = utils.REVIEW_DIR / "queued.webp"
+    review_file.parent.mkdir(parents=True, exist_ok=True)
+    review_file.write_bytes(b"existing review bytes")
+    review_file.with_suffix(".webp.json").write_text(
+        json.dumps({"state": "pending", "file_hash": file_hash, "original_name": "pending.webp"}),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(processor, "get_mime_type", lambda path: "image/webp")
+    monkeypatch.setattr(processor, "calculate_phash", lambda path: None)
+
+    ok, message, idx_data = processor.process_file(
+        source,
+        {"firewall": {"allowed_mimes": ["image/webp"], "allowed_extensions": ["webp"]}},
+        allow_pending_review=True,
+    )
+
+    conn = sqlite_operator.init_database()
+    row = conn.execute("SELECT 1 FROM items WHERE hash = ?", (file_hash,)).fetchone()
+    conn.close()
+
+    assert ok, message
+    assert idx_data["file_hash"] == file_hash
+    assert row is not None
+
+
 def test_pending_review_match_uses_cache_without_sidecar_glob(monkeypatch, tmp_path):
     utils, processor = fresh_backend(monkeypatch, tmp_path, "utils", "processor")
     review_hash = "ab" * 32
@@ -2666,6 +2697,42 @@ def test_metadata_facet_counts_refresh_and_fallback(monkeypatch, tmp_path):
 
     facet = web_api._get_facets_sync("wd_tag", "", 10)
     assert facet == {"kind": "wd_tag", "items": [{"value": "New Tag", "count": 1, "tag_type": "general"}]}
+
+
+def test_replace_delete_refreshes_wd_facet_counts(monkeypatch, tmp_path):
+    sqlite_operator, metadata_index, api_library = fresh_backend(
+        monkeypatch,
+        tmp_path,
+        "db.sqlite_operator",
+        "metadata_index",
+        "api.library",
+    )
+    old_hash = "42" * 32
+    kept_hash = "43" * 32
+    conn = insert_mock_item(sqlite_operator, old_hash)
+    conn.close()
+    conn = insert_mock_item(sqlite_operator, kept_hash)
+    metadata_index.ensure_metadata_schema(conn)
+    conn.execute("INSERT OR IGNORE INTO item_wd_tags(item_hash, tag, tag_norm, tag_type) VALUES (?, 'Shared', 'shared', 'general')", (old_hash,))
+    conn.execute("INSERT OR IGNORE INTO item_wd_tags(item_hash, tag, tag_norm, tag_type) VALUES (?, 'Shared', 'shared', 'general')", (kept_hash,))
+    metadata_index.refresh_metadata_facet_counts_for_values(conn, {("wd_tag", "shared")})
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setattr(api_library.search_manager, "remove_indexes_batch", lambda *args, **kwargs: None)
+
+    result = api_library._delete_item_after_replacement(old_hash)
+
+    conn = sqlite_operator.init_database()
+    count_row = conn.execute(
+        "SELECT value, count FROM metadata_facet_counts WHERE kind = 'wd_tag' AND value_norm = 'shared'"
+    ).fetchone()
+    old_tag_rows = conn.execute("SELECT COUNT(*) FROM item_wd_tags WHERE item_hash = ?", (old_hash,)).fetchone()[0]
+    conn.close()
+
+    assert result["status"] == "deleted"
+    assert count_row == ("Shared", 1)
+    assert old_tag_rows == 0
 
 
 def test_item_details_include_topic_and_wd_counts(monkeypatch, tmp_path):

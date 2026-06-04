@@ -633,6 +633,11 @@ def _item_facet_values(conn: sqlite3.Connection, item_hash: str) -> set[tuple[st
     return values
 
 
+def item_facet_values(conn: sqlite3.Connection, item_hash: str) -> set[tuple[str, str]]:
+    ensure_metadata_schema(conn)
+    return _item_facet_values(conn, item_hash)
+
+
 def item_core_facet_values(conn: sqlite3.Connection, item_hash: str) -> set[tuple[str, str]]:
     ensure_metadata_schema(conn)
     row = conn.execute("SELECT source_artist, platform FROM items WHERE hash = ?", (item_hash,)).fetchone()

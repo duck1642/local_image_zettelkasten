@@ -23,10 +23,10 @@
       <span>Retry Cleanup & Delete Staged File</span>
     </button>
   {:else}
-    <!-- Keep: Leaves file in review staging -->
+    <!-- Defer: Leaves file in review staging -->
     <button class="action-big keep-btn" on:click={() => handleAction('keep')} disabled={acting}>
       <IconEye size={14} />
-      <span>Keep Staged</span>
+      <span>Defer</span>
     </button>
     <!-- Save Variant: Ingests new variant cleanly without replacing matching vault item -->
     <button class="action-big variant-btn" on:click={() => handleAction('variant')} disabled={acting}>

@@ -30,6 +30,7 @@ from thumbnails import ensure_thumbnail
 from review_cache import pending_review_match as cached_pending_review_match, upsert_review_cache_entry
 
 REVIEW_DIR = get_runtime_context().active_vault.review_dir
+IMAGE_REVIEW_PHASH_THRESHOLD = 12
 
 def _ctx(ctx: WorkspaceContext | None = None) -> WorkspaceContext:
     return ctx or get_runtime_context()
@@ -148,7 +149,7 @@ def calculate_tiles(filepath: Path, ratio_threshold: float = 3.0) -> list:
     except Exception:
         return []
 
-def find_visual_duplicate(new_phash: str, threshold: int = 5, new_tiles: list = None, ctx: WorkspaceContext | None = None, return_all: bool = False) -> Tuple[Optional[str], Optional[str], int, Optional[int], List[str]] | Tuple[Optional[str], Optional[str], int, Optional[int]]:
+def find_visual_duplicate(new_phash: str, threshold: int = IMAGE_REVIEW_PHASH_THRESHOLD, new_tiles: list = None, ctx: WorkspaceContext | None = None, return_all: bool = False) -> Tuple[Optional[str], Optional[str], int, Optional[int], List[str]] | Tuple[Optional[str], Optional[str], int, Optional[int]]:
 
     best_match = None
     match_type = None
@@ -266,7 +267,7 @@ def find_video_duplicate(audio_hash: bytes, visual_embedding: bytes, ai_threshol
         return best_match, match_type, total_conflicts, max_similarity if best_match else None, all_hashes
     return best_match, match_type, total_conflicts, max_similarity if best_match else None
 
-def process_file(filepath: Path, config: dict, metadata: dict = None, delete_source: bool = False, skip_similarity: bool = False, sync_index: bool = True, ctx: WorkspaceContext | None = None) -> Tuple[bool, str, Optional[dict]]:
+def process_file(filepath: Path, config: dict, metadata: dict = None, delete_source: bool = False, skip_similarity: bool = False, sync_index: bool = True, ctx: WorkspaceContext | None = None, allow_pending_review: bool = False) -> Tuple[bool, str, Optional[dict]]:
 
     metadata = metadata or {}
     index_data = None
@@ -293,7 +294,7 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
         pending_review = _pending_review_match(file_hash, ctx=ctx)
     except TypeError:
         pending_review = _pending_review_match(file_hash)
-    if pending_review:
+    if pending_review and not allow_pending_review:
         log_system(
             "INFO",
             "Skipped: Already pending review",
@@ -330,7 +331,7 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
             pass
 
         if phash and not skip_similarity:
-            conflict_hash, match_type, total_conflicts, distance, all_matches = find_visual_duplicate(phash, threshold=5, new_tiles=tiles, ctx=ctx, return_all=True)
+            conflict_hash, match_type, total_conflicts, distance, all_matches = find_visual_duplicate(phash, threshold=IMAGE_REVIEW_PHASH_THRESHOLD, new_tiles=tiles, ctx=ctx, return_all=True)
             if conflict_hash:
 
                 conn.close()

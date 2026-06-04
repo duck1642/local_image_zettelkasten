@@ -1080,8 +1080,11 @@ def _delete_item_row(cursor, conn, item_hash: str, remove_indexes: bool = True):
         return {"hash": item_hash, "status": "missing", "cleanup_errors": []}
 
     cleanup_paths = _item_file_paths(item_hash, row[0] or "", row[1] or "", row[2], conn)
+    previous_facet_values = item_facet_values(conn, item_hash)
 
     cursor.execute("DELETE FROM items WHERE hash = ?", (item_hash,))
+    refresh_metadata_facet_counts_for_values(conn, previous_facet_values)
+    refresh_metadata_index_counters(conn)
     conn.commit()
     index_payload = {"hash": item_hash, "source_url": row[3] or ""}
     if remove_indexes:
@@ -1110,6 +1113,7 @@ def _delete_item_after_replacement(item_hash: str, ctx: WorkspaceContext | None 
             return {"hash": item_hash, "status": "missing", "cleanup_errors": []}
 
         cleanup_paths = _item_file_paths(item_hash, row[0] or "", row[1] or "", row[2], conn, ctx=ctx)
+        previous_facet_values = item_facet_values(conn, item_hash)
         existing_paths = [path for path in cleanup_paths if path.exists()]
         trash_dir = _review_dir(ctx) / ".replace-trash"
         trash_dir.mkdir(parents=True, exist_ok=True)
@@ -1138,6 +1142,8 @@ def _delete_item_after_replacement(item_hash: str, ctx: WorkspaceContext | None 
 
         try:
             cursor.execute("DELETE FROM items WHERE hash = ?", (item_hash,))
+            refresh_metadata_facet_counts_for_values(conn, previous_facet_values)
+            refresh_metadata_index_counters(conn)
             conn.commit()
             search_manager.remove_indexes_batch([{"hash": item_hash, "source_url": row[3] or ""}], ctx=ctx)
         except Exception as exc:
