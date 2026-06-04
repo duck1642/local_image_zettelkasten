@@ -4,7 +4,7 @@ import json
 import time
 import secrets
 from pathlib import Path
-from typing import Tuple, Optional
+from typing import Tuple, Optional, List
 from utils import (
     calculate_file_hash, calculate_phash,
     atomic_write_text, flatten_image, get_normalization_color, note_path_for,
