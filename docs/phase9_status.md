@@ -110,6 +110,10 @@ tools/browser_extension/
 
 Edge, Chrome, and Firefox are runnable extension folders now.
 
+> [!NOTE]
+> **Maintenance warning**: The extension codebase (`background.js`, `popup.html`, `popup.js`, and `styles.css`) is duplicated across the `edge/`, `chrome/`, and `firefox/` folders. Any edits or new features implemented in one folder must be manually replicated or copied to the others to keep them in sync.
+
+
 ## Backend Shape
 
 Active-vault staging:
