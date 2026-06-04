@@ -1,4 +1,5 @@
 import re
+import threading
 
 from fastapi import APIRouter, File, Form, Request, UploadFile
 
@@ -9,6 +10,10 @@ router = APIRouter()
 
 STAGED_ID_RE = re.compile(r"^staged_\d{8}_\d{6}_[0-9a-f]{8}$")
 CAPTURE_STAGE_DIR_NAME = "capture_staging"
+CAPTURE_HANDLED_DIR_NAME = ".handled"
+
+_capture_commit_locks: dict[str, threading.Lock] = {}
+_capture_commit_locks_guard = threading.Lock()
 
 
 class CaptureCommitRequest(BaseModel):
@@ -20,6 +25,25 @@ class CaptureCommitRequest(BaseModel):
 
 def _capture_stage_dir(ctx: WorkspaceContext | None = None) -> Path:
     return (ctx or get_runtime_context()).active_vault.root / CAPTURE_STAGE_DIR_NAME
+
+
+def _capture_handled_dir(ctx: WorkspaceContext | None = None) -> Path:
+    return _capture_stage_dir(ctx) / CAPTURE_HANDLED_DIR_NAME
+
+
+def _capture_handled_path(staged_id: str, ctx: WorkspaceContext | None = None) -> Path:
+    staged_id = _validate_staged_id(staged_id)
+    return _capture_handled_dir(ctx) / f"{staged_id}.json"
+
+
+def _capture_commit_lock(staged_id: str) -> threading.Lock:
+    staged_id = _validate_staged_id(staged_id)
+    with _capture_commit_locks_guard:
+        lock = _capture_commit_locks.get(staged_id)
+        if lock is None:
+            lock = threading.Lock()
+            _capture_commit_locks[staged_id] = lock
+        return lock
 
 
 def _validate_staged_id(staged_id: str) -> str:
@@ -76,6 +100,29 @@ def _load_sidecar(staged_id: str, ctx: WorkspaceContext | None = None) -> dict:
     if payload.get("staged_id") != staged_id:
         raise HTTPException(status_code=500, detail="Capture sidecar mismatch")
     return payload
+
+
+def _load_handled_capture(staged_id: str, ctx: WorkspaceContext | None = None) -> dict | None:
+    path = _capture_handled_path(staged_id, ctx)
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    if payload.get("staged_id") != staged_id:
+        return None
+    payload["already_handled"] = True
+    return payload
+
+
+def _write_handled_capture(staged_id: str, payload: dict, ctx: WorkspaceContext | None = None):
+    path = _capture_handled_path(staged_id, ctx)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    marker = dict(payload)
+    marker["staged_id"] = staged_id
+    marker["handled_at"] = utc_now_str()
+    atomic_write_text(path, json.dumps(marker, indent=2, sort_keys=True))
 
 
 def _staged_file_from_sidecar(sidecar: dict, ctx: WorkspaceContext | None = None) -> Path:
@@ -210,6 +257,23 @@ async def commit_capture(body: CaptureCommitRequest):
 def _commit_capture_sync(body: CaptureCommitRequest) -> dict:
     ctx = get_runtime_context()
     staged_id = _validate_staged_id(body.staged_id)
+    handled = _load_handled_capture(staged_id, ctx)
+    if handled:
+        return handled
+
+    commit_lock = _capture_commit_lock(staged_id)
+    if not commit_lock.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="Capture is already committing")
+    try:
+        handled = _load_handled_capture(staged_id, ctx)
+        if handled:
+            return handled
+        return _commit_capture_locked(body, staged_id, ctx)
+    finally:
+        commit_lock.release()
+
+
+def _commit_capture_locked(body: CaptureCommitRequest, staged_id: str, ctx: WorkspaceContext) -> dict:
     sidecar = _load_sidecar(staged_id, ctx)
     staged_path = _staged_file_from_sidecar(sidecar, ctx)
     file_hash = calculate_file_hash(staged_path)
@@ -245,10 +309,13 @@ def _commit_capture_sync(body: CaptureCommitRequest) -> dict:
         hash=file_hash,
         result_message=message,
     )
-    return {
+    result = {
         "success": status in {"ingested", "quarantined", "duplicate"},
         "status": status,
         "hash": file_hash,
         "message": message,
         "tagging_status": (index_data or {}).get("tagging_status", ""),
     }
+    if result["success"]:
+        _write_handled_capture(staged_id, result, ctx)
+    return result

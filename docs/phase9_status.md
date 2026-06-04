@@ -69,17 +69,18 @@ docs/lmz_roadmap.md
 - Added backend-owned queue append endpoint:
   - `POST /api/queue/{queue_name}/append`
 - Added queue-block writer that preserves `@artist`, `@platform`, URL, and `---` parser semantics.
-- Added Edge Manifest V3 extension scaffold with:
-  - right-click image capture.
-  - right-click online page staging.
+- Added Edge Manifest V3 extension with:
+  - right-click image capture into IndexedDB Blob cache.
+  - right-click online page/URL staging into IndexedDB.
   - popup settings.
-  - authenticated preview fetch via blob URL.
-  - discard and commit/append actions.
+  - local cached preview via blob URL.
+  - sync, discard, commit, download fallback, and queue append actions.
+  - 100 MB automatic cache limit with large-file download/discard choice.
 - Added Chrome Manifest V3 extension containing background service worker, popup UI, and styles.
 - Added Firefox Manifest V3 extension containing background script, popup UI, and styles.
 - Added `python-multipart` dependency.
 
-Important gap: the current extension still uploads to LMZ immediately. It must be revised to cache captures locally first so right-click capture works while LMZ is closed.
+Edge capture now caches locally first, so right-click capture works while LMZ is closed. LMZ is only needed for sync, commit, and online queue append.
 
 ## Extension Shape
 
@@ -111,7 +112,7 @@ tools/browser_extension/
 Edge, Chrome, and Firefox are runnable extension folders now.
 
 > [!NOTE]
-> **Maintenance warning**: The extension codebase (`background.js`, `popup.html`, `popup.js`, and `styles.css`) is duplicated across the `edge/`, `chrome/`, and `firefox/` folders. Any edits or new features implemented in one folder must be manually replicated or copied to the others to keep them in sync.
+> **Maintenance warning**: Edge is currently ahead of Chrome and Firefox. Chrome/Firefox still use the older direct-upload flow until Edge smoke passes and the implementation is copied or shared.
 
 
 ## Backend Shape
@@ -133,23 +134,19 @@ Implementation rule: capture commit must call existing processor/review helpers.
 
 ## Immediate Work
 
-1. Add extension-side IndexedDB cache for captured Blob/File bytes.
-2. Change right-click image capture to cache locally first and sync/upload later.
-3. Add fallback normal download to `Downloads/LMZ Capture/` when Blob cache fails.
-4. Add capture statuses: `cached`, `downloaded`, `uploading`, `uploaded`, `committed`, `failed`.
-5. Update popup states for offline LMZ:
-   - cached item: preview locally, allow discard, sync when online.
-   - downloaded-only item: explain manual Local Ingestion fallback.
-   - uploaded item: allow commit.
-6. Manual Edge smoke with LMZ closed, then opened for sync.
-7. Test supported online page queue append for X/Pixiv/Instagram/Pinterest.
+1. Manual Edge smoke with LMZ closed, then opened for sync.
+2. Test supported online page queue append for X/Pixiv/Instagram/Pinterest.
+3. Test similar-image review behavior with `IMAGE_REVIEW_PHASH_THRESHOLD = 12`.
+4. Test large-image path over 100 MB.
+5. Test protected/CORS-blocked media download fallback.
+6. After Edge smoke passes, copy or share the Edge implementation with Chrome.
 
 ## Current Risks
 
 - Extension fetch may fail for blob URLs, canvas images, expiring CDN links, hotlink protection, and auth-gated media.
 - Video capture is likely messy and should stay out of the MVP.
-- Extension has not had real Edge smoke yet.
-- IndexedDB quota and large image/GIF behavior need a clear size policy.
+- Restored offline-first Edge extension has not had a fresh smoke after sync.
+- IndexedDB quota and large image/GIF behavior use a 100 MB automatic cache limit, but need real-world testing.
 - Download fallback copies are user-visible and should not be auto-deleted by default.
 
 ## Useful Checks

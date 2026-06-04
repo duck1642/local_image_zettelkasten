@@ -2735,6 +2735,50 @@ def test_replace_delete_refreshes_wd_facet_counts(monkeypatch, tmp_path):
     assert old_tag_rows == 0
 
 
+def test_delete_and_replace_cleanup_remove_thumbnails(monkeypatch, tmp_path):
+    utils, sqlite_operator, api_library, thumbnails = fresh_backend(
+        monkeypatch,
+        tmp_path,
+        "utils",
+        "db.sqlite_operator",
+        "api.library",
+        "thumbnails",
+    )
+    replace_hash = "52" * 32
+    delete_hash = "53" * 32
+    conn = insert_mock_item(sqlite_operator, replace_hash)
+    replace_storage = storage_id_for(conn, replace_hash)
+    conn.close()
+    conn = insert_mock_item(sqlite_operator, delete_hash)
+    delete_storage = storage_id_for(conn, delete_hash)
+    conn.close()
+
+    def write_item_files(item_hash: str, storage_id: str):
+        asset = utils.asset_path_for(item_hash, ".jpg", "image/jpeg", storage_id=storage_id)
+        note = utils.note_path_for(item_hash, storage_id)
+        wd = utils.wd_tag_cache_path_for(item_hash, storage_id)
+        thumb = thumbnails.thumbnail_path_for(item_hash, storage_id)
+        for path, data in (
+            (asset, b"asset"),
+            (note, b"---\n---\n"),
+            (wd, b"{}"),
+            (thumb, b"thumb"),
+        ):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+        return asset, note, wd, thumb
+
+    replace_paths = write_item_files(replace_hash, replace_storage)
+    delete_paths = write_item_files(delete_hash, delete_storage)
+    monkeypatch.setattr(api_library.search_manager, "remove_indexes_batch", lambda *args, **kwargs: None)
+
+    assert api_library._delete_item_after_replacement(replace_hash)["status"] == "deleted"
+    assert api_library._delete_item_sync(delete_hash)["status"] == "success"
+
+    for path in replace_paths + delete_paths:
+        assert not path.exists()
+
+
 def test_item_details_include_topic_and_wd_counts(monkeypatch, tmp_path):
     utils, sqlite_operator, metadata_index, web_api = fresh_backend(
         monkeypatch,

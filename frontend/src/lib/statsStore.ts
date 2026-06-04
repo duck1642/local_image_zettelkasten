@@ -70,10 +70,25 @@ export async function refreshSharedStats() {
   await Promise.all([refreshQueueStats(), refreshReviewCount()]);
 }
 
-export function startSharedStatsPolling(intervalMs = 5000) {
+export function startSharedStatsPolling(queueIntervalMs = 1000, reviewIntervalMs = 5000) {
   refreshSharedStats().catch(() => undefined);
-  const timer = window.setInterval(() => {
-    refreshSharedStats().catch(() => undefined);
-  }, intervalMs);
-  return () => window.clearInterval(timer);
+  const queueTimer = window.setInterval(() => {
+    if (document.visibilityState === 'visible') {
+      refreshQueueStats().catch(() => undefined);
+    }
+  }, queueIntervalMs);
+  const reviewTimer = window.setInterval(() => {
+    if (document.visibilityState === 'visible') {
+      refreshReviewCount().catch(() => undefined);
+    }
+  }, reviewIntervalMs);
+  const refreshOnFocus = () => refreshSharedStats().catch(() => undefined);
+  window.addEventListener('focus', refreshOnFocus);
+  document.addEventListener('visibilitychange', refreshOnFocus);
+  return () => {
+    window.clearInterval(queueTimer);
+    window.clearInterval(reviewTimer);
+    window.removeEventListener('focus', refreshOnFocus);
+    document.removeEventListener('visibilitychange', refreshOnFocus);
+  };
 }

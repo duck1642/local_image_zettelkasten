@@ -47,7 +47,7 @@ from metadata_index import (
 )
 from topics import format_topics_for_note, parse_topic_value, parse_topic_values, rename_topic as rename_topic_file, slugify_topic_label
 from tagging import load_tag_cache, tag_media
-from thumbnails import ThumbnailBusyError, get_or_generate_thumbnail
+from thumbnails import ThumbnailBusyError, get_or_generate_thumbnail, thumbnail_path_for, video_thumbnail_path_for
 from utils import (
     atomic_write_text, get_cookie_auth_status,
     invalidate_config_cache, utc_now, utc_now_str
@@ -615,11 +615,16 @@ def _apply_manual_frontmatter_to_item(item_hash: str, manual_fields: dict, ident
 def _item_file_paths(item_hash: str, extension: str, mime_type: str, storage_id: str | None, conn=None, ctx: WorkspaceContext | None = None) -> list[Path]:
     if not storage_id:
         raise RuntimeError(f"item {item_hash} is missing storage_id")
-    return [
+    paths = [
         asset_path_for(item_hash, extension, mime_type, storage_id=storage_id, ctx=ctx),
         note_path_for(item_hash, storage_id=storage_id, ctx=ctx),
         wd_tag_cache_path_for(item_hash, storage_id=storage_id, ctx=ctx),
     ]
+    if str(mime_type or "").startswith("video/"):
+        paths.append(video_thumbnail_path_for(item_hash, storage_id, ctx=ctx))
+    elif str(mime_type or "").startswith("image/"):
+        paths.append(thumbnail_path_for(item_hash, storage_id, ctx=ctx))
+    return paths
 
 def _tail_lines(path: Path, count: int = 150) -> list[str]:
     if not path.exists():

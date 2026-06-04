@@ -571,6 +571,12 @@
       try {
           const res = await apiFetch(`/api/items/${item.hash}`, { method: 'DELETE' });
           if (res.ok) {
+              const result = await res.json().catch(() => ({}));
+              const cleanupErrors = Array.isArray(result.cleanup_errors) ? result.cleanup_errors : [];
+              if (cleanupErrors.length > 0) {
+                  uiLog('WARNING', 'Item deleted with cleanup failures', { hash: item.hash, cleanup_errors: cleanupErrors });
+                  alert(`Item deleted, but ${cleanupErrors.length} cleanup operation(s) failed. Check App Logs.`);
+              }
               uiLog('INFO', `Item deleted: ${item.hash}`);
               dispatch('deleted', item.hash);
               

@@ -1,7 +1,11 @@
 import base64
+import concurrent.futures
 import json
+import threading
 
+import pytest
 from fastapi.testclient import TestClient
+from fastapi import HTTPException
 
 from .test_mock_vault_isolation import fresh_backend
 
@@ -146,6 +150,47 @@ def test_capture_commit_uses_processor_metadata_and_cleans_stage(monkeypatch, tm
     assert seen["delete_source"] is True
     leftovers = list(capture._capture_stage_dir(client.runtime_context()).glob(f"{staged['staged_id']}.*"))
     assert leftovers == []
+
+
+def test_capture_commit_same_staged_id_is_locked_and_idempotent(monkeypatch, tmp_path):
+    client, api_key = _client(monkeypatch, tmp_path)
+    staged = client.post(
+        "/api/capture/stage",
+        headers={"X-LMZ-API-KEY": api_key},
+        files={"file": ("sample.png", PNG_BYTES, "image/png")},
+        data={"source_url": "https://example.com"},
+    ).json()
+    capture = client.capture_module
+    started = threading.Event()
+    release = threading.Event()
+    calls = 0
+
+    def fake_process_file(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        started.set()
+        assert release.wait(2)
+        return True, "Success: sample.png -> 000001.png", {"tagging_status": "ok"}
+
+    monkeypatch.setattr(capture, "process_file", fake_process_file)
+    body = capture.CaptureCommitRequest(staged_id=staged["staged_id"])
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        first = executor.submit(capture._commit_capture_sync, body)
+        assert started.wait(2)
+        with pytest.raises(HTTPException) as exc:
+            capture._commit_capture_sync(body)
+        assert exc.value.status_code == 409
+        release.set()
+        first_result = first.result(timeout=2)
+
+    assert first_result["status"] == "ingested"
+    assert calls == 1
+
+    repeat_result = capture._commit_capture_sync(body)
+    assert repeat_result["status"] == "ingested"
+    assert repeat_result["already_handled"] is True
+    assert calls == 1
 
 
 def test_capture_commit_maps_review_and_duplicate_statuses(monkeypatch, tmp_path):
