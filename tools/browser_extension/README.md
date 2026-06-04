@@ -2,11 +2,9 @@
 
 Phase 9 browser capture integration.
 
-Current target:
-
-- Edge first: load `tools/browser_extension/edge/` as an unpacked extension.
-- Chrome later with a near-identical Manifest V3 build.
-- Firefox later after Chromium flow is stable.
+- Edge: load `tools/browser_extension/edge/` as an unpacked extension.
+- Chrome: load `tools/browser_extension/chrome/` as an unpacked extension.
+- Firefox: load `tools/browser_extension/firefox/` as a temporary add-on.
 
 The extension has two flows:
 

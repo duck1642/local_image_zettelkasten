@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>LMZ Capture</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <div class="title">LMZ Capture</div>
+        <div id="statusText" class="muted">Checking backend...</div>
+      </div>
+      <button id="settingsToggle" class="icon-button" title="Settings">...</button>
+    </header>
+
+    <section id="settingsPanel" class="panel hidden">
+      <label>
+        API Base URL
+        <input id="apiBaseUrl" type="text" placeholder="http://127.0.0.1:8000" />
+      </label>
+      <label>
+        API Key
+        <input id="apiKey" type="password" placeholder="Paste secrets/.api_key" />
+      </label>
+      <button id="saveSettings" class="primary full">Save</button>
+    </section>
+
+    <section id="errorPanel" class="error hidden"></section>
+
+    <main id="itemPanel" class="panel hidden">
+      <div class="item-head">
+        <div>
+          <div id="itemKind" class="kind"></div>
+          <div id="itemTitle" class="item-title"></div>
+          <div id="itemUrl" class="item-url"></div>
+        </div>
+        <div id="itemCounter" class="counter"></div>
+      </div>
+
+      <div id="previewWrap" class="preview-wrap hidden">
+        <img id="previewImage" alt="Capture preview" />
+      </div>
+
+      <label>
+        Artist
+        <input id="artistInput" type="text" placeholder="Artist name" />
+      </label>
+
+      <label>
+        Platform
+        <select id="platformSelect">
+          <option value="General Web">General Web</option>
+          <option value="X">X / Twitter</option>
+          <option value="Pixiv">Pixiv</option>
+          <option value="Instagram">Instagram</option>
+          <option value="Pinterest">Pinterest</option>
+        </select>
+      </label>
+
+      <label id="queueWrap" class="hidden">
+        Queue
+        <select id="queueSelect">
+          <option value="normal">Normal</option>
+          <option value="force">Force</option>
+        </select>
+      </label>
+
+      <div class="button-row">
+        <button id="discardButton">Discard</button>
+        <button id="commitButton" class="primary">Commit</button>
+      </div>
+    </main>
+
+    <section id="emptyPanel" class="empty">
+      Right-click an image or supported platform page to stage it for LMZ.
+    </section>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

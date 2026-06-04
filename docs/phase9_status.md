@@ -75,7 +75,8 @@ docs/lmz_roadmap.md
   - popup settings.
   - authenticated preview fetch via blob URL.
   - discard and commit/append actions.
-- Added Chrome and Firefox placeholder folders.
+- Added Chrome Manifest V3 extension containing background service worker, popup UI, and styles.
+- Added Firefox Manifest V3 extension containing background script, popup UI, and styles.
 - Added `python-multipart` dependency.
 
 Important gap: the current extension still uploads to LMZ immediately. It must be revised to cache captures locally first so right-click capture works while LMZ is closed.
@@ -93,11 +94,21 @@ tools/browser_extension/
     styles.css
   chrome/
     README.md
+    manifest.json
+    background.js
+    popup.html
+    popup.js
+    styles.css
   firefox/
     README.md
+    manifest.json
+    background.js
+    popup.html
+    popup.js
+    styles.css
 ```
 
-Edge is the only runnable extension folder for now.
+Edge, Chrome, and Firefox are runnable extension folders now.
 
 ## Backend Shape
 
