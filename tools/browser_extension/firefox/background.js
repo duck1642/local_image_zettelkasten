@@ -165,8 +165,11 @@ function guessPlatform(url) {
   const lower = String(url || "").toLowerCase();
   if (lower.includes("pixiv.net")) return "Pixiv";
   if (lower.includes("twitter.com") || lower.includes("x.com")) return "X";
-  if (lower.includes("instagram.com")) return "Instagram";
   if (lower.includes("pinterest.") || lower.includes("pin.it")) return "Pinterest";
+  if (lower.includes("youtube.com") || lower.includes("youtu.be")) return "YouTube";
+  if (lower.includes("bsky.app") || lower.includes("bsky.social")) return "Bluesky";
+  if (lower.includes("deviantart.com")) return "DeviantArt";
+  if (lower.includes("reddit.com")) return "Reddit";
   return "General Web";
 }
 

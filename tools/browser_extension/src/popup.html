@@ -12,7 +12,10 @@
         <div class="title">LMZ Capture</div>
         <div id="statusText" class="muted">Checking backend...</div>
       </div>
-      <button id="settingsToggle" class="icon-button" title="Settings">...</button>
+      <div class="top-actions">
+        <button id="bulkToggle" class="top-button" title="Bulk actions">Bulk</button>
+        <button id="settingsToggle" class="top-button" title="API settings">API</button>
+      </div>
     </header>
 
     <section id="settingsPanel" class="panel hidden">
@@ -25,6 +28,14 @@
         <input id="apiKey" type="password" placeholder="Paste secrets/.api_key" />
       </label>
       <button id="saveSettings" class="primary full">Save</button>
+    </section>
+
+    <section id="bulkPanel" class="panel hidden">
+      <div class="panel-title">Bulk Actions</div>
+      <button class="full" disabled>Apply metadata to all</button>
+      <button class="full" disabled>Sync all cached</button>
+      <button class="full" disabled>Commit all uploaded</button>
+      <button class="full" disabled>Append all online</button>
     </section>
 
     <section id="errorPanel" class="error hidden"></section>
@@ -52,11 +63,14 @@
       <label>
         Platform
         <select id="platformSelect">
-          <option value="General Web">General Web</option>
           <option value="X">X / Twitter</option>
           <option value="Pixiv">Pixiv</option>
-          <option value="Instagram">Instagram</option>
           <option value="Pinterest">Pinterest</option>
+          <option value="YouTube">YouTube</option>
+          <option value="Bluesky">Bluesky</option>
+          <option value="DeviantArt">DeviantArt</option>
+          <option value="Reddit">Reddit</option>
+          <option value="General Web">General Web</option>
         </select>
       </label>
 

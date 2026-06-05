@@ -254,6 +254,51 @@ def test_queue_append_writes_metadata_block(monkeypatch, tmp_path):
 
 
 @pytest.mark.parametrize(
+    "url",
+    [
+        "https://www.youtube.com/watch?v=abc123",
+        "https://youtu.be/abc123",
+        "https://www.youtube.com/shorts/abc123",
+        "https://www.youtube.com/post/Ugkxabc123",
+        "https://www.youtube.com/@name/community?lb=Ugkxabc123",
+    ],
+)
+def test_queue_append_accepts_ingestible_youtube_urls(monkeypatch, tmp_path, url):
+    queue_service, ingestion_api = fresh_backend(monkeypatch, tmp_path, "queue_service", "api.ingestion")
+
+    result = ingestion_api._append_queue_entry_sync(
+        "normal",
+        ingestion_api.QueueAppendRequest(url=url, platform="YouTube"),
+    )
+    text = queue_service.read_queue("normal")
+
+    assert result["status"] == "success"
+    assert url in text
+    assert "@platform: YouTube" in text
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://www.youtube.com/",
+        "https://www.youtube.com/results?search_query=test",
+        "https://www.youtube.com/@name",
+        "https://www.youtube.com/playlist?list=PLabc123",
+    ],
+)
+def test_queue_append_rejects_non_ingestible_youtube_urls(monkeypatch, tmp_path, url):
+    _queue_service, ingestion_api = fresh_backend(monkeypatch, tmp_path, "queue_service", "api.ingestion")
+
+    with pytest.raises(HTTPException) as exc:
+        ingestion_api._append_queue_entry_sync(
+            "normal",
+            ingestion_api.QueueAppendRequest(url=url, platform="YouTube"),
+        )
+
+    assert exc.value.status_code == 400
+
+
+@pytest.mark.parametrize(
     "origin",
     [
         "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",

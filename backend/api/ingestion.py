@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from api.common import *
 from artists import ensure_artist_schema
@@ -66,7 +66,8 @@ def clean_extension_queue_url(url: str) -> str:
 
 
 def _is_supported_extension_online_host(url: str) -> bool:
-    host = (urlparse(url).hostname or "").casefold()
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").casefold()
     return (
         host == "x.com"
         or host.endswith(".x.com")
@@ -80,7 +81,30 @@ def _is_supported_extension_online_host(url: str) -> bool:
         or host.endswith(".pinterest.com")
         or host == "pin.it"
         or host.endswith(".pin.it")
+        or _is_supported_youtube_extension_url(parsed)
     )
+
+
+def _is_supported_youtube_extension_url(parsed) -> bool:
+    host = (parsed.hostname or "").casefold()
+    path = parsed.path.casefold()
+    query = parse_qs(parsed.query)
+
+    if host == "youtu.be" or host.endswith(".youtu.be"):
+        return bool(path.strip("/"))
+
+    if host != "youtube.com" and not host.endswith(".youtube.com"):
+        return False
+
+    if path == "/watch":
+        return bool(query.get("v"))
+    if path.startswith("/shorts/"):
+        return bool(path.removeprefix("/shorts/").strip("/"))
+    if path.startswith("/post/"):
+        return bool(path.removeprefix("/post/").strip("/"))
+    if "/community" in path and query.get("lb"):
+        return True
+    return False
 
 @router.post("/api/queue/{queue_name}/parse")
 async def parse_queue_content(queue_name: str, update: QueueUpdate):

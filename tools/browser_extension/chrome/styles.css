@@ -38,6 +38,11 @@ body {
   border-bottom: 1px solid var(--line);
 }
 
+.top-actions {
+  display: flex;
+  gap: 6px;
+}
+
 .title {
   font-size: 14px;
   font-weight: 700;
@@ -110,15 +115,27 @@ button:disabled {
   opacity: 0.55;
 }
 
+.top-button {
+  min-width: 42px;
+  padding: 6px 8px;
+  font-size: 12px;
+}
+
+.top-button.active {
+  border-color: var(--blue);
+  background: var(--blue);
+  color: white;
+}
+
 button.full {
   width: 100%;
   margin-top: 10px;
 }
 
-.icon-button {
-  width: 30px;
-  height: 30px;
-  padding: 0;
+.panel-title {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .kind {

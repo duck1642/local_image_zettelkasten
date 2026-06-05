@@ -9,12 +9,24 @@ import {
 } from "./api.js";
 
 const DEFAULT_API_BASE_URL = "http://127.0.0.1:8000";
+const METADATA_SAVE_DEBOUNCE_MS = 300;
+const PLATFORM_OPTIONS = [
+  "X",
+  "Pixiv",
+  "Pinterest",
+  "YouTube",
+  "Bluesky",
+  "DeviantArt",
+  "Reddit",
+  "General Web"
+];
 
 let config = { apiBaseUrl: DEFAULT_API_BASE_URL, apiKey: "" };
 let pendingItems = [];
 let currentIndex = 0;
 let previewObjectUrl = "";
 let actionInFlight = false;
+let metadataSaveTimer = null;
 
 document.addEventListener("DOMContentLoaded", async () => {
   bindEvents();
@@ -26,13 +38,39 @@ document.addEventListener("DOMContentLoaded", async () => {
 
 function bindEvents() {
   document.getElementById("settingsToggle").addEventListener("click", () => {
-    document.getElementById("settingsPanel").classList.toggle("hidden");
+    togglePanel("settingsPanel", "bulkPanel");
+  });
+  document.getElementById("bulkToggle").addEventListener("click", () => {
+    togglePanel("bulkPanel", "settingsPanel");
   });
   document.getElementById("saveSettings").addEventListener("click", saveConfig);
+  document.getElementById("artistInput").addEventListener("input", scheduleMetadataSave);
+  document.getElementById("artistInput").addEventListener("change", () => saveVisibleItem().catch(showSaveError));
+  document.getElementById("platformSelect").addEventListener("change", () => saveVisibleItem().catch(showSaveError));
+  document.getElementById("queueSelect").addEventListener("change", () => saveVisibleItem().catch(showSaveError));
   document.getElementById("discardButton").addEventListener("click", discardCurrent);
   document.getElementById("commitButton").addEventListener("click", primaryAction);
-  document.getElementById("prevButton").addEventListener("click", () => moveCurrent(-1));
-  document.getElementById("nextButton").addEventListener("click", () => moveCurrent(1));
+  document.getElementById("prevButton").addEventListener("click", () => moveCurrent(-1).catch(showSaveError));
+  document.getElementById("nextButton").addEventListener("click", () => moveCurrent(1).catch(showSaveError));
+}
+
+function togglePanel(openId, closeId) {
+  const openPanel = document.getElementById(openId);
+  const closePanel = document.getElementById(closeId);
+  closePanel.classList.add("hidden");
+  openPanel.classList.toggle("hidden");
+  updatePanelToggles();
+}
+
+function updatePanelToggles() {
+  document.getElementById("settingsToggle").classList.toggle(
+    "active",
+    !document.getElementById("settingsPanel").classList.contains("hidden")
+  );
+  document.getElementById("bulkToggle").classList.toggle(
+    "active",
+    !document.getElementById("bulkPanel").classList.contains("hidden")
+  );
 }
 
 async function loadConfig() {
@@ -87,6 +125,7 @@ async function saveConfig() {
   };
   await storageSet(config);
   document.getElementById("settingsPanel").classList.add("hidden");
+  updatePanelToggles();
   await checkBackend();
   await render();
 }
@@ -237,8 +276,7 @@ function clearPreview() {
 }
 
 function platformValue(value) {
-  const known = ["General Web", "X", "Pixiv", "Instagram", "Pinterest"];
-  return known.includes(value) ? value : "General Web";
+  return PLATFORM_OPTIONS.includes(value) ? value : "General Web";
 }
 
 async function moveCurrent(delta) {
@@ -246,11 +284,13 @@ async function moveCurrent(delta) {
   if (next < 0 || next >= pendingItems.length) {
     return;
   }
+  await saveVisibleItem();
   currentIndex = next;
   await render();
 }
 
 async function discardCurrent() {
+  clearMetadataSaveTimer();
   const item = pendingItems[currentIndex];
   if (!item) return;
   if (item.kind === "capture" && item.staged_id) {
@@ -271,13 +311,13 @@ async function primaryAction() {
   if (!item) return;
   actionInFlight = true;
   document.getElementById("commitButton").disabled = true;
-  await saveItemForm(item);
-  const fresh = await getItem(item.id);
-  if (!fresh) {
-    actionInFlight = false;
-    return;
-  }
+  let fresh = null;
   try {
+    await saveVisibleItem();
+    fresh = await getItem(item.id);
+    if (!fresh) {
+      return;
+    }
     if (fresh.kind === "online") {
       await appendOnlineQueue(fresh);
     } else if (fresh.status === "cached") {
@@ -292,7 +332,9 @@ async function primaryAction() {
   } catch (error) {
     const message = error?.message || String(error);
     showError(message);
-    await updateItem(fresh.id, { status: restoreStatus(fresh.status), last_error: message });
+    if (fresh) {
+      await updateItem(fresh.id, { status: restoreStatus(fresh.status), last_error: message });
+    }
     await storageSet({ lastError: message });
     await refreshState();
   } finally {
@@ -310,11 +352,60 @@ function restoreStatus(status) {
 }
 
 async function saveItemForm(item) {
-  await updateItem(item.id, {
+  return updateItem(item.id, currentMetadataPatch());
+}
+
+async function saveVisibleItem() {
+  clearMetadataSaveTimer();
+  const item = pendingItems[currentIndex];
+  if (!item) return null;
+  const updated = await saveItemForm(item);
+  if (updated) {
+    pendingItems[currentIndex] = updated;
+  }
+  return updated;
+}
+
+function scheduleMetadataSave() {
+  clearMetadataSaveTimer();
+  const item = pendingItems[currentIndex];
+  if (!item) return;
+  const itemId = item.id;
+  const patch = currentMetadataPatch();
+  metadataSaveTimer = setTimeout(async () => {
+    metadataSaveTimer = null;
+    try {
+      const updated = await updateItem(itemId, patch);
+      if (updated && pendingItems[currentIndex]?.id === itemId) {
+        pendingItems[currentIndex] = updated;
+      }
+    } catch (error) {
+      showSaveError(error);
+    }
+  }, METADATA_SAVE_DEBOUNCE_MS);
+}
+
+function clearMetadataSaveTimer() {
+  if (metadataSaveTimer) {
+    clearTimeout(metadataSaveTimer);
+    metadataSaveTimer = null;
+  }
+}
+
+function currentMetadataPatch() {
+  return {
     artist: document.getElementById("artistInput").value.trim(),
-    platform: document.getElementById("platformSelect").value,
+    platform: currentPlatformValue(),
     queue_name: document.getElementById("queueSelect").value
-  });
+  };
+}
+
+function currentPlatformValue() {
+  return document.getElementById("platformSelect").value || "General Web";
+}
+
+function showSaveError(error) {
+  showError(`Metadata save failed: ${error?.message || String(error)}`);
 }
 
 async function syncCapture(item) {
