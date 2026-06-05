@@ -21,88 +21,83 @@
 
       <div class="popup-scroll-wrap">
         <div id="popupScroll" class="popup-scroll">
-          <section id="settingsPanel" class="panel hidden">
-            <label>
-              API Base URL
-              <input id="apiBaseUrl" type="text" placeholder="http://127.0.0.1:8000" />
-            </label>
-            <label>
-              API Key
-              <input id="apiKey" type="password" placeholder="Paste secrets/.api_key" />
-            </label>
-            <button id="saveSettings" class="primary full">Save</button>
-          </section>
+          <div class="popup-scroll-content">
+            <section id="settingsPanel" class="panel hidden">
+              <label>
+                API Base URL
+                <input id="apiBaseUrl" type="text" placeholder="http://127.0.0.1:8000" />
+              </label>
+              <label>
+                API Key
+                <input id="apiKey" type="password" placeholder="Paste secrets/.api_key" />
+              </label>
+              <button id="saveSettings" class="primary full">Save</button>
+            </section>
 
-          <section id="bulkPanel" class="panel hidden">
-            <div class="panel-title">Bulk Actions</div>
-            <button class="full" disabled>Apply metadata to all</button>
-            <button class="full" disabled>Sync all cached</button>
-            <button class="full" disabled>Commit all uploaded</button>
-            <button class="full" disabled>Append all online</button>
-          </section>
+            <section id="bulkPanel" class="panel hidden">
+              <div class="panel-title">Bulk Actions</div>
+              <button class="full" disabled>Apply metadata to all</button>
+              <button class="full" disabled>Sync all cached</button>
+              <button class="full" disabled>Commit all uploaded</button>
+              <button class="full" disabled>Append all online</button>
+            </section>
 
-          <section id="errorPanel" class="error hidden"></section>
+            <section id="errorPanel" class="error hidden"></section>
 
-          <main id="itemPanel" class="panel hidden">
-            <div class="item-head">
-              <div>
-                <div id="itemKind" class="kind"></div>
-                <div id="itemTitle" class="item-title"></div>
-                <div id="itemUrl" class="item-url"></div>
-                <div id="itemStatus" class="muted"></div>
+            <main id="itemPanel" class="panel hidden">
+              <div class="item-head">
+                <div>
+                  <div id="itemKind" class="kind"></div>
+                  <div id="itemTitle" class="item-title"></div>
+                  <div id="itemUrl" class="item-url"></div>
+                  <div id="itemStatus" class="muted"></div>
+                </div>
+                <div id="itemCounter" class="counter"></div>
               </div>
-              <div id="itemCounter" class="counter"></div>
-            </div>
 
-            <div id="previewWrap" class="preview-wrap hidden">
-              <img id="previewImage" alt="Capture preview" />
-            </div>
+              <div id="previewWrap" class="preview-wrap hidden">
+                <img id="previewImage" alt="Capture preview" />
+              </div>
 
-            <label>
-              Artist
-              <input id="artistInput" type="text" placeholder="Artist name" />
-            </label>
+              <label>
+                Artist
+                <input id="artistInput" type="text" placeholder="Artist name" />
+              </label>
 
-            <label>
-              Platform
-              <select id="platformSelect">
-                <option value="X">X / Twitter</option>
-                <option value="Pixiv">Pixiv</option>
-                <option value="Pinterest">Pinterest</option>
-                <option value="YouTube">YouTube</option>
-                <option value="Bluesky">Bluesky</option>
-                <option value="DeviantArt">DeviantArt</option>
-                <option value="Reddit">Reddit</option>
-                <option value="General Web">General Web</option>
-              </select>
-            </label>
+              <label>
+                Platform
+                <select id="platformSelect">
+                  <option value="X">X / Twitter</option>
+                  <option value="Pixiv">Pixiv</option>
+                  <option value="Pinterest">Pinterest</option>
+                  <option value="YouTube">YouTube</option>
+                  <option value="Bluesky">Bluesky</option>
+                  <option value="DeviantArt">DeviantArt</option>
+                  <option value="Reddit">Reddit</option>
+                  <option value="General Web">General Web</option>
+                </select>
+              </label>
 
-            <label id="queueWrap" class="hidden">
-              Queue
-              <select id="queueSelect">
-                <option value="normal">Normal</option>
-                <option value="force">Force</option>
-              </select>
-            </label>
+              <label id="queueWrap" class="hidden">
+                Queue
+                <select id="queueSelect">
+                  <option value="normal">Normal</option>
+                  <option value="force">Force</option>
+                </select>
+              </label>
 
-            <div class="button-row">
-              <button id="discardButton">Discard</button>
-              <button id="prevButton" class="icon-button nav-button" title="Previous item" aria-label="Previous item">Prev</button>
-              <button id="nextButton" class="icon-button nav-button" title="Next item" aria-label="Next item">Next</button>
-              <button id="commitButton" class="primary">Commit</button>
-            </div>
-          </main>
+              <div class="button-row">
+                <button id="discardButton">Discard</button>
+                <button id="prevButton" class="icon-button nav-button" title="Previous item" aria-label="Previous item">Prev</button>
+                <button id="nextButton" class="icon-button nav-button" title="Next item" aria-label="Next item">Next</button>
+                <button id="commitButton" class="primary">Commit</button>
+              </div>
+            </main>
 
-          <section id="emptyPanel" class="empty">
-            Right-click an image or supported platform page to stage it for LMZ.
-          </section>
-        </div>
-        <div class="fake-scrollbar" aria-hidden="true">
-          <div class="fake-scrollbar-button fake-scrollbar-button-up"></div>
-          <div class="fake-scrollbar-track">
-            <div id="fakeScrollbarThumb" class="fake-scrollbar-thumb"></div>
+            <section id="emptyPanel" class="empty">
+              Right-click an image or supported platform page to stage it for LMZ.
+            </section>
           </div>
-          <div class="fake-scrollbar-button fake-scrollbar-button-down"></div>
         </div>
       </div>
     </div>

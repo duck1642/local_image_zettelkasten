@@ -28,11 +28,9 @@ let currentIndex = 0;
 let previewObjectUrl = "";
 let actionInFlight = false;
 let metadataSaveTimer = null;
-let scrollbarResizeObserver = null;
 
 document.addEventListener("DOMContentLoaded", async () => {
   setupStaticIcons();
-  setupFakeScrollbar();
   bindEvents();
   await loadConfig();
   await migrateLegacyPendingItems();
@@ -321,35 +319,6 @@ function resetPopupScroll() {
   if (scroll) {
     scroll.scrollTop = 0;
   }
-  updateFakeScrollbar();
-}
-
-function setupFakeScrollbar() {
-  const scroll = document.getElementById("popupScroll");
-  if (!scroll) return;
-  scroll.addEventListener("scroll", updateFakeScrollbar);
-  if (globalThis.ResizeObserver) {
-    scrollbarResizeObserver = new ResizeObserver(updateFakeScrollbar);
-    scrollbarResizeObserver.observe(scroll);
-  }
-  updateFakeScrollbar();
-}
-
-function updateFakeScrollbar() {
-  const scroll = document.getElementById("popupScroll");
-  const track = document.querySelector(".fake-scrollbar-track");
-  const thumb = document.getElementById("fakeScrollbarThumb");
-  if (!scroll || !track || !thumb) return;
-  const clientHeight = scroll.clientHeight || 1;
-  const scrollHeight = scroll.scrollHeight || clientHeight;
-  const maxScroll = Math.max(0, scrollHeight - clientHeight);
-  const trackHeight = track.clientHeight || clientHeight;
-  const ratio = Math.min(1, clientHeight / scrollHeight);
-  const thumbHeight = Math.max(28, Math.round(trackHeight * ratio));
-  const maxThumbTop = Math.max(0, trackHeight - thumbHeight);
-  const thumbTop = maxScroll > 0 ? Math.round((scroll.scrollTop / maxScroll) * maxThumbTop) : 0;
-  thumb.style.height = `${thumbHeight}px`;
-  thumb.style.transform = `translateY(${thumbTop}px)`;
 }
 
 async function discardCurrent() {
