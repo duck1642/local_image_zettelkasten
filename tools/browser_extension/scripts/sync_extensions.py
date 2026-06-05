@@ -8,7 +8,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
 TARGETS = ("edge", "chrome", "firefox")
-SHARED_FILES = ("api.js", "background.js", "db.js", "popup.html", "popup.js", "styles.css")
+SHARED_FILES = ("api.js", "background.js", "db.js", "icons.js", "popup.html", "popup.js", "styles.css")
 
 
 def chromium_manifest() -> dict:

@@ -7,6 +7,7 @@ import {
   storageRemove,
   storageSet
 } from "./api.js";
+import { iconHtml } from "./icons.js";
 
 const DEFAULT_API_BASE_URL = "http://127.0.0.1:8000";
 const METADATA_SAVE_DEBOUNCE_MS = 300;
@@ -27,14 +28,31 @@ let currentIndex = 0;
 let previewObjectUrl = "";
 let actionInFlight = false;
 let metadataSaveTimer = null;
+let scrollbarResizeObserver = null;
 
 document.addEventListener("DOMContentLoaded", async () => {
+  setupStaticIcons();
+  setupFakeScrollbar();
   bindEvents();
   await loadConfig();
   await migrateLegacyPendingItems();
   await refreshState();
   await checkBackend();
 });
+
+function setupStaticIcons() {
+  setButtonContent("bulkToggle", "merge", "Bulk");
+  setButtonContent("settingsToggle", "server", "API");
+  setButtonContent("prevButton", "chevronLeft", "");
+  setButtonContent("nextButton", "chevronRight", "");
+  setButtonContent("discardButton", "trash", "Discard");
+}
+
+function setButtonContent(buttonOrId, iconName, label) {
+  const button = typeof buttonOrId === "string" ? document.getElementById(buttonOrId) : buttonOrId;
+  if (!button) return;
+  button.innerHTML = iconHtml(iconName, label);
+}
 
 function bindEvents() {
   document.getElementById("settingsToggle").addEventListener("click", () => {
@@ -60,6 +78,7 @@ function togglePanel(openId, closeId) {
   closePanel.classList.add("hidden");
   openPanel.classList.toggle("hidden");
   updatePanelToggles();
+  resetPopupScroll();
 }
 
 function updatePanelToggles() {
@@ -128,6 +147,7 @@ async function saveConfig() {
   updatePanelToggles();
   await checkBackend();
   await render();
+  resetPopupScroll();
 }
 
 function normalizeApiBaseUrl(value) {
@@ -142,6 +162,7 @@ async function refreshState() {
   }
   showError(result.lastError || "");
   await render();
+  resetPopupScroll();
 }
 
 async function checkBackend() {
@@ -171,7 +192,7 @@ async function render() {
 
   const item = pendingItems[currentIndex];
   const isCapture = item.kind === "capture";
-  document.getElementById("itemKind").textContent = isCapture ? "Capture" : "Online Queue";
+  document.getElementById("itemKind").innerHTML = iconHtml(isCapture ? "image" : "externalLink", isCapture ? "Capture" : "Online Queue");
   document.getElementById("itemTitle").textContent = item.page_title || item.original_name || item.url || "Untitled";
   document.getElementById("itemUrl").textContent = isCapture ? item.source_url || item.media_url : item.url;
   document.getElementById("itemStatus").textContent = statusText(item);
@@ -205,33 +226,38 @@ function configurePrimaryButton(item) {
   const button = document.getElementById("commitButton");
   button.disabled = actionInFlight;
   if (item.kind === "online") {
-    button.textContent = "Append Queue";
+    setPrimaryButton(button, "plus", "Append", "Append Queue");
   } else if (item.status === "cached") {
-    button.textContent = "Sync to LMZ";
+    setPrimaryButton(button, "upload", "Sync", "Sync to LMZ");
   } else if (item.status === "uploaded") {
-    button.textContent = "Commit to Vault";
+    setPrimaryButton(button, "checkCircle", "Commit", "Commit to Vault");
   } else if (item.status === "needs_download_choice" || item.status === "failed") {
-    button.textContent = item.media_url ? "Download" : "No Download URL";
+    setPrimaryButton(button, item.media_url ? "download" : "externalLink", item.media_url ? "Download" : "No URL", item.media_url ? "Download fallback" : "No Download URL");
     button.disabled = !item.media_url;
   } else if (item.status === "downloaded") {
-    button.textContent = "Manual Import";
+    setPrimaryButton(button, "download", "Manual", "Manual Import");
     button.disabled = true;
   } else if (item.status === "syncing") {
-    button.textContent = "Syncing...";
+    setPrimaryButton(button, "upload", "Syncing");
     button.disabled = true;
   } else if (item.status === "committing") {
-    button.textContent = "Committing...";
+    setPrimaryButton(button, "checkCircle", "Committing");
     button.disabled = true;
   } else if (item.status === "appending") {
-    button.textContent = "Appending...";
+    setPrimaryButton(button, "plus", "Appending");
     button.disabled = true;
   } else if (item.status === "downloading") {
-    button.textContent = "Downloading...";
+    setPrimaryButton(button, "download", "Downloading");
     button.disabled = true;
   } else {
-    button.textContent = "Wait";
+    setPrimaryButton(button, "externalLink", "Wait");
     button.disabled = true;
   }
+}
+
+function setPrimaryButton(button, iconName, label, title = label) {
+  setButtonContent(button, iconName, label);
+  button.title = title;
 }
 
 async function loadPreview(item) {
@@ -287,6 +313,43 @@ async function moveCurrent(delta) {
   await saveVisibleItem();
   currentIndex = next;
   await render();
+  resetPopupScroll();
+}
+
+function resetPopupScroll() {
+  const scroll = document.getElementById("popupScroll");
+  if (scroll) {
+    scroll.scrollTop = 0;
+  }
+  updateFakeScrollbar();
+}
+
+function setupFakeScrollbar() {
+  const scroll = document.getElementById("popupScroll");
+  if (!scroll) return;
+  scroll.addEventListener("scroll", updateFakeScrollbar);
+  if (globalThis.ResizeObserver) {
+    scrollbarResizeObserver = new ResizeObserver(updateFakeScrollbar);
+    scrollbarResizeObserver.observe(scroll);
+  }
+  updateFakeScrollbar();
+}
+
+function updateFakeScrollbar() {
+  const scroll = document.getElementById("popupScroll");
+  const track = document.querySelector(".fake-scrollbar-track");
+  const thumb = document.getElementById("fakeScrollbarThumb");
+  if (!scroll || !track || !thumb) return;
+  const clientHeight = scroll.clientHeight || 1;
+  const scrollHeight = scroll.scrollHeight || clientHeight;
+  const maxScroll = Math.max(0, scrollHeight - clientHeight);
+  const trackHeight = track.clientHeight || clientHeight;
+  const ratio = Math.min(1, clientHeight / scrollHeight);
+  const thumbHeight = Math.max(28, Math.round(trackHeight * ratio));
+  const maxThumbTop = Math.max(0, trackHeight - thumbHeight);
+  const thumbTop = maxScroll > 0 ? Math.round((scroll.scrollTop / maxScroll) * maxThumbTop) : 0;
+  thumb.style.height = `${thumbHeight}px`;
+  thumb.style.transform = `translateY(${thumbTop}px)`;
 }
 
 async function discardCurrent() {

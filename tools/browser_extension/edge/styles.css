@@ -15,13 +15,98 @@
 }
 
 body {
-  width: 340px;
   margin: 0;
-  padding: 12px;
-  scrollbar-gutter: stable;
+  overflow: hidden;
   background: var(--bg);
+}
+
+.popup-root {
+  width: 340px;
+  max-height: 600px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   color: var(--text);
   font: 13px/1.4 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.popup-scroll {
+  width: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding-right: 12px;
+  scrollbar-width: none;
+}
+
+.popup-scroll::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.popup-scroll-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.fake-scrollbar {
+  position: absolute;
+  top: 12px;
+  right: 0;
+  bottom: 0;
+  width: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.fake-scrollbar-button {
+  margin-top: 12px;
+  width: 10px;
+  height: 10px;
+  flex: 0 0 10px;
+  background-color: transparent;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 10px 10px;
+}
+
+.fake-scrollbar-button-up {
+  margin-top: 0;
+  background-image: url("data:image/svg+xml,%3Csvg width='10' height='10' viewBox='0 0 12 12' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M5.36 3.75 Q6 3.05 6.64 3.75 L9.76 7.85 Q10.45 8.75 9.28 8.75 H2.72 Q1.55 8.75 2.24 7.85 Z' fill='%236b7280'/%3E%3C/svg%3E");
+}
+
+.fake-scrollbar-button-down {
+  margin-top: 0;
+  background-image: url("data:image/svg+xml,%3Csvg width='10' height='10' viewBox='0 0 12 12' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M2.72 3.25 H9.28 Q10.45 3.25 9.76 4.15 L6.64 8.25 Q6 8.95 5.36 8.25 L2.24 4.15 Q1.55 3.25 2.72 3.25 Z' fill='%236b7280'/%3E%3C/svg%3E");
+}
+
+.fake-scrollbar-track {
+  flex: 1 1 auto;
+  width: 10px;
+  border-radius: 5px;
+  background: transparent;
+}
+
+.fake-scrollbar-thumb {
+  width: 8px;
+  margin-left: 1px;
+  min-height: 28px;
+  border-radius: 4px;
+  background: #6b7280;
+  transform: translateY(0);
+}
+
+.fake-scrollbar:hover .fake-scrollbar-thumb {
+  background: #484f58;
 }
 
 .topbar,
@@ -88,6 +173,10 @@ select {
 }
 
 button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   border: 1px solid var(--line);
   border-radius: 6px;
   padding: 8px 10px;
@@ -139,6 +228,9 @@ button.full {
 }
 
 .kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   color: var(--blue);
   font-size: 11px;
   font-weight: 700;
@@ -176,15 +268,25 @@ button.full {
   margin-top: 12px;
 }
 
-.button-row.compact {
-  margin-top: 10px;
+.icon {
+  flex: 0 0 auto;
 }
 
-.button-row.compact button {
-  padding: 6px 8px;
+.icon-label {
+  min-width: 0;
 }
 
-.button-row button {
+.icon-button {
+  min-height: 34px;
+}
+
+.nav-button {
+  flex: 0 0 34px;
+  width: 34px;
+  padding: 8px;
+}
+
+.button-row button:not(.nav-button) {
   flex: 1;
 }
 
