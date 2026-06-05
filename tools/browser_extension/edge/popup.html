@@ -40,7 +40,8 @@
                 <div>Cached captures <span id="bulkCachedCaptures">0</span></div>
                 <div>Uploaded captures <span id="bulkUploadedCaptures">0</span></div>
                 <div>Cached links <span id="bulkCachedLinks">0</span></div>
-                <div>Skipped/manual/failed <span id="bulkSkippedItems">0</span></div>
+                <div>Failed <span id="bulkFailedItems">0</span></div>
+                <div>Skipped/manual <span id="bulkSkippedItems">0</span></div>
               </div>
               <button id="bulkCommitAll" class="primary full">Commit all cached</button>
               <button id="bulkDiscardAll" class="full">Discard all</button>
@@ -55,6 +56,7 @@
                   <div id="itemTitle" class="item-title"></div>
                   <div id="itemUrl" class="item-url"></div>
                   <div id="itemStatus" class="muted"></div>
+                  <div id="itemError" class="item-error hidden"></div>
                 </div>
                 <div id="itemCounter" class="counter"></div>
               </div>

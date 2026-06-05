@@ -97,8 +97,12 @@ function bulkCounts(items = pendingItems) {
   let cachedCaptures = 0;
   let uploadedCaptures = 0;
   let cachedLinks = 0;
+  let failed = 0;
   let skipped = 0;
   for (const item of items) {
+    if (item.last_error) {
+      failed += 1;
+    }
     if (item.kind === "capture" && item.status === "cached") {
       cachedCaptures += 1;
     } else if (item.kind === "capture" && item.status === "uploaded") {
@@ -109,7 +113,7 @@ function bulkCounts(items = pendingItems) {
       skipped += 1;
     }
   }
-  return { cachedCaptures, uploadedCaptures, cachedLinks, skipped };
+  return { cachedCaptures, uploadedCaptures, cachedLinks, failed, skipped };
 }
 
 function updateBulkPanel() {
@@ -118,6 +122,7 @@ function updateBulkPanel() {
   document.getElementById("bulkCachedCaptures").textContent = String(counts.cachedCaptures);
   document.getElementById("bulkUploadedCaptures").textContent = String(counts.uploadedCaptures);
   document.getElementById("bulkCachedLinks").textContent = String(counts.cachedLinks);
+  document.getElementById("bulkFailedItems").textContent = String(counts.failed);
   document.getElementById("bulkSkippedItems").textContent = String(counts.skipped);
   setButtonContent("bulkCommitAll", "checkCircle", actionInFlight ? "Working..." : `Commit all cached${eligible ? ` (${eligible})` : ""}`);
   setButtonContent("bulkDiscardAll", "trash", `Discard all${pendingItems.length ? ` (${pendingItems.length})` : ""}`);
@@ -187,9 +192,15 @@ function normalizeApiBaseUrl(value) {
   return String(value || DEFAULT_API_BASE_URL).replace(/\/+$/, "");
 }
 
-async function refreshState() {
+async function refreshState(preferredItemId = "") {
   const result = await storageGet({ lastError: "" });
   pendingItems = await listItems();
+  if (preferredItemId) {
+    const preferredIndex = pendingItems.findIndex((item) => item.id === preferredItemId);
+    if (preferredIndex >= 0) {
+      currentIndex = preferredIndex;
+    }
+  }
   if (currentIndex >= pendingItems.length) {
     currentIndex = Math.max(0, pendingItems.length - 1);
   }
@@ -230,6 +241,9 @@ async function render() {
   document.getElementById("itemTitle").textContent = item.page_title || item.original_name || item.url || "Untitled";
   document.getElementById("itemUrl").textContent = isCapture ? item.source_url || item.media_url : item.url;
   document.getElementById("itemStatus").textContent = statusText(item);
+  const itemError = document.getElementById("itemError");
+  itemError.textContent = item.last_error || "";
+  itemError.classList.toggle("hidden", !item.last_error);
   document.getElementById("itemCounter").textContent = `${currentIndex + 1}/${pendingItems.length}`;
   document.getElementById("platformSelect").value = platformValue(item.platform);
   document.getElementById("artistInput").value = item.artist || "";
@@ -244,11 +258,11 @@ async function render() {
 
 function statusText(item) {
   if (item.status === "cached") return "Cached locally. LMZ can be offline.";
-  if (item.status === "needs_download_choice") return item.last_error || "Large image. Choose download or discard.";
+  if (item.status === "needs_download_choice") return "Large image. Choose download or discard.";
   if (item.status === "downloaded") return "Downloaded to LMZ Capture. Import manually in LMZ.";
   if (item.status === "uploaded") return "Synced to LMZ staging. Ready to commit.";
   if (item.status === "deferred") return "Saved locally. Append when LMZ is online.";
-  if (item.status === "failed") return item.last_error || "Capture failed.";
+  if (item.status === "failed") return "Capture failed. Try fallback if available.";
   if (item.status === "syncing") return "Syncing...";
   if (item.status === "committing") return "Committing to vault...";
   if (item.status === "appending") return "Appending to queue...";
@@ -389,6 +403,7 @@ async function commitAllCached() {
   let completed = 0;
   let failed = 0;
   let skipped = 0;
+  let firstFailedId = "";
   try {
     const items = await listItems();
     for (const item of items) {
@@ -415,6 +430,7 @@ async function commitAllCached() {
         failed += 1;
         const latest = await getItem(item.id);
         if (latest) {
+          firstFailedId ||= latest.id;
           await updateItem(latest.id, {
             status: restoreStatus(latest.status),
             last_error: error?.message || String(error)
@@ -427,7 +443,7 @@ async function commitAllCached() {
     showError(summary);
   } finally {
     actionInFlight = false;
-    await refreshState();
+    await refreshState(firstFailedId);
   }
 }
 

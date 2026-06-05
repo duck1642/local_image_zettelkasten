@@ -199,6 +199,13 @@ button.full {
   font-weight: 700;
 }
 
+.item-error {
+  margin-top: 4px;
+  color: #fed7aa;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
 .kind {
   display: inline-flex;
   align-items: center;
