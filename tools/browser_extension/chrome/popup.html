@@ -35,6 +35,7 @@
           <div id="itemKind" class="kind"></div>
           <div id="itemTitle" class="item-title"></div>
           <div id="itemUrl" class="item-url"></div>
+          <div id="itemStatus" class="muted"></div>
         </div>
         <div id="itemCounter" class="counter"></div>
       </div>
@@ -67,6 +68,11 @@
         </select>
       </label>
 
+      <div class="button-row compact">
+        <button id="prevButton">Prev</button>
+        <button id="nextButton">Next</button>
+      </div>
+
       <div class="button-row">
         <button id="discardButton">Discard</button>
         <button id="commitButton" class="primary">Commit</button>
@@ -77,6 +83,6 @@
       Right-click an image or supported platform page to stage it for LMZ.
     </section>
 
-    <script src="popup.js"></script>
+    <script type="module" src="popup.js"></script>
   </body>
 </html>
