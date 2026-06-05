@@ -1,4 +1,12 @@
 import { addItem, deleteItem, getItem, listItems, updateItem } from "./db.js";
+import {
+  downloadFile,
+  setBadgeBackgroundColor,
+  setBadgeText,
+  storageGet,
+  storageRemove,
+  storageSet
+} from "./api.js";
 
 const DEFAULT_API_BASE_URL = "http://127.0.0.1:8000";
 
@@ -28,7 +36,7 @@ function bindEvents() {
 }
 
 async function loadConfig() {
-  const result = await chrome.storage.local.get(["apiBaseUrl", "apiKey"]);
+  const result = await storageGet(["apiBaseUrl", "apiKey"]);
   config = {
     apiBaseUrl: normalizeApiBaseUrl(result.apiBaseUrl || DEFAULT_API_BASE_URL),
     apiKey: result.apiKey || ""
@@ -38,7 +46,7 @@ async function loadConfig() {
 }
 
 async function migrateLegacyPendingItems() {
-  const result = await chrome.storage.local.get({ pendingItems: [] });
+  const result = await storageGet({ pendingItems: [] });
   const legacyItems = Array.isArray(result.pendingItems) ? result.pendingItems : [];
   if (!legacyItems.length) {
     return;
@@ -69,7 +77,7 @@ async function migrateLegacyPendingItems() {
       });
     }
   }
-  await chrome.storage.local.remove("pendingItems");
+  await storageRemove("pendingItems");
 }
 
 async function saveConfig() {
@@ -77,7 +85,7 @@ async function saveConfig() {
     apiBaseUrl: normalizeApiBaseUrl(document.getElementById("apiBaseUrl").value),
     apiKey: document.getElementById("apiKey").value.trim()
   };
-  await chrome.storage.local.set(config);
+  await storageSet(config);
   document.getElementById("settingsPanel").classList.add("hidden");
   await checkBackend();
   await render();
@@ -88,7 +96,7 @@ function normalizeApiBaseUrl(value) {
 }
 
 async function refreshState() {
-  const result = await chrome.storage.local.get({ lastError: "" });
+  const result = await storageGet({ lastError: "" });
   pendingItems = await listItems();
   if (currentIndex >= pendingItems.length) {
     currentIndex = Math.max(0, pendingItems.length - 1);
@@ -253,7 +261,7 @@ async function discardCurrent() {
   }
   await deleteItem(item.id);
   document.getElementById("artistInput").value = "";
-  await chrome.storage.local.set({ lastError: "" });
+  await storageSet({ lastError: "" });
   await refreshState();
 }
 
@@ -279,13 +287,13 @@ async function primaryAction() {
     } else if (fresh.status === "needs_download_choice" || fresh.status === "failed") {
       await downloadFallback(fresh);
     }
-    await chrome.storage.local.set({ lastError: "" });
+    await storageSet({ lastError: "" });
     await refreshState();
   } catch (error) {
     const message = error?.message || String(error);
     showError(message);
     await updateItem(fresh.id, { status: restoreStatus(fresh.status), last_error: message });
-    await chrome.storage.local.set({ lastError: message });
+    await storageSet({ lastError: message });
     await refreshState();
   } finally {
     actionInFlight = false;
@@ -386,7 +394,7 @@ async function appendOnlineQueue(item) {
 
 async function downloadFallback(item) {
   await updateItem(item.id, { status: "downloading", last_error: "" });
-  const downloadId = await chrome.downloads.download({
+  const downloadId = await downloadFile({
     url: item.media_url,
     filename: downloadFilename(item),
     conflictAction: "uniquify",
@@ -410,8 +418,8 @@ function sanitizeFilename(value) {
 }
 
 async function updateBadge(count) {
-  chrome.action.setBadgeText({ text: count > 0 ? String(count) : "" });
-  chrome.action.setBadgeBackgroundColor({ color: "#1f6feb" });
+  await setBadgeText({ text: count > 0 ? String(count) : "" });
+  await setBadgeBackgroundColor({ color: "#1f6feb" });
 }
 
 function showError(message) {

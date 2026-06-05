@@ -1,26 +1,34 @@
 import { MAX_AUTO_CACHE_BYTES, addItem, countItems } from "./db.js";
+import {
+  createContextMenu,
+  ext,
+  removeAllContextMenus,
+  setBadgeBackgroundColor,
+  setBadgeText,
+  storageSet
+} from "./api.js";
 
-chrome.runtime.onInstalled.addListener(() => {
-  chrome.contextMenus.removeAll(() => {
-    chrome.contextMenus.create({
+ext.runtime.onInstalled.addListener(() => {
+  removeAllContextMenus().then(() => {
+    createContextMenu({
       id: "lmz_capture_image",
       title: "Capture image to LMZ",
       contexts: ["image"]
     });
-    chrome.contextMenus.create({
+    createContextMenu({
       id: "lmz_queue_page",
       title: "Send page to LMZ online queue",
       contexts: ["page", "image"]
     });
-  });
+  }).catch((error) => recordError(error));
   updateBadgeFromDb().catch(() => {});
 });
 
-chrome.runtime.onStartup.addListener(() => {
+ext.runtime.onStartup.addListener(() => {
   updateBadgeFromDb().catch(() => {});
 });
 
-chrome.contextMenus.onClicked.addListener((info, tab) => {
+ext.contextMenus.onClicked.addListener((info, tab) => {
   if (info.menuItemId === "lmz_capture_image") {
     cacheImageCapture(info, tab).catch((error) => recordError(error));
   } else if (info.menuItemId === "lmz_queue_page") {
@@ -115,15 +123,15 @@ function captureRecord({ sourceUrl, mediaUrl, pageTitle, filename, platform, siz
 
 async function recordError(error) {
   const message = error?.message || String(error);
-  await chrome.storage.local.set({ lastError: message });
-  chrome.action.setBadgeText({ text: "!" });
-  chrome.action.setBadgeBackgroundColor({ color: "#c2410c" });
+  await storageSet({ lastError: message });
+  await setBadgeText({ text: "!" });
+  await setBadgeBackgroundColor({ color: "#c2410c" });
 }
 
 async function updateBadgeFromDb() {
   const count = await countItems();
-  chrome.action.setBadgeText({ text: count > 0 ? String(count) : "" });
-  chrome.action.setBadgeBackgroundColor({ color: "#1f6feb" });
+  await setBadgeText({ text: count > 0 ? String(count) : "" });
+  await setBadgeBackgroundColor({ color: "#1f6feb" });
 }
 
 function filenameFromUrl(url, mimeType) {

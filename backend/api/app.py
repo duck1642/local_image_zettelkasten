@@ -12,6 +12,7 @@ from metadata_index import start_metadata_repair_worker, start_metadata_watchdog
 
 from api.common import (
     ALLOWED_ORIGINS,
+    EXTENSION_ORIGIN_REGEX,
     MUTATING_METHODS,
     _assets_dir,
     _file_response_under,
@@ -64,7 +65,7 @@ app = FastAPI(title="LMZ API", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=sorted(ALLOWED_ORIGINS),
-    allow_origin_regex=r"^chrome-extension://[a-z]{32}$",
+    allow_origin_regex=EXTENSION_ORIGIN_REGEX,
     allow_methods=["*"],
     allow_headers=["*"],
 )

@@ -253,9 +253,15 @@ def test_queue_append_writes_metadata_block(monkeypatch, tmp_path):
     assert preview["entries"][-1]["platform"] == "Pixiv"
 
 
-def test_extension_origin_requires_valid_api_key(monkeypatch, tmp_path):
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "moz-extension://123e4567-e89b-12d3-a456-426614174000",
+    ],
+)
+def test_extension_origin_requires_valid_api_key(monkeypatch, tmp_path, origin):
     client, api_key = _client(monkeypatch, tmp_path)
-    origin = "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
     missing_key = client.post(
         "/api/capture/stage",
@@ -279,3 +285,26 @@ def test_extension_origin_requires_valid_api_key(monkeypatch, tmp_path):
     assert missing_key.status_code == 403
     assert valid_key.status_code == 200
     assert web_origin.status_code == 403
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "moz-extension://123e4567-e89b-12d3-a456-426614174000",
+    ],
+)
+def test_extension_origin_cors_preflight_allowed(monkeypatch, tmp_path, origin):
+    client, _api_key = _client(monkeypatch, tmp_path)
+
+    response = client.options(
+        "/api/capture/stage",
+        headers={
+            "Origin": origin,
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "X-LMZ-API-KEY",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == origin
