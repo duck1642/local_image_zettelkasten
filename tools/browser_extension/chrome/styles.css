@@ -180,6 +180,25 @@ button.full {
   font-weight: 700;
 }
 
+.bulk-counts {
+  margin-top: 8px;
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.bulk-counts div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.bulk-counts span {
+  color: var(--text);
+  font-weight: 700;
+}
+
 .kind {
   display: inline-flex;
   align-items: center;

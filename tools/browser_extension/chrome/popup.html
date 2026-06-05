@@ -36,10 +36,14 @@
 
             <section id="bulkPanel" class="panel hidden">
               <div class="panel-title">Bulk Actions</div>
-              <button class="full" disabled>Apply metadata to all</button>
-              <button class="full" disabled>Sync all cached</button>
-              <button class="full" disabled>Commit all uploaded</button>
-              <button class="full" disabled>Append all online</button>
+              <div class="bulk-counts">
+                <div>Cached captures <span id="bulkCachedCaptures">0</span></div>
+                <div>Uploaded captures <span id="bulkUploadedCaptures">0</span></div>
+                <div>Cached links <span id="bulkCachedLinks">0</span></div>
+                <div>Skipped/manual/failed <span id="bulkSkippedItems">0</span></div>
+              </div>
+              <button id="bulkCommitAll" class="primary full">Commit all cached</button>
+              <button id="bulkDiscardAll" class="full">Discard all</button>
             </section>
 
             <section id="errorPanel" class="error hidden"></section>

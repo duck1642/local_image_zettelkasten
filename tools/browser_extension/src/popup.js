@@ -43,6 +43,8 @@ function setupStaticIcons() {
   setButtonContent("prevButton", "chevronLeft", "");
   setButtonContent("nextButton", "chevronRight", "");
   setButtonContent("discardButton", "trash", "Discard");
+  setButtonContent("bulkCommitAll", "checkCircle", "Commit all cached");
+  setButtonContent("bulkDiscardAll", "trash", "Discard all");
 }
 
 function setButtonContent(buttonOrId, iconName, label) {
@@ -65,6 +67,8 @@ function bindEvents() {
   document.getElementById("queueSelect").addEventListener("change", () => saveVisibleItem().catch(showSaveError));
   document.getElementById("discardButton").addEventListener("click", discardCurrent);
   document.getElementById("commitButton").addEventListener("click", primaryAction);
+  document.getElementById("bulkCommitAll").addEventListener("click", commitAllCached);
+  document.getElementById("bulkDiscardAll").addEventListener("click", discardAllItems);
   document.getElementById("prevButton").addEventListener("click", () => moveCurrent(-1).catch(showSaveError));
   document.getElementById("nextButton").addEventListener("click", () => moveCurrent(1).catch(showSaveError));
 }
@@ -87,6 +91,38 @@ function updatePanelToggles() {
     "active",
     !document.getElementById("bulkPanel").classList.contains("hidden")
   );
+}
+
+function bulkCounts(items = pendingItems) {
+  let cachedCaptures = 0;
+  let uploadedCaptures = 0;
+  let cachedLinks = 0;
+  let skipped = 0;
+  for (const item of items) {
+    if (item.kind === "capture" && item.status === "cached") {
+      cachedCaptures += 1;
+    } else if (item.kind === "capture" && item.status === "uploaded") {
+      uploadedCaptures += 1;
+    } else if (item.kind === "online" && item.status === "deferred") {
+      cachedLinks += 1;
+    } else {
+      skipped += 1;
+    }
+  }
+  return { cachedCaptures, uploadedCaptures, cachedLinks, skipped };
+}
+
+function updateBulkPanel() {
+  const counts = bulkCounts();
+  const eligible = counts.cachedCaptures + counts.uploadedCaptures + counts.cachedLinks;
+  document.getElementById("bulkCachedCaptures").textContent = String(counts.cachedCaptures);
+  document.getElementById("bulkUploadedCaptures").textContent = String(counts.uploadedCaptures);
+  document.getElementById("bulkCachedLinks").textContent = String(counts.cachedLinks);
+  document.getElementById("bulkSkippedItems").textContent = String(counts.skipped);
+  setButtonContent("bulkCommitAll", "checkCircle", actionInFlight ? "Working..." : `Commit all cached${eligible ? ` (${eligible})` : ""}`);
+  setButtonContent("bulkDiscardAll", "trash", `Discard all${pendingItems.length ? ` (${pendingItems.length})` : ""}`);
+  document.getElementById("bulkCommitAll").disabled = actionInFlight || eligible === 0;
+  document.getElementById("bulkDiscardAll").disabled = actionInFlight || pendingItems.length === 0;
 }
 
 async function loadConfig() {
@@ -175,6 +211,7 @@ async function checkBackend() {
 async function render() {
   const itemPanel = document.getElementById("itemPanel");
   const emptyPanel = document.getElementById("emptyPanel");
+  updateBulkPanel();
   if (!pendingItems.length) {
     itemPanel.classList.add("hidden");
     emptyPanel.classList.remove("hidden");
@@ -334,6 +371,94 @@ async function discardCurrent() {
   document.getElementById("artistInput").value = "";
   await storageSet({ lastError: "" });
   await refreshState();
+}
+
+function isBulkCommitEligible(item) {
+  return (
+    (item.kind === "capture" && (item.status === "cached" || item.status === "uploaded"))
+    || (item.kind === "online" && item.status === "deferred")
+  );
+}
+
+async function commitAllCached() {
+  if (actionInFlight) return;
+  clearMetadataSaveTimer();
+  await saveVisibleItem();
+  actionInFlight = true;
+  await render();
+  let completed = 0;
+  let failed = 0;
+  let skipped = 0;
+  try {
+    const items = await listItems();
+    for (const item of items) {
+      if (!isBulkCommitEligible(item)) {
+        skipped += 1;
+        continue;
+      }
+      try {
+        if (item.kind === "online") {
+          await appendOnlineQueue(item);
+        } else if (item.status === "cached") {
+          await syncCapture(item);
+          const uploaded = await getItem(item.id);
+          if (!uploaded) {
+            completed += 1;
+            continue;
+          }
+          await commitCapture(uploaded);
+        } else if (item.status === "uploaded") {
+          await commitCapture(item);
+        }
+        completed += 1;
+      } catch (error) {
+        failed += 1;
+        const latest = await getItem(item.id);
+        if (latest) {
+          await updateItem(latest.id, {
+            status: restoreStatus(latest.status),
+            last_error: error?.message || String(error)
+          });
+        }
+      }
+    }
+    const summary = `Bulk finished: ${completed} done, ${failed} failed, ${skipped} skipped.`;
+    await storageSet({ lastError: summary });
+    showError(summary);
+  } finally {
+    actionInFlight = false;
+    await refreshState();
+  }
+}
+
+async function discardAllItems() {
+  if (actionInFlight) return;
+  if (!pendingItems.length) return;
+  const ok = globalThis.confirm("Discard all cached LMZ extension items? Downloaded files will not be deleted.");
+  if (!ok) return;
+  clearMetadataSaveTimer();
+  actionInFlight = true;
+  await render();
+  let discarded = 0;
+  try {
+    const items = await listItems();
+    for (const item of items) {
+      if (item.kind === "capture" && item.staged_id) {
+        await fetch(`${config.apiBaseUrl}/api/capture/stage/${encodeURIComponent(item.staged_id)}`, {
+          method: "DELETE",
+          headers: { "X-LMZ-API-KEY": config.apiKey }
+        }).catch(() => {});
+      }
+      await deleteItem(item.id);
+      discarded += 1;
+    }
+    const summary = `Discarded ${discarded} item${discarded === 1 ? "" : "s"}.`;
+    await storageSet({ lastError: summary });
+    showError(summary);
+  } finally {
+    actionInFlight = false;
+    await refreshState();
+  }
 }
 
 async function primaryAction() {
