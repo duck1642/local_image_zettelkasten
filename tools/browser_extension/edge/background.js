@@ -3,9 +3,9 @@ import {
   createContextMenu,
   ext,
   removeAllContextMenus,
-  setBadgeBackgroundColor,
-  setBadgeText,
-  storageSet
+  setErrorBadge,
+  storageSet,
+  updateBadge
 } from "./api.js";
 
 ext.runtime.onInstalled.addListener(() => {
@@ -124,14 +124,12 @@ function captureRecord({ sourceUrl, mediaUrl, pageTitle, filename, platform, siz
 async function recordError(error) {
   const message = error?.message || String(error);
   await storageSet({ lastError: message });
-  await setBadgeText({ text: "!" });
-  await setBadgeBackgroundColor({ color: "#c2410c" });
+  await setErrorBadge();
 }
 
 async function updateBadgeFromDb() {
   const count = await countItems();
-  await setBadgeText({ text: count > 0 ? String(count) : "" });
-  await setBadgeBackgroundColor({ color: "#1f6feb" });
+  await updateBadge(count);
 }
 
 function filenameFromUrl(url, mimeType) {

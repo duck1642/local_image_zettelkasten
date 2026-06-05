@@ -57,6 +57,16 @@ export function setBadgeBackgroundColor(details) {
   return callApi(rawApi.action, "setBadgeBackgroundColor", details);
 }
 
+export async function updateBadge(count) {
+  await setBadgeText({ text: count > 0 ? String(count) : "" });
+  await setBadgeBackgroundColor({ color: "#1f6feb" });
+}
+
+export async function setErrorBadge() {
+  await setBadgeText({ text: "!" });
+  await setBadgeBackgroundColor({ color: "#c2410c" });
+}
+
 export function downloadFile(details) {
   return callApi(rawApi.downloads, "download", details);
 }

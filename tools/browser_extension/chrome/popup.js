@@ -1,11 +1,10 @@
 import { addItem, deleteItem, getItem, listItems, updateItem } from "./db.js";
 import {
   downloadFile,
-  setBadgeBackgroundColor,
-  setBadgeText,
   storageGet,
   storageRemove,
-  storageSet
+  storageSet,
+  updateBadge
 } from "./api.js";
 import { iconHtml } from "./icons.js";
 
@@ -538,11 +537,6 @@ function downloadFilename(item) {
 
 function sanitizeFilename(value) {
   return String(value || "captured_media.jpg").replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").slice(0, 180);
-}
-
-async function updateBadge(count) {
-  await setBadgeText({ text: count > 0 ? String(count) : "" });
-  await setBadgeBackgroundColor({ color: "#1f6feb" });
 }
 
 function showError(message) {
