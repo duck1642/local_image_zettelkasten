@@ -16,6 +16,9 @@
     "log:default",
     "core:window:default",
     "core:window:allow-set-fullscreen",
-    "core:window:allow-destroy"
+    "core:window:allow-destroy",
+    "core:window:allow-set-size",
+    "core:window:allow-set-resizable",
+    "core:window:allow-center"
   ]
 }

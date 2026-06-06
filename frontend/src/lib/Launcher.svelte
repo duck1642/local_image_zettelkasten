@@ -10,8 +10,7 @@
     IconSettings,
     IconAlertTriangle,
     IconCheckCircle,
-    IconServer,
-    IconDownload
+    IconServer
   } from './icons';
 
   const dispatch = createEventDispatcher<{
@@ -41,19 +40,24 @@
   } = { type: null, id: '' };
 
   // Form states
-  let activeForm: 'obsidian' | 'create_vault' | 'import_vault' | null = null;
-  let obsidianForm = { name: '', path: '' };
+  let activeForm: 'create_vault' | null = null;
   let vaultForm = { name: '', id: '' };
-  let importForm = { package_path: '', name: '', id: '' };
 
   async function fetchWorkspaces() {
     try {
       loading = true;
       errorMessage = '';
+      const startTime = Date.now();
       const res = await apiFetch('/api/workspaces');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       workspaces = Array.isArray(data.items) ? data.items : [];
+      
+      // Ensure the scanning loader is visible for at least 450ms to prevent jarring flashes
+      const elapsed = Date.now() - startTime;
+      if (elapsed < 450) {
+        await new Promise((resolve) => setTimeout(resolve, 450 - elapsed));
+      }
     } catch (e) {
       uiLog('ERROR', 'Failed to fetch workspaces in launcher', { error: String(e) });
       errorMessage = 'Could not load workspaces. Make sure backend is running.';
@@ -188,66 +192,7 @@
     }
   }
 
-  async function pickObsidianPath() {
-    try {
-      const selection = await openDialog({ directory: true, multiple: false });
-      if (selection) {
-        obsidianForm.path = String(selection);
-      }
-    } catch (e) {
-      uiLog('ERROR', 'Folder picker failed for Obsidian', { error: String(e) });
-    }
-  }
 
-  async function pickImportPackage() {
-    try {
-      const selection = await openDialog({
-        directory: false,
-        multiple: false,
-        filters: [{ name: 'LMZ Package', extensions: ['tar', 'zip'] }]
-      });
-      if (selection) {
-        importForm.package_path = String(selection);
-      }
-    } catch (e) {
-      uiLog('ERROR', 'File picker failed for Package import', { error: String(e) });
-    }
-  }
-
-  async function submitObsidianForm() {
-    if (!obsidianForm.path) return;
-    actionBusy = true;
-    errorMessage = '';
-    statusMessage = 'Setting up Obsidian workspace...';
-    try {
-      const res = await apiFetch('/api/workspaces/obsidian', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          path: obsidianForm.path,
-          name: obsidianForm.name || 'Obsidian Vault',
-          set_active: true
-        })
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.detail || `HTTP ${res.status}`);
-      
-      statusMessage = 'Workspace created! Loading workspace services...';
-      obsidianForm = { name: '', path: '' };
-      activeForm = null;
-      await fetchWorkspaces();
-      // Load the newly created workspace (which is marked active)
-      const activeItem = workspaces.find(w => w.active);
-      if (activeItem) {
-        await loadWorkspace(activeItem.id);
-      }
-    } catch (e) {
-      errorMessage = `Setup failed: ${String(e)}`;
-      statusMessage = '';
-    } finally {
-      actionBusy = false;
-    }
-  }
 
   async function submitCreateVault() {
     if (!vaultForm.name) return;
@@ -275,38 +220,6 @@
       }
     } catch (e) {
       errorMessage = `Creation failed: ${String(e)}`;
-      statusMessage = '';
-    } finally {
-      actionBusy = false;
-    }
-  }
-
-  async function submitImportVault() {
-    if (!importForm.package_path) return;
-    actionBusy = true;
-    errorMessage = '';
-    statusMessage = 'Importing vault archive...';
-    try {
-      const res = await apiFetch('/api/vaults/import', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(importForm)
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.detail || `HTTP ${res.status}`);
-      
-      statusMessage = 'Vault imported! Reloading active workspace...';
-      importForm = { package_path: '', name: '', id: '' };
-      activeForm = null;
-      // Reload active workspace
-      const activeItem = workspaces.find(w => w.active);
-      if (activeItem) {
-        await loadWorkspace(activeItem.id);
-      } else {
-        await fetchWorkspaces();
-      }
-    } catch (e) {
-      errorMessage = `Import failed: ${String(e)}`;
       statusMessage = '';
     } finally {
       actionBusy = false;
@@ -361,30 +274,7 @@
             </div>
           </div>
 
-        {:else if activeForm === 'obsidian'}
-          <!-- Link Obsidian Form View -->
-          <div class="form-box">
-            <h3>Link Obsidian Vault</h3>
-            <p class="form-desc">Creates a workspace configuration that allows LMZ notes to live natively alongside Obsidian md notes.</p>
-            
-            <div class="form-group">
-              <label for="obsidian-name">Workspace Name</label>
-              <input id="obsidian-name" type="text" bind:value={obsidianForm.name} placeholder="e.g. Personal Knowledge Base" />
-            </div>
 
-            <div class="form-group">
-              <label for="obsidian-path">Obsidian Vault Folder</label>
-              <div class="input-with-button">
-                <input id="obsidian-path" type="text" readonly bind:value={obsidianForm.path} placeholder="Choose folder path..." />
-                <button type="button" class="row-action-btn secondary" on:click={pickObsidianPath}>Browse...</button>
-              </div>
-            </div>
-
-            <div class="form-buttons">
-              <button class="primary-action-btn" on:click={submitObsidianForm} disabled={!obsidianForm.path || actionBusy}>Link Vault</button>
-              <button class="row-action-btn secondary" on:click={() => activeForm = null} disabled={actionBusy}>Cancel</button>
-            </div>
-          </div>
 
         {:else if activeForm === 'create_vault'}
           <!-- Create Vault Form View -->
@@ -408,31 +298,6 @@
             </div>
           </div>
 
-        {:else if activeForm === 'import_vault'}
-          <!-- Import Vault Form View -->
-          <div class="form-box">
-            <h3>Import Vault Package</h3>
-            <p class="form-desc">Imports a shared LMZ vault archive (.tar or .zip package) into the current workspace registry.</p>
-            
-            <div class="form-group">
-              <label for="package-path">Package Archive File</label>
-              <div class="input-with-button">
-                <input id="package-path" type="text" readonly bind:value={importForm.package_path} placeholder="Choose archive package..." />
-                <button type="button" class="row-action-btn secondary" on:click={pickImportPackage}>Browse...</button>
-              </div>
-            </div>
-
-            <div class="form-group">
-              <label for="import-name">New Vault Name (optional)</label>
-              <input id="import-name" type="text" bind:value={importForm.name} placeholder="Leave blank to use package name" />
-            </div>
-
-            <div class="form-buttons">
-              <button class="primary-action-btn" on:click={submitImportVault} disabled={!importForm.package_path || actionBusy}>Import Package</button>
-              <button class="row-action-btn secondary" on:click={() => activeForm = null} disabled={actionBusy}>Cancel</button>
-            </div>
-          </div>
-
         {:else}
           <!-- Main Startup Selector View (Obsidian Switcher Style) -->
           {#if workspaces.length > 0}
@@ -444,23 +309,24 @@
                 </button>
               </div>
               
-              <div class="workspace-list">
+              <div class="launcher-workspace-list">
                 {#each workspaces as w}
-                  <div class="workspace-row" class:active={w.active}>
-                    <div class="row-info">
-                      <div class="name-line">
+                  <div class="launcher-workspace-row" class:active={w.active}>
+                    <div class="launcher-row-info">
+                      <div class="launcher-name-line">
                         <span class="workspace-name">{w.name}</span>
                         {#if w.active}
-                          <span class="active-badge">Active</span>
+                          <span class="launcher-active-badge">Active</span>
                         {/if}
-                        <span class="status-indicator {w.exists ? 'online' : 'offline'}" title={w.exists ? 'Online' : 'Offline'}>
+                        <span class="launcher-status-badge" class:launcher-found={w.exists} class:launcher-missing={!w.exists}>
                           <span class="dot"></span>
+                          {w.exists ? 'Found' : 'Missing'}
                         </span>
                       </div>
-                      <div class="path-line" title={w.config_path}>{w.config_path}</div>
+                      <div class="launcher-path-line" title={w.config_path}>{w.config_path}</div>
                     </div>
                     
-                    <div class="row-actions">
+                    <div class="launcher-row-actions">
                       {#if !w.exists}
                         <button class="row-action-btn secondary relocate" on:click={() => {
                           relocateState = { type: 'workspace', id: w.id, current_path: w.config_path };
@@ -486,16 +352,7 @@
             </div>
             
             <div class="action-rows-list">
-              <!-- Link Obsidian Vault Row -->
-              <div class="action-row">
-                <div class="action-row-info">
-                  <div class="action-row-title">Link Obsidian Vault</div>
-                  <div class="action-row-desc">Open an existing Obsidian vault containing LMZ notes.</div>
-                </div>
-                <button class="row-action-btn secondary" on:click={() => activeForm = 'obsidian'} disabled={actionBusy}>
-                  Link
-                </button>
-              </div>
+
 
               <!-- Create New Vault Row -->
               <div class="action-row">
@@ -505,17 +362,6 @@
                 </div>
                 <button class="row-action-btn primary" on:click={() => activeForm = 'create_vault'} disabled={actionBusy}>
                   Create
-                </button>
-              </div>
-
-              <!-- Import Vault Package Row -->
-              <div class="action-row">
-                <div class="action-row-info">
-                  <div class="action-row-title">Import Vault Package</div>
-                  <div class="action-row-desc">Import a shared vault package (.tar or .zip archive).</div>
-                </div>
-                <button class="row-action-btn secondary" on:click={() => activeForm = 'import_vault'} disabled={actionBusy}>
-                  Import
                 </button>
               </div>
             </div>
@@ -558,15 +404,15 @@
     align-items: center;
     justify-content: center;
     background: var(--bg-launcher-gradient);
-    padding: 24px;
-    overflow-y: auto;
+    padding: 16px;
+    overflow: hidden;
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   }
 
   .launcher-card {
     width: 100%;
     max-width: 580px;
-    min-height: auto;
+    max-height: 90vh;
     background: rgba(22, 27, 34, 0.85);
     border: 1px solid var(--border-dim);
     border-radius: 12px;
@@ -574,28 +420,30 @@
     backdrop-filter: blur(12px);
     display: flex;
     flex-direction: column;
-    padding: 36px;
+    padding: 24px 32px;
     box-sizing: border-box;
+    overflow: hidden;
   }
 
   .header {
     text-align: center;
-    margin-bottom: 28px;
+    margin-bottom: 20px;
     display: flex;
     flex-direction: column;
     align-items: center;
+    flex-shrink: 0;
   }
 
   .logo-wrap {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 64px;
-    height: 64px;
-    border-radius: 16px;
+    width: 56px;
+    height: 56px;
+    border-radius: 14px;
     background: rgba(31, 111, 235, 0.12);
     border: 1px solid rgba(31, 111, 235, 0.35);
-    margin-bottom: 16px;
+    margin-bottom: 12px;
     box-shadow: 0 0 15px rgba(31, 111, 235, 0.25);
   }
 
@@ -604,7 +452,7 @@
   }
 
   .title {
-    font-size: 26px;
+    font-size: 24px;
     font-weight: 800;
     letter-spacing: -0.5px;
     margin: 0 0 6px 0;
@@ -614,7 +462,7 @@
   }
 
   .subtitle {
-    font-size: 13px;
+    font-size: 12px;
     color: var(--text-muted);
     margin: 0;
   }
@@ -649,14 +497,17 @@
   .launcher-body {
     display: flex;
     flex-direction: column;
-    gap: 28px;
+    gap: 20px;
     width: 100%;
+    overflow-y: auto;
+    max-height: calc(95vh - 140px);
+    padding-right: 4px;
   }
 
   .launcher-section {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 10px;
     width: 100%;
   }
 
@@ -694,17 +545,17 @@
     background: var(--bg-hover);
   }
 
-  .workspace-list {
+  .launcher-workspace-list {
     display: flex;
     flex-direction: column;
     gap: 8px;
-    max-height: 180px;
+    max-height: 140px;
     overflow-y: auto;
     width: 100%;
     padding-right: 4px;
   }
 
-  .workspace-row {
+  .launcher-workspace-row {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -714,30 +565,38 @@
     border-radius: 8px;
     box-sizing: border-box;
     width: 100%;
+    text-align: left;
     transition: border-color 0.2s ease, background-color 0.2s ease;
   }
 
-  .workspace-row:hover {
+  .launcher-workspace-row:hover {
     border-color: rgba(31, 111, 235, 0.35);
     background: rgba(13, 17, 23, 0.7);
   }
 
-  .workspace-row.active {
+  .launcher-workspace-row.active {
     border-color: rgba(31, 111, 235, 0.45);
     background: rgba(31, 111, 235, 0.03);
   }
 
-  .row-info {
+  .launcher-row-info {
     display: flex;
     flex-direction: column;
-    gap: 4px;
-    max-width: 70%;
+    align-items: flex-start;
+    text-align: left;
+    gap: 6px;
+    max-width: 75%;
+    flex-grow: 1;
+    min-width: 0;
   }
 
-  .name-line {
+  .launcher-name-line {
     display: flex;
     align-items: center;
-    gap: 6px;
+    justify-content: flex-start;
+    gap: 8px;
+    flex-wrap: wrap;
+    width: 100%;
   }
 
   .workspace-name {
@@ -746,7 +605,7 @@
     color: var(--text-bright);
   }
 
-  .active-badge {
+  .launcher-active-badge {
     font-size: 9px;
     font-weight: 600;
     background: rgba(31, 111, 235, 0.16);
@@ -755,40 +614,60 @@
     border-radius: 4px;
   }
 
-  .status-indicator {
+  .launcher-status-badge {
     display: inline-flex;
     align-items: center;
+    gap: 5px;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: 4px;
+    line-height: 1;
   }
 
-  .status-indicator .dot {
-    width: 5px;
-    height: 5px;
+  .launcher-status-badge.launcher-found {
+    background: rgba(35, 134, 54, 0.12);
+    color: #3fb950;
+  }
+
+  .launcher-status-badge.launcher-missing {
+    background: rgba(210, 153, 34, 0.12);
+    color: #d29922;
+  }
+
+  .launcher-status-badge .dot {
+    width: 6px;
+    height: 6px;
     border-radius: 50%;
     display: inline-block;
   }
 
-  .status-indicator.online .dot {
-    background: var(--accent-success);
-    box-shadow: 0 0 6px var(--accent-success);
+  .launcher-status-badge.launcher-found .dot {
+    background: #2ea043;
+    box-shadow: 0 0 6px #2ea043;
   }
 
-  .status-indicator.offline .dot {
-    background: var(--accent-warning);
-    box-shadow: 0 0 6px var(--accent-warning);
+  .launcher-status-badge.launcher-missing .dot {
+    background: #d29922;
+    box-shadow: 0 0 6px #d29922;
   }
 
-  .path-line {
+  .launcher-path-line {
     font-size: 11px;
     color: var(--text-muted);
     font-family: monospace;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    width: 100%;
+    align-self: flex-start;
+    text-align: left;
   }
 
-  .row-actions {
+  .launcher-row-actions {
     display: flex;
     align-items: center;
+    flex-shrink: 0;
   }
 
   /* Action Rows (Obsidian-Style) */
@@ -908,15 +787,6 @@
   .form-group input:focus {
     border-color: var(--accent-primary);
     outline: none;
-  }
-
-  .input-with-button {
-    display: flex;
-    gap: 8px;
-  }
-
-  .input-with-button input {
-    flex-grow: 1;
   }
 
   .form-buttons {

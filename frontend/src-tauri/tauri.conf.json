@@ -13,9 +13,9 @@
     "windows": [
       {
         "title": "LMZ - Management Center",
-        "width": 1280,
-        "height": 800,
-        "resizable": true,
+        "width": 580,
+        "height": 580,
+        "resizable": false,
         "fullscreen": false
       }
     ],

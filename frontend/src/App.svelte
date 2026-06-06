@@ -29,6 +29,33 @@
   let stopStats: (() => void) | null = null;
   let stopRam: (() => void) | null = null;
 
+  async function resizeForLauncher() {
+    try {
+      const { getCurrentWindow } = await import('@tauri-apps/api/window');
+      const { LogicalSize } = await import('@tauri-apps/api/dpi');
+      const appWindow = getCurrentWindow();
+      await appWindow.setResizable(true);
+      await appWindow.setSize(new LogicalSize(580, 580));
+      await appWindow.setResizable(false);
+      await appWindow.center();
+    } catch {
+      // Non-tauri context
+    }
+  }
+
+  async function resizeForMainApp() {
+    try {
+      const { getCurrentWindow } = await import('@tauri-apps/api/window');
+      const { LogicalSize } = await import('@tauri-apps/api/dpi');
+      const appWindow = getCurrentWindow();
+      await appWindow.setResizable(true);
+      await appWindow.setSize(new LogicalSize(1280, 800));
+      await appWindow.center();
+    } catch {
+      // Non-tauri context
+    }
+  }
+
   $: if (workspaceLoaded) {
     if (!stopStats) {
       stopStats = startSharedStatsPolling();
@@ -43,6 +70,7 @@
     activeVaultId = event.detail.vault_id || '';
     workspaceLoaded = true;
     uiLog('INFO', `Workspace loaded: ${activeWorkspaceId}, vault: ${activeVaultId}`);
+    void resizeForMainApp();
   }
 
   type DropPoint = { x: number; y: number };
@@ -257,6 +285,8 @@
       activeWorkspaceId = 'default';
       activeVaultId = 'default';
       uiLog('INFO', 'Test mode detected: bypassing workspace launcher');
+    } else {
+      void resizeForLauncher();
     }
 
     (async () => {
