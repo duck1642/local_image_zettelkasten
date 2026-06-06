@@ -599,6 +599,39 @@ VSCode-friendly test launchers:
   - Current test validates handler wiring through synthetic click events, not real mouse hit stability.
   - Real-vault/manual smoke should verify WD promote/unpromote, WD remove, saved topic rename/remove, and hover action behavior.
 
+### Backend Crashes When Active Workspace Config Is Missing
+
+**Issue**: If the last-selected workspace has a missing or broken `config_path`, the entire backend fails to start. FastAPI never reaches a state where it can serve routes, so the launcher frontend gets no API responses and shows "Could not load workspaces." The user is completely locked out with no UI-based recovery path. The only fix is manually editing `config/workspaces.yaml` to change `active` back to a working workspace ID.
+
+**Why it happens**: The backend loads a workspace eagerly at import time, before any user interaction or HTTP request occurs. The import chain is:
+  - `web_api.py` imports `api.app`.
+  - `api/app.py` imports `db.sqlite_operator`.
+  - `db/sqlite_operator.py` imports `utils`.
+  - `utils.py` line 19 runs `_RUNTIME_CONTEXT = reload_runtime_context()` at module scope.
+  - `runtime_context.py` line 154 calls `build_runtime_context(config_path)`.
+  - `config_path` comes from the `active` workspace entry in `config/workspaces.yaml`.
+  - If that file doesn't exist or is malformed → `RuntimeError("config.yaml must define vaults")` → backend crashes.
+  - The `active` field is persisted by `set_active_workspace()` in `workspaces.py` line 84 every time a user selects a workspace in the launcher. If the user selects a workspace and the config later disappears (disk moved, USB removed, path changed), the app is permanently broken.
+
+**Related codes/lines**:
+  - `backend/utils.py` line 19: `_RUNTIME_CONTEXT = reload_runtime_context()` — eager load at import time, crash point.
+  - `backend/runtime_context.py` line 124: `raise RuntimeError("config.yaml must define vaults")` — the actual error.
+  - `backend/runtime_context.py` line 154: `reload_runtime_context()` → `build_runtime_context(config_path)`.
+  - `backend/workspaces.py` lines 70–73: `active_workspace_config_path()` — resolves the active workspace's config path.
+  - `backend/workspaces.py` lines 76–86: `set_active_workspace()` — persists `active` to `workspaces.yaml` on every workspace selection.
+  - `config/workspaces.yaml` line 1: `active: <workspace_id>` — persisted across restarts, used to auto-load.
+  - `backend/api/runtime.py` line 664: `set_active_workspace()` is called before verifying the context reloads cleanly.
+
+**What needs to change / design recommendations**:
+  - Core problem: the backend assumes a valid workspace is always available at startup. With the new launcher-first flow (workspace → vault selection), this assumption is wrong.
+  - Recommended design: the backend should start in a "launcher mode" — no workspace loaded, just enough to serve launcher-related API endpoints (`/api/workspaces`, `/api/workspaces/relocate`, etc.). A workspace only loads when the user explicitly picks one from the launcher via `/api/workspaces/{id}/load`.
+  - The `active` field in `workspaces.yaml` should become `last_used` — a hint for the launcher UI to highlight/pre-select, not an auto-load instruction.
+  - Specific changes needed:
+    1. Make `_RUNTIME_CONTEXT` lazy in `utils.py`: remove the module-level `reload_runtime_context()` call; make `get_runtime_context()` return `None` or raise a clear error if no workspace is loaded yet.
+    2. Separate launcher APIs from workspace APIs: launcher APIs (`/api/workspaces`, `/api/workspaces/relocate`) must work without a loaded workspace; workspace APIs (`/api/vaults`, `/api/config`, `/api/items`, etc.) should return 503 if no workspace is loaded.
+    3. Guard `set_active_workspace()` calls: only persist `active`/`last_used` after a workspace successfully loads, not before attempting to load.
+  - Warning: this is a significant refactor. `runtime_context` is imported transitively by most backend modules (`utils.py` → everything). Making it lazy requires auditing every call site to handle the unloaded state.
+
 ## Issue Remediation Plan
 
 ### Next Documentation / Drift Pass
