@@ -46,6 +46,10 @@ _CONTEXT_LOCK = threading.RLock()
 _RUNTIME_CONTEXT: WorkspaceContext | None = None
 
 
+class RuntimeNotLoadedError(RuntimeError):
+    pass
+
+
 def _slug_vault_id(value: str) -> str:
     cleaned = "".join(ch.casefold() if ch.isalnum() else "-" for ch in str(value or "").strip())
     return "-".join(part for part in cleaned.split("-") if part) or "default"
@@ -140,11 +144,38 @@ def build_runtime_context(config_path: str | Path | None = None) -> WorkspaceCon
     )
 
 
+def has_runtime_context() -> bool:
+    with _CONTEXT_LOCK:
+        return _RUNTIME_CONTEXT is not None
+
+
+def try_get_runtime_context() -> WorkspaceContext | None:
+    with _CONTEXT_LOCK:
+        return _RUNTIME_CONTEXT
+
+
+def clear_runtime_context():
+    global _RUNTIME_CONTEXT
+    with _CONTEXT_LOCK:
+        _RUNTIME_CONTEXT = None
+
+
+def set_runtime_context(ctx: WorkspaceContext) -> WorkspaceContext:
+    global _RUNTIME_CONTEXT
+    with _CONTEXT_LOCK:
+        _RUNTIME_CONTEXT = ctx
+        return _RUNTIME_CONTEXT
+
+
 def get_runtime_context() -> WorkspaceContext:
     global _RUNTIME_CONTEXT
     with _CONTEXT_LOCK:
         if _RUNTIME_CONTEXT is None:
-            _RUNTIME_CONTEXT = build_runtime_context()
+            env_path = os.environ.get("LMZ_CONFIG_PATH")
+            if env_path:
+                _RUNTIME_CONTEXT = build_runtime_context(env_path)
+                return _RUNTIME_CONTEXT
+            raise RuntimeNotLoadedError("Workspace not loaded")
         return _RUNTIME_CONTEXT
 
 

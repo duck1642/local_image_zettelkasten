@@ -38,7 +38,7 @@ def fresh_backend(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *module_names
             "workspace_db",
             "ingest_control",
             "workspaces",
-        } or name.startswith(("logger", "db.", "tagging", "downloaders")):
+        } or name.startswith(("api.", "logger", "db.", "tagging", "downloaders")):
             del sys.modules[name]
     return [importlib.import_module(name) for name in module_names]
 

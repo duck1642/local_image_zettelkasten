@@ -206,6 +206,7 @@ def rename_vault(vault_id: str, name: str, ctx: WorkspaceContext | None = None) 
 
 
 def set_active_vault(vault_id: str, ctx: WorkspaceContext | None = None) -> dict:
+    runtime = _ctx(ctx)
     config = _ensure_vault_registry(_read_config(ctx))
     vault_id = vault_id_slug(vault_id)
     if vault_id not in config["vaults"]:
@@ -221,7 +222,7 @@ def set_active_vault(vault_id: str, ctx: WorkspaceContext | None = None) -> dict
     from db.search_manager import search_manager
     from metadata_index import restart_metadata_watchdog
 
-    new_ctx = reload_runtime_context()
+    new_ctx = reload_runtime_context(runtime.config_path)
     search_manager.reset_all()
     restart_metadata_watchdog(new_ctx)
 

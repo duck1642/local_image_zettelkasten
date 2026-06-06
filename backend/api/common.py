@@ -27,7 +27,7 @@ from utils import (
     get_config, note_path_for,
     asset_path_for, calculate_file_hash, asset_url_for, wd_tag_cache_path_for
 )
-from runtime_context import WorkspaceContext, get_runtime_context
+from runtime_context import RuntimeNotLoadedError, WorkspaceContext, get_runtime_context
 from processor import process_file
 from logger import log_auth, log_ingest_audit, log_ingest_local, log_review, log_svelte, log_system, log_dirs
 from md_generator import MANUAL_FRONTMATTER_FIELDS, load_note_frontmatter, load_note_topics, load_note_wd_tags, generate_markdown, normalize_topic_list
@@ -101,6 +101,10 @@ class TerminalLogger:
     def isatty(self):
         return hasattr(self.terminal, 'isatty') and self.terminal.isatty()
 
+    def close(self):
+        with self._lock:
+            self._handle.close()
+
     def __getattr__(self, attr):
         return getattr(self.terminal, attr)
 
@@ -108,12 +112,24 @@ _terminal_logging_configured = False
 
 def configure_terminal_logging():
     global _terminal_logging_configured
-    if _terminal_logging_configured:
+    raw_logs_dir, _ = log_dirs()
+    target_path = raw_logs_dir / "terminal.log"
+    if (
+        _terminal_logging_configured
+        and isinstance(sys.stdout, TerminalLogger)
+        and isinstance(sys.stderr, TerminalLogger)
+        and sys.stdout.log_path == target_path
+        and sys.stderr.log_path == target_path
+    ):
         return
-    if not isinstance(sys.stdout, TerminalLogger):
-        sys.stdout = TerminalLogger("terminal.log", sys.stdout)
-    if not isinstance(sys.stderr, TerminalLogger):
-        sys.stderr = TerminalLogger("terminal.log", sys.stderr)
+    original_stdout = sys.stdout.terminal if isinstance(sys.stdout, TerminalLogger) else sys.stdout
+    original_stderr = sys.stderr.terminal if isinstance(sys.stderr, TerminalLogger) else sys.stderr
+    if isinstance(sys.stdout, TerminalLogger):
+        sys.stdout.close()
+    if isinstance(sys.stderr, TerminalLogger):
+        sys.stderr.close()
+    sys.stdout = TerminalLogger("terminal.log", original_stdout)
+    sys.stderr = TerminalLogger("terminal.log", original_stderr)
     _terminal_logging_configured = True
 
 configure_terminal_logging()
@@ -285,7 +301,7 @@ def _scan_auth_status_sync(reason: str = "manual") -> dict:
 
 
 def _api_key_path() -> Path:
-    return get_runtime_context().secrets_dir / ".api_key"
+    return Path(__file__).resolve().parents[2] / "secrets" / ".api_key"
 
 def _api_key() -> str:
     path = _api_key_path()
@@ -296,6 +312,13 @@ def _api_key() -> str:
     value = secrets.token_urlsafe(32)
     atomic_write_text(path, value)
     return value
+
+
+def require_runtime_loaded():
+    try:
+        return get_runtime_context()
+    except RuntimeNotLoadedError as exc:
+        raise HTTPException(status_code=503, detail="Workspace not loaded") from exc
 
 def _validate_origin(origin: str | None):
     if origin and EXTENSION_ORIGIN_RE.match(origin):

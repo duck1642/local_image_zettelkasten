@@ -4,12 +4,13 @@ import logging
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-from runtime_context import WorkspaceContext, get_runtime_context
+from runtime_context import WorkspaceContext, get_runtime_context, try_get_runtime_context
 from utils import utc_now_str
 
-
-RAW_LOGS_DIR = get_runtime_context().active_vault.logs_dir / "raw"
-STRUCTURED_LOGS_DIR = get_runtime_context().active_vault.logs_dir / "structured"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+BOOTSTRAP_LOGS_DIR = PROJECT_ROOT / "logs" / "bootstrap"
+RAW_LOGS_DIR = BOOTSTRAP_LOGS_DIR / "raw"
+STRUCTURED_LOGS_DIR = BOOTSTRAP_LOGS_DIR / "structured"
 
 
 class JSONFormatter(logging.Formatter):
@@ -50,7 +51,11 @@ _LOGGER_SPECS = {
 
 
 def log_dirs(ctx: WorkspaceContext | None = None) -> tuple[Path, Path]:
-    runtime = ctx or get_runtime_context()
+    runtime = ctx or try_get_runtime_context()
+    if runtime is None:
+        return BOOTSTRAP_LOGS_DIR / "raw", BOOTSTRAP_LOGS_DIR / "structured"
+    if not runtime.active_vault.root.exists():
+        return BOOTSTRAP_LOGS_DIR / "raw", BOOTSTRAP_LOGS_DIR / "structured"
     logs_dir = runtime.active_vault.logs_dir
     return logs_dir / "raw", logs_dir / "structured"
 
@@ -65,18 +70,25 @@ def _remove_owned_handlers(logger: logging.Logger):
 def configure_logging(ctx: WorkspaceContext | None = None, force: bool = False):
     global RAW_LOGS_DIR, STRUCTURED_LOGS_DIR
 
-    RAW_LOGS_DIR, STRUCTURED_LOGS_DIR = log_dirs(ctx)
-    RAW_LOGS_DIR.mkdir(parents=True, exist_ok=True)
-    STRUCTURED_LOGS_DIR.mkdir(parents=True, exist_ok=True)
-    (ctx or get_runtime_context()).active_vault.vault_dir.mkdir(parents=True, exist_ok=True)
-
     formatter = JSONFormatter()
+    runtime = ctx or try_get_runtime_context()
     for logger, (filename, max_bytes, backup_count) in _LOGGER_SPECS.items():
         logger.setLevel(logging.INFO)
         if force:
             _remove_owned_handlers(logger)
         if any(getattr(handler, "_lmz_owned", False) for handler in logger.handlers):
             continue
+        if runtime is None:
+            handler = logging.StreamHandler()
+            handler.setFormatter(formatter)
+            handler._lmz_owned = True
+            logger.addHandler(handler)
+            continue
+
+        RAW_LOGS_DIR, STRUCTURED_LOGS_DIR = log_dirs(runtime)
+        RAW_LOGS_DIR.mkdir(parents=True, exist_ok=True)
+        STRUCTURED_LOGS_DIR.mkdir(parents=True, exist_ok=True)
+        runtime.active_vault.vault_dir.mkdir(parents=True, exist_ok=True)
         handler = RotatingFileHandler(
             STRUCTURED_LOGS_DIR / filename,
             maxBytes=max_bytes,

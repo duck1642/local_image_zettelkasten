@@ -1,7 +1,7 @@
 
 from logger import log_ingest_local, log_ingest_online
 from utils import setup_directories, get_config
-from runtime_context import get_runtime_context
+from runtime_context import reload_runtime_context
 from processor import process_file
 from external_ingestion import ExternalIngestor
 from db.sqlite_operator import init_database
@@ -10,8 +10,8 @@ from queue_service import queue_path
 
 def main():
 
+    ctx = reload_runtime_context()
     setup_directories()
-    ctx = get_runtime_context()
     config = get_config(ctx)
 
 

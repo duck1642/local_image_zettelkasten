@@ -10,7 +10,8 @@ from PIL import Image
 
 from fingerprint import extract_sampled_video_frames
 from logger import log_system
-from utils import MODELS_DIR, atomic_write_text, calculate_file_hash, get_config, utc_now_str, wd_tag_cache_path_for
+from runtime_context import get_runtime_context
+from utils import atomic_write_text, calculate_file_hash, get_config, utc_now_str, wd_tag_cache_path_for
 from validators import get_mime_type
 
 
@@ -201,7 +202,7 @@ def _cached_model_state(model_repo: str, device: str, ort, hf_hub_download) -> _
 
 
 def _ensure_model_files(model_repo: str, hf_hub_download):
-    model_dir = MODELS_DIR / model_repo.split("/")[-1]
+    model_dir = get_runtime_context().models_dir / model_repo.split("/")[-1]
     model_dir.mkdir(parents=True, exist_ok=True)
     local_model = model_dir / "model.onnx"
     local_tags = model_dir / "selected_tags.csv"

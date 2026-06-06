@@ -2,6 +2,14 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
 from api.common import *
+from runtime_context import (
+    RuntimeNotLoadedError,
+    build_runtime_context,
+    clear_runtime_context,
+    has_runtime_context,
+    set_runtime_context,
+    try_get_runtime_context,
+)
 
 router = APIRouter()
 
@@ -120,7 +128,7 @@ def _looks_like_dev_launcher(proc) -> bool:
 
 def _project_path_token() -> str:
     try:
-        return str(get_runtime_context().project_root).casefold()
+        return str(get_runtime_context().root).casefold()
     except Exception:
         try:
             return str(Path(__file__).resolve().parents[2]).casefold()
@@ -361,6 +369,8 @@ async def set_workspace_active(body: dict):
 
 
 def _runtime_switch_blocker():
+    if not has_runtime_context():
+        return None
     from api.ingestion import runtime_switch_preflight
 
     preflight = runtime_switch_preflight()
@@ -373,6 +383,8 @@ def _runtime_switch_blocker():
 
 
 def _ensure_runtime_switch_allowed():
+    if not has_runtime_context():
+        return
     from api.ingestion import runtime_switch_preflight
 
     preflight = runtime_switch_preflight()
@@ -384,29 +396,21 @@ def _ensure_runtime_switch_allowed():
 
 
 def _set_workspace_active_sync(body: dict):
-    from workspaces import set_active_workspace, workspace_list
-    from runtime_context import reload_runtime_context
-    from db.search_manager import search_manager
-    from metadata_index import restart_metadata_watchdog
-
     _ensure_runtime_switch_allowed()
     workspace_id = str((body or {}).get("id") or "").strip()
     if not workspace_id:
         raise HTTPException(status_code=400, detail="workspace id is required")
-    try:
-        registry = set_active_workspace(workspace_id)
+    payload = _load_workspace_sync(workspace_id)
+    if payload.get("status") != "success":
+        return payload
+    from workspaces import load_workspace_registry, workspace_list
 
-        # Dynamic workspace switching runtime updates
-        import os
-        os.environ.pop("LMZ_CONFIG_PATH", None)
-
-        new_ctx = reload_runtime_context()
-        search_manager.reset_all()
-        restart_metadata_watchdog(new_ctx)
-
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    return {"status": "success", "active": registry["active"], "restart_required": False, "items": workspace_list()}
+    return {
+        "status": "success",
+        "active": load_workspace_registry()["active"],
+        "restart_required": False,
+        "items": workspace_list(),
+    }
 
 
 @router.post("/api/workspaces/obsidian")
@@ -641,10 +645,10 @@ async def load_workspace(workspace_id: str):
 
 def _load_workspace_sync(workspace_id: str):
     from workspaces import load_workspace_registry, set_active_workspace, _resolve
-    from runtime_context import reload_runtime_context
     from db.search_manager import search_manager
     from metadata_index import restart_metadata_watchdog, start_metadata_repair_worker
     from db.sqlite_operator import init_database
+    from logger import reconfigure_logging
     
     registry = load_workspace_registry()
     if workspace_id not in registry["workspaces"]:
@@ -658,21 +662,19 @@ def _load_workspace_sync(workspace_id: str):
             "message": f"Workspace configuration file not found at {config_path}",
             "config_path": str(config_path)
         }
-        
+
+    previous_ctx = try_get_runtime_context()
     try:
-        # Set workspace active
-        set_active_workspace(workspace_id)
-        
-        # Reload context
         import os
         os.environ.pop("LMZ_CONFIG_PATH", None)
-        new_ctx = reload_runtime_context()
+        new_ctx = build_runtime_context(config_path)
         
         # Check if active vault root exists
         active_vault = new_ctx.active_vault
         if active_vault and active_vault.root:
             vault_root = Path(active_vault.root)
             if not vault_root.exists():
+                set_runtime_context(new_ctx)
                 return {
                     "status": "relocate_vault",
                     "message": f"Vault directory not found at {vault_root}",
@@ -681,29 +683,49 @@ def _load_workspace_sync(workspace_id: str):
                     "vault_root": str(vault_root)
                 }
         
-        # If healthy, start services
+        set_runtime_context(new_ctx)
+        reconfigure_logging(new_ctx)
+        configure_terminal_logging()
         search_manager.reset_all()
-        restart_metadata_watchdog(new_ctx)
         
-        # Start metadata repair worker in background
-        try:
-            start_metadata_repair_worker(full=False)
-        except Exception as exc:
-            log_system("WARNING", "Metadata index repair startup failed during load", error=str(exc))
-            
-        # Hydrate search manager
-        conn = init_database()
+        conn = init_database(ctx=new_ctx)
         try:
             search_manager.hydrate(conn)
         finally:
             conn.close()
+
+        restart_metadata_watchdog(new_ctx)
+        try:
+            start_metadata_repair_worker(full=False)
+        except Exception as exc:
+            log_system("WARNING", "Metadata index repair startup failed during load", error=str(exc))
+
+        set_active_workspace(workspace_id)
             
         return {
             "status": "success",
             "active_workspace": workspace_id,
             "active_vault": active_vault.id if active_vault else None
         }
+    except ValueError as e:
+        if previous_ctx is not None:
+            set_runtime_context(previous_ctx)
+            reconfigure_logging(previous_ctx)
+            configure_terminal_logging()
+        else:
+            clear_runtime_context()
+            reconfigure_logging(None)
+            configure_terminal_logging()
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
+        if previous_ctx is not None:
+            set_runtime_context(previous_ctx)
+            reconfigure_logging(previous_ctx)
+            configure_terminal_logging()
+        else:
+            clear_runtime_context()
+            reconfigure_logging(None)
+            configure_terminal_logging()
         log_system("ERROR", "Failed to load workspace", workspace_id=workspace_id, error=str(e))
         raise HTTPException(status_code=500, detail=f"Failed to load workspace: {e}")
 
@@ -741,7 +763,13 @@ async def relocate_vault(body: RelocateVaultRequest):
 def _relocate_vault_sync(vault_id: str, new_vault_root: str):
     from vaults import _read_config, _write_config, vault_id_slug
     from runtime_context import reload_runtime_context
-    
+    from db.search_manager import search_manager
+    from metadata_index import restart_metadata_watchdog, start_metadata_repair_worker
+    from db.sqlite_operator import init_database
+    from logger import reconfigure_logging
+    from workspaces import load_workspace_registry, set_active_workspace, _resolve
+
+    ctx = get_runtime_context()
     config = _read_config()
     clean_id = vault_id_slug(vault_id)
     if "vaults" not in config or clean_id not in config["vaults"]:
@@ -754,7 +782,26 @@ def _relocate_vault_sync(vault_id: str, new_vault_root: str):
     config["vaults"][clean_id]["root"] = str(resolved_root)
     _write_config(config)
     
-    reload_runtime_context()
+    new_ctx = reload_runtime_context(ctx.config_path)
+    reconfigure_logging(new_ctx)
+    configure_terminal_logging()
+    search_manager.reset_all()
+    conn = init_database(ctx=new_ctx)
+    try:
+        search_manager.hydrate(conn)
+    finally:
+        conn.close()
+    restart_metadata_watchdog(new_ctx)
+    try:
+        start_metadata_repair_worker(full=False)
+    except Exception as exc:
+        log_system("WARNING", "Metadata index repair startup failed after vault relocation", error=str(exc))
+
+    registry = load_workspace_registry()
+    for candidate_id, entry in registry.get("workspaces", {}).items():
+        if _resolve(entry.get("config_path") or "") == new_ctx.config_path:
+            set_active_workspace(candidate_id)
+            break
     return {"status": "success", "vault_root": str(resolved_root)}
 
 

@@ -29,7 +29,6 @@ from tagging import tag_media
 from thumbnails import ensure_thumbnail
 from review_cache import pending_review_match as cached_pending_review_match, upsert_review_cache_entry
 
-REVIEW_DIR = get_runtime_context().active_vault.review_dir
 IMAGE_REVIEW_PHASH_THRESHOLD = 12
 
 def _ctx(ctx: WorkspaceContext | None = None) -> WorkspaceContext:

@@ -11,20 +11,20 @@ from pathlib import Path
 from datetime import datetime, timezone
 from typing import Optional
 
-from runtime_context import WorkspaceContext, get_runtime_context, reload_runtime_context
+from runtime_context import WorkspaceContext, get_runtime_context, try_get_runtime_context
 
 SRC_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SRC_DIR.parent
 
-_RUNTIME_CONTEXT = reload_runtime_context()
-CONFIG_PATH = _RUNTIME_CONTEXT.config_path
-CONFIG_ROOT = _RUNTIME_CONTEXT.root
-
 def _early_load_config() -> dict:
+    ctx = try_get_runtime_context()
+    if ctx is None:
+        return {}
+    config_path = ctx.config_path
 
-    if CONFIG_PATH.exists():
+    if config_path.exists():
         try:
-            with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
+            with open(config_path, 'r', encoding='utf-8') as f:
                 return yaml.safe_load(f) or {}
         except Exception:
             return {}
@@ -36,16 +36,20 @@ _config = _early_load_config()
 
 def _resolve_path(key: str, default: str) -> Path:
 
+    config_root = get_runtime_context().root
     paths = _config.get('paths', {}) if isinstance(_config.get('paths'), dict) else {}
     path_str = paths.get(key) or default
     p = Path(path_str)
-    return p.resolve() if p.is_absolute() else (CONFIG_ROOT / p).resolve()
+    return p.resolve() if p.is_absolute() else (config_root / p).resolve()
 
 def _resolve_config_relative(path_str: str) -> Path:
+    config_root = get_runtime_context().root
     p = Path(path_str)
-    return p.resolve() if p.is_absolute() else (CONFIG_ROOT / p).resolve()
+    return p.resolve() if p.is_absolute() else (config_root / p).resolve()
 
 _DYNAMIC_CONSTANTS = {
+    "CONFIG_PATH": lambda: get_runtime_context().config_path,
+    "CONFIG_ROOT": lambda: get_runtime_context().root,
     "VAULTS_CONFIGURED": lambda: get_runtime_context().vaults_configured,
     "ACTIVE_VAULT_ID": lambda: get_runtime_context().active_vault.id,
     "ACTIVE_VAULT_NAME": lambda: get_runtime_context().active_vault.name,
@@ -407,9 +411,10 @@ def resolve_project_path(path_str: str) -> Path:
 
 def resolve_config_path(path_str: str) -> Path:
 
+    config_root = get_runtime_context().root
     path = Path(path_str)
     if not path.is_absolute():
-        path = CONFIG_ROOT / path
+        path = config_root / path
     return path.resolve()
 
 def get_configured_cookie_path() -> Optional[Path]:
