@@ -18,6 +18,16 @@
   $: current = group.items[index];
   $: thumbnailUrl = current ? apiUrl(current.thumbnail_url) : '';
   $: fullUrl = current ? apiUrl(current.url) : '';
+  let thumbFailed = false;
+  $: if (current) thumbFailed = false;
+
+  function handleThumbError(e: Event) {
+    const img = e.currentTarget as HTMLImageElement;
+    if (!thumbFailed) {
+      thumbFailed = true;
+      img.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' width='100' height='100'%3E%3Crect width='100%25' height='100%25' fill='%23222'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' fill='%23555' font-family='sans-serif' font-size='10'%3ENo Preview%3C/text%3E%3C/svg%3E";
+    }
+  }
   $: isSelected = group.items.some(item => item.hash === selectedHash || selectedHashes.has(item.hash));
   $: aspectStyle = (current?.width && current?.height)
     ? `aspect-ratio: ${current.width} / ${current.height}`
@@ -55,7 +65,8 @@
     <div class="media-stack" style={layout !== 'grid' ? aspectStyle : ''}>
         {#if current && isImageMedia(current)}
             <img src={thumbnailUrl} alt="Vault Item" loading={eagerImages ? 'eager' : 'lazy'}
-                 width={current.width || undefined} height={current.height || undefined} />
+                 width={current.width || undefined} height={current.height || undefined}
+                 on:error={handleThumbError} />
         {:else if current && isVideoMedia(current)}
             <!-- svelte-ignore a11y-media-has-caption -->
             <video src={fullUrl} poster={thumbnailUrl} preload="none" muted loop

@@ -333,6 +333,8 @@ def _require_api_key(request: Request):
         raise HTTPException(status_code=403, detail="Invalid API key")
 
 def _log_dirs_for_source(source: str = "active") -> tuple[Path, Path]:
+    if hasattr(source, "default"):
+        source = source.default
     clean = str(source or "active").strip().lower()
     if clean == "startup":
         return startup_log_dirs()
@@ -347,6 +349,10 @@ def _log_dirs_for_source(source: str = "active") -> tuple[Path, Path]:
 
 
 def _log_file_for(filename: str, source: str = "active") -> Path:
+    if hasattr(filename, "default"):
+        filename = filename.default
+    if hasattr(source, "default"):
+        source = source.default
     spec = LOG_FILE_NAMES.get(filename)
     if not spec:
         raise HTTPException(status_code=400, detail="Invalid log file")
@@ -660,10 +666,8 @@ def _item_file_paths(item_hash: str, extension: str, mime_type: str, storage_id:
         note_path_for(item_hash, storage_id=storage_id, ctx=ctx),
         wd_tag_cache_path_for(item_hash, storage_id=storage_id, ctx=ctx),
     ]
-    if str(mime_type or "").startswith("video/"):
-        paths.append(video_thumbnail_path_for(item_hash, storage_id, ctx=ctx))
-    elif str(mime_type or "").startswith("image/"):
-        paths.append(thumbnail_path_for(item_hash, storage_id, ctx=ctx))
+    paths.append(thumbnail_path_for(item_hash, storage_id, ctx=ctx))
+    paths.append(video_thumbnail_path_for(item_hash, storage_id, ctx=ctx))
     return paths
 
 def _tail_lines(path: Path, count: int = 150) -> list[str]:

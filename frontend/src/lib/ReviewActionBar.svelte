@@ -1,13 +1,13 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
-  import { IconCopy, IconEye, IconRefresh, IconReplace, IconTrash } from './icons';
+  import { IconCopy, IconRefresh, IconReplace, IconTrash } from './icons';
 
   export let section: 'pending' | 'cleanup' = 'pending';
   export let acting = false;
 
   const dispatch = createEventDispatcher();
 
-  function handleAction(action: 'keep' | 'delete' | 'variant' | 'replace') {
+  function handleAction(action: 'delete' | 'variant' | 'replace') {
     dispatch('action', { action });
   }
 
@@ -23,11 +23,7 @@
       <span>Retry Cleanup & Delete Staged File</span>
     </button>
   {:else}
-    <!-- Defer: Leaves file in review staging -->
-    <button class="action-big keep-btn" on:click={() => handleAction('keep')} disabled={acting}>
-      <IconEye size={14} />
-      <span>Defer</span>
-    </button>
+
     <!-- Save Variant: Ingests new variant cleanly without replacing matching vault item -->
     <button class="action-big variant-btn" on:click={() => handleAction('variant')} disabled={acting}>
       <IconCopy size={14} />
@@ -81,14 +77,7 @@
     opacity: 0.4;
   }
 
-  .keep-btn {
-    background: rgba(139, 148, 158, 0.1);
-    color: var(--text-bright);
-    border: 1px solid var(--border-dim);
-  }
-  .keep-btn:hover:not(:disabled) {
-    background: rgba(139, 148, 158, 0.18);
-  }
+
 
   .variant-btn {
     background: rgba(35, 134, 54, 0.12);

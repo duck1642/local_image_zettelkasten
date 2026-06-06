@@ -181,17 +181,22 @@
     }
 
     if (current.section === 'cleanup') return;
+
+    acting = true;
     if (action === 'replace') {
       if (!targetHash) {
+        acting = false;
         alert('No visual match selected to replace.');
         return;
       }
       const message = `Replace target copy ${targetHash.slice(0, 12)}... with ${displayName(current)}?`;
-      if (!confirm(message)) return;
+      if (!confirm(message)) {
+        acting = false;
+        return;
+      }
     }
 
-    acting = true;
-    if (action !== 'keep') await unmountMediaForFileAction();
+    await unmountMediaForFileAction();
     try {
       const filename = encodeURIComponent(current.filename);
       const url = action === 'replace'

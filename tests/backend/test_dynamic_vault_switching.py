@@ -20,6 +20,7 @@ def fresh_backend(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *module_names
         sys.path.insert(0, str(BACKEND))
     for name in list(sys.modules):
         if name in {
+            "api",
             "utils",
             "runtime_context",
             "runtime_activation",

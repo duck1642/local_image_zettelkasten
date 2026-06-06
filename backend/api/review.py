@@ -4,6 +4,13 @@ from api.common import *
 from api.library import _delete_item_after_replacement
 
 router = APIRouter()
+import asyncio
+_review_locks: dict[str, asyncio.Lock] = {}
+
+def _get_review_lock(resource_key: str) -> asyncio.Lock:
+    if resource_key not in _review_locks:
+        _review_locks[resource_key] = asyncio.Lock()
+    return _review_locks[resource_key]
 
 @router.get("/api/review/count")
 async def get_review_count(include_resolved: bool = False):
@@ -164,12 +171,14 @@ def _get_review_items_sync(include_resolved: bool = False):
 
 @router.post("/api/review/{filename}/action")
 async def review_action(filename: str, action: str, target_hash: str = None):
-    return await asyncio.to_thread(_review_action_sync, filename, action, target_hash)
+    lock = _get_review_lock(filename)
+    async with lock:
+        return await asyncio.to_thread(_review_action_sync, filename, action, target_hash)
 
 def _review_action_sync(filename: str, action: str, target_hash: str = None):
     ctx = get_runtime_context()
     cfg = get_config(ctx)
-    if action not in {"delete", "keep", "variant", "replace"}:
+    if action not in {"delete", "variant", "replace"}:
         raise HTTPException(status_code=400, detail="Invalid review action")
     file_path = _review_path(filename)
     if not file_path.exists(): raise HTTPException(status_code=404)
@@ -210,13 +219,6 @@ def _review_action_sync(filename: str, action: str, target_hash: str = None):
         message = "Review delete requested, but cleanup is pending."
         log_review("WARNING", "Review delete cleanup pending", action=action, filename=filename, display_name=display_name, state="pending_cleanup", error=file_err or sidecar_err)
         return {"status": "warning", "action": action, "message": message}
-
-    if action == "keep":
-        sidecar = _set_review_state(sidecar, "deferred", action=action)
-        _write_review_sidecar(file_path, sidecar)
-        message = "Review item kept in review queue."
-        log_review("INFO", "Review action succeeded", action=action, filename=filename, display_name=display_name, state="deferred", detail=message)
-        return {"status": "success", "action": action, "message": message}
 
     target_hash = str(target_hash or "").strip()
     replacement_manual_fields = {}
@@ -406,4 +408,3 @@ CONFIG_SECRET_KEYS = {"pixiv_token"}
 
 
 __all__ = [name for name in globals() if not name.startswith("__")]
-

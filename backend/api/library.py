@@ -1,4 +1,5 @@
 from fastapi import APIRouter
+from fastapi.responses import RedirectResponse
 
 from api.common import *
 from metadata_maintenance import (
@@ -561,7 +562,10 @@ def _get_thumbnail_sync(item_hash: str):
         row = cursor.fetchone()
         if not row: raise HTTPException(status_code=404)
         ext, mime, storage_id, thumb_status = row
+        is_image = str(mime or "").startswith("image/")
         if thumb_status == 'failed':
+            if is_image:
+                return RedirectResponse(url=asset_url_for(item_hash, ext, mime, storage_id=storage_id), status_code=302)
             from fastapi import Response
             return Response(
                 content='<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100"><rect width="100%" height="100%" fill="#333"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#666" font-family="sans-serif" font-size="12">FAILED</text></svg>',
@@ -581,6 +585,8 @@ def _get_thumbnail_sync(item_hash: str):
                 conn.commit()
             except Exception:
                 pass
+            if is_image:
+                return RedirectResponse(url=asset_url_for(item_hash, ext, mime, storage_id=storage_id), status_code=302)
             from fastapi import Response
             return Response(
                 content='<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100"><rect width="100%" height="100%" fill="#333"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#666" font-family="sans-serif" font-size="12">FAILED</text></svg>',
@@ -1110,13 +1116,24 @@ def _trash_path_for(trash_dir: Path, item_hash: str, index: int, path: Path) -> 
     raise RuntimeError(f"could not allocate cleanup trash path for {path}")
 
 
+def _retry_file_move(src: Path, dst: Path, attempts: int = 5, backoff_ms: int = 100) -> None:
+    """Retry a file move with linear backoff to handle transient OS file locks."""
+    for attempt in range(attempts):
+        try:
+            src.replace(dst)
+            return
+        except OSError:
+            if attempt == attempts - 1:
+                raise
+            time.sleep(backoff_ms / 1000 * (attempt + 1))
+
 def _restore_moved_cleanup_paths(item_hash: str, moved_paths: list[tuple[Path, Path]]) -> list[dict]:
     restore_errors = []
     for temp_path, original_path in reversed(moved_paths):
         try:
             if temp_path.exists() and not original_path.exists():
                 original_path.parent.mkdir(parents=True, exist_ok=True)
-                temp_path.replace(original_path)
+                _retry_file_move(temp_path, original_path)
         except OSError as exc:
             restore_errors.append({"hash": item_hash, "path": str(original_path), "error": str(exc)})
     return restore_errors
@@ -1128,7 +1145,7 @@ def _stage_cleanup_paths(item_hash: str, cleanup_paths: list[Path], trash_dir: P
     for index, path in enumerate(path for path in cleanup_paths if path.exists()):
         try:
             temp_path = _trash_path_for(trash_dir, item_hash, index, path)
-            path.replace(temp_path)
+            _retry_file_move(path, temp_path)
             moved_paths.append((temp_path, path))
         except OSError as exc:
             cleanup_errors = [{"hash": item_hash, "path": str(path), "error": str(exc)}]
