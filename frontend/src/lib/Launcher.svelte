@@ -10,7 +10,8 @@
     IconSettings,
     IconAlertTriangle,
     IconCheckCircle,
-    IconServer
+    IconServer,
+    IconChevronLeft
   } from './icons';
 
   const dispatch = createEventDispatcher<{
@@ -25,8 +26,22 @@
     exists: boolean;
   };
 
+  type VaultItem = {
+    id: string;
+    name: string;
+    root: string;
+    exists: boolean;
+  };
+
+  // Navigation state: 'workspaces' or 'vaults'
+  let step: 'workspaces' | 'vaults' = 'workspaces';
+
   let workspaces: WorkspaceItem[] = [];
+  let vaults: VaultItem[] = [];
+  let activeVaultId: string | null = null;
+  let selectedWorkspace: WorkspaceItem | null = null;
   let loading = true;
+  let loadingVaults = false;
   let actionBusy = false;
   let statusMessage = '';
   let errorMessage = '';
@@ -38,10 +53,6 @@
     name?: string;
     current_path?: string;
   } = { type: null, id: '' };
-
-  // Form states
-  let activeForm: 'create_vault' | null = null;
-  let vaultForm = { name: '', id: '' };
 
   async function fetchWorkspaces() {
     try {
@@ -66,25 +77,27 @@
     }
   }
 
-  async function loadWorkspace(workspaceId: string) {
+  async function selectWorkspace(workspace: WorkspaceItem) {
     if (actionBusy) return;
     actionBusy = true;
     errorMessage = '';
-    statusMessage = `Initializing workspace ${workspaceId}...`;
+    statusMessage = `Loading workspace ${workspace.name}...`;
     try {
-      const res = await apiFetch(`/api/workspaces/${workspaceId}/load`, { method: 'POST' });
+      const res = await apiFetch(`/api/workspaces/${workspace.id}/load`, { method: 'POST' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
 
       if (data.status === 'relocate_workspace') {
         relocateState = {
           type: 'workspace',
-          id: workspaceId,
+          id: workspace.id,
           current_path: data.config_path
         };
         errorMessage = `Workspace configuration file is missing. Please relocate it.`;
         statusMessage = '';
       } else if (data.status === 'relocate_vault') {
+        // Workspace loaded but vault needs relocation — go to vault step anyway
+        selectedWorkspace = workspace;
         relocateState = {
           type: 'vault',
           id: data.vault_id,
@@ -93,20 +106,83 @@
         };
         errorMessage = `Vault directory is offline or missing. Please locate it.`;
         statusMessage = '';
+        step = 'vaults';
+        await fetchVaults();
       } else if (data.status === 'success') {
-        uiLog('INFO', 'Workspace loaded successfully via launcher', { workspace_id: workspaceId, vault_id: data.active_vault });
-        statusMessage = 'Workspace ready!';
-        dispatch('loaded', { workspace_id: workspaceId, vault_id: data.active_vault });
+        uiLog('INFO', 'Workspace loaded, moving to vault selection', { workspace_id: workspace.id });
+        selectedWorkspace = workspace;
+        statusMessage = '';
+        step = 'vaults';
+        await fetchVaults();
       } else {
         throw new Error(data.message || 'Unknown response status');
       }
     } catch (e) {
-      uiLog('ERROR', 'Failed to load workspace', { workspace_id: workspaceId, error: String(e) });
+      uiLog('ERROR', 'Failed to load workspace', { workspace_id: workspace.id, error: String(e) });
       errorMessage = `Failed to load workspace: ${String(e)}`;
       statusMessage = '';
     } finally {
       actionBusy = false;
     }
+  }
+
+  async function fetchVaults() {
+    try {
+      loadingVaults = true;
+      const startTime = Date.now();
+      const res = await apiFetch('/api/vaults');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      vaults = Array.isArray(data.items) ? data.items : [];
+      activeVaultId = data.active || null;
+
+      const elapsed = Date.now() - startTime;
+      if (elapsed < 300) {
+        await new Promise((resolve) => setTimeout(resolve, 300 - elapsed));
+      }
+    } catch (e) {
+      uiLog('ERROR', 'Failed to fetch vaults', { error: String(e) });
+      errorMessage = 'Could not load vaults.';
+    } finally {
+      loadingVaults = false;
+    }
+  }
+
+  async function openVault(vault: VaultItem) {
+    if (actionBusy || !selectedWorkspace) return;
+    actionBusy = true;
+    errorMessage = '';
+    statusMessage = `Opening vault ${vault.name}...`;
+    try {
+      // Set the vault active if it's not already
+      if (vault.id !== activeVaultId) {
+        const res = await apiFetch('/api/vaults/active', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: vault.id })
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      }
+
+      statusMessage = 'Vault ready!';
+      dispatch('loaded', { workspace_id: selectedWorkspace.id, vault_id: vault.id });
+    } catch (e) {
+      uiLog('ERROR', 'Failed to open vault', { vault_id: vault.id, error: String(e) });
+      errorMessage = `Failed to open vault: ${String(e)}`;
+      statusMessage = '';
+    } finally {
+      actionBusy = false;
+    }
+  }
+
+  function goBack() {
+    step = 'workspaces';
+    selectedWorkspace = null;
+    vaults = [];
+    activeVaultId = null;
+    errorMessage = '';
+    statusMessage = '';
+    relocateState = { type: null, id: '' };
   }
 
   async function handleRelocateWorkspace() {
@@ -137,11 +213,14 @@
         throw new Error(payload?.detail || `HTTP ${res.status}`);
       }
 
-      statusMessage = 'Relocated! Retrying workspace initialization...';
+      statusMessage = 'Relocated! Retrying...';
       const targetId = relocateState.id;
       relocateState = { type: null, id: '' };
       await fetchWorkspaces();
-      await loadWorkspace(targetId);
+      const ws = workspaces.find(w => w.id === targetId);
+      if (ws) {
+        await selectWorkspace(ws);
+      }
     } catch (e) {
       uiLog('ERROR', 'Relocation of workspace config failed', { error: String(e) });
       errorMessage = `Relocation failed: ${String(e)}`;
@@ -176,53 +255,13 @@
         throw new Error(payload?.detail || `HTTP ${res.status}`);
       }
 
-      statusMessage = 'Relocated! Retrying workspace initialization...';
-      // Find active or selected workspace ID
-      const activeItem = workspaces.find(w => w.active) || workspaces[0];
+      statusMessage = 'Relocated! Refreshing vaults...';
       relocateState = { type: null, id: '' };
-      if (activeItem) {
-        await loadWorkspace(activeItem.id);
-      } else {
-        await fetchWorkspaces();
-      }
+      await fetchVaults();
     } catch (e) {
       uiLog('ERROR', 'Relocation of vault directory failed', { error: String(e) });
       errorMessage = `Relocation failed: ${String(e)}`;
       statusMessage = '';
-    }
-  }
-
-
-
-  async function submitCreateVault() {
-    if (!vaultForm.name) return;
-    actionBusy = true;
-    errorMessage = '';
-    statusMessage = 'Creating vault folder...';
-    try {
-      const res = await apiFetch('/api/vaults', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(vaultForm)
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.detail || `HTTP ${res.status}`);
-      
-      statusMessage = 'Vault created! Reloading active workspace...';
-      vaultForm = { name: '', id: '' };
-      activeForm = null;
-      // Reload active workspace to pick up new vault
-      const activeItem = workspaces.find(w => w.active);
-      if (activeItem) {
-        await loadWorkspace(activeItem.id);
-      } else {
-        await fetchWorkspaces();
-      }
-    } catch (e) {
-      errorMessage = `Creation failed: ${String(e)}`;
-      statusMessage = '';
-    } finally {
-      actionBusy = false;
     }
   }
 
@@ -270,40 +309,19 @@
               {:else}
                 <button class="primary-action-btn" on:click={handleRelocateVault}>Locate Vault Folder...</button>
               {/if}
-              <button class="row-action-btn secondary" on:click={() => relocateState = { type: null, id: '' }}>Cancel</button>
+              <button class="row-action-btn secondary" on:click={() => {
+                relocateState = { type: null, id: '' };
+                errorMessage = '';
+              }}>Cancel</button>
             </div>
           </div>
 
-
-
-        {:else if activeForm === 'create_vault'}
-          <!-- Create Vault Form View -->
-          <div class="form-box">
-            <h3>Create New Vault</h3>
-            <p class="form-desc">Initializes a new media vault inside the active workspace directory.</p>
-            
-            <div class="form-group">
-              <label for="vault-name">Vault Display Name</label>
-              <input id="vault-name" type="text" bind:value={vaultForm.name} placeholder="e.g. Gameplay Recordings" />
-            </div>
-
-            <div class="form-group">
-              <label for="vault-slug">Vault ID (Slug, optional)</label>
-              <input id="vault-slug" type="text" bind:value={vaultForm.id} placeholder="e.g. gameplay-vault" />
-            </div>
-
-            <div class="form-buttons">
-              <button class="primary-action-btn" on:click={submitCreateVault} disabled={!vaultForm.name || actionBusy}>Create Vault</button>
-              <button class="row-action-btn secondary" on:click={() => activeForm = null} disabled={actionBusy}>Cancel</button>
-            </div>
-          </div>
-
-        {:else}
-          <!-- Main Startup Selector View (Obsidian Switcher Style) -->
+        {:else if step === 'workspaces'}
+          <!-- Step 1: Workspace Selection -->
           {#if workspaces.length > 0}
             <section class="launcher-section">
               <div class="section-header">
-                <h3>Open recent workspace</h3>
+                <h3>Select a workspace</h3>
                 <button class="icon-btn" on:click={fetchWorkspaces} disabled={actionBusy} title="Refresh workspaces">
                   <IconRefresh size={12} />
                 </button>
@@ -311,13 +329,15 @@
               
               <div class="launcher-workspace-list">
                 {#each workspaces as w}
-                  <div class="launcher-workspace-row" class:active={w.active}>
+                  <button
+                    class="launcher-workspace-row"
+                    class:active={w.active}
+                    on:click={() => w.exists ? selectWorkspace(w) : null}
+                    disabled={actionBusy || !w.exists}
+                  >
                     <div class="launcher-row-info">
                       <div class="launcher-name-line">
                         <span class="workspace-name">{w.name}</span>
-                        {#if w.active}
-                          <span class="launcher-active-badge">Active</span>
-                        {/if}
                         <span class="launcher-status-badge" class:launcher-found={w.exists} class:launcher-missing={!w.exists}>
                           <span class="dot"></span>
                           {w.exists ? 'Found' : 'Missing'}
@@ -326,45 +346,81 @@
                       <div class="launcher-path-line" title={w.config_path}>{w.config_path}</div>
                     </div>
                     
-                    <div class="launcher-row-actions">
-                      {#if !w.exists}
-                        <button class="row-action-btn secondary relocate" on:click={() => {
+                    {#if !w.exists}
+                      <div class="launcher-row-actions">
+                        <button class="row-action-btn secondary relocate" on:click|stopPropagation={() => {
                           relocateState = { type: 'workspace', id: w.id, current_path: w.config_path };
                           errorMessage = 'Configuration file missing. Please relocate it.';
                         }} disabled={actionBusy}>
                           Relocate
                         </button>
-                      {:else}
-                        <button class="row-action-btn secondary open" on:click={() => loadWorkspace(w.id)} disabled={actionBusy}>
-                          Open
-                        </button>
-                      {/if}
-                    </div>
-                  </div>
+                      </div>
+                    {/if}
+                  </button>
                 {/each}
               </div>
             </section>
+          {:else}
+            <div class="empty-state">
+              <p>No workspaces found.</p>
+            </div>
           {/if}
 
+        {:else if step === 'vaults'}
+          <!-- Step 2: Vault Selection -->
           <section class="launcher-section">
             <div class="section-header">
-              <h3>Get started</h3>
+              <button class="back-btn" on:click={goBack} disabled={actionBusy} title="Back to workspaces">
+                <IconChevronLeft size={14} />
+                <span>Back</span>
+              </button>
+              <h3>{selectedWorkspace?.name || 'Workspace'}</h3>
+              <button class="icon-btn" on:click={fetchVaults} disabled={actionBusy || loadingVaults} title="Refresh vaults">
+                <IconRefresh size={12} />
+              </button>
             </div>
-            
-            <div class="action-rows-list">
 
-
-              <!-- Create New Vault Row -->
-              <div class="action-row">
-                <div class="action-row-info">
-                  <div class="action-row-title">Create New Vault</div>
-                  <div class="action-row-desc">Initialize a new media vault under a folder.</div>
-                </div>
-                <button class="row-action-btn primary" on:click={() => activeForm = 'create_vault'} disabled={actionBusy}>
-                  Create
-                </button>
+            {#if loadingVaults}
+              <div class="spinner-area compact">
+                <div class="spinner"></div>
+                <div class="loading-text">Loading vaults...</div>
               </div>
-            </div>
+            {:else if vaults.length > 0}
+              <div class="launcher-workspace-list">
+                {#each vaults as v}
+                  <button
+                    class="launcher-workspace-row"
+                    class:active={v.id === activeVaultId}
+                    on:click={() => v.exists ? openVault(v) : null}
+                    disabled={actionBusy || !v.exists}
+                  >
+                    <div class="launcher-row-info">
+                      <div class="launcher-name-line">
+                        <IconFolder size={14} class="vault-icon" />
+                        <span class="workspace-name">{v.name}</span>
+                        {#if v.id === activeVaultId}
+                          <span class="launcher-active-badge">Active</span>
+                        {/if}
+                        <span class="launcher-status-badge" class:launcher-found={v.exists} class:launcher-missing={!v.exists}>
+                          <span class="dot"></span>
+                          {v.exists ? 'Found' : 'Missing'}
+                        </span>
+                      </div>
+                      <div class="launcher-path-line" title={v.root}>{v.root}</div>
+                    </div>
+                    <div class="launcher-row-actions">
+                      {#if v.exists}
+                        <span class="row-action-btn secondary open">Open</span>
+                      {/if}
+                    </div>
+                  </button>
+                {/each}
+              </div>
+            {:else}
+              <div class="empty-state">
+                <p>No vaults in this workspace.</p>
+              </div>
+            {/if}
           </section>
         {/if}
       </div>
@@ -476,6 +532,10 @@
     padding: 40px 0;
   }
 
+  .spinner-area.compact {
+    padding: 24px 0;
+  }
+
   .spinner {
     width: 32px;
     height: 32px;
@@ -517,6 +577,7 @@
     justify-content: space-between;
     border-bottom: 1px solid rgba(255, 255, 255, 0.08);
     padding-bottom: 6px;
+    gap: 8px;
   }
 
   .section-header h3 {
@@ -526,6 +587,28 @@
     margin: 0;
     text-transform: uppercase;
     letter-spacing: 0.5px;
+    flex: 1;
+  }
+
+  .back-btn {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    background: transparent;
+    border: none;
+    padding: 4px 8px 4px 4px;
+    color: var(--text-muted);
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 600;
+    transition: color 0.15s ease, background 0.15s ease;
+    flex-shrink: 0;
+  }
+
+  .back-btn:hover {
+    color: var(--text-bright);
+    background: var(--bg-hover);
   }
 
   .icon-btn {
@@ -538,6 +621,7 @@
     align-items: center;
     justify-content: center;
     cursor: pointer;
+    flex-shrink: 0;
   }
 
   .icon-btn:hover {
@@ -549,7 +633,7 @@
     display: flex;
     flex-direction: column;
     gap: 8px;
-    max-height: 140px;
+    max-height: 200px;
     overflow-y: auto;
     width: 100%;
     padding-right: 4px;
@@ -566,12 +650,20 @@
     box-sizing: border-box;
     width: 100%;
     text-align: left;
+    cursor: pointer;
+    font-family: inherit;
+    color: inherit;
     transition: border-color 0.2s ease, background-color 0.2s ease;
   }
 
-  .launcher-workspace-row:hover {
+  .launcher-workspace-row:hover:not(:disabled) {
     border-color: rgba(31, 111, 235, 0.35);
     background: rgba(13, 17, 23, 0.7);
+  }
+
+  .launcher-workspace-row:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
   }
 
   .launcher-workspace-row.active {
@@ -597,6 +689,11 @@
     gap: 8px;
     flex-wrap: wrap;
     width: 100%;
+  }
+
+  :global(.vault-icon) {
+    color: var(--text-muted);
+    flex-shrink: 0;
   }
 
   .workspace-name {
@@ -670,44 +767,6 @@
     flex-shrink: 0;
   }
 
-  /* Action Rows (Obsidian-Style) */
-  .action-rows-list {
-    display: flex;
-    flex-direction: column;
-    width: 100%;
-  }
-
-  .action-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 14px 0;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  }
-
-  .action-row:last-child {
-    border-bottom: none;
-  }
-
-  .action-row-info {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    max-width: 75%;
-  }
-
-  .action-row-title {
-    font-size: 14px;
-    font-weight: 500;
-    color: #c9d1d9;
-  }
-
-  .action-row-desc {
-    font-size: 11px;
-    color: var(--text-muted);
-    line-height: 1.4;
-  }
-
   .row-action-btn {
     padding: 6px 18px;
     font-size: 12px;
@@ -738,6 +797,17 @@
     border-color: #8b949e;
   }
 
+  .empty-state {
+    padding: 32px 0;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 13px;
+  }
+
+  .empty-state p {
+    margin: 0;
+  }
+
   /* Form & Dialog Boxes */
   .form-box {
     padding: 8px 0;
@@ -752,41 +822,6 @@
     font-weight: 700;
     margin: 0;
     color: var(--text-bright);
-  }
-
-  .form-desc {
-    font-size: 12px;
-    color: var(--text-muted);
-    margin: 0;
-    line-height: 1.4;
-  }
-
-  .form-group {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-
-  .form-group label {
-    font-size: 10px;
-    font-weight: 700;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-  }
-
-  .form-group input {
-    font-size: 13px;
-    padding: 9px 12px;
-    background: #0d1117;
-    border: 1px solid var(--border-dim);
-    color: var(--text-main);
-    border-radius: 6px;
-  }
-
-  .form-group input:focus {
-    border-color: var(--accent-primary);
-    outline: none;
   }
 
   .form-buttons {
