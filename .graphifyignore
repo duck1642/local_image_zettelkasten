@@ -1,26 +1,59 @@
 # Ignore everything by default
 *
 
-# Allow folders we want to include
-!backend/
-!backend/**
-!frontend/
-!frontend/src/
-!frontend/src/**
-!docs/
-!docs/**
-!tools/
-!tools/**
-
-# Allow root files
+# Root files
+!README.md
 !main.py
 !dev.py
 !pyproject.toml
+!pytest.ini
 
-# Exclude specific subdirectories inside allowed folders
+# Config template only
+!config/
+!config/workspaces.example.yaml
+
+# Core backend
+!backend/
+!backend/**
+
+# Active frontend source
+!frontend/
+!frontend/src/
+!frontend/src/**
+
+# Durable docs
+!docs/
+!docs/**
+
+# Maintenance tools and shared browser-extension source
+!tools/
+!tools/maintenance/
+!tools/maintenance/**
+!tools/browser_extension/
+!tools/browser_extension/README.md
+!tools/browser_extension/src/
+!tools/browser_extension/src/**
+!tools/browser_extension/scripts/
+!tools/browser_extension/scripts/**
+
+# Exclude generated/runtime/noisy areas
 frontend/node_modules/
 frontend/dist/
 frontend/.vite/
 frontend/src-tauri/
+frontend/src/lib/icons/
+frontend/src/lib/renderers/archive/
 backend/__pycache__/
 tools/__pycache__/
+tools/browser_extension/edge/
+tools/browser_extension/chrome/
+tools/browser_extension/firefox/
+graphify-out/
+data/
+logs/
+secrets/
+backups/
+tests/
+test-results/
+test_input/
+test_videos/

@@ -2779,6 +2779,236 @@ def test_delete_and_replace_cleanup_remove_thumbnails(monkeypatch, tmp_path):
         assert not path.exists()
 
 
+def test_delete_stage_failure_keeps_db_row_and_files(monkeypatch, tmp_path):
+    utils, sqlite_operator, api_library, thumbnails = fresh_backend(
+        monkeypatch,
+        tmp_path,
+        "utils",
+        "db.sqlite_operator",
+        "api.library",
+        "thumbnails",
+    )
+    item_hash = "54" * 32
+    conn = insert_mock_item(sqlite_operator, item_hash)
+    storage_id = storage_id_for(conn, item_hash)
+    conn.close()
+    asset = utils.asset_path_for(item_hash, ".jpg", "image/jpeg", storage_id=storage_id)
+    note = utils.note_path_for(item_hash, storage_id)
+    wd = utils.wd_tag_cache_path_for(item_hash, storage_id)
+    thumb = thumbnails.thumbnail_path_for(item_hash, storage_id)
+    for path, data in ((asset, b"asset"), (note, b"---\n---\n"), (wd, b"{}"), (thumb, b"thumb")):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+
+    real_replace = Path.replace
+
+    def failing_replace(self, target):
+        if self == asset:
+            raise OSError("locked asset")
+        return real_replace(self, target)
+
+    monkeypatch.setattr(Path, "replace", failing_replace)
+    monkeypatch.setattr(api_library.search_manager, "remove_indexes_batch", lambda *args, **kwargs: None)
+
+    result = api_library._delete_item_sync(item_hash)
+    conn = sqlite_operator.init_database()
+    db_row = conn.execute("SELECT 1 FROM items WHERE hash = ?", (item_hash,)).fetchone()
+    conn.close()
+
+    assert result["status"] == "warning"
+    assert result["deleted"] is False
+    assert db_row is not None
+    assert all(path.exists() for path in (asset, note, wd, thumb))
+
+
+def test_delete_db_failure_restores_staged_files(monkeypatch, tmp_path):
+    utils, sqlite_operator, api_library, thumbnails = fresh_backend(
+        monkeypatch,
+        tmp_path,
+        "utils",
+        "db.sqlite_operator",
+        "api.library",
+        "thumbnails",
+    )
+    item_hash = "55" * 32
+    conn = insert_mock_item(sqlite_operator, item_hash)
+    storage_id = storage_id_for(conn, item_hash)
+    conn.close()
+    asset = utils.asset_path_for(item_hash, ".jpg", "image/jpeg", storage_id=storage_id)
+    note = utils.note_path_for(item_hash, storage_id)
+    wd = utils.wd_tag_cache_path_for(item_hash, storage_id)
+    thumb = thumbnails.thumbnail_path_for(item_hash, storage_id)
+    for path, data in ((asset, b"asset"), (note, b"---\n---\n"), (wd, b"{}"), (thumb, b"thumb")):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+
+    monkeypatch.setattr(api_library, "refresh_metadata_index_counters", lambda conn: (_ for _ in ()).throw(RuntimeError("db failure")))
+    monkeypatch.setattr(api_library.search_manager, "remove_indexes_batch", lambda *args, **kwargs: None)
+
+    result = api_library._delete_item_sync(item_hash)
+    conn = sqlite_operator.init_database()
+    db_row = conn.execute("SELECT 1 FROM items WHERE hash = ?", (item_hash,)).fetchone()
+    conn.close()
+
+    assert result["status"] == "warning"
+    assert result["deleted"] is False
+    assert db_row is not None
+    assert all(path.exists() for path in (asset, note, wd, thumb))
+
+
+def test_delete_final_trash_cleanup_failure_reports_error(monkeypatch, tmp_path):
+    utils, sqlite_operator, api_library, thumbnails = fresh_backend(
+        monkeypatch,
+        tmp_path,
+        "utils",
+        "db.sqlite_operator",
+        "api.library",
+        "thumbnails",
+    )
+    item_hash = "56" * 32
+    conn = insert_mock_item(sqlite_operator, item_hash)
+    storage_id = storage_id_for(conn, item_hash)
+    conn.close()
+    asset = utils.asset_path_for(item_hash, ".jpg", "image/jpeg", storage_id=storage_id)
+    note = utils.note_path_for(item_hash, storage_id)
+    wd = utils.wd_tag_cache_path_for(item_hash, storage_id)
+    thumb = thumbnails.thumbnail_path_for(item_hash, storage_id)
+    for path, data in ((asset, b"asset"), (note, b"---\n---\n"), (wd, b"{}"), (thumb, b"thumb")):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+
+    real_unlink = Path.unlink
+
+    def failing_unlink(self, *args, **kwargs):
+        if ".delete-trash" in str(self):
+            raise OSError("trash locked")
+        return real_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", failing_unlink)
+    monkeypatch.setattr(api_library.search_manager, "remove_indexes_batch", lambda *args, **kwargs: None)
+
+    result = api_library._delete_item_sync(item_hash)
+    conn = sqlite_operator.init_database()
+    db_row = conn.execute("SELECT 1 FROM items WHERE hash = ?", (item_hash,)).fetchone()
+    conn.close()
+
+    assert result["status"] == "success"
+    assert result["deleted"] is True
+    assert db_row is None
+    assert result["cleanup_errors"]
+    assert all(".delete-trash" in error["path"] for error in result["cleanup_errors"])
+    assert not any(path.exists() for path in (asset, note, wd, thumb))
+
+
+def test_replace_final_trash_cleanup_failure_reports_error(monkeypatch, tmp_path):
+    utils, sqlite_operator, api_library = fresh_backend(
+        monkeypatch,
+        tmp_path,
+        "utils",
+        "db.sqlite_operator",
+        "api.library",
+    )
+    item_hash = "57" * 32
+    conn = insert_mock_item(sqlite_operator, item_hash)
+    storage_id = storage_id_for(conn, item_hash)
+    conn.close()
+    asset = utils.asset_path_for(item_hash, ".jpg", "image/jpeg", storage_id=storage_id)
+    asset.parent.mkdir(parents=True, exist_ok=True)
+    asset.write_bytes(b"asset")
+
+    real_unlink = Path.unlink
+
+    def failing_unlink(self, *args, **kwargs):
+        if ".replace-trash" in str(self):
+            raise OSError("replace trash locked")
+        return real_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", failing_unlink)
+    monkeypatch.setattr(api_library.search_manager, "remove_indexes_batch", lambda *args, **kwargs: None)
+
+    result = api_library._delete_item_after_replacement(item_hash)
+
+    assert result["status"] == "deleted"
+    assert result["cleanup_errors"]
+    assert all(".replace-trash" in error["path"] for error in result["cleanup_errors"])
+
+
+def test_review_replace_warns_when_old_target_cleanup_incomplete(monkeypatch, tmp_path):
+    utils, sqlite_operator, web_api, api_review = fresh_backend(
+        monkeypatch,
+        tmp_path,
+        "utils",
+        "db.sqlite_operator",
+        "web_api",
+        "api.review",
+    )
+    old_hash = "58" * 32
+    new_hash = "59" * 32
+    conn = insert_mock_item(sqlite_operator, old_hash)
+    conn.close()
+    review_file = utils.REVIEW_DIR / "replace-warning.jpg"
+    review_file.write_bytes(b"replacement")
+    review_file.with_suffix(".jpg.json").write_text(json.dumps({"best_match": old_hash}), encoding="utf-8")
+
+    def fake_process_file(path, config, metadata=None, delete_source=False, skip_similarity=False, **kwargs):
+        conn = insert_mock_item(sqlite_operator, new_hash)
+        new_storage_id = storage_id_for(conn, new_hash)
+        note_path = utils.note_path_for(new_hash, new_storage_id)
+        note_path.parent.mkdir(parents=True, exist_ok=True)
+        note_path.write_text("---\n---\n", encoding="utf-8")
+        conn.close()
+        if delete_source and path.exists():
+            path.unlink()
+        return True, "ok", {"file_hash": new_hash}
+
+    monkeypatch.setattr(api_review, "process_file", fake_process_file)
+    monkeypatch.setattr(
+        api_review,
+        "_delete_item_after_replacement",
+        lambda target_hash, **kwargs: {
+            "hash": target_hash,
+            "status": "deleted",
+            "cleanup_errors": [{"hash": target_hash, "path": "review/.replace-trash/x", "error": "locked"}],
+        },
+    )
+
+    result = api_review._review_action_sync("replace-warning.jpg", "replace")
+
+    assert result["status"] == "warning"
+    assert "cleanup" in result["message"].lower()
+
+
+def test_successful_delete_does_not_leave_vault_health_orphans(monkeypatch, tmp_path):
+    utils, sqlite_operator, api_library, thumbnails, vaults = fresh_backend(
+        monkeypatch,
+        tmp_path,
+        "utils",
+        "db.sqlite_operator",
+        "api.library",
+        "thumbnails",
+        "vaults",
+    )
+    item_hash = "5a" * 32
+    conn = insert_mock_item(sqlite_operator, item_hash)
+    storage_id = storage_id_for(conn, item_hash)
+    conn.close()
+    asset = utils.asset_path_for(item_hash, ".jpg", "image/jpeg", storage_id=storage_id)
+    note = utils.note_path_for(item_hash, storage_id)
+    wd = utils.wd_tag_cache_path_for(item_hash, storage_id)
+    thumb = thumbnails.thumbnail_path_for(item_hash, storage_id)
+    for path, data in ((asset, b"asset"), (note, b"---\n---\n"), (wd, b"{}"), (thumb, b"thumb")):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+    monkeypatch.setattr(api_library.search_manager, "remove_indexes_batch", lambda *args, **kwargs: None)
+
+    result = api_library._delete_item_sync(item_hash)
+    report = vaults.audit_vault_health("default")
+
+    assert result["status"] == "success"
+    assert str(asset) not in report["orphans"]["assets"]
+    assert str(note) not in report["orphans"]["notes"]
+
+
 def test_item_details_include_topic_and_wd_counts(monkeypatch, tmp_path):
     utils, sqlite_operator, metadata_index, web_api = fresh_backend(
         monkeypatch,

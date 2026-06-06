@@ -306,6 +306,7 @@ def _review_action_sync(filename: str, action: str, target_hash: str = None):
         if "ctx" in inspect.signature(_delete_item_after_replacement).parameters:
             del_kwargs["ctx"] = ctx
         replace_result = _delete_item_after_replacement(target_hash, **del_kwargs)
+        replace_cleanup_errors = replace_result.get("cleanup_errors") or []
         if replace_result["status"] != "deleted":
             error_text = "; ".join(str(item.get("error", "")) for item in replace_result.get("cleanup_errors", []) if item.get("error"))
             message = "Replacement ingested, but old target cleanup failed. Both vault items are kept."
@@ -320,6 +321,25 @@ def _review_action_sync(filename: str, action: str, target_hash: str = None):
                 error=error_text or replace_result["status"],
             )
             return {"status": "warning", "action": action, "message": message}
+        if replace_cleanup_errors:
+            error_text = "; ".join(str(item.get("error", "")) for item in replace_cleanup_errors if item.get("error"))
+            message = "Replacement ingested and old target removed from DB, but staged file cleanup is incomplete."
+            log_review(
+                "WARNING",
+                "Review replace staged cleanup incomplete",
+                action=action,
+                filename=filename,
+                display_name=display_name,
+                state=resolved_state,
+                target_hash=target_hash,
+                error=error_text or "cleanup incomplete",
+            )
+            return {
+                "status": "warning",
+                "action": action,
+                "message": message,
+                "cleanup_errors": replace_cleanup_errors,
+            }
 
     message = "Review item replaced and ingested." if action == "replace" else "Review item ingested as variant."
     log_review("INFO", "Review action succeeded", action=action, filename=filename, display_name=display_name, state=resolved_state, target_hash=target_hash, detail=message)

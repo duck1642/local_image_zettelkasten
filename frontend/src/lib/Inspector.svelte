@@ -573,6 +573,11 @@
           if (res.ok) {
               const result = await res.json().catch(() => ({}));
               const cleanupErrors = Array.isArray(result.cleanup_errors) ? result.cleanup_errors : [];
+              if (result.status === 'warning' && result.deleted === false) {
+                  uiLog('WARNING', 'Item delete did not complete', { hash: item.hash, cleanup_errors: cleanupErrors, message: result.message || '' });
+                  alert(result.message || 'Item was not deleted. Check App Logs.');
+                  return;
+              }
               if (cleanupErrors.length > 0) {
                   uiLog('WARNING', 'Item deleted with cleanup failures', { hash: item.hash, cleanup_errors: cleanupErrors });
                   alert(`Item deleted, but ${cleanupErrors.length} cleanup operation(s) failed. Check App Logs.`);

@@ -1073,35 +1073,97 @@ async def delete_item(item_hash: str):
 async def bulk_delete_items(request: BulkDeleteRequest):
     return await asyncio.to_thread(_bulk_delete_items_sync, request.hashes)
 
-def _delete_item_row(cursor, conn, item_hash: str, remove_indexes: bool = True):
+def _cleanup_trash_dir(name: str, ctx: WorkspaceContext | None = None) -> Path:
+    return _review_dir(ctx) / name
+
+
+def _trash_path_for(trash_dir: Path, item_hash: str, index: int, path: Path) -> Path:
+    base = trash_dir / f"{item_hash}_{index}_{path.name}"
+    if not base.exists():
+        return base
+    for suffix in range(1, 1000):
+        candidate = trash_dir / f"{item_hash}_{index}_{suffix}_{path.name}"
+        if not candidate.exists():
+            return candidate
+    raise RuntimeError(f"could not allocate cleanup trash path for {path}")
+
+
+def _restore_moved_cleanup_paths(item_hash: str, moved_paths: list[tuple[Path, Path]]) -> list[dict]:
+    restore_errors = []
+    for temp_path, original_path in reversed(moved_paths):
+        try:
+            if temp_path.exists() and not original_path.exists():
+                original_path.parent.mkdir(parents=True, exist_ok=True)
+                temp_path.replace(original_path)
+        except OSError as exc:
+            restore_errors.append({"hash": item_hash, "path": str(original_path), "error": str(exc)})
+    return restore_errors
+
+
+def _stage_cleanup_paths(item_hash: str, cleanup_paths: list[Path], trash_dir: Path) -> tuple[list[tuple[Path, Path]], list[dict]]:
+    trash_dir.mkdir(parents=True, exist_ok=True)
+    moved_paths: list[tuple[Path, Path]] = []
+    for index, path in enumerate(path for path in cleanup_paths if path.exists()):
+        try:
+            temp_path = _trash_path_for(trash_dir, item_hash, index, path)
+            path.replace(temp_path)
+            moved_paths.append((temp_path, path))
+        except OSError as exc:
+            cleanup_errors = [{"hash": item_hash, "path": str(path), "error": str(exc)}]
+            cleanup_errors.extend(_restore_moved_cleanup_paths(item_hash, moved_paths))
+            return moved_paths, cleanup_errors
+    return moved_paths, []
+
+
+def _remove_staged_cleanup_paths(item_hash: str, moved_paths: list[tuple[Path, Path]], log_label: str, log_context: str = "system") -> list[dict]:
+    cleanup_errors = []
+    for temp_path, _original_path in moved_paths:
+        try:
+            if temp_path.exists():
+                temp_path.unlink()
+        except OSError as exc:
+            error = {"hash": item_hash, "path": str(temp_path), "error": str(exc)}
+            cleanup_errors.append(error)
+            if log_context == "review":
+                log_review("WARNING", log_label, target_hash=item_hash, path=str(temp_path), error=str(exc))
+            else:
+                log_system("WARNING", log_label, hash=item_hash, path=str(temp_path), error=str(exc))
+    return cleanup_errors
+
+
+def _delete_item_row(cursor, conn, item_hash: str, remove_indexes: bool = True, ctx: WorkspaceContext | None = None):
     cursor.execute("SELECT file_extension, mime_type, storage_id, source_url FROM items WHERE hash = ?", (item_hash,))
     row = cursor.fetchone()
     if not row:
         return {"hash": item_hash, "status": "missing", "cleanup_errors": []}
 
-    cleanup_paths = _item_file_paths(item_hash, row[0] or "", row[1] or "", row[2], conn)
+    cleanup_paths = _item_file_paths(item_hash, row[0] or "", row[1] or "", row[2], conn, ctx=ctx)
     previous_facet_values = item_facet_values(conn, item_hash)
+    moved_paths, cleanup_errors = _stage_cleanup_paths(item_hash, cleanup_paths, _cleanup_trash_dir(".delete-trash", ctx))
+    if cleanup_errors:
+        log_system("WARNING", "Item delete staging failed", hash=item_hash, cleanup_errors=cleanup_errors)
+        return {"hash": item_hash, "status": "cleanup_failed", "cleanup_errors": cleanup_errors, "deleted": False}
 
-    cursor.execute("DELETE FROM items WHERE hash = ?", (item_hash,))
-    refresh_metadata_facet_counts_for_values(conn, previous_facet_values)
-    refresh_metadata_index_counters(conn)
-    conn.commit()
+    try:
+        cursor.execute("DELETE FROM items WHERE hash = ?", (item_hash,))
+        refresh_metadata_facet_counts_for_values(conn, previous_facet_values)
+        refresh_metadata_index_counters(conn)
+        conn.commit()
+    except Exception as exc:
+        conn.rollback()
+        cleanup_errors = [{"hash": item_hash, "path": "database", "error": str(exc)}]
+        cleanup_errors.extend(_restore_moved_cleanup_paths(item_hash, moved_paths))
+        log_system("WARNING", "Item delete database step failed; restored staged files", hash=item_hash, error=str(exc), cleanup_errors=cleanup_errors)
+        return {"hash": item_hash, "status": "cleanup_failed", "cleanup_errors": cleanup_errors, "deleted": False}
+
     index_payload = {"hash": item_hash, "source_url": row[3] or ""}
     if remove_indexes:
         search_manager.remove_indexes_batch([index_payload])
 
-    cleanup_errors = []
-    for path in cleanup_paths:
-        try:
-            if path.exists():
-                path.unlink()
-        except OSError as exc:
-            error = {"hash": item_hash, "path": str(path), "error": str(exc)}
-            cleanup_errors.append(error)
-            log_system("WARNING", "Deleted DB row but file cleanup failed", hash=item_hash, path=str(path), error=str(exc))
+    cleanup_errors = _remove_staged_cleanup_paths(item_hash, moved_paths, "Deleted DB row but staged file cleanup failed")
 
     log_system("INFO", f"Deleted item {item_hash}")
-    return {"hash": item_hash, "status": "deleted", "cleanup_errors": cleanup_errors, "index": index_payload}
+    return {"hash": item_hash, "status": "deleted", "cleanup_errors": cleanup_errors, "index": index_payload, "deleted": True}
 
 def _delete_item_after_replacement(item_hash: str, ctx: WorkspaceContext | None = None):
     conn = init_database(ctx=ctx)
@@ -1114,31 +1176,10 @@ def _delete_item_after_replacement(item_hash: str, ctx: WorkspaceContext | None 
 
         cleanup_paths = _item_file_paths(item_hash, row[0] or "", row[1] or "", row[2], conn, ctx=ctx)
         previous_facet_values = item_facet_values(conn, item_hash)
-        existing_paths = [path for path in cleanup_paths if path.exists()]
         trash_dir = _review_dir(ctx) / ".replace-trash"
-        trash_dir.mkdir(parents=True, exist_ok=True)
-        moved_paths = []
-
-        def restore_moved():
-            restore_errors = []
-            for temp_path, original_path in reversed(moved_paths):
-                try:
-                    if temp_path.exists() and not original_path.exists():
-                        original_path.parent.mkdir(parents=True, exist_ok=True)
-                        temp_path.replace(original_path)
-                except OSError as exc:
-                    restore_errors.append({"hash": item_hash, "path": str(original_path), "error": str(exc)})
-            return restore_errors
-
-        for index, path in enumerate(existing_paths):
-            try:
-                temp_path = trash_dir / f"{item_hash}_{index}_{path.name}"
-                path.replace(temp_path)
-                moved_paths.append((temp_path, path))
-            except OSError as exc:
-                cleanup_errors = [{"hash": item_hash, "path": str(path), "error": str(exc)}]
-                cleanup_errors.extend(restore_moved())
-                return {"hash": item_hash, "status": "cleanup_failed", "cleanup_errors": cleanup_errors}
+        moved_paths, cleanup_errors = _stage_cleanup_paths(item_hash, cleanup_paths, trash_dir)
+        if cleanup_errors:
+            return {"hash": item_hash, "status": "cleanup_failed", "cleanup_errors": cleanup_errors}
 
         try:
             cursor.execute("DELETE FROM items WHERE hash = ?", (item_hash,))
@@ -1149,16 +1190,11 @@ def _delete_item_after_replacement(item_hash: str, ctx: WorkspaceContext | None 
         except Exception as exc:
             conn.rollback()
             cleanup_errors = [{"hash": item_hash, "path": "database", "error": str(exc)}]
-            cleanup_errors.extend(restore_moved())
+            cleanup_errors.extend(_restore_moved_cleanup_paths(item_hash, moved_paths))
             return {"hash": item_hash, "status": "cleanup_failed", "cleanup_errors": cleanup_errors}
 
-        for temp_path, _ in moved_paths:
-            try:
-                if temp_path.exists():
-                    temp_path.unlink()
-            except OSError as exc:
-                log_review("WARNING", "Review replace staged file cleanup failed", target_hash=item_hash, path=str(temp_path), error=str(exc))
-        return {"hash": item_hash, "status": "deleted", "cleanup_errors": []}
+        cleanup_errors = _remove_staged_cleanup_paths(item_hash, moved_paths, "Review replace staged file cleanup failed", log_context="review")
+        return {"hash": item_hash, "status": "deleted", "cleanup_errors": cleanup_errors}
     finally:
         conn.close()
 
@@ -1169,7 +1205,14 @@ def _delete_item_sync(item_hash: str):
         result = _delete_item_row(cursor, conn, item_hash)
         if result["status"] == "missing":
             raise HTTPException(status_code=404)
-        return {"status": "success", "cleanup_errors": result["cleanup_errors"]}
+        if result["status"] == "cleanup_failed":
+            return {
+                "status": "warning",
+                "deleted": False,
+                "message": "Item was not deleted because cleanup staging or database deletion failed.",
+                "cleanup_errors": result["cleanup_errors"],
+            }
+        return {"status": "success", "deleted": True, "cleanup_errors": result["cleanup_errors"]}
     finally:
         conn.close()
 
@@ -1193,6 +1236,8 @@ def _bulk_delete_items_sync(hashes: list[str]):
             result = _delete_item_row(cursor, conn, item_hash, remove_indexes=False)
             if result["status"] == "missing":
                 missing.append(item_hash)
+            elif result["status"] == "cleanup_failed":
+                failed_cleanup.extend(result["cleanup_errors"])
             else:
                 deleted.append(item_hash)
                 failed_cleanup.extend(result["cleanup_errors"])
