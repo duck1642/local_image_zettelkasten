@@ -269,257 +269,135 @@ Build and stabilize the local-first Tauri/Svelte vault app, backend API, metadat
 
 ---
 
-## Phase 9 — Browser Extension Integration
+## Phase 9 — Browser Extension Integration ✅
 
 ### Task
 
-Build a browser extension that captures active-page/media URLs and sends them to LMZ's local queue/API, reducing dependence on fragile backend scrapers.
+Build a browser extension that captures browser-selected images and supported page URLs into LMZ without requiring the backend to be online at capture time.
 
-### Planned Scope
+### Completed
 
-- Start with Chromium-based browsers: Edge/Chrome.
-- Capture active tab URL, selected media URLs, and page media candidates.
-- Send URLs and metadata groups into the online queue/local API.
-- Handle local API base discovery and session/auth safely.
-- Pass source/platform metadata where reliable.
-- Keep online scraper-derived `artist`/`title` out of item metadata; explicit user/app metadata remains owner.
-- Defer Firefox until the Chromium flow is stable.
+- Added a shared browser extension source tree under `tools/browser_extension/src/`.
+- Added generated runnable folders for Edge, Chrome, and Firefox.
+- Added `tools/browser_extension/scripts/sync_extensions.py`; shared source is the source of truth.
+- Added offline-first right-click image capture:
+  - selected image bytes are fetched into a Blob.
+  - captures are cached in extension IndexedDB first.
+  - LMZ can be closed during capture.
+  - cached captures sync to backend staging later.
+  - staged captures commit through existing LMZ ingest/review/duplicate logic.
+- Added a `100 MB` automatic cache limit.
+  - larger files become `needs_download_choice`.
+  - fallback downloads go to `Downloads/LMZ Capture/` and are manual recovery items.
+- Added online URL capture for supported queue targets.
+  - online items are cached in IndexedDB first.
+  - append happens later through the backend queue append API.
+- Added popup metadata editing with autosave:
+  - artist input.
+  - platform preset select.
+  - queue selection for online links.
+  - blank capture artist commits as `Unknown`.
+- Added popup API settings and bulk actions panels.
+  - bulk commit processes cached captures, uploaded captures, and deferred online links.
+  - discard all clears extension records and best-effort deletes backend staging.
+  - failed items are marked through `last_error` and counted from current IndexedDB state.
+- Added local inline SVG icons and a compact popup UI.
+- Added backend capture and queue append APIs needed by the extension.
+- Added extension-origin CORS support for Chromium and Firefox extension origins while keeping mutating requests API-key protected.
 
-### Temporary Design Decisions
-
-The extension should live under:
-
-```text
-tools/browser_extension/
-```
-
-The first target browser is Microsoft Edge because it is the primary browser in current use. Chrome should remain a near-term secondary target because the extension will start on Chromium Manifest V3. Firefox is explicitly deferred until the Edge/Chrome path is stable, because Firefox extension behavior and Manifest V3 support differ enough to distract from the MVP.
-
-Initial folder direction:
+### Extension Shape
 
 ```text
 tools/browser_extension/
   README.md
-  shared/
+  scripts/
+    sync_extensions.py
+  src/
+    api.js
     background.js
+    db.js
+    icons.js
     popup.html
     popup.js
     styles.css
-    icons/
   edge/
     manifest.json
+    background.js
+    db.js
+    icons.js
+    popup.html
+    popup.js
+    styles.css
   chrome/
+    README.md
     manifest.json
+    background.js
+    db.js
+    icons.js
+    popup.html
+    popup.js
+    styles.css
   firefox/
+    README.md
     manifest.json
+    background.js
+    db.js
+    icons.js
+    popup.html
+    popup.js
+    styles.css
 ```
 
-Only the Edge manifest needs to be production-real at first. Chrome can be kept close to Edge. Firefox can remain a placeholder until a later compatibility phase.
+Run this after editing shared extension files:
 
-The product split is:
+```powershell
+python tools/browser_extension/scripts/sync_extensions.py
+```
+
+### Product Split
 
 - **Online queue**: supported platform page/post URLs go into LMZ's existing online queue.
-- **Capture**: browser-selected media is uploaded/staged through the local LMZ backend, then committed through LMZ's existing ingest/review path.
+- **Capture**: browser-selected media is cached by the extension, synced to LMZ staging later, then committed through existing ingest/review behavior.
 
-Do not call the second flow "local queue" in code or UI. "Local ingestion" already means filesystem paths selected from the local machine. Browser media is not local until LMZ receives and stages it. Use "Capture" for the extension-driven media flow.
+Use "Capture" for the extension-driven media flow. Do not call it "local queue"; local ingestion already means filesystem paths selected from the machine.
 
-#### Online Queue Flow
+### Backend APIs
 
-Online queue is for platforms where LMZ already has downloader logic:
+Capture endpoints:
 
-- Instagram
-- X/Twitter
-- Pixiv
-- Pinterest
+- `POST /api/capture/stage`
+- `GET /api/capture/preview/{staged_id}`
+- `DELETE /api/capture/stage/{staged_id}`
+- `POST /api/capture/commit`
 
-The extension sends the page/post URL plus explicit user metadata. LMZ should append a queue block compatible with the current markdown queue parser, for example:
+Queue append endpoint:
 
-```text
-@artist: creator name
-@platform: X
-https://x.com/creator/status/123
----
-```
+- `POST /api/queue/{queue_name}/append`
 
-The backend, not the extension, should own final queue formatting. The extension should send structured JSON such as URL, queue name, artist, and platform. The backend can then preserve existing queue parser semantics and avoid duplicating queue syntax rules in extension code.
+Implementation rules:
 
-For online ingestion, the source URL is the page/post URL. Downloader-derived artist/title metadata should remain untrusted. Explicit user/app-provided artist/platform metadata is the owner.
+- Capture commit calls existing `process_file()` and existing review/duplicate logic.
+- Queue append writes markdown queue blocks on the backend.
+- API keys are never sent in URLs or query strings.
+- Mutating extension requests require `X-LMZ-API-KEY`.
 
-#### Capture Flow
+### Supported And Deferred
 
-Capture is for unsupported or arbitrary sites.
+- Edge is the primary target.
+- Firefox has had a basic manual smoke and is no longer only a placeholder.
+- Chrome is generated from the same source; fuller manual smoke is still useful.
+- Image capture is supported. Video capture remains deferred.
+- Browser-assisted capture is not guaranteed on every site. Known hard cases include `blob:` URLs, canvas-rendered images, auth-gated media, hotlink/referer protection, expiring CDN URLs, service-worker-only assets, HLS/DASH streams, and protected media players.
+- Instagram image capture can be blocked by the site, but link queueing still works.
+- Online queue append supports ingestible target URLs only; broad home/search/channel/playlist pages should remain rejected.
 
-MVP capture should start with right-click image capture only:
+### Remaining Follow-Up
 
-```text
-right-click image -> extension fetches image bytes -> save Blob in extension cache -> sync to LMZ backend staging when available -> popup metadata -> commit to vault
-```
-
-Capture must work when LMZ is closed. The extension should not require the backend to be online at right-click time. The browser/extension download step and local cache write happen first; backend upload is a later sync step.
-
-The extension-side source of truth for unsynced captures should be IndexedDB, not `chrome.storage.local`. `chrome.storage.local` is acceptable for lightweight settings, badge/popup summaries, and status pointers, but image bytes should live in IndexedDB as Blob/File data.
-
-Normal browser download can be used as a secondary fallback/backup, not as the main automation queue:
-
-```text
-try fetch -> Blob -> IndexedDB cache
-if Blob cache fails -> try chrome.downloads.download() to Downloads/LMZ Capture/
-```
-
-If the fallback only downloads to disk and no Blob is cached, the item should be marked as `downloaded` / `download_only`: useful for manual recovery, but not automatically syncable to LMZ unless a later file-picker/native-helper path is added.
-
-Suggested extension capture states:
-
-- `cached`: Blob is stored in IndexedDB and can sync to LMZ later.
-- `downloaded`: visible backup copy was saved, but no Blob is available for automatic sync.
-- `uploading`: extension is currently sending cached Blob to LMZ.
-- `uploaded`: LMZ has staged the file and returned `staged_id`.
-- `committed`: LMZ handled the item through ingest/review/duplicate logic.
-- `failed`: last cache/sync/commit attempt failed and is retryable where possible.
-
-Videos are deferred beyond the image MVP. Many site videos are HLS/DASH streams, blob URLs, segmented media, or protected players. A context-menu video item can be added later, but should not be part of the first stability target.
-
-Capture payload should preserve two URLs:
-
-- `source_url`: parent page/post URL, used for provenance and UI grouping.
-- `media_url`: raw selected media URL, used only as transport/debug metadata.
-
-The backend should stage uploaded bytes under the active vault, for example:
-
-```text
-data/vaults/<vault_id>/capture_staging/
-```
-
-Staging should include a backend-owned sidecar so extension storage and backend disk state can recover from drift:
-
-```json
-{
-  "staged_id": "staged_...",
-  "source_url": "https://site/page",
-  "media_url": "https://cdn/site/image.jpg",
-  "original_name": "image.jpg",
-  "mime_type": "image/jpeg",
-  "captured_at": "...",
-  "platform_guess": "General Web"
-}
-```
-
-The extension may also keep a lightweight staged list in `chrome.storage.local` for popup navigation and badge count, but that storage is not the source of truth for cached bytes.
-
-Commit should call existing LMZ ingest/review behavior. It should not reimplement storage ID allocation, SHA256 insert logic, pHash checks, note generation, thumbnail generation, WD tagging, or RAM index hydration. The capture commit endpoint should validate the staged file and metadata, then route through the existing processor/review helpers.
-
-#### Capture Limitations
-
-Browser-assisted capture reduces scraper brittleness, but it is not guaranteed to work on every site. Avoid promising a 100% success rate.
-
-Expected failure or later-fallback cases:
-
-- `blob:` URLs.
-- Canvas-rendered images.
-- Auth-gated media where extension `fetch()` cannot reproduce the page request.
-- Hotlink or referer-protected assets.
-- Expiring signed CDN URLs.
-- Service-worker-only assets.
-- HLS/DASH video streams.
-- DRM-like or protected media players.
-
-For MVP, failed captures should produce clear errors. A later fallback can upload bytes directly from content-script/page context where possible, or add specialized handling for blob/canvas cases.
-
-Offline/cache-specific risks:
-
-- IndexedDB quota can fill up.
-- Very large images/GIFs should have a size policy before caching.
-- Downloaded fallback copies are user-visible and should not be auto-deleted unless the user opts in.
-- A `downloaded` item may require manual Local Ingestion from `Downloads/LMZ Capture/`.
-
-#### Security Decisions
-
-The backend must allow browser extension requests without allowing arbitrary web pages.
-
-Requirements:
-
-- Mutating extension endpoints require `X-LMZ-API-KEY`.
-- Normal webpage origins remain rejected.
-- Extension origins are allowed only for authenticated local API use.
-- Do not put the API key in preview URLs or query strings.
-
-Preview should use authenticated fetch from the popup:
-
-```javascript
-const res = await fetch(previewUrl, {
-  headers: { "X-LMZ-API-KEY": apiKey }
-});
-const blob = await res.blob();
-img.src = URL.createObjectURL(blob);
-```
-
-This avoids leaking the API key through URLs, logs, browser history, or devtools traces.
-
-If possible, later restrict allowed extension IDs instead of allowing every `chrome-extension://` origin. The API key remains the primary guard.
-
-#### Implementation Phases
-
-1. **Scaffold extension files**
-   - Create `tools/browser_extension/`.
-   - Add Edge-first Manifest V3 files.
-   - Add placeholder Chrome/Firefox manifest folders.
-   - Add minimal popup/background skeleton.
-
-2. **Backend capture staging**
-   - Add capture stage endpoint.
-   - Add preview endpoint with header auth.
-   - Add discard endpoint.
-   - Store staged file plus sidecar under active-vault `capture_staging/`.
-   - Validate staged IDs to prevent traversal.
-
-3. **Basic right-click image capture**
-   - Add Edge context menu for image capture.
-   - Fetch selected image with browser extension permissions.
-   - Store Blob/File bytes in IndexedDB first.
-   - If Blob cache fails, try normal browser download to `Downloads/LMZ Capture/`.
-   - Store pending item reference/status and update badge count.
-
-4. **Stability loop**
-   - Test direct `.jpg`, `.png`, and `.webp` URLs.
-   - Test CDN URLs with query strings.
-   - Test authenticated pages where practical.
-   - Ensure blob/canvas/protected failures are clear and non-destructive.
-
-5. **Basic popup UI**
-   - Show cached capture preview from IndexedDB when not uploaded.
-   - Show backend preview after upload to LMZ staging.
-   - Add artist and platform fields.
-   - Add sync/upload, discard, and commit actions.
-   - Add connection indicator and API settings.
-
-6. **Capture commit**
-   - Upload cached Blob to backend staging when LMZ is online.
-   - Commit staged file through existing LMZ processing/review path.
-   - Preserve explicit artist/platform/source metadata.
-   - Return `ingested`, `duplicate`, or `quarantined` status clearly.
-   - Clean up staging after success where appropriate.
-
-7. **Online queue support**
-   - Add "Send page to LMZ online queue".
-   - Limit to supported platform intent first.
-   - Backend appends queue blocks with explicit artist/platform metadata.
-   - Keep auto-start disabled unless deliberately added later.
-
-8. **Metadata hardening**
-   - Improve platform guessing from page URL.
-   - Preserve original filename/extension/MIME where possible.
-   - Add artist/platform autocomplete from LMZ.
-   - Consider topics only after the basic metadata path is stable.
-
-9. **UI refinement**
-   - Improve error states, loading states, batch navigation, and settings.
-   - Match LMZ visual language without pulling in the full Tauri frontend stack.
-
-10. **Tests and iteration**
-   - Add backend tests for stage, preview, discard, commit, auth, and traversal rejection.
-   - Manual Edge smoke first.
-   - Chrome smoke second.
-   - Firefox compatibility later.
+- Fuller Chrome manual smoke.
+- Longer Firefox compatibility smoke.
+- Real-world capture testing on blob/canvas/auth-gated/protected media.
+- Optional future platform preset management/autocomplete.
+- Optional extension ID restriction in backend CORS policy.
 
 ---
 

@@ -132,6 +132,9 @@ How the app starts, runs, and ships.
 Sources outside the desktop app that submit work to LMZ.
 
 - Browser extension capture.
+- Offline-first browser extension IndexedDB cache.
+- Browser extension queue append for supported online URLs.
+- Backend capture staging under the active vault.
 - Future clipboard/watch-folder/API integrations.
 - Active page URL/media capture.
 - Queue/API handoff into ingestion.
@@ -184,6 +187,7 @@ local_media_zettelkasten/
     workspace_db.py
     api/
       app.py
+      capture.py
       common.py
       runtime.py
       ingestion.py
@@ -264,6 +268,21 @@ local_media_zettelkasten/
           archive/
     src-tauri/
   tools/
+    browser_extension/
+      README.md
+      scripts/
+        sync_extensions.py
+      src/
+        api.js
+        background.js
+        db.js
+        icons.js
+        popup.html
+        popup.js
+        styles.css
+      edge/
+      chrome/
+      firefox/
     maintenance/
   tests/
     backend/
@@ -283,6 +302,7 @@ local_media_zettelkasten/
         input/
         local_ingest/
         online_ingest/
+        capture_staging/
         review/
         queues/
         batches/
@@ -317,7 +337,7 @@ The old Flet and PySide/PyQt UI paths are no longer active.
 ## Runtime Data Flow
 
 ```text
-local files / native drag-drop / markdown URL queues / Tauri UI actions
+local files / native drag-drop / markdown URL queues / browser extension / Tauri UI actions
         |
         v
 backend/core.py / backend/queue_service.py / backend/web_api.py
@@ -327,6 +347,10 @@ backend/core.py / backend/queue_service.py / backend/web_api.py
         +--> backend/external_ingestion.py
         |       +--> gallery-dl wrapper
         |       +--> yt-dlp wrapper
+        |
+        +--> backend/api/capture.py
+        |       +--> active-vault capture_staging/
+        |       +--> staged file sidecar
         |
         v
 backend/processor.py
@@ -368,6 +392,7 @@ LMZ has one active workspace and one active vault at runtime.
       logs/
       queues/
       batches/
+      capture_staging/
       input/
       local_ingest/
       online_ingest/
@@ -498,6 +523,7 @@ Usage remains vault-local. Stats `Used` counts active-vault usage; Stats `All` m
 - `api/common.py`: shared auth, runtime path helpers, dynamic file serving, local ingest compatibility proxies, review/item helper utilities.
 - `api/runtime.py`: config, workspace/vault management, switch preflight usage, metadata maintenance/status, system memory.
 - `api/ingestion.py`: queues, online ingest, local ingest, drag-drop intake, runtime ingest state.
+- `api/capture.py`: browser-extension capture staging, preview, discard, and commit.
 - `api/library.py`: items, thumbnails, facets/search suggestions, artists/platforms, topic/WD metadata actions.
 - `api/logs.py`: log streaming/open/clear/UI log ingest.
 - `api/review.py`: review list/count/actions/cleanup.
@@ -515,7 +541,9 @@ Core API areas:
 - Auth status: `/api/auth/scan` writes credential availability checks to `auth.jsonl`.
 - Queue ingestion: queue read/write/parse/open/retry/clear/start.
   - Parse preview uses the shared queue parser and returns URL count, groups, entries, and warnings.
+- Queue append: `/api/queue/{queue_name}/append` appends backend-owned queue blocks for supported extension URLs.
 - Local ingestion: local start/status/retry plus drag-drop preflight through `/api/local-ingest/drop-intake`.
+- Browser capture: `/api/capture/stage`, `/api/capture/preview/{staged_id}`, `/api/capture/stage/{staged_id}`, and `/api/capture/commit`.
 - Review workflow: review count, review item list, review actions.
 - Review cleanup: `/api/review/cleanup`.
 - Config: `/api/config`.
@@ -529,8 +557,9 @@ Security and runtime constraints:
 
 - Mutating endpoints require `X-LMZ-API-KEY`.
 - The session key is stored under `secrets/.api_key`.
-- CORS is limited to local/Tauri origins.
+- CORS is limited to local/Tauri origins plus authenticated browser extension origins.
 - Queue/log/review path inputs are allowlisted or root-checked.
+- Browser capture staged IDs are validated as opaque IDs, not paths.
 - Local drag-drop paths are preflighted by the backend before they are staged into Local Ingestion.
 - Blocking filesystem/SQLite work is routed through thread helpers on main API paths.
 - Static vault/review assets are served from active-vault runtime folders.
@@ -642,6 +671,41 @@ Rules:
 - Blank `source_url` rows are never grouped.
 - Source URL grouping is UI-level; the database remains file-based.
 - Grouped media index state is owned by `VaultView` so virtualization can unmount/remount tiles safely.
+
+## Browser Extension
+
+The browser extension lives under `tools/browser_extension/`.
+
+Shared source is under `tools/browser_extension/src/`; Edge, Chrome, and Firefox folders are generated from that source with:
+
+```powershell
+python tools/browser_extension/scripts/sync_extensions.py
+```
+
+Runtime model:
+
+- IndexedDB is the source of truth for pending extension work.
+- `chrome.storage.local` / extension storage is used only for lightweight settings such as API base URL and API key.
+- Right-click image capture stores a Blob locally first, so capture works while LMZ is closed.
+- `100 MB` is the automatic Blob cache limit; larger files require download/discard choice.
+- Download fallback saves under `Downloads/LMZ Capture/` and is manual recovery, not auto-sync.
+- Sync uploads cached captures to `/api/capture/stage`.
+- Commit calls `/api/capture/commit`, which routes through existing processor/review/duplicate behavior.
+- Online link capture stores a deferred local item first, then appends through `/api/queue/{queue_name}/append`.
+- Failed extension actions are tracked on the item with `last_error`, not a separate log.
+
+Security model:
+
+- The extension sends `X-LMZ-API-KEY` for mutating local API calls.
+- API keys are never sent in query strings.
+- Preview fetches are authenticated and use object URLs in the popup.
+- Normal web origins remain rejected; browser extension origins are allowed only for authenticated local API use.
+
+Known limits:
+
+- Image capture is the MVP. Video capture is deferred.
+- Blob URLs, canvas-rendered images, auth-gated media, protected CDN URLs, and site-specific blockers may still fail.
+- Instagram image capture can be blocked by the site; link queueing remains usable.
 
 ## Search And Facets
 

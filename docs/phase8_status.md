@@ -1,6 +1,6 @@
   # LMZ Current Status
 
-Last updated: 2026-05-31
+Last updated: 2026-06-06
 
 ## Current Status
 
@@ -44,6 +44,7 @@ lmz
 - Local image, GIF, and video ingestion.
 - External URL ingestion via gallery-dl and yt-dlp.
 - Batch-safe Pixiv, X/Twitter, Instagram, Pinterest, YouTube community ingestion.
+- Browser extension capture and queue append are implemented as Phase 9 completion; see `docs/lmz_roadmap.md` and `docs/lmz_architecture.md`.
 - SHA256 item identity with compact `storage_id` physical filenames.
 - Markdown note generation with frontmatter topics and distilled WD fields.
 - Local WD tagging for images and sampled video frames.
@@ -239,16 +240,14 @@ VSCode-friendly test launchers:
   - sampled frame extraction now uses one FFmpeg subprocess per batch.
   - embedding/tagging still depends on extracting sampled original video frames.
 
-### Phase E - Browser Extension
+### Phase E - Browser Extension Follow-Up
 
-- Browser extension integration:
-  - Chromium-based browsers first: Edge/Chrome.
-  - Firefox after the Chromium flow is stable.
-  - capture URLs/media from the active page and send them to the LMZ queue/API.
-  - handle API/session auth and local backend targeting carefully.
-- Platform maintenance:
-  - full platform panel after browser extension ingestion clarifies platform names, aliases, and URL parsing behavior.
-  - platform alias/import tools after browser extension data flow is known.
+- Browser extension MVP is implemented in Phase 9.
+- Remaining follow-up:
+  - fuller Chrome manual smoke.
+  - longer Firefox compatibility smoke.
+  - more real-world capture testing for blob/canvas/auth-gated/protected media.
+  - optional platform preset/alias management after real extension use settles platform names.
 
 ### Final Phase - Runtime / Packaging Hardening
 
@@ -587,6 +586,13 @@ VSCode-friendly test launchers:
 ## Current Issues
 
 - Mojibake check: no actual mojibake found in project source/docs during 2026-05-31 scan; apparent warning-icon mojibake was terminal encoding.
+- Vault repair/replace-delete mechanics need a focused data-flow audit:
+  - After review replacement testing, metadata index rows did not reliably reflect the replacement result.
+  - A repeat click/freeze scenario during similar-image review testing may have allowed duplicate replacement/commit behavior.
+  - Health audit showed orphan assets, WD cache files, and thumbnails in the test vault after replace/delete-like flows.
+  - At least one deleted note was removed correctly while the paired asset/cache remained, creating audit errors.
+  - These findings were discovered through browser-extension similarity testing, but they likely belong to core review/delete/repair flows rather than extension code.
+  - Test-vault damage can stay for now and should be used to improve repair mechanics.
 - Data-flow ownership audit is needed after current findings are fixed; DB, Markdown, metadata index, RAM/search index, and frontend draft state should be mapped flow-by-flow.
 - Inspector chip action UX is still not fully settled long-term:
   - WD promotion toggle is covered by targeted mock-vault tests.
@@ -608,6 +614,9 @@ VSCode-friendly test launchers:
    - Inspector save.
    - online queue ingest.
    - local ingest.
+   - review replace.
+   - item delete.
+   - vault health repair.
    - artist merge/rename.
    - WD tag promotion/removal.
 3. Rerun full `npm.cmd run test:mock-vault` after the current Inspector chip stabilization is finalized.
