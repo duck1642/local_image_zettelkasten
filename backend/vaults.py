@@ -397,15 +397,46 @@ def _fetch_vault_items(db_path: Path) -> list[dict]:
         return []
     conn = sqlite3.connect(db_path)
     try:
-        rows = conn.execute("""
-            SELECT hash, storage_id, file_extension, mime_type
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA table_info(items)")
+        columns = [row[1] for row in cursor.fetchall()]
+        has_thumb_status = "thumbnail_status" in columns
+        has_thumb_error = "thumbnail_error" in columns
+        
+        select_cols = ["hash", "storage_id", "file_extension", "mime_type"]
+        if has_thumb_status:
+            select_cols.append("thumbnail_status")
+        if has_thumb_error:
+            select_cols.append("thumbnail_error")
+            
+        cols_str = ", ".join(select_cols)
+        rows = conn.execute(f"""
+            SELECT {cols_str}
             FROM items
             WHERE storage_id IS NOT NULL AND storage_id != ''
         """).fetchall()
-        return [
-            {"hash": row[0], "storage_id": row[1], "ext": row[2] or "", "mime_type": row[3] or ""}
-            for row in rows
-        ]
+        
+        items = []
+        for row in rows:
+            item = {
+                "hash": row[0],
+                "storage_id": row[1],
+                "ext": row[2] or "",
+                "mime_type": row[3] or "",
+            }
+            idx = 4
+            if has_thumb_status:
+                item["thumbnail_status"] = row[idx] or "pending"
+                idx += 1
+            else:
+                item["thumbnail_status"] = "pending"
+                
+            if has_thumb_error:
+                item["thumbnail_error"] = row[idx]
+            else:
+                item["thumbnail_error"] = None
+            items.append(item)
+        return items
     finally:
         conn.close()
 
@@ -415,6 +446,8 @@ def audit_vault_health(vault_id: str, ctx: WorkspaceContext | None = None) -> di
     db_path = vault_db_path(root)
     items = _fetch_vault_items(db_path)
     expected = {"asset": set(), "note": set(), "wd": set(), "thumb": set()}
+    failed_thumbs = []
+    
     for item in items:
         paths = _item_paths(root, item["hash"], item["storage_id"], item["ext"], item["mime_type"])
         expected["asset"].add(paths["asset"].resolve())
@@ -422,7 +455,14 @@ def audit_vault_health(vault_id: str, ctx: WorkspaceContext | None = None) -> di
         mime = str(item.get("mime_type") or "").lower()
         if mime.startswith("image/") or mime.startswith("video/"):
             expected["wd"].add(paths["wd"].resolve())
-            expected["thumb"].add(paths["thumb"].resolve())
+            if item.get("thumbnail_status") == "failed":
+                failed_thumbs.append({
+                    "hash": item["hash"],
+                    "path": str(paths["thumb"]),
+                    "error": item.get("thumbnail_error") or "Unknown thumbnail generation failure"
+                })
+            else:
+                expected["thumb"].add(paths["thumb"].resolve())
 
     missing = {key: [] for key in expected}
     for key, paths in expected.items():
@@ -541,6 +581,7 @@ def audit_vault_health(vault_id: str, ctx: WorkspaceContext | None = None) -> di
         "item_count": len(items),
         "issue_count": issue_count,
         "missing_files": missing,
+        "failed_thumbnails": failed_thumbs,
         "details": {
             "missing_files": {
                 "asset": [{"path": path, "reason": "DB item points to an asset file that does not exist"} for path in missing.get("asset", [])],
@@ -548,6 +589,7 @@ def audit_vault_health(vault_id: str, ctx: WorkspaceContext | None = None) -> di
                 "wd": [{"path": path, "reason": "WD cache is missing; old or manually untagged items may need tagging, not repair"} for path in missing.get("wd", [])],
                 "thumb": [{"path": path, "reason": "thumbnail can be regenerated"} for path in missing.get("thumb", [])],
             },
+            "failed_thumbnails": failed_thumbs,
         },
         "orphans": {
             "assets": orphan_assets,

@@ -251,9 +251,9 @@ test('generated grouped media tiles expose navigation controls', async ({ page }
   const groupedTile = page.locator('[data-testid="vault-tile"]').filter({ hasText: /1 \/ [2-9]/ }).first();
   await expect(groupedTile).toBeVisible();
   await expect(groupedTile).toContainText(/1 \/ [2-9]/);
-  await groupedTile.getByRole('button', { name: '>' }).click();
+  await groupedTile.getByRole('button', { name: 'Next Item' }).click();
   const advancedTile = page.locator('[data-testid="vault-tile"]').filter({ hasText: /2 \/ [2-9]/ }).first();
   await expect(advancedTile).toBeVisible();
-  await advancedTile.getByRole('button', { name: '<' }).click();
+  await advancedTile.getByRole('button', { name: 'Previous Item' }).click();
   await expect(page.locator('[data-testid="vault-tile"]').filter({ hasText: /1 \/ [2-9]/ }).first()).toBeVisible();
 });

@@ -55,8 +55,6 @@ async def startup_search_index():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await startup_auth_scan()
-    await startup_metadata_index()
-    await startup_search_index()
     yield
 
 

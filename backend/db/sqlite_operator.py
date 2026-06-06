@@ -87,7 +87,9 @@ def init_database(db_path: Path | None = None, ctx: WorkspaceContext | None = No
             visual_embedding BLOB,
             width INTEGER,
             height INTEGER,
-            storage_id TEXT UNIQUE
+            storage_id TEXT UNIQUE,
+            thumbnail_status TEXT DEFAULT 'pending',
+            thumbnail_error TEXT
         )
     ''')
 
@@ -132,6 +134,10 @@ def init_database(db_path: Path | None = None, ctx: WorkspaceContext | None = No
         cursor.execute("ALTER TABLE items ADD COLUMN source_url_norm TEXT")
     if 'storage_id' not in columns:
         cursor.execute("ALTER TABLE items ADD COLUMN storage_id TEXT")
+    if 'thumbnail_status' not in columns:
+        cursor.execute("ALTER TABLE items ADD COLUMN thumbnail_status TEXT DEFAULT 'pending'")
+    if 'thumbnail_error' not in columns:
+        cursor.execute("ALTER TABLE items ADD COLUMN thumbnail_error TEXT")
 
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS storage_id_counter (
@@ -345,8 +351,8 @@ def insert_to_database(conn: sqlite3.Connection, filepath: Path, file_hash: str,
     storage_id = existing_storage or storage_id or allocate_storage_id(conn)
     cursor.execute('''
         INSERT INTO items
-        (hash, original_filename, file_extension, mime_type, size_bytes, date_added, source_url, source_url_norm, platform, source_artist, phash, audio_hash, visual_embedding, width, height, storage_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (hash, original_filename, file_extension, mime_type, size_bytes, date_added, source_url, source_url_norm, platform, source_artist, phash, audio_hash, visual_embedding, width, height, storage_id, thumbnail_status, thumbnail_error)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', NULL)
         ON CONFLICT(hash) DO UPDATE SET
             original_filename = excluded.original_filename,
             file_extension = excluded.file_extension,
@@ -362,7 +368,9 @@ def insert_to_database(conn: sqlite3.Connection, filepath: Path, file_hash: str,
             visual_embedding = excluded.visual_embedding,
             width = excluded.width,
             height = excluded.height,
-            storage_id = COALESCE(items.storage_id, excluded.storage_id)
+            storage_id = COALESCE(items.storage_id, excluded.storage_id),
+            thumbnail_status = 'pending',
+            thumbnail_error = NULL
     ''', (
         file_hash,
         filepath.name,

@@ -176,6 +176,44 @@ def ensure_metadata_schema(conn: sqlite3.Connection):
     _create_metadata_secondary_indexes(conn)
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_metadata_dirty_queue_queued_at ON metadata_dirty_queue(queued_at)")
 
+    try:
+        active_vault = get_runtime_context().active_vault
+        if active_vault and active_vault.root:
+            root_path = Path(active_vault.root).resolve()
+            rows = cursor.execute("SELECT item_hash, note_path, wd_path FROM item_metadata_files").fetchall()
+            for item_hash, note_path_str, wd_path_str in rows:
+                updated = False
+                new_note_path = note_path_str
+                new_wd_path = wd_path_str
+                if note_path_str:
+                    np = Path(note_path_str)
+                    if np.is_absolute():
+                        try:
+                            resolved_np = np.resolve()
+                            if resolved_np.is_relative_to(root_path):
+                                new_note_path = str(resolved_np.relative_to(root_path)).replace("\\", "/")
+                                updated = True
+                        except Exception:
+                            pass
+                if wd_path_str:
+                    wp = Path(wd_path_str)
+                    if wp.is_absolute():
+                        try:
+                            resolved_wp = wp.resolve()
+                            if resolved_wp.is_relative_to(root_path):
+                                new_wd_path = str(resolved_wp.relative_to(root_path)).replace("\\", "/")
+                                updated = True
+                        except Exception:
+                            pass
+                if updated:
+                    cursor.execute(
+                        "UPDATE item_metadata_files SET note_path = ?, wd_path = ? WHERE item_hash = ?",
+                        (new_note_path, new_wd_path, item_hash)
+                    )
+    except Exception as e:
+        from logger import log_system
+        log_system("WARNING", f"Failed to run absolute to relative path migration: {e}")
+
 
 def _create_metadata_secondary_indexes(conn: sqlite3.Connection):
     for sql in METADATA_SECONDARY_INDEXES.values():
@@ -293,12 +331,26 @@ def _now() -> str:
     return utc_now_str()
 
 
+def _to_relative(path: Path) -> str:
+    try:
+        active_vault = get_runtime_context().active_vault
+        if active_vault and active_vault.root:
+            root_path = Path(active_vault.root).resolve()
+            resolved_path = path.resolve()
+            if resolved_path.is_relative_to(root_path):
+                return str(resolved_path.relative_to(root_path)).replace("\\", "/")
+    except Exception:
+        pass
+    return str(path).replace("\\", "/")
+
+
 def _file_sig(path: Path) -> tuple[str, int | None, int | None]:
+    rel_path = _to_relative(path)
     try:
         stat = path.stat()
-        return str(path), int(stat.st_mtime_ns), int(stat.st_size)
+        return rel_path, int(stat.st_mtime_ns), int(stat.st_size)
     except OSError:
-        return str(path), None, None
+        return rel_path, None, None
 
 
 def _current_sigs(item_hash: str, storage_id: str) -> dict:

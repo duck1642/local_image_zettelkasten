@@ -627,6 +627,137 @@ def _export_vault_sync(vault_id: str):
         raise HTTPException(status_code=400, detail=str(exc))
 
 
+class RelocateWorkspaceRequest(BaseModel):
+    workspace_id: str
+    new_config_path: str
+
+class RelocateVaultRequest(BaseModel):
+    vault_id: str
+    new_vault_root: str
+
+@router.post("/api/workspaces/{workspace_id}/load")
+async def load_workspace(workspace_id: str):
+    return await asyncio.to_thread(_load_workspace_sync, workspace_id)
+
+def _load_workspace_sync(workspace_id: str):
+    from workspaces import load_workspace_registry, set_active_workspace, _resolve
+    from runtime_context import reload_runtime_context
+    from db.search_manager import search_manager
+    from metadata_index import restart_metadata_watchdog, start_metadata_repair_worker
+    from db.sqlite_operator import init_database
+    
+    registry = load_workspace_registry()
+    if workspace_id not in registry["workspaces"]:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+        
+    entry = registry["workspaces"][workspace_id]
+    config_path = _resolve(entry.get("config_path") or "")
+    if not config_path.exists():
+        return {
+            "status": "relocate_workspace",
+            "message": f"Workspace configuration file not found at {config_path}",
+            "config_path": str(config_path)
+        }
+        
+    try:
+        # Set workspace active
+        set_active_workspace(workspace_id)
+        
+        # Reload context
+        import os
+        os.environ.pop("LMZ_CONFIG_PATH", None)
+        new_ctx = reload_runtime_context()
+        
+        # Check if active vault root exists
+        active_vault = new_ctx.active_vault
+        if active_vault and active_vault.root:
+            vault_root = Path(active_vault.root)
+            if not vault_root.exists():
+                return {
+                    "status": "relocate_vault",
+                    "message": f"Vault directory not found at {vault_root}",
+                    "vault_id": active_vault.id,
+                    "vault_name": active_vault.name,
+                    "vault_root": str(vault_root)
+                }
+        
+        # If healthy, start services
+        search_manager.reset_all()
+        restart_metadata_watchdog(new_ctx)
+        
+        # Start metadata repair worker in background
+        try:
+            start_metadata_repair_worker(full=False)
+        except Exception as exc:
+            log_system("WARNING", "Metadata index repair startup failed during load", error=str(exc))
+            
+        # Hydrate search manager
+        conn = init_database()
+        try:
+            search_manager.hydrate(conn)
+        finally:
+            conn.close()
+            
+        return {
+            "status": "success",
+            "active_workspace": workspace_id,
+            "active_vault": active_vault.id if active_vault else None
+        }
+    except Exception as e:
+        log_system("ERROR", "Failed to load workspace", workspace_id=workspace_id, error=str(e))
+        raise HTTPException(status_code=500, detail=f"Failed to load workspace: {e}")
+
+@router.post("/api/workspaces/relocate")
+async def relocate_workspace(body: RelocateWorkspaceRequest):
+    return await asyncio.to_thread(_relocate_workspace_sync, body.workspace_id, body.new_config_path)
+
+def _relocate_workspace_sync(workspace_id: str, new_config_path: str):
+    from workspaces import load_workspace_registry, save_workspace_registry, _resolve, PROJECT_ROOT
+    registry = load_workspace_registry()
+    if workspace_id not in registry["workspaces"]:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+        
+    resolved = _resolve(new_config_path)
+    if not resolved.exists():
+        raise HTTPException(status_code=400, detail=f"File does not exist: {resolved}")
+        
+    stored_path = str(resolved)
+    try:
+        resolved_abs = resolved.resolve()
+        project_root_abs = PROJECT_ROOT.resolve()
+        if resolved_abs.is_relative_to(project_root_abs):
+            stored_path = str(resolved_abs.relative_to(project_root_abs)).replace("\\", "/")
+    except Exception:
+        pass
+        
+    registry["workspaces"][workspace_id]["config_path"] = stored_path
+    save_workspace_registry(registry)
+    return {"status": "success", "config_path": str(resolved)}
+
+@router.post("/api/vaults/relocate")
+async def relocate_vault(body: RelocateVaultRequest):
+    return await asyncio.to_thread(_relocate_vault_sync, body.vault_id, body.new_vault_root)
+
+def _relocate_vault_sync(vault_id: str, new_vault_root: str):
+    from vaults import _read_config, _write_config, vault_id_slug
+    from runtime_context import reload_runtime_context
+    
+    config = _read_config()
+    clean_id = vault_id_slug(vault_id)
+    if "vaults" not in config or clean_id not in config["vaults"]:
+        raise HTTPException(status_code=404, detail="Vault not found")
+        
+    resolved_root = Path(new_vault_root).resolve()
+    if not resolved_root.exists():
+        raise HTTPException(status_code=400, detail=f"Directory does not exist: {resolved_root}")
+        
+    config["vaults"][clean_id]["root"] = str(resolved_root)
+    _write_config(config)
+    
+    reload_runtime_context()
+    return {"status": "success", "vault_root": str(resolved_root)}
+
+
 @router.post("/api/vaults/import")
 async def import_vault(body: dict):
     return await asyncio.to_thread(_import_vault_sync, body)

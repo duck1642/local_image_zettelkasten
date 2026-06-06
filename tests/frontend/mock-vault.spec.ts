@@ -877,7 +877,7 @@ test('review fixture uses display names and encoded asset/action paths', async (
   await expect(page.getByRole('button', { name: 'Original Review Name.jpg pending' })).toBeVisible();
   await expect(page.getByRole('button', { name: /Locked Cleanup Item\.jpg/ })).toBeVisible();
   await page.getByRole('button', { name: 'Original Review Name\.jpg' }).click();
-  await page.getByRole('button', { name: 'Keep Staged' }).click();
+  await page.getByRole('button', { name: 'Defer' }).click();
 
   expect(reviewRequests.some((url) => url.includes('review%2520encoded%2Bname.jpg'))).toBeTruthy();
 });

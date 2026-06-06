@@ -557,14 +557,36 @@ def _get_thumbnail_sync(item_hash: str):
     conn = connect_database()
     cursor = conn.cursor()
     try:
-        cursor.execute("SELECT file_extension, mime_type, storage_id FROM items WHERE hash = ?", (item_hash,))
+        cursor.execute("SELECT file_extension, mime_type, storage_id, thumbnail_status FROM items WHERE hash = ?", (item_hash,))
         row = cursor.fetchone()
         if not row: raise HTTPException(status_code=404)
+        ext, mime, storage_id, thumb_status = row
+        if thumb_status == 'failed':
+            from fastapi import Response
+            return Response(
+                content='<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100"><rect width="100%" height="100%" fill="#333"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#666" font-family="sans-serif" font-size="12">FAILED</text></svg>',
+                media_type="image/svg+xml",
+                headers={"Cache-Control": "public, max-age=31536000, immutable"}
+            )
         try:
-            thumb_path = get_or_generate_thumbnail(item_hash, row[0], row[1], storage_id=row[2])
+            thumb_path = get_or_generate_thumbnail(item_hash, ext, mime, storage_id=storage_id)
         except ThumbnailBusyError:
             raise HTTPException(status_code=503, detail="Thumbnail generation busy")
-        if not thumb_path: raise HTTPException(status_code=500, detail="Thumbnail generation failed")
+        if not thumb_path:
+            try:
+                cursor.execute(
+                    "UPDATE items SET thumbnail_status = 'failed', thumbnail_error = 'get_or_generate_thumbnail returned None' WHERE hash = ?",
+                    (item_hash,)
+                )
+                conn.commit()
+            except Exception:
+                pass
+            from fastapi import Response
+            return Response(
+                content='<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100"><rect width="100%" height="100%" fill="#333"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#666" font-family="sans-serif" font-size="12">FAILED</text></svg>',
+                media_type="image/svg+xml",
+                headers={"Cache-Control": "public, max-age=31536000, immutable"}
+            )
         return FileResponse(
             thumb_path, media_type="image/jpeg",
             headers={"Cache-Control": "public, max-age=31536000, immutable"}

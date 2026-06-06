@@ -1,6 +1,7 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import Ingestion from './lib/Ingestion.svelte';
+  import Launcher from './lib/Launcher.svelte';
   import LogsView from './lib/LogsView.svelte';
   import ReviewView from './lib/ReviewView.svelte';
   import SettingsView from './lib/SettingsView.svelte';
@@ -21,6 +22,29 @@
 
   type AppTab = 'vault' | 'logs' | 'ingest' | 'review' | 'stats' | 'settings';
   type IngestMode = 'online' | 'local';
+
+  let workspaceLoaded = false;
+  let activeWorkspaceId = '';
+  let activeVaultId = '';
+  let stopStats: (() => void) | null = null;
+  let stopRam: (() => void) | null = null;
+
+  $: if (workspaceLoaded) {
+    if (!stopStats) {
+      stopStats = startSharedStatsPolling();
+    }
+    if (!stopRam) {
+      stopRam = startRamTracker();
+    }
+  }
+
+  function handleWorkspaceLoaded(event: CustomEvent<{ workspace_id: string; vault_id: string | null }>) {
+    activeWorkspaceId = event.detail.workspace_id;
+    activeVaultId = event.detail.vault_id || '';
+    workspaceLoaded = true;
+    uiLog('INFO', `Workspace loaded: ${activeWorkspaceId}, vault: ${activeVaultId}`);
+  }
+
   type DropPoint = { x: number; y: number };
   type DropRequest = {
     id: string;
@@ -222,11 +246,18 @@
 
   onMount(() => {
     uiLog('INFO', 'Svelte UI initialized and mounted');
-    const stopStats = startSharedStatsPolling();
-    const stopRam = startRamTracker();
     let unlistenClose: (() => void) | null = null;
     let unlistenDrop: (() => void) | null = null;
     let unlistenScale: (() => void) | null = null;
+
+    // Check if running inside Playwright / test mode
+    const params = new URLSearchParams(window.location.search);
+    if (params.has('lmz_test_page_size')) {
+      workspaceLoaded = true;
+      activeWorkspaceId = 'default';
+      activeVaultId = 'default';
+      uiLog('INFO', 'Test mode detected: bypassing workspace launcher');
+    }
 
     (async () => {
       try {
@@ -321,102 +352,109 @@
     window.addEventListener('lmz:test-drop-request', handleTestDropRequest);
 
     return () => {
-      stopStats();
-      stopRam();
       window.removeEventListener('lmz:test-drop-request', handleTestDropRequest);
       if (unlistenClose) unlistenClose();
       if (unlistenDrop) unlistenDrop();
       if (unlistenScale) unlistenScale();
     };
   });
+
+  onDestroy(() => {
+    if (stopStats) stopStats();
+    if (stopRam) stopRam();
+  });
 </script>
 
 <svelte:window on:keydown={handleGlobalKeydown} />
 
-<div class="root-container">
-  {#if dragOverlayVisible}
-    <div class="drop-overlay">
-      <div class="drop-overlay-text">{dragOverlayText}</div>
-    </div>
-  {/if}
-  <div class="app-container">
-    <aside class="sidebar">
-      <div class="nav-group">
-        <button class:active={activeTab === 'vault'} on:click={() => activeTab = 'vault'}>
-          <IconFolder size={14} />
-          <span>Vault</span>
-        </button>
-        <button class:active={activeTab === 'ingest'} on:click={() => activeTab = 'ingest'}>
-          <IconDownload size={14} />
-          <span>Ingestion</span>
-          {#if ($queueStats.normal + $queueStats.force) > 0}
-            <span class="badge">{$queueStats.normal + $queueStats.force}</span>
-          {/if}
-        </button>
-        <button class:active={activeTab === 'review'} on:click={() => activeTab = 'review'}>
-          <IconEye size={14} />
-          <span>Review</span>
-          {#if $reviewCount > 0}
-            <span class="badge warn">{$reviewCount}</span>
-          {/if}
-        </button>
-        <button class:active={activeTab === 'stats'} on:click={() => activeTab = 'stats'}>
-          <IconChart size={14} />
-          <span>Stats</span>
-        </button>
-        <button class:active={activeTab === 'settings'} on:click={() => activeTab = 'settings'}>
-          <IconSettings size={14} />
-          <span>Settings</span>
-        </button>
-        <button class:active={activeTab === 'logs'} on:click={() => activeTab = 'logs'}>
-          <IconFileText size={14} />
-          <span>App Logs</span>
-        </button>
+{#if !workspaceLoaded}
+  <Launcher on:loaded={handleWorkspaceLoaded} />
+{:else}
+  <div class="root-container">
+    {#if dragOverlayVisible}
+      <div class="drop-overlay">
+        <div class="drop-overlay-text">{dragOverlayText}</div>
       </div>
-    </aside>
-
-    <main class="main-content">
-      <!-- VaultView stays mounted across tab switches to preserve scroll position, selection, and loaded items.
-           Its IntersectionObserver/ResizeObserver are idle when display:none, so the cost is negligible.
-           Other tabs use {#if} since they can re-fetch on demand. -->
-      <div class:hidden={activeTab !== 'vault'} class="tab-panel" data-drop-zone="vault">
-        <VaultView filterRequest={pendingVaultFilterRequest} on:status={handleVaultStatus} />
-      </div>
-      {#if activeTab === 'review'}
-        <div class="view-shell"><ReviewView /></div>
-      {:else if activeTab === 'ingest'}
-        <div class="view-shell">
-          <Ingestion dropRequest={pendingDropRequest} on:modechange={handleIngestModeChange} />
-        </div>
-      {:else if activeTab === 'stats'}
-        <div class="view-shell"><StatsView on:filterVault={handleStatsFilterVault} /></div>
-      {:else if activeTab === 'settings'}
-        <div class="view-shell"><SettingsView /></div>
-      {:else if activeTab === 'logs'}
-        <div class="view-shell"><LogsView /></div>
-      {/if}
-    </main>
-  </div>
-
-  <footer class="bottom-status">
-    {#if activeTab === 'vault'}
-      <span class="status-left">Total Items: {vaultStatus.totalItems} | View: {vaultStatus.layoutMode} | LMZ Tauri</span>
-      <span class="status-right">
-        {#if $ramStats.enabled}<span class="ram-status">{ramStatusText($ramStats)}</span>{/if}
-        <span>Showing {vaultStatus.groups} groups{vaultStatus.hasMore ? ' (more available)' : ''}</span>
-      </span>
-    {:else if activeTab === 'ingest'}
-      <span class="status-left">Ingestion | Normal: {$queueStats.normal} | Force: {$queueStats.force} | Failed: {$queueStats.failed}</span>
-      <span class="status-right">{#if $ramStats.enabled}<span class="ram-status">{ramStatusText($ramStats)}</span>{/if}<span>LMZ Tauri</span></span>
-    {:else if activeTab === 'review'}
-      <span class="status-left">Review | Pending: {$reviewStats.pending} | Cleanup: {$reviewStats.cleanup}</span>
-      <span class="status-right">{#if $ramStats.enabled}<span class="ram-status">{ramStatusText($ramStats)}</span>{/if}<span>LMZ Tauri</span></span>
-    {:else}
-      <span class="status-left">{activeTab === 'logs' ? 'App Logs' : activeTab === 'stats' ? 'Stats' : 'Settings'}</span>
-      <span class="status-right">{#if $ramStats.enabled}<span class="ram-status">{ramStatusText($ramStats)}</span>{/if}<span>LMZ Tauri</span></span>
     {/if}
-  </footer>
-</div>
+    <div class="app-container">
+      <aside class="sidebar">
+        <div class="nav-group">
+          <button class:active={activeTab === 'vault'} on:click={() => activeTab = 'vault'}>
+            <IconFolder size={14} />
+            <span>Vault</span>
+          </button>
+          <button class:active={activeTab === 'ingest'} on:click={() => activeTab = 'ingest'}>
+            <IconDownload size={14} />
+            <span>Ingestion</span>
+            {#if ($queueStats.normal + $queueStats.force) > 0}
+              <span class="badge">{$queueStats.normal + $queueStats.force}</span>
+            {/if}
+          </button>
+          <button class:active={activeTab === 'review'} on:click={() => activeTab = 'review'}>
+            <IconEye size={14} />
+            <span>Review</span>
+            {#if $reviewCount > 0}
+              <span class="badge warn">{$reviewCount}</span>
+            {/if}
+          </button>
+          <button class:active={activeTab === 'stats'} on:click={() => activeTab = 'stats'}>
+            <IconChart size={14} />
+            <span>Stats</span>
+          </button>
+          <button class:active={activeTab === 'settings'} on:click={() => activeTab = 'settings'}>
+            <IconSettings size={14} />
+            <span>Settings</span>
+          </button>
+          <button class:active={activeTab === 'logs'} on:click={() => activeTab = 'logs'}>
+            <IconFileText size={14} />
+            <span>App Logs</span>
+          </button>
+        </div>
+      </aside>
+
+      <main class="main-content">
+        <!-- VaultView stays mounted across tab switches to preserve scroll position, selection, and loaded items.
+             Its IntersectionObserver/ResizeObserver are idle when display:none, so the cost is negligible.
+             Other tabs use {#if} since they can re-fetch on demand. -->
+        <div class:hidden={activeTab !== 'vault'} class="tab-panel" data-drop-zone="vault">
+          <VaultView filterRequest={pendingVaultFilterRequest} on:status={handleVaultStatus} />
+        </div>
+        {#if activeTab === 'review'}
+          <div class="view-shell"><ReviewView /></div>
+        {:else if activeTab === 'ingest'}
+          <div class="view-shell">
+            <Ingestion dropRequest={pendingDropRequest} on:modechange={handleIngestModeChange} />
+          </div>
+        {:else if activeTab === 'stats'}
+          <div class="view-shell"><StatsView on:filterVault={handleStatsFilterVault} /></div>
+        {:else if activeTab === 'settings'}
+          <div class="view-shell"><SettingsView /></div>
+        {:else if activeTab === 'logs'}
+          <div class="view-shell"><LogsView /></div>
+        {/if}
+      </main>
+    </div>
+
+    <footer class="bottom-status">
+      {#if activeTab === 'vault'}
+        <span class="status-left">Total Items: {vaultStatus.totalItems} | View: {vaultStatus.layoutMode} | LMZ Tauri</span>
+        <span class="status-right">
+          {#if $ramStats.enabled}<span class="ram-status">{ramStatusText($ramStats)}</span>{/if}
+          <span>Showing {vaultStatus.groups} groups{vaultStatus.hasMore ? ' (more available)' : ''}</span>
+        </span>
+      {:else if activeTab === 'ingest'}
+        <span class="status-left">Ingestion | Normal: {$queueStats.normal} | Force: {$queueStats.force} | Failed: {$queueStats.failed}</span>
+        <span class="status-right">{#if $ramStats.enabled}<span class="ram-status">{ramStatusText($ramStats)}</span>{/if}<span>LMZ Tauri</span></span>
+      {:else if activeTab === 'review'}
+        <span class="status-left">Review | Pending: {$reviewStats.pending} | Cleanup: {$reviewStats.cleanup}</span>
+        <span class="status-right">{#if $ramStats.enabled}<span class="ram-status">{ramStatusText($ramStats)}</span>{/if}<span>LMZ Tauri</span></span>
+      {:else}
+        <span class="status-left">{activeTab === 'logs' ? 'App Logs' : activeTab === 'stats' ? 'Stats' : 'Settings'}</span>
+        <span class="status-right">{#if $ramStats.enabled}<span class="ram-status">{ramStatusText($ramStats)}</span>{/if}<span>LMZ Tauri</span></span>
+      {/if}
+    </footer>
+  </div>
+{/if}
 
 <style>
   .root-container { display: flex; flex-direction: column; height: 100vh; width: 100vw; background: var(--bg-main); overflow: hidden; }

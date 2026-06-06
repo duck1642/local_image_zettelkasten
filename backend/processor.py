@@ -500,8 +500,21 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
 
         try:
             ensure_thumbnail(file_hash, target_ext, mime_type, wait=True, storage_id=storage_id, ctx=ctx)
+            conn.execute(
+                "UPDATE items SET thumbnail_status = 'ready', thumbnail_error = NULL WHERE hash = ?",
+                (file_hash,)
+            )
+            conn.commit()
         except Exception as thumb_exc:
-            log_system("WARNING", "Ingest thumbnail pregeneration failed", hash=file_hash, error=str(thumb_exc))
+            log_system("WARNING", "Ingest thumbnail pregeneration failed", hash=file_hash, error=str(thumb_exc), exc_info=True)
+            try:
+                conn.execute(
+                    "UPDATE items SET thumbnail_status = 'failed', thumbnail_error = ? WHERE hash = ?",
+                    (str(thumb_exc), file_hash)
+                )
+                conn.commit()
+            except Exception as db_exc:
+                log_system("ERROR", "Failed to update thumbnail error status in DB", hash=file_hash, error=str(db_exc))
 
         if sync_index:
             search_index_data = {

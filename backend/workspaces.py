@@ -97,9 +97,18 @@ def register_workspace(name: str, config_path: str | Path, workspace_id: str | N
     if not resolved.exists():
         raise ValueError(f"workspace config does not exist: {resolved}")
     workspace_id = _slug_workspace_id(workspace_id or name or resolved.parent.name)
+    stored_path = str(resolved)
+    try:
+        resolved_abs = resolved.resolve()
+        project_root_abs = PROJECT_ROOT.resolve()
+        if resolved_abs.is_relative_to(project_root_abs):
+            stored_path = str(resolved_abs.relative_to(project_root_abs)).replace("\\", "/")
+    except Exception:
+        pass
+
     registry["workspaces"][workspace_id] = {
         "name": str(name or workspace_id),
-        "config_path": str(resolved),
+        "config_path": stored_path,
     }
     if set_active:
         registry["active"] = workspace_id
