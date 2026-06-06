@@ -1,19 +1,26 @@
 ﻿
 import shutil
 from db.sqlite_operator import reset_database
-from utils import ASSETS_DIR, NOTES_DIR, DB_PATH
+from scripts.workspace_select import select_runtime_context
 
 def main():
 
     print("[INFO] LMZ System Reset - Starting")
+    ctx = select_runtime_context("system reset", hydrate=False)
+    db_path = ctx.active_vault.db_path
 
-    if DB_PATH.exists():
+    confirm = input(f"Reset DB and clear assets/notes for vault '{ctx.active_vault.id}'? Type RESET to continue: ").strip()
+    if confirm != "RESET":
+        print("[INFO] Reset cancelled.")
+        return
+
+    if db_path.exists():
         reset_database()
     else:
         print("[INFO] Database file not found, skipping reset.")
 
-    assets_dir = ASSETS_DIR
-    notes_dir = NOTES_DIR
+    assets_dir = ctx.active_vault.assets_dir
+    notes_dir = ctx.active_vault.notes_dir
 
     for folder in [assets_dir, notes_dir]:
         if folder.exists():

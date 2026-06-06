@@ -19,7 +19,12 @@
   let logs: LogEntry[] = [];
   let logIdCounter = 0;
   let currentFile = 'system.jsonl';
+  let logSource: 'startup' | 'vault' = 'startup';
+  let sourceTouched = false;
   let currentMode: 'Normal' | 'Full' = 'Normal';
+  let logLocationLabel = 'Startup logs';
+  let logLocationMode: 'startup' | 'vault' = 'startup';
+  let vaultLogsAvailable = false;
   let eventSource: EventSource | null = null;
   let reconnectTimer: number | null = null;
   let reconnectAttempts = 0;
@@ -44,15 +49,21 @@
   };
 
   const logFiles = [
-    { label: 'system.jsonl (Backend)', value: 'system.jsonl' },
-    { label: 'terminal.log (Python Stdout)', value: 'terminal.log' },
-    { label: 'svelte.jsonl (Frontend)', value: 'svelte.jsonl' },
-    { label: 'ingest_local.jsonl (Ingest Local)', value: 'ingest_local.jsonl' },
-    { label: 'ingest_online.jsonl (Ingest Online)', value: 'ingest_online.jsonl' },
-    { label: 'review.jsonl (Review)', value: 'review.jsonl' },
-    { label: 'auth.jsonl (Auth)', value: 'auth.jsonl' },
-    { label: 'ingestion_audit.jsonl (Ingestion Audit)', value: 'ingestion_audit.jsonl' },
+    { title: 'Backend', value: 'system.jsonl' },
+    { title: 'Python Stdout', value: 'terminal.log' },
+    { title: 'Frontend', value: 'svelte.jsonl' },
+    { title: 'Ingest Local', value: 'ingest_local.jsonl' },
+    { title: 'Ingest Online', value: 'ingest_online.jsonl' },
+    { title: 'Review', value: 'review.jsonl' },
+    { title: 'Auth', value: 'auth.jsonl' },
+    { title: 'Ingestion Audit', value: 'ingestion_audit.jsonl' },
   ];
+
+  $: logScopeLabel = logSource === 'vault' ? logLocationLabel : 'Startup logs';
+  $: displayedLogFiles = logFiles.map((file) => ({
+    ...file,
+    label: `${logScopeLabel} / ${file.value} (${file.title})`
+  }));
 
   // Fields to exclude from inline extras (already shown in columns)
   const HIDDEN_EXTRA_KEYS = new Set(['timestamp', 'level', 'module', 'message', 'platform']);
@@ -120,15 +131,16 @@
     }, nextReconnectDelayMs());
   }
 
-  function connectToLogs() {
+  async function connectToLogs() {
     if (reconnectTimer !== null) {
         clearTimeout(reconnectTimer);
         reconnectTimer = null;
     }
     if (eventSource) eventSource.close();
     logs = [];
+    await loadLogLocation();
 
-    eventSource = new EventSource(apiUrl(`/api/logs?filename=${currentFile}`));
+    eventSource = new EventSource(apiUrl(`/api/logs?filename=${currentFile}&source=${logSource}`));
     eventSource.onmessage = (e) => {
       reconnectAttempts = 0;
       try {
@@ -165,6 +177,29 @@
     };
   }
 
+  async function loadLogLocation() {
+    try {
+      const sourceParam = sourceTouched ? logSource : 'active';
+      const response = await apiFetch(`/api/logs/location?source=${sourceParam}`);
+      if (!response.ok) {
+        if (logSource === 'vault') logSource = 'startup';
+        return;
+      }
+      const payload = await response.json();
+      vaultLogsAvailable = Boolean(payload.vault_available);
+      if (!sourceTouched) {
+        logSource = payload.active_mode === 'vault' ? 'vault' : 'startup';
+      }
+      logLocationMode = payload.mode === 'vault' ? 'vault' : 'startup';
+      logLocationLabel = payload.label || (payload.mode === 'vault' ? 'Vault logs' : 'Startup logs');
+    } catch {
+      vaultLogsAvailable = false;
+      logSource = 'startup';
+      logLocationMode = 'startup';
+      logLocationLabel = 'Startup logs';
+    }
+  }
+
   function reconnectForRuntimeSwitch() {
     if (reconnectTimer !== null) {
       clearTimeout(reconnectTimer);
@@ -175,6 +210,7 @@
     logs = [];
     logIdCounter = 0;
     reconnectAttempts = 0;
+    sourceTouched = false;
     connectToLogs();
   }
 
@@ -197,14 +233,14 @@
 
   async function openExternal() {
     try {
-      await apiFetch(`/api/logs/open?filename=${currentFile}`, { method: 'POST' });
+      await apiFetch(`/api/logs/open?filename=${currentFile}&source=${logSource}`, { method: 'POST' });
     } catch (e) { console.error(e); }
   }
 
   async function clearLogs() {
     if (!confirm("Are you sure you want to clear all log files? This cannot be undone.")) return;
     try {
-        await apiFetch(`/api/logs/clear`, { method: 'POST' });
+        await apiFetch(`/api/logs/clear?source=${logSource}`, { method: 'POST' });
         logs = [];
         uiLog('INFO', 'All logs cleared by user.');
         connectToLogs();
@@ -216,6 +252,11 @@
 
   function handleFileChange() {
     uiLog('DEBUG', `Switched log view to ${currentFile}`);
+    connectToLogs();
+  }
+
+  function handleSourceChange() {
+    sourceTouched = true;
     connectToLogs();
   }
 
@@ -264,8 +305,15 @@
 
 <div class="logs-container">
     <div class="toolbar">
+        <select bind:value={logSource} on:change={handleSourceChange}>
+            <option value="startup">Startup logs</option>
+            {#if vaultLogsAvailable || logSource === 'vault'}
+                <option value="vault">Vault logs</option>
+            {/if}
+        </select>
+
         <select bind:value={currentFile} on:change={handleFileChange}>
-            {#each logFiles as file}
+            {#each displayedLogFiles as file}
                 <option value={file.value}>{file.label}</option>
             {/each}
         </select>
@@ -293,6 +341,7 @@
         />
 
         <div class="spacer"></div>
+        <span class="log-location">{logLocationLabel}</span>
 
         <button on:click={connectToLogs}>Reload</button>
         <button on:click={clearLogs}>Clear Logs</button>
@@ -339,6 +388,12 @@
         flex-direction: column;
         padding: 10px 15px;
         overflow: hidden;
+    }
+
+    .log-location {
+        color: var(--text-muted);
+        font-size: 12px;
+        white-space: nowrap;
     }
 
     .toolbar {

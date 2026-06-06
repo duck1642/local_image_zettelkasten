@@ -2,6 +2,7 @@ from .logger import (
     RAW_LOGS_DIR,
     STRUCTURED_LOGS_DIR,
     configure_logging,
+    log_location,
     log_dirs,
     log_activity,
     log_auth,
@@ -11,5 +12,6 @@ from .logger import (
     log_review,
     log_svelte,
     log_system,
+    startup_log_dirs,
     reconfigure_logging,
 )

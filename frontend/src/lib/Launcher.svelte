@@ -274,7 +274,7 @@
   <div class="launcher-card">
     <header class="header">
       <div class="logo-wrap">
-        <IconServer size={32} class="logo-icon" />
+        <IconServer size={32} className="logo-icon" />
       </div>
       <h1 class="title">Local Media Zettelkasten</h1>
       <p class="subtitle">Secure, portable, agent-assisted media archive manager</p>
@@ -291,7 +291,7 @@
           <!-- Relocation Form View -->
           <div class="form-box">
             <div class="alert-header">
-              <IconAlertTriangle size={18} class="alert-icon" />
+              <IconAlertTriangle size={18} className="alert-icon" />
               <h3>Relocation Required</h3>
             </div>
             <p class="alert-desc">
@@ -329,34 +329,46 @@
               
               <div class="launcher-workspace-list">
                 {#each workspaces as w}
-                  <button
-                    class="launcher-workspace-row"
-                    class:active={w.active}
-                    on:click={() => w.exists ? selectWorkspace(w) : null}
-                    disabled={actionBusy || !w.exists}
-                  >
-                    <div class="launcher-row-info">
-                      <div class="launcher-name-line">
-                        <span class="workspace-name">{w.name}</span>
-                        <span class="launcher-status-badge" class:launcher-found={w.exists} class:launcher-missing={!w.exists}>
-                          <span class="dot"></span>
-                          {w.exists ? 'Found' : 'Missing'}
-                        </span>
+                  {#if w.exists}
+                    <button
+                      class="launcher-workspace-row"
+                      class:active={w.active}
+                      on:click={() => selectWorkspace(w)}
+                      disabled={actionBusy}
+                    >
+                      <div class="launcher-row-info">
+                        <div class="launcher-name-line">
+                          <span class="workspace-name">{w.name}</span>
+                          <span class="launcher-status-badge launcher-found">
+                            <span class="dot"></span>
+                            Found
+                          </span>
+                        </div>
+                        <div class="launcher-path-line" title={w.config_path}>{w.config_path}</div>
                       </div>
-                      <div class="launcher-path-line" title={w.config_path}>{w.config_path}</div>
-                    </div>
-                    
-                    {#if !w.exists}
+                    </button>
+                  {:else}
+                    <div class="launcher-workspace-row missing">
+                      <div class="launcher-row-info">
+                        <div class="launcher-name-line">
+                          <span class="workspace-name">{w.name}</span>
+                          <span class="launcher-status-badge launcher-missing">
+                            <span class="dot"></span>
+                            Missing
+                          </span>
+                        </div>
+                        <div class="launcher-path-line" title={w.config_path}>{w.config_path}</div>
+                      </div>
                       <div class="launcher-row-actions">
-                        <button class="row-action-btn secondary relocate" on:click|stopPropagation={() => {
+                        <button class="row-action-btn secondary relocate" on:click={() => {
                           relocateState = { type: 'workspace', id: w.id, current_path: w.config_path };
                           errorMessage = 'Configuration file missing. Please relocate it.';
                         }} disabled={actionBusy}>
                           Relocate
                         </button>
                       </div>
-                    {/if}
-                  </button>
+                    </div>
+                  {/if}
                 {/each}
               </div>
             </section>
@@ -396,7 +408,7 @@
                   >
                     <div class="launcher-row-info">
                       <div class="launcher-name-line">
-                        <IconFolder size={14} class="vault-icon" />
+                        <IconFolder size={14} className="vault-icon" />
                         <span class="workspace-name">{v.name}</span>
                         {#if v.id === activeVaultId}
                           <span class="launcher-active-badge">Active</span>
@@ -513,6 +525,7 @@
     letter-spacing: -0.5px;
     margin: 0 0 6px 0;
     background: linear-gradient(to right, #58a6ff, #1f6feb);
+    background-clip: text;
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
   }
@@ -775,15 +788,6 @@
     cursor: pointer;
     border: 1px solid transparent;
     transition: all 0.15s ease;
-  }
-
-  .row-action-btn.primary {
-    background: #58a6ff;
-    color: #0d1117;
-  }
-
-  .row-action-btn.primary:hover {
-    background: #79c0ff;
   }
 
   .row-action-btn.secondary {

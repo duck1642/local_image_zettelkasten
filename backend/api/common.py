@@ -29,7 +29,7 @@ from utils import (
 )
 from runtime_context import RuntimeNotLoadedError, WorkspaceContext, get_runtime_context
 from processor import process_file
-from logger import log_auth, log_ingest_audit, log_ingest_local, log_review, log_svelte, log_system, log_dirs
+from logger import log_auth, log_ingest_audit, log_ingest_local, log_review, log_svelte, log_system, log_dirs, startup_log_dirs
 from md_generator import MANUAL_FRONTMATTER_FIELDS, load_note_frontmatter, load_note_topics, load_note_wd_tags, generate_markdown, normalize_topic_list
 from metadata_index import (
     ensure_metadata_schema,
@@ -332,11 +332,25 @@ def _require_api_key(request: Request):
     if not secrets.compare_digest(provided, expected):
         raise HTTPException(status_code=403, detail="Invalid API key")
 
-def _log_file_for(filename: str) -> Path:
+def _log_dirs_for_source(source: str = "active") -> tuple[Path, Path]:
+    clean = str(source or "active").strip().lower()
+    if clean == "startup":
+        return startup_log_dirs()
+    if clean == "vault":
+        ctx = get_runtime_context()
+        if not ctx.active_vault.root.exists():
+            raise HTTPException(status_code=503, detail="Vault logs unavailable")
+        return ctx.active_vault.logs_dir / "raw", ctx.active_vault.logs_dir / "structured"
+    if clean == "active":
+        return log_dirs()
+    raise HTTPException(status_code=400, detail="Invalid log source")
+
+
+def _log_file_for(filename: str, source: str = "active") -> Path:
     spec = LOG_FILE_NAMES.get(filename)
     if not spec:
         raise HTTPException(status_code=400, detail="Invalid log file")
-    raw_logs_dir, structured_logs_dir = log_dirs()
+    raw_logs_dir, structured_logs_dir = _log_dirs_for_source(source)
     folder = raw_logs_dir if spec[0] == "raw" else structured_logs_dir
     return folder / spec[1]
 

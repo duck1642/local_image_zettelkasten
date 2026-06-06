@@ -219,12 +219,10 @@ def set_active_vault(vault_id: str, ctx: WorkspaceContext | None = None) -> dict
 
     # Dynamic dynamic-vault switching runtime updates
     from runtime_context import reload_runtime_context
-    from db.search_manager import search_manager
-    from metadata_index import restart_metadata_watchdog
+    from runtime_activation import activate_runtime_context
 
     new_ctx = reload_runtime_context(runtime.config_path)
-    search_manager.reset_all()
-    restart_metadata_watchdog(new_ctx)
+    activate_runtime_context(new_ctx)
 
     return {"status": "success", "active": vault_id, "restart_required": False, "items": vault_list()}
 

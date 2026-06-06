@@ -36,7 +36,7 @@ def fresh_backend(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *module_names
     if str(BACKEND) not in sys.path:
         sys.path.insert(0, str(BACKEND))
     for name in list(sys.modules):
-        if name in {"api", "utils", "runtime_context", "web_api", "queue_service", "md_generator", "metadata_index", "metadata_maintenance", "processor", "external_ingestion", "thumbnails", "fingerprint", "artists", "platforms", "review_cache", "topics", "vaults", "workspace_db", "ingest_control"} or name.startswith(("api.", "logger", "db.", "tagging", "downloaders")):
+        if name in {"api", "utils", "runtime_context", "runtime_activation", "web_api", "queue_service", "md_generator", "metadata_index", "metadata_maintenance", "processor", "external_ingestion", "thumbnails", "fingerprint", "artists", "platforms", "review_cache", "topics", "vaults", "workspace_db", "ingest_control"} or name.startswith(("api.", "logger", "db.", "tagging", "downloaders")):
             del sys.modules[name]
     return [importlib.import_module(name) for name in module_names]
 
@@ -204,6 +204,7 @@ def test_logger_reconfigure_writes_to_context_logs(monkeypatch, tmp_path):
     runtime_context, lmz_logger = fresh_backend(monkeypatch, tmp_path, "runtime_context", "logger")
     default_ctx = runtime_context.get_runtime_context()
     injected_ctx = injected_context_for(runtime_context, tmp_path)
+    injected_ctx.active_vault.root.mkdir(parents=True, exist_ok=True)
 
     try:
         lmz_logger.reconfigure_logging(injected_ctx)
@@ -511,6 +512,8 @@ def test_workspace_registry_resolves_active_and_env_override(monkeypatch, tmp_pa
     })
 
     utils = importlib.import_module("utils")
+    runtime_context = importlib.import_module("runtime_context")
+    runtime_context.reload_runtime_context()
     assert utils.CONFIG_PATH == custom_config
     assert utils.CONFIG_ROOT == custom_root
 
@@ -518,6 +521,8 @@ def test_workspace_registry_resolves_active_and_env_override(monkeypatch, tmp_pa
     sys.modules.pop("utils", None)
     sys.modules.pop("runtime_context", None)
     utils = importlib.import_module("utils")
+    runtime_context = importlib.import_module("runtime_context")
+    runtime_context.reload_runtime_context()
     assert utils.CONFIG_PATH == FIXTURE / "config.yaml"
 
 
@@ -1014,7 +1019,8 @@ def test_review_cleanup_state_and_orphan_sidecar(monkeypatch, tmp_path):
 
 
 def test_web_api_startup_hydrates_search_manager(monkeypatch, tmp_path):
-    (web_api,) = fresh_backend(monkeypatch, tmp_path, "web_api")
+    runtime_context, web_api = fresh_backend(monkeypatch, tmp_path, "runtime_context", "web_api")
+    runtime_context.reload_runtime_context()
     calls = []
 
     class FakeConnection:
@@ -1514,7 +1520,7 @@ def test_pending_review_match_uses_cache_without_sidecar_glob(monkeypatch, tmp_p
         def glob(self, *args, **kwargs):
             raise AssertionError("pending review match should not glob sidecars")
 
-    monkeypatch.setattr(processor, "REVIEW_DIR", FakeReviewDir())
+    monkeypatch.setattr(processor, "REVIEW_DIR", FakeReviewDir(), raising=False)
 
     assert processor._pending_review_match(review_hash)["original_name"] == "cached.webp"
 

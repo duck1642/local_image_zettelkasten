@@ -22,6 +22,7 @@ def fresh_api(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
             "api",
             "utils",
             "runtime_context",
+            "runtime_activation",
             "web_api",
             "workspaces",
             "queue_service",
@@ -111,6 +112,10 @@ def test_launcher_mode_serves_recovery_routes_without_workspace(monkeypatch, tmp
     missing = [item for item in workspace_response.json()["items"] if item["id"] == "missing"][0]
     assert missing["exists"] is False
 
+    logs_response = client.get("/api/logs/location")
+    assert logs_response.status_code == 200
+    assert logs_response.json()["mode"] == "startup"
+
 
 def test_missing_workspace_config_load_does_not_persist_active(monkeypatch, tmp_path):
     app_module = fresh_api(monkeypatch, tmp_path)
@@ -169,6 +174,7 @@ def test_missing_vault_root_load_enables_vault_relocation(monkeypatch, tmp_path)
     vaults_response = client.get("/api/vaults")
     assert vaults_response.status_code == 200
     assert vaults_response.json()["items"][0]["exists"] is False
+    assert client.get("/api/logs/location").json()["mode"] == "startup"
     assert workspaces.load_workspace_registry()["active"] == "default"
 
 
@@ -202,4 +208,44 @@ def test_valid_workspace_load_persists_active_after_services_start(monkeypatch, 
     assert response.json()["status"] == "success"
     assert response.json()["active_workspace"] == "ready"
     assert response.json()["active_vault"] == "default"
+    assert client.get("/api/logs/location").json()["mode"] == "vault"
     assert workspaces.load_workspace_registry()["active"] == "ready"
+
+
+def test_vault_relocation_activates_runtime_and_vault_logs(monkeypatch, tmp_path):
+    app_module = fresh_api(monkeypatch, tmp_path)
+    workspaces = importlib.import_module("workspaces")
+    registry_path = tmp_path / "workspaces.yaml"
+    ws_root = tmp_path / "workspace"
+    ws_root.mkdir()
+    config_path = ws_root / "config.yaml"
+    workspace_config(config_path)
+    write_registry(
+        registry_path,
+        "default",
+        {
+            "default": {"name": "Default", "config_path": "config/config.yaml"},
+            "offline-vault": {"name": "Offline Vault", "config_path": str(config_path)},
+        },
+    )
+    monkeypatch.setattr(workspaces, "REGISTRY_PATH", registry_path)
+    patch_runtime_services(monkeypatch)
+
+    client = TestClient(app_module.app)
+    key = api_key(client)
+    response = client.post("/api/workspaces/offline-vault/load", headers={"X-LMZ-API-KEY": key})
+    assert response.json()["status"] == "relocate_vault"
+
+    vault_root = ws_root / "data" / "vaults" / "default"
+    vault_root.mkdir(parents=True)
+    relocate = client.post(
+        "/api/vaults/relocate",
+        json={"vault_id": "default", "new_vault_root": str(vault_root)},
+        headers={"X-LMZ-API-KEY": key},
+    )
+
+    assert relocate.status_code == 200
+    assert relocate.json()["status"] == "success"
+    location = client.get("/api/logs/location").json()
+    assert location["mode"] == "vault"
+    assert location["vault"] == "default"

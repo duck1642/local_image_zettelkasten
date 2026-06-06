@@ -7,9 +7,9 @@ from runtime_context import (
     build_runtime_context,
     clear_runtime_context,
     has_runtime_context,
-    set_runtime_context,
     try_get_runtime_context,
 )
+from runtime_activation import activate_runtime_context
 
 router = APIRouter()
 
@@ -645,10 +645,6 @@ async def load_workspace(workspace_id: str):
 
 def _load_workspace_sync(workspace_id: str):
     from workspaces import load_workspace_registry, set_active_workspace, _resolve
-    from db.search_manager import search_manager
-    from metadata_index import restart_metadata_watchdog, start_metadata_repair_worker
-    from db.sqlite_operator import init_database
-    from logger import reconfigure_logging
     
     registry = load_workspace_registry()
     if workspace_id not in registry["workspaces"]:
@@ -674,7 +670,8 @@ def _load_workspace_sync(workspace_id: str):
         if active_vault and active_vault.root:
             vault_root = Path(active_vault.root)
             if not vault_root.exists():
-                set_runtime_context(new_ctx)
+                activate_runtime_context(new_ctx, hydrate=False)
+                configure_terminal_logging()
                 return {
                     "status": "relocate_vault",
                     "message": f"Vault directory not found at {vault_root}",
@@ -683,22 +680,8 @@ def _load_workspace_sync(workspace_id: str):
                     "vault_root": str(vault_root)
                 }
         
-        set_runtime_context(new_ctx)
-        reconfigure_logging(new_ctx)
+        activate_runtime_context(new_ctx)
         configure_terminal_logging()
-        search_manager.reset_all()
-        
-        conn = init_database(ctx=new_ctx)
-        try:
-            search_manager.hydrate(conn)
-        finally:
-            conn.close()
-
-        restart_metadata_watchdog(new_ctx)
-        try:
-            start_metadata_repair_worker(full=False)
-        except Exception as exc:
-            log_system("WARNING", "Metadata index repair startup failed during load", error=str(exc))
 
         set_active_workspace(workspace_id)
             
@@ -709,21 +692,21 @@ def _load_workspace_sync(workspace_id: str):
         }
     except ValueError as e:
         if previous_ctx is not None:
-            set_runtime_context(previous_ctx)
-            reconfigure_logging(previous_ctx)
+            activate_runtime_context(previous_ctx, hydrate=False)
             configure_terminal_logging()
         else:
             clear_runtime_context()
+            from logger import reconfigure_logging
             reconfigure_logging(None)
             configure_terminal_logging()
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         if previous_ctx is not None:
-            set_runtime_context(previous_ctx)
-            reconfigure_logging(previous_ctx)
+            activate_runtime_context(previous_ctx, hydrate=False)
             configure_terminal_logging()
         else:
             clear_runtime_context()
+            from logger import reconfigure_logging
             reconfigure_logging(None)
             configure_terminal_logging()
         log_system("ERROR", "Failed to load workspace", workspace_id=workspace_id, error=str(e))
@@ -763,10 +746,6 @@ async def relocate_vault(body: RelocateVaultRequest):
 def _relocate_vault_sync(vault_id: str, new_vault_root: str):
     from vaults import _read_config, _write_config, vault_id_slug
     from runtime_context import reload_runtime_context
-    from db.search_manager import search_manager
-    from metadata_index import restart_metadata_watchdog, start_metadata_repair_worker
-    from db.sqlite_operator import init_database
-    from logger import reconfigure_logging
     from workspaces import load_workspace_registry, set_active_workspace, _resolve
 
     ctx = get_runtime_context()
@@ -783,19 +762,8 @@ def _relocate_vault_sync(vault_id: str, new_vault_root: str):
     _write_config(config)
     
     new_ctx = reload_runtime_context(ctx.config_path)
-    reconfigure_logging(new_ctx)
+    activate_runtime_context(new_ctx)
     configure_terminal_logging()
-    search_manager.reset_all()
-    conn = init_database(ctx=new_ctx)
-    try:
-        search_manager.hydrate(conn)
-    finally:
-        conn.close()
-    restart_metadata_watchdog(new_ctx)
-    try:
-        start_metadata_repair_worker(full=False)
-    except Exception as exc:
-        log_system("WARNING", "Metadata index repair startup failed after vault relocation", error=str(exc))
 
     registry = load_workspace_registry()
     for candidate_id, entry in registry.get("workspaces", {}).items():

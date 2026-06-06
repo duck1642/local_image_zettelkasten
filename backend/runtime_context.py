@@ -118,7 +118,7 @@ def _vault_context(root: Path, vault_id: str, entry: dict) -> VaultContext:
     )
 
 
-def build_runtime_context(config_path: str | Path | None = None) -> WorkspaceContext:
+def build_runtime_context(config_path: str | Path | None = None, active_vault_id: str | None = None) -> WorkspaceContext:
     resolved_config_path = _resolve_config_path(config_path)
     root = _config_root_for(resolved_config_path)
     config = _load_config(resolved_config_path)
@@ -127,7 +127,7 @@ def build_runtime_context(config_path: str | Path | None = None) -> WorkspaceCon
     if not vaults:
         raise RuntimeError("config.yaml must define vaults")
 
-    active_id = _slug_vault_id(str(config.get("active_vault") or "default"))
+    active_id = _slug_vault_id(str(active_vault_id or config.get("active_vault") or "default"))
     if active_id not in vaults:
         active_id = "default" if "default" in vaults else sorted(vaults.keys())[0]
     active_vault = _vault_context(root, active_id, vaults.get(active_id) or {})
@@ -179,10 +179,10 @@ def get_runtime_context() -> WorkspaceContext:
         return _RUNTIME_CONTEXT
 
 
-def reload_runtime_context(config_path: str | Path | None = None) -> WorkspaceContext:
+def reload_runtime_context(config_path: str | Path | None = None, active_vault_id: str | None = None) -> WorkspaceContext:
     global _RUNTIME_CONTEXT
     with _CONTEXT_LOCK:
-        _RUNTIME_CONTEXT = build_runtime_context(config_path)
+        _RUNTIME_CONTEXT = build_runtime_context(config_path, active_vault_id=active_vault_id)
         return _RUNTIME_CONTEXT
 
 

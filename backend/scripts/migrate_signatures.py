@@ -3,11 +3,17 @@ from tqdm import tqdm
 
 from db.sqlite_operator import init_database
 from fingerprint import get_audio_fingerprint, get_visual_embedding
-from utils import DB_PATH, asset_path_for
+from scripts.workspace_select import select_runtime_context
+from utils import asset_path_for
 
 def migrate():
-    print(f"[INFO] LMZ Signature Migration - Target: {DB_PATH}")
-    conn = init_database()
+    ctx = select_runtime_context("signature migration", hydrate=False)
+    db_path = ctx.active_vault.db_path
+    print(f"[INFO] LMZ Signature Migration - Target: {db_path}")
+    if not db_path.exists():
+        print(f"[ERROR] Database not found at {db_path}")
+        return
+    conn = init_database(ctx=ctx)
     cursor = conn.cursor()
 
 
@@ -25,7 +31,7 @@ def migrate():
     errors = 0
 
     for f_hash, ext, mime, storage_id in tqdm(videos, desc="Migrating", unit="file"):
-        file_path = asset_path_for(f_hash, ext, mime, storage_id=storage_id)
+        file_path = asset_path_for(f_hash, ext, mime, storage_id=storage_id, ctx=ctx)
 
         if not file_path.exists():
             print(f"[WARN] File missing in vault: {file_path.name}")

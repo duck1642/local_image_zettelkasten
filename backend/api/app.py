@@ -10,7 +10,8 @@ from db.sqlite_operator import init_database
 from db.search_manager import search_manager
 from logger import log_system
 from metadata_index import start_metadata_repair_worker, start_metadata_watchdog
-from runtime_context import RuntimeNotLoadedError, has_runtime_context, reload_runtime_context
+from runtime_activation import activate_runtime_context
+from runtime_context import RuntimeNotLoadedError, build_runtime_context, has_runtime_context
 
 from api.common import (
     ALLOWED_ORIGINS,
@@ -29,6 +30,9 @@ from api import capture, ingestion, library, logs, review, runtime
 LAUNCHER_SAFE_EXACT_PATHS = {
     "/",
     "/api/session-key",
+    "/api/logs",
+    "/api/logs/location",
+    "/api/logs/open",
     "/api/workspaces",
     "/api/workspaces/active",
     "/api/workspaces/relocate",
@@ -48,11 +52,9 @@ def _load_env_workspace_if_requested():
     env_path = os.environ.get("LMZ_CONFIG_PATH")
     if not env_path or has_runtime_context():
         return
-    from logger import reconfigure_logging
-
     try:
-        ctx = reload_runtime_context(env_path)
-        reconfigure_logging(ctx)
+        ctx = build_runtime_context(env_path)
+        activate_runtime_context(ctx)
         configure_terminal_logging()
     except Exception as exc:
         log_system("WARNING", "LMZ_CONFIG_PATH workspace load failed; staying in launcher mode", error=str(exc))

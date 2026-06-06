@@ -8,9 +8,9 @@ from runtime_context import WorkspaceContext, get_runtime_context, try_get_runti
 from utils import utc_now_str
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-BOOTSTRAP_LOGS_DIR = PROJECT_ROOT / "logs" / "bootstrap"
-RAW_LOGS_DIR = BOOTSTRAP_LOGS_DIR / "raw"
-STRUCTURED_LOGS_DIR = BOOTSTRAP_LOGS_DIR / "structured"
+STARTUP_LOGS_DIR = PROJECT_ROOT / "logs" / "startup"
+RAW_LOGS_DIR = STARTUP_LOGS_DIR / "raw"
+STRUCTURED_LOGS_DIR = STARTUP_LOGS_DIR / "structured"
 
 
 class JSONFormatter(logging.Formatter):
@@ -50,14 +50,38 @@ _LOGGER_SPECS = {
 }
 
 
+def startup_log_dirs() -> tuple[Path, Path]:
+    return STARTUP_LOGS_DIR / "raw", STARTUP_LOGS_DIR / "structured"
+
+
 def log_dirs(ctx: WorkspaceContext | None = None) -> tuple[Path, Path]:
     runtime = ctx or try_get_runtime_context()
     if runtime is None:
-        return BOOTSTRAP_LOGS_DIR / "raw", BOOTSTRAP_LOGS_DIR / "structured"
+        return startup_log_dirs()
     if not runtime.active_vault.root.exists():
-        return BOOTSTRAP_LOGS_DIR / "raw", BOOTSTRAP_LOGS_DIR / "structured"
+        return startup_log_dirs()
     logs_dir = runtime.active_vault.logs_dir
     return logs_dir / "raw", logs_dir / "structured"
+
+
+def log_location(ctx: WorkspaceContext | None = None) -> dict:
+    runtime = ctx or try_get_runtime_context()
+    raw_dir, structured_dir = log_dirs(runtime)
+    if runtime is None or not runtime.active_vault.root.exists():
+        return {
+            "mode": "startup",
+            "label": "Startup logs",
+            "raw_dir": str(raw_dir),
+            "structured_dir": str(structured_dir),
+            "vault": "",
+        }
+    return {
+        "mode": "vault",
+        "label": f"Vault logs: {runtime.active_vault.id}",
+        "raw_dir": str(raw_dir),
+        "structured_dir": str(structured_dir),
+        "vault": runtime.active_vault.id,
+    }
 
 
 def _remove_owned_handlers(logger: logging.Logger):
@@ -78,17 +102,11 @@ def configure_logging(ctx: WorkspaceContext | None = None, force: bool = False):
             _remove_owned_handlers(logger)
         if any(getattr(handler, "_lmz_owned", False) for handler in logger.handlers):
             continue
-        if runtime is None:
-            handler = logging.StreamHandler()
-            handler.setFormatter(formatter)
-            handler._lmz_owned = True
-            logger.addHandler(handler)
-            continue
-
         RAW_LOGS_DIR, STRUCTURED_LOGS_DIR = log_dirs(runtime)
         RAW_LOGS_DIR.mkdir(parents=True, exist_ok=True)
         STRUCTURED_LOGS_DIR.mkdir(parents=True, exist_ok=True)
-        runtime.active_vault.vault_dir.mkdir(parents=True, exist_ok=True)
+        if runtime is not None and runtime.active_vault.root.exists():
+            runtime.active_vault.vault_dir.mkdir(parents=True, exist_ok=True)
         handler = RotatingFileHandler(
             STRUCTURED_LOGS_DIR / filename,
             maxBytes=max_bytes,

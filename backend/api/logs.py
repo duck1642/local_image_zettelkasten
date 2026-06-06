@@ -5,8 +5,8 @@ from api.common import *
 router = APIRouter()
 
 @router.get("/api/logs")
-async def stream_logs(filename: str = Query("system.jsonl")):
-    log_file = _log_file_for(filename)
+async def stream_logs(filename: str = Query("system.jsonl"), source: str = Query("active")):
+    log_file = _log_file_for(filename, source=source)
 
     if not log_file.exists():
         log_file.parent.mkdir(parents=True, exist_ok=True)
@@ -64,6 +64,38 @@ async def stream_logs(filename: str = Query("system.jsonl")):
             await asyncio.sleep(poll_seconds)
     return StreamingResponse(log_generator(), media_type="text/event-stream")
 
+
+@router.get("/api/logs/location")
+async def get_logs_location(source: str = Query("active")):
+    from logger import log_location, startup_log_dirs
+
+    active = log_location()
+    vault_available = active["mode"] == "vault"
+    if source == "startup":
+        raw_dir, structured_dir = startup_log_dirs()
+        selected = {
+            "mode": "startup",
+            "label": "Startup logs",
+            "raw_dir": str(raw_dir),
+            "structured_dir": str(structured_dir),
+            "vault": "",
+        }
+    elif source == "vault":
+        if not vault_available:
+            raise HTTPException(status_code=503, detail="Vault logs unavailable")
+        selected = active
+    elif source == "active":
+        selected = active
+    else:
+        raise HTTPException(status_code=400, detail="Invalid log source")
+
+    return {
+        **selected,
+        "active_mode": active["mode"],
+        "vault_available": vault_available,
+        "available_sources": ["startup", "vault"] if vault_available else ["startup"],
+    }
+
 @router.post("/api/auth/scan")
 async def scan_auth_status():
     statuses = await asyncio.to_thread(_scan_auth_status_sync, "manual")
@@ -80,11 +112,11 @@ async def post_ui_log(entry: UILogEntry):
     return {"status": "ok"}
 
 @router.post("/api/logs/open")
-async def open_log_external(filename: str = Query(...)):
-    return await asyncio.to_thread(_open_log_external_sync, filename)
+async def open_log_external(filename: str = Query(...), source: str = Query("active")):
+    return await asyncio.to_thread(_open_log_external_sync, filename, source)
 
-def _open_log_external_sync(filename: str):
-    log_file = _log_file_for(filename)
+def _open_log_external_sync(filename: str, source: str = "active"):
+    log_file = _log_file_for(filename, source=source)
         
     if not log_file.exists(): raise HTTPException(status_code=404)
     try:
@@ -93,12 +125,12 @@ def _open_log_external_sync(filename: str):
     except Exception as e: raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/api/logs/clear")
-async def clear_all_logs():
-    return await asyncio.to_thread(_clear_all_logs_sync)
+async def clear_all_logs(source: str = Query("active")):
+    return await asyncio.to_thread(_clear_all_logs_sync, source)
 
-def _clear_all_logs_sync():
+def _clear_all_logs_sync(source: str = "active"):
     try:
-        raw_logs_dir, structured_logs_dir = log_dirs()
+        raw_logs_dir, structured_logs_dir = _log_dirs_for_source(source)
         for folder in [raw_logs_dir, structured_logs_dir]:
             if folder.exists():
                 for f in folder.iterdir():
