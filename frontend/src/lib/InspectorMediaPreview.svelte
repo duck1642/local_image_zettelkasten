@@ -78,7 +78,7 @@
   .inspector-header {
     display: flex;
     flex-direction: column;
-    padding: 15px calc(15px + var(--inspector-scrollbar-gutter-width, 12px)) 0 15px;
+    padding: 15px calc(15px + var(--inspector-scrollbar-gutter-width, 12px)) 12px 15px;
     gap: 12px;
     flex-shrink: 0;
   }

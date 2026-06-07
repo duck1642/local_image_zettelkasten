@@ -788,7 +788,7 @@
     flex-grow: 1;
     overflow-y: auto;
     scrollbar-gutter: stable;
-    padding: 12px 15px;
+    padding: 0 15px 12px 15px;
     display: flex;
     flex-direction: column;
     gap: 12px;
