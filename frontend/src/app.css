@@ -21,6 +21,7 @@
 
   --sidebar-width: 100px;
   --header-height: 60px;
+  --scrollbar-size: 12px;
 }
 
 @layer base {
@@ -92,8 +93,8 @@
   }
 
   ::-webkit-scrollbar {
-    width: 12px;
-    height: 12px;
+    width: var(--scrollbar-size);
+    height: var(--scrollbar-size);
   }
   ::-webkit-scrollbar-track {
     background: transparent;
@@ -110,8 +111,8 @@
     background-clip: content-box;
   }
   ::-webkit-scrollbar-button {
-    width: 12px;
-    height: 12px;
+    width: var(--scrollbar-size);
+    height: var(--scrollbar-size);
     background-color: transparent;
     background-repeat: no-repeat;
     background-position: center;
