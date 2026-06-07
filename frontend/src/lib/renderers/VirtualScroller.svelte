@@ -8,28 +8,50 @@
 
   export let scrollTop = 0;
   export let viewportHeight = 0;
+  export let contentWidth = 0;
 
   let scrollFrame: number | null = null;
+  let resizeObserver: ResizeObserver | null = null;
+  let observedHost: HTMLElement | null = null;
 
   $: if (hostEl) {
-    scrollTop = hostEl.scrollTop;
-    viewportHeight = hostEl.clientHeight;
+    observeHost(hostEl);
+  }
+
+  function measureContentWidth(node: HTMLElement) {
+    const style = window.getComputedStyle(node);
+    const paddingLeft = parseFloat(style.paddingLeft || '0') || 0;
+    const paddingRight = parseFloat(style.paddingRight || '0') || 0;
+    return Math.max(0, node.clientWidth - paddingLeft - paddingRight);
+  }
+
+  function updateMetrics(node: HTMLElement) {
+    scrollTop = node.scrollTop;
+    viewportHeight = node.clientHeight;
+    contentWidth = measureContentWidth(node);
+  }
+
+  function observeHost(node: HTMLElement) {
+    if (observedHost === node) return;
+    resizeObserver?.disconnect();
+    observedHost = node;
+    updateMetrics(node);
+    resizeObserver = new ResizeObserver(() => updateMetrics(node));
+    resizeObserver.observe(node);
   }
 
   function handleScroll(event: Event) {
     const target = event.currentTarget as HTMLElement;
-    const nextScrollTop = target.scrollTop;
-    const nextViewportHeight = target.clientHeight;
     if (scrollFrame !== null) return;
     scrollFrame = window.requestAnimationFrame(() => {
-      scrollTop = nextScrollTop;
-      viewportHeight = nextViewportHeight;
+      updateMetrics(target);
       scrollFrame = null;
     });
   }
 
   onDestroy(() => {
     if (scrollFrame !== null) window.cancelAnimationFrame(scrollFrame);
+    resizeObserver?.disconnect();
   });
 </script>
 
@@ -48,7 +70,8 @@
     flex-grow: 1;
     overflow-y: auto;
     overflow-x: hidden;
-    padding: 15px;
+    padding: var(--vault-content-padding);
+    scrollbar-gutter: stable;
     position: relative;
     min-width: 0;
     box-sizing: border-box;

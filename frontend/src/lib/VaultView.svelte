@@ -671,7 +671,7 @@
   :global(body.inspector-resizing *) { cursor: col-resize !important; user-select: none; }
   .vault-shell { flex-grow: 1; display: flex; overflow: hidden; min-width: 0; }
   .vault-main { flex-grow: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
-  .top-header { height: var(--header-height); display: flex; align-items: center; padding: 0 15px; gap: 15px; border-bottom: 1px solid var(--border-dim); flex-shrink: 0; z-index: 100; }
+  .top-header { height: var(--header-height); display: flex; align-items: center; padding: 0 calc(var(--vault-content-padding) + var(--scrollbar-size)) 0 var(--vault-content-padding); gap: 15px; border-bottom: 1px solid var(--border-dim); flex-shrink: 0; z-index: 100; }
   .viewport { flex-grow: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; position: relative; }
   .inspector-resize-handle { width: 7px; flex: 0 0 7px; cursor: col-resize; border: 0; border-left: 1px solid var(--border-dim); border-right: 1px solid transparent; border-radius: 0; background: var(--bg-main); position: relative; z-index: 20; padding: 0; }
   .inspector-resize-handle:hover, .inspector-resize-handle.active { border-left-color: var(--accent-primary); }

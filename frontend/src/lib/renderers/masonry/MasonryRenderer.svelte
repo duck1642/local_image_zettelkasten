@@ -29,6 +29,7 @@
 
   let scrollTop = 0;
   let viewportHeight = 0;
+  let contentWidth = 0;
   let measurements: MeasurementStore = {};
   let pendingMeasurements: Record<string, { width: number; height: number; position: MasonryPosition }> = {};
   let measurementFrame: number | null = null;
@@ -39,7 +40,7 @@
   const measuredNodes = new Map<HTMLElement, MasonryPosition>();
   const loggedDrifts = new Set<string>();
 
-  $: layout = computeLayout(groups, viewportWidth, tileMinWidth, activeIndexes, measurements);
+  $: layout = computeLayout(groups, contentWidth || viewportWidth, tileMinWidth, activeIndexes, measurements);
   $: visiblePositions = visibleMasonryPositions(layout.positions, scrollTop, viewportHeight, MASONRY_OVERSCAN, layout.maxPositionHeight);
   $: if (import.meta.env.DEV) logSummary(groups, visiblePositions, layout, scrollTop, viewportHeight, recomputeCount, measurements);
 
@@ -170,6 +171,7 @@
   {isLoadingMore}
   bind:scrollTop
   bind:viewportHeight
+  bind:contentWidth
 >
     {#each visiblePositions as position (position.group.id)}
       <div

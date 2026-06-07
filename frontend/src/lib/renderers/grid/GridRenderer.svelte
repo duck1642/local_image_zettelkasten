@@ -23,10 +23,11 @@
 
   let scrollTop = 0;
   let viewportHeight = 0;
+  let contentWidth = 0;
   let lastSummaryLog = 0;
   let lastSummaryKey = '';
 
-  $: layout = computeGridLayout(groups, viewportWidth, tileMinWidth);
+  $: layout = computeGridLayout(groups, contentWidth || viewportWidth, tileMinWidth);
   $: visiblePositions = visibleGridPositions(
     layout.positions,
     scrollTop,
@@ -79,6 +80,7 @@
   {isLoadingMore}
   bind:scrollTop
   bind:viewportHeight
+  bind:contentWidth
 >
     {#each visiblePositions as position (position.group.id)}
       <div
