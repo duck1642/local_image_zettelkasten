@@ -1,14 +1,17 @@
   # LMZ Current Status
 
-Last updated: 2026-06-06
+Last updated: 2026-06-07
 
 ## Current Status
 
-LMZ is a local media vault desktop app.
+LMZ is a local-first media vault desktop app with launcher-mode workspace/vault selection.
 
-- Frontend: Tauri + Svelte.
-- Backend: local FastAPI/Python API under `backend/`.
-- Runtime model: SQLite owns item identity/source fields; Markdown mirrors item identity fields and remains the editable source for topics/WD metadata.
+- Frontend: Tauri + Svelte, with virtualized vault grid/masonry views and split feature panels.
+- Backend: local FastAPI/Python API under `backend/`, launched by the desktop app or dev commands.
+- Runtime model: backend may start without an active workspace; vault-dependent services activate after workspace/vault selection or relocation.
+- Workspace/vault model: workspace config can contain machine-local absolute paths; vault internals should keep portable relative paths where practical.
+- Data model: SQLite owns item identity/source fields; Markdown mirrors identity fields and remains the editable source for topics/WD metadata.
+- Active risk areas: workspace/vault control, maintenance safety, startup launcher behavior, index lifecycle, import/export, and auth clarity.
 - Old Flet and PySide/PyQt UI paths are inactive.
 
 Launch commands:
@@ -18,45 +21,6 @@ python dev.py
 python main.py
 lmz
 ```
-
-## Architecture Snapshot
-
-- Frontend app: `frontend/src/`.
-- Tauri shell: `frontend/src-tauri/`.
-- Backend API: `backend/web_api.py`.
-- Ingestion CLI: `backend/core.py`, launched by `main.py` or `lmz`.
-- Workspace DB: `data/workspace.db`.
-- Shared topic library: `data/topics/`.
-- Active vault root: `data/vaults/<active_vault>/`.
-- Vault DB: `data/vaults/<active_vault>/db/lmz_main.db`.
-- Vault assets: `data/vaults/<active_vault>/vault/assets/{hash[:2]}/{storage_id}.{ext}`.
-- Vault notes: `data/vaults/<active_vault>/vault/notes/{hash[:2]}/{storage_id}.md`.
-- WD tag cache: `data/vaults/<active_vault>/wd-tags/{hash[:2]}/{storage_id}.json`.
-- Thumbnails: `data/vaults/<active_vault>/ui_cache/thumbnails/{hash[:2]}/{storage_id}.jpg`.
-- Review quarantine: `data/vaults/<active_vault>/review/`.
-- Local ingest staging: `data/vaults/<active_vault>/local_ingest/`.
-- Online ingest staging: `data/vaults/<active_vault>/online_ingest/`.
-- Logs: `data/vaults/<active_vault>/logs/raw/`, `data/vaults/<active_vault>/logs/structured/`.
-- Secrets: `secrets/`.
-
-## Working Areas
-
-- Local image, GIF, and video ingestion.
-- External URL ingestion via gallery-dl and yt-dlp.
-- Batch-safe Pixiv, X/Twitter, Instagram, Pinterest, YouTube community ingestion.
-- Browser extension capture and queue append are implemented as Phase 9 completion; see `docs/lmz_roadmap.md` and `docs/lmz_architecture.md`.
-- SHA256 item identity with compact `storage_id` physical filenames.
-- Markdown note generation with frontmatter topics and distilled WD fields.
-- Local WD tagging for images and sampled video frames.
-- Virtualized masonry/grid vault UI.
-- Grouped media navigation, fullscreen focus, zoom/pan, filmstrip.
-- Structured search with prefixes, commands, suggestions, and facet counts.
-- Toggleable/resizable inspector.
-- Markdown queue ingestion workbench.
-- Review, Stats, Settings, and App Logs views.
-- Structured/raw logs plus auth-status stream.
-- RAM tracker.
-- Local API hardening for destructive actions.
 
 ## Useful Checks
 
@@ -87,6 +51,29 @@ VSCode-friendly test launchers:
 .\tests\test-playwright-ui.bat
 ```
 
+## Architecture Snapshot
+
+- Frontend app: `frontend/src/`.
+- Tauri shell: `frontend/src-tauri/`.
+- Backend API: `backend/web_api.py`.
+- Ingestion CLI: `backend/core.py`, launched by `main.py` or `lmz`.
+- Workspace registry/config loading supports launcher mode before an active runtime exists.
+- Workspace config owns registered vault definitions and machine-local vault roots.
+- Workspace DB and shared topic/metadata libraries are workspace-scoped.
+- Active runtime context points at one selected workspace and one active vault.
+- Active vault root contains the vault DB, files, caches, review area, ingest staging, and vault logs.
+- Vault DB: `<vault_root>/db/lmz_main.db`.
+- Vault assets: `<vault_root>/vault/assets/{hash[:2]}/{storage_id}.{ext}`.
+- Vault notes: `<vault_root>/vault/notes/{hash[:2]}/{storage_id}.md`.
+- WD tag cache: `<vault_root>/wd-tags/{hash[:2]}/{storage_id}.json`.
+- Thumbnails: `<vault_root>/ui_cache/thumbnails/{hash[:2]}/{storage_id}.jpg`.
+- Review quarantine: `<vault_root>/review/`.
+- Local ingest staging: `<vault_root>/local_ingest/`.
+- Online ingest staging: `<vault_root>/online_ingest/`.
+- Vault logs: `<vault_root>/logs/raw/`, `<vault_root>/logs/structured/`.
+- Startup logs: `logs/startup/raw/`, `logs/startup/structured/`.
+- Secrets: `secrets/`.
+
 ## Documentation Notes
 
 - `docs/lmz_architecture.md`: durable architecture details.
@@ -116,96 +103,6 @@ VSCode-friendly test launchers:
 - `/cleanup-review`.
 - `/sort-newest`, `/sort-oldest`, `/sort-artist`.
 - `/media-all`, `/media-image`, `/media-video`.
-
-## Done Tasks
-
-- Historical completed work has been moved to `docs/lmz_roadmap.md`, mainly Phase 8 and Phase 9.
-- Current operational completion checkpoints remain below under `Done But Needs Check`.
-
-## Current Test Results
-
-### 2026-05-31 Crosscheck
-
-- Frontend `npm.cmd run check`: passes with 0 Svelte/TS warnings.
-- Backend AST parse check: passes.
-- Backend import smoke: passes when `LMZ_CONFIG_PATH` is pointed at the mock-vault config.
-  - Note: running the import smoke against the active real config may try to open real vault logs.
-- Frontend findings fix validation:
-  - `npm.cmd run check`: passes.
-  - `git diff --check`: passes; Git reports only normal LF/CRLF working-copy warnings.
-  - `npm.cmd run test:mock-vault -- --grep "inspector drafts WD promotion"`: passes.
-  - `npm.cmd run test:mock-vault -- --grep "settings"`: passes.
-  - `npm.cmd run test:mock-vault -- --grep "stats"`: passes.
-  - `npm.cmd run test:mock-vault -- --output test-results-full-fix`: `29 passed`.
-  - Fixed stale Inspector, Settings, and Stats Playwright selectors after current UI copy/layout changes.
-- Latest Inspector chip stabilization check:
-  - `npm.cmd run check`: passes.
-  - `npm.cmd run test:mock-vault -- --grep "inspector drafts WD promotion"`: passes.
-  - Full mock-vault suite has not been rerun after the latest chip stabilization edits.
-
-### Phase A Generated-Vault Performance Findings
-
-- Completed real generated-vault runs:
-  - Initial `800`, `10k`, and `50k`: backend/index/API plus headed Tauri WebView scrolling.
-  - WD-scale reruns: `800`, `10k`, and `50k` with realistic WD pressure (`1` rating, `1` character tag, `20` general WD tags per item).
-  - Facet-count optimization reruns: `800`, `10k`, and `50k` after adding precomputed topic/WD facet counts.
-  - Metadata internals and artist/platform optimization reruns: `10k` and `50k` after Pass 1/2.
-  - `100k`: skipped for now because `50k` exposed the scale costs clearly.
-- Frontend scrolling / virtualization:
-  - headed Tauri scroll tests passed at `10k` and `50k`.
-  - visible tile counts stayed bounded (`50-54` masonry, `36` grid).
-  - mounted video counts stayed bounded (`7` at `10k`, `2` at `50k` in sampled scroll/filter paths).
-  - frontend heap stayed low (`~9.4 MB` at `10k`, `~7.4 MB` at `50k` after video filter).
-  - current evidence points away from scrolling as the primary bottleneck.
-- Backend/API scale:
-  - read-path DB connection cleanup reduced normal `50k` item-list/filter p50s from roughly `129-252ms` to mostly single/tens of ms.
-  - cached metadata counters reduced `/api/metadata-index/status` from about `228ms` p50 at `50k` with `1.1M` WD rows to low/tens of ms.
-  - exact topic/WD filters use indexed metadata lookups when exact values exist.
-  - WD exact filter stayed fast under realistic scale: `50k` / `1.1M` WD rows, `items-filter-wd-tag` p50 `~17ms`.
-- WD/topic facets and suggestions:
-  - realistic `50k` WD run before facet counts exposed the bottleneck:
-    - `facets-wd-tag` p50 `~1201ms`, p95 `~2332ms`.
-    - `search-suggestions-wd-tag` p50 `~831ms`.
-  - precomputed facet-count table fixed the interactive counter path:
-    - `800`: `17.6k` WD rows, `928` facet-count rows, `facets-wd-tag` p50 `~4ms`.
-    - `10k`: `220k` WD rows, `9103` facet-count rows, `facets-wd-tag` p50 `~18ms`, WD suggestions p50 `~16ms`.
-    - `50k`: `1.1M` WD rows, `30253` facet-count rows, `facets-wd-tag` p50 `~19ms`, WD suggestions p50 `~32ms`.
-- Artist/platform facets and filters:
-  - artist/platform facets now use the same facet-count path as topic/WD counters.
-  - `50k` Pass 2 backend API rerun:
-    - `items-filter-artist` p50 `~9ms`.
-    - `items-filter-platform` p50 `~19ms`.
-    - `facets-artist` p50 `~7ms`.
-    - `facets-platform` p50 `~6ms`.
-    - `search-suggestions-artist` p50 `~17ms`.
-- RAM:
-  - backend memory remained stable enough for these profiles (`~75 MB` at `800`, `~82-85 MB` at `10k`, `~120 MB` at `50k` after WD/facet-count runs).
-  - no RAM explosion observed.
-- Primary bottlenecks:
-  - full metadata index rebuild remains the largest backend cost.
-    - realistic WD `10k`: `~30-31s` after Pass 1/2.
-    - realistic WD `50k`: `~190-193s` after Pass 1/2.
-  - topic/WD filtered item queries still sometimes land in tens of ms at `50k`.
-  - broad text search still uses `LIKE '%term%'` paths.
-- Next optimization targets:
-  - further inspect full metadata rebuild cost.
-  - profile topic/WD filtered item paging.
-  - evaluate FTS5 for broad text discovery.
-  - rerun headed Tauri/WebView scroll tests after backend changes if needed.
-  - rerun `100k` only after the above improvements.
-
-### Remaining Optimization Sequence
-
-- Pass 3 - remaining metadata/query scale:
-  - Pass 3A low-risk cleanup is mostly implemented:
-    - facet fallback scan avoids scanning when ready count tables simply have zero matches.
-    - full metadata rebuild reports stage timing.
-    - normal full rebuild skips deep stale validation by default.
-  - Still pending:
-    - inspect query plans for topic/WD filtered paging.
-    - decide on composite indexes from measured plans.
-    - evaluate FTS5 for broad text search.
-  - defer `100k` until Pass 3A/3B results are clean.
 
 ## Deferred / Will Do Later
 
@@ -261,6 +158,103 @@ VSCode-friendly test launchers:
 
 - YouTube community partial policy:
   - one failed expected image can still keep the post retryable.
+
+## Current Issues
+
+- Mojibake check: no actual mojibake found in project source/docs during 2026-05-31 scan; apparent warning-icon mojibake was terminal encoding.
+- Vault repair/replace-delete mechanics need a focused data-flow audit:
+  - After review replacement testing, metadata index rows did not reliably reflect the replacement result.
+  - A repeat click/freeze scenario during similar-image review testing may have allowed duplicate replacement/commit behavior.
+  - Health audit showed orphan assets, WD cache files, and thumbnails in the test vault after replace/delete-like flows.
+  - At least one deleted note was removed correctly while the paired asset/cache remained, creating audit errors.
+  - These findings were discovered through browser-extension similarity testing, but they likely belong to core review/delete/repair flows rather than extension code.
+  - Test-vault damage can stay for now and should be used to improve repair mechanics.
+- Data-flow ownership audit is needed after current findings are fixed; DB, Markdown, metadata index, RAM/search index, and frontend draft state should be mapped flow-by-flow.
+- Inspector chip action UX is still not fully settled long-term:
+  - WD promotion toggle is covered by targeted mock-vault tests.
+  - Current test validates handler wiring through synthetic click events, not real mouse hit stability.
+  - Real-vault/manual smoke should verify WD promote/unpromote, WD remove, saved topic rename/remove, and hover action behavior.
+
+## Workspace / Vault Control Backlog
+
+### P0 Stability / Startup
+
+- Investigate startup white box.
+- Audit why `POST /api/logs/ui` can return `503 Service Unavailable` during startup/launcher mode.
+- Verify launcher-safe API routes stay available before workspace/vault activation.
+
+### P1 Workspace / Vault Runtime
+
+- Add/update workspace creation so it is global, not Obsidian-only.
+- Add vault creation flow.
+- Audit vault switching reliability across DB paths, search index, metadata index, watchdogs, logs, review cache, RAM/search state, and frontend stores.
+- Design and implement vault merge flow.
+- Evaluate workspace merge later after vault merge behavior is clear.
+- Verify vault/workspace internals keep relative paths where practical.
+- Keep config/workspace YAML paths machine-local/absolute where needed.
+- Use relocation/recovery flows to handle synced config files whose absolute paths moved across machines.
+
+### P1 Maintenance Safety
+
+- Audit Settings maintenance buttons, especially actions that touch DB state.
+- Ensure destructive maintenance actions clearly show selected workspace/vault before execution.
+- Prevent maintenance actions from crashing the app when runtime/vault is missing or paths are invalid.
+- Keep UI maintenance behavior aligned with script maintenance behavior.
+
+### P1 Index Systems
+
+- Audit search index activation/reset/hydration on startup, workspace load, vault switch, and vault relocation.
+- Audit metadata index activation/reset/hydration and repair/watchdog lifecycle on the same transitions.
+- Check review cache, RAM/search indexes, and other long-lived state for stale-vault leakage.
+
+### P2 Import / Export
+
+- Audit current vault export behavior.
+- Audit current vault import behavior.
+- Decide whether workspace export/import should exist separately from vault export/import.
+- Ensure imports do not preserve wrong machine-specific absolute paths.
+- Decide package scope for assets, notes, DB, config, workspace metadata, logs, and secrets.
+
+### P2 Settings UX
+
+- Redesign workspace/vault/maintenance settings sections for clearer state and actions.
+- Make path state explicit: active, valid, missing, relocated, synced-from-another-machine risk.
+- Fix confusing input boxes in workspace/vault/settings/maintenance panels.
+
+### P2 Auth
+
+- Add clearer authentication UI.
+- Improve auth scan output and per-platform state.
+- Show what path/token/cookie source is being checked where possible.
+
+## Issue Remediation Plan
+
+### Next Documentation / Drift Pass
+
+- Review `docs/lmz_architecture.md` against current backend/frontend shape.
+- Reconcile `docs/lmz_roadmap.md` phase notes with current status.
+- Keep status doc as the operational handoff source.
+
+### Recommended Fix Batches
+
+1. Run focused real-vault smoke for Settings, Stats, Inspector, Ingestion.
+2. Do a data-flow audit:
+   - Inspector save.
+   - online queue ingest.
+   - local ingest.
+   - review replace.
+   - item delete.
+   - vault health repair.
+   - artist merge/rename.
+   - WD tag promotion/removal.
+3. Rerun full `npm.cmd run test:mock-vault` after the current Inspector chip stabilization is finalized.
+4. Continue remaining real-vault validation for P0/P1/P2/P3 smoke items.
+5. Audit workspace/vault control, path model, maintenance safety, import/export, and auth flows.
+
+## Done Tasks
+
+- Historical completed work has been moved to `docs/lmz_roadmap.md`, mainly Phase 8 and Phase 9.
+- Current operational completion checkpoints remain below under `Done But Needs Check`.
 
 ## Done But Needs Check
 
@@ -590,40 +584,3 @@ VSCode-friendly test launchers:
 - **Frontend Dependencies:** Run `npm outdated` in the `frontend/` directory to see a table of current vs. latest npm packages.
 - **Backend Dependencies:** Run `pip list --outdated` with your Python virtual environment activated to check for updates on PyPI. Note: `yt-dlp` and `gallery-dl` are auto-updated by the maintenance script.
 
-## Current Issues
-
-- Mojibake check: no actual mojibake found in project source/docs during 2026-05-31 scan; apparent warning-icon mojibake was terminal encoding.
-- Vault repair/replace-delete mechanics need a focused data-flow audit:
-  - After review replacement testing, metadata index rows did not reliably reflect the replacement result.
-  - A repeat click/freeze scenario during similar-image review testing may have allowed duplicate replacement/commit behavior.
-  - Health audit showed orphan assets, WD cache files, and thumbnails in the test vault after replace/delete-like flows.
-  - At least one deleted note was removed correctly while the paired asset/cache remained, creating audit errors.
-  - These findings were discovered through browser-extension similarity testing, but they likely belong to core review/delete/repair flows rather than extension code.
-  - Test-vault damage can stay for now and should be used to improve repair mechanics.
-- Data-flow ownership audit is needed after current findings are fixed; DB, Markdown, metadata index, RAM/search index, and frontend draft state should be mapped flow-by-flow.
-- Inspector chip action UX is still not fully settled long-term:
-  - WD promotion toggle is covered by targeted mock-vault tests.
-  - Current test validates handler wiring through synthetic click events, not real mouse hit stability.
-  - Real-vault/manual smoke should verify WD promote/unpromote, WD remove, saved topic rename/remove, and hover action behavior.
-## Issue Remediation Plan
-
-### Next Documentation / Drift Pass
-
-- Review `docs/lmz_architecture.md` against current backend/frontend shape.
-- Reconcile `docs/lmz_roadmap.md` phase notes with current status.
-- Keep status doc as the operational handoff source.
-
-### Recommended Fix Batches
-
-1. Run focused real-vault smoke for Settings, Stats, Inspector, Ingestion.
-2. Do a data-flow audit:
-   - Inspector save.
-   - online queue ingest.
-   - local ingest.
-   - review replace.
-   - item delete.
-   - vault health repair.
-   - artist merge/rename.
-   - WD tag promotion/removal.
-3. Rerun full `npm.cmd run test:mock-vault` after the current Inspector chip stabilization is finalized.
-4. Continue remaining real-vault validation for P0/P1/P2/P3 smoke items.
