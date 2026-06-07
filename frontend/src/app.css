@@ -83,22 +83,24 @@
     border-color: var(--border-hover);
   }
 
-  /* Scrollbar Styling — Unified design (Inspector floating capsule structure + Vault colors) */
-  * {
-    scrollbar-width: auto;
-    scrollbar-color: #30363d transparent;
+  /* Scrollbar Styling — Unified design (Inspector floating capsule structure + Vault colors + Custom SVG arrows) */
+  @supports (-moz-appearance: none) {
+    * {
+      scrollbar-width: auto;
+      scrollbar-color: #30363d transparent;
+    }
   }
 
   ::-webkit-scrollbar {
-    width: 16px;
-    height: 16px;
+    width: 12px;
+    height: 12px;
   }
   ::-webkit-scrollbar-track {
     background: transparent;
   }
   ::-webkit-scrollbar-thumb {
     background: #30363d;
-    border: 4px solid transparent;
+    border: 3px solid transparent;
     background-clip: content-box;
     border-radius: 999px;
     min-height: 40px;
@@ -108,16 +110,50 @@
     background-clip: content-box;
   }
   ::-webkit-scrollbar-button {
-    display: none !important;
+    width: 12px;
+    height: 12px;
+    background-color: transparent;
+    background-repeat: no-repeat;
+    background-position: center;
+    display: block;
+  }
+  ::-webkit-scrollbar-button:vertical:start:decrement {
+    background-image: url("data:image/svg+xml,%3Csvg width='12' height='12' viewBox='0 0 12 12' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M5.36 3.75 Q6 3.05 6.64 3.75 L9.76 7.85 Q10.45 8.75 9.28 8.75 H2.72 Q1.55 8.75 2.24 7.85 Z' fill='%23484f58'/%3E%3C/svg%3E");
+  }
+  ::-webkit-scrollbar-button:vertical:end:increment {
+    background-image: url("data:image/svg+xml,%3Csvg width='12' height='12' viewBox='0 0 12 12' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M2.72 3.25 H9.28 Q10.45 3.25 9.76 4.15 L6.64 8.25 Q6 8.95 5.36 8.25 L2.24 4.15 Q1.55 3.25 2.72 3.25 Z' fill='%23484f58'/%3E%3C/svg%3E");
+  }
+  ::-webkit-scrollbar-button:horizontal:start:decrement {
+    background-image: url("data:image/svg+xml,%3Csvg width='12' height='12' viewBox='0 0 12 12' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M8.25 2.72 V9.28 Q8.25 10.45 7.35 9.76 L3.25 6.64 Q2.55 6 3.25 5.36 L7.35 2.24 Q8.25 1.55 8.25 2.72 Z' fill='%23484f58'/%3E%3C/svg%3E");
+  }
+  ::-webkit-scrollbar-button:horizontal:end:increment {
+    background-image: url("data:image/svg+xml,%3Csvg width='12' height='12' viewBox='0 0 12 12' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M3.75 2.72 V9.28 Q3.75 10.45 4.65 9.76 L8.75 6.64 Q9.45 6 8.75 5.36 L4.65 2.24 Q3.75 1.55 3.75 2.72 Z' fill='%23484f58'/%3E%3C/svg%3E");
+  }
+  ::-webkit-scrollbar-button:hover:vertical:start:decrement {
+    background-image: url("data:image/svg+xml,%3Csvg width='12' height='12' viewBox='0 0 12 12' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M5.36 3.75 Q6 3.05 6.64 3.75 L9.76 7.85 Q10.45 8.75 9.28 8.75 H2.72 Q1.55 8.75 2.24 7.85 Z' fill='%238b949e'/%3E%3C/svg%3E");
+  }
+  ::-webkit-scrollbar-button:hover:vertical:end:increment {
+    background-image: url("data:image/svg+xml,%3Csvg width='12' height='12' viewBox='0 0 12 12' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M2.72 3.25 H9.28 Q10.45 3.25 9.76 4.15 L6.64 8.25 Q6 8.95 5.36 8.25 L2.24 4.15 Q1.55 3.25 2.72 3.25 Z' fill='%238b949e'/%3E%3C/svg%3E");
+  }
+  ::-webkit-scrollbar-button:hover:horizontal:start:decrement {
+    background-image: url("data:image/svg+xml,%3Csvg width='12' height='12' viewBox='0 0 12 12' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M8.25 2.72 V9.28 Q8.25 10.45 7.35 9.76 L3.25 6.64 Q2.55 6 3.25 5.36 L7.35 2.24 Q8.25 1.55 8.25 2.72 Z' fill='%238b949e'/%3E%3C/svg%3E");
+  }
+  ::-webkit-scrollbar-button:hover:horizontal:end:increment {
+    background-image: url("data:image/svg+xml,%3Csvg width='12' height='12' viewBox='0 0 12 12' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M3.75 2.72 V9.28 Q3.75 10.45 4.65 9.76 L8.75 6.64 Q9.45 6 8.75 5.36 L4.65 2.24 Q3.75 1.55 3.75 2.72 Z' fill='%238b949e'/%3E%3C/svg%3E");
+  }
+  ::-webkit-scrollbar-button:hover {
+    background-color: transparent;
   }
   ::-webkit-scrollbar-corner {
     background: transparent;
   }
 
   /* Utility class for tight/thin scrollbars (reusable across settings, review list, overlays) */
-  .sleek-scrollbar {
-    scrollbar-width: thin;
-    scrollbar-color: #30363d transparent;
+  @supports (-moz-appearance: none) {
+    .sleek-scrollbar {
+      scrollbar-width: thin;
+      scrollbar-color: #30363d transparent;
+    }
   }
   .sleek-scrollbar::-webkit-scrollbar {
     width: 10px;
@@ -138,8 +174,10 @@
   }
 
   /* Utility class to hide scrollbars completely (reusable for carousels, horizontal lists) */
-  .hide-scrollbar {
-    scrollbar-width: none !important;
+  @supports (-moz-appearance: none) {
+    .hide-scrollbar {
+      scrollbar-width: none !important;
+    }
   }
   .hide-scrollbar::-webkit-scrollbar {
     display: none !important;

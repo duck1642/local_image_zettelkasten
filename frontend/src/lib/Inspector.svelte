@@ -771,7 +771,7 @@
 
 <style>
   .inspector {
-    --inspector-scrollbar-gutter-width: 18px;
+    --inspector-scrollbar-gutter-width: 12px;
     background: var(--bg-main);
     display: flex;
     flex-direction: column;
