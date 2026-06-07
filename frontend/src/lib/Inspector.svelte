@@ -660,19 +660,19 @@
           <p>Loading details...</p>
       </div>
     {/if}
+    {#if fullItem}
+      <InspectorMediaPreview
+        {item}
+        {group}
+        {currentIndex}
+        on:focus={(event) => toggleFocus(event.detail.mode, event.detail.startTime)}
+        on:prev={prevItem}
+        on:next={nextItem}
+        on:time={(event) => previewVideoTime = event.detail}
+      />
+
       <!-- Scrollable Body -->
       <div class="inspector-body">
-        {#if fullItem}
-          <InspectorMediaPreview
-            {item}
-            {group}
-            {currentIndex}
-            on:focus={(event) => toggleFocus(event.detail.mode, event.detail.startTime)}
-            on:prev={prevItem}
-            on:next={nextItem}
-            on:time={(event) => previewVideoTime = event.detail}
-          />
-
         <InspectorMetadataGrid
           {item}
           {artist}
@@ -751,8 +751,8 @@
                 </button>
             </div>
         </div>
-      {/if}
-    </div>
+      </div>
+    {/if}
   {/if}
 
   <MetadataActionModal
