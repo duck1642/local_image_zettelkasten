@@ -80,7 +80,7 @@
         </button>
       </div>
       {#if suggestionsOpen}
-        <div class="topic-suggestions" role="listbox">
+        <div class="topic-suggestions sleek-scrollbar" role="listbox">
           {#each suggestions as suggestion, index}
             <button
               type="button"
@@ -99,7 +99,7 @@
           {/each}
         </div>
       {:else if suggestionsLoading}
-        <div class="topic-suggestions loading">Loading...</div>
+        <div class="topic-suggestions loading sleek-scrollbar">Loading...</div>
       {/if}
     </div>
   {/if}

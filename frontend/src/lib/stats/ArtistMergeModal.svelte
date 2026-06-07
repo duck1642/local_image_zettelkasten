@@ -38,7 +38,7 @@
         <div class="empty-state error">{mergeError}</div>
       {/if}
 
-      <div class="merge-source-list">
+      <div class="merge-source-list sleek-scrollbar">
         {#each mergeCandidates as artist}
           <button
             type="button"

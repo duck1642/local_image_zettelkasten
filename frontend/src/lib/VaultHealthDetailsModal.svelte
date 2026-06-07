@@ -16,7 +16,7 @@
       <h4>Vault Health Details</h4>
       <button type="button" on:click={onClose}>Close</button>
     </div>
-    <div class="health-detail">
+    <div class="health-detail sleek-scrollbar">
       {#if countValues(healthReport.missing_files)}
         <div class="health-section-title">Missing Files</div>
         {#each detailValues(healthReport.details?.missing_files || healthReport.missing_files) as row}

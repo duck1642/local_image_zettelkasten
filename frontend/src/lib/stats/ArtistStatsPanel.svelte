@@ -27,7 +27,7 @@
 </script>
 
 <div class="artist-layout">
-  <div class="artist-list" style={`width: ${artistListWidth}px;`}>
+  <div class="artist-list sleek-scrollbar" style={`width: ${artistListWidth}px;`}>
     {#if loading && visibleArtists.length === 0}
       <div class="empty-state">Loading...</div>
     {:else if visibleArtists.length === 0}

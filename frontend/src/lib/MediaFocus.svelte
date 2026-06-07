@@ -502,7 +502,7 @@
     {#if filmstripOpen}
       <!-- svelte-ignore a11y-no-static-element-interactions -->
       <div class="filmstrip" class:hidden={!controlsVisible || uiHidden} class:disable-clicks={disableFilmstripClicks} on:click|stopPropagation on:keydown|stopPropagation>
-        <div class="filmstrip-row">
+        <div class="filmstrip-row hide-scrollbar">
           {#each group.items as entry, index (entry.hash)}
             <button
               class="filmstrip-thumb"
@@ -1031,14 +1031,7 @@
     padding: 4px 0;
   }
 
-  /* Hide scrollbar of filmstrip */
-  .filmstrip-row::-webkit-scrollbar {
-    display: none;
-  }
-  .filmstrip-row {
-    scrollbar-width: none;
-    -ms-overflow-style: none;
-  }
+
 
   .filmstrip-thumb {
     position: relative;

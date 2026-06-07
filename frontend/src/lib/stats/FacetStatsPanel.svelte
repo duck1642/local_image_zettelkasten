@@ -34,7 +34,7 @@
   }
 </script>
 
-<div class="stats-list">
+<div class="stats-list sleek-scrollbar">
   {#if loading}
     <div class="empty-state">Loading...</div>
   {:else if error}

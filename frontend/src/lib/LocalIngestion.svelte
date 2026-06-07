@@ -396,7 +396,7 @@
             placeholder="Optional default artist"
           />
           {#if showArtistSuggestions && artistOptions.length > 0}
-            <div bind:this={artistSuggestionsListEl} class="custom-dropdown-popover artist-suggestions">
+            <div bind:this={artistSuggestionsListEl} class="custom-dropdown-popover artist-suggestions sleek-scrollbar">
               {#each artistOptions as artist, i}
                 <button
                   type="button"
@@ -438,7 +438,7 @@
       </button>
     </div>
 
-    <div class="local-list">
+    <div class="local-list sleek-scrollbar">
       {#each localPaths as path, index}
         <div class="local-item">
           <span class="local-path" title={path}>{path}</span>
@@ -507,7 +507,7 @@
           <span>Retry Session</span>
         </button>
       </div>
-      <div class="local-results">
+      <div class="local-results sleek-scrollbar">
         {#each localStatus.results.slice(-120).reverse() as result}
           <div class="result-line">
             <span class="result-status {result.status}">[{result.status}]</span>

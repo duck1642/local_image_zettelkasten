@@ -97,7 +97,7 @@
             </label>
 
             {#if alphabetFilterOpen}
-              <div class="letter-tabs" aria-label="First character filter">
+              <div class="letter-tabs hide-scrollbar" aria-label="First character filter">
                 {#each letterFilters as letter}
                   <button
                     type="button"

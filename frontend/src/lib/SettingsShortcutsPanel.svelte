@@ -28,7 +28,7 @@
     <!-- Console Commands Column -->
     <div class="shortcuts-column">
       <h5>Vault Commands (/)</h5>
-      <div class="shortcuts-list-scroll">
+      <div class="shortcuts-list-scroll sleek-scrollbar">
         <div class="shortcut-row"><span class="key">/grid</span><span class="desc">Switch Vault Grid</span></div>
         <div class="shortcut-row"><span class="key">/masonry</span><span class="desc">Switch Vault Masonry</span></div>
         <div class="shortcut-row"><span class="key">/zoom-in</span><span class="desc">Increase Tile Size</span></div>

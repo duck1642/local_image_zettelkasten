@@ -286,7 +286,7 @@
         <div class="loading-text">Scanning local workspaces...</div>
       </div>
     {:else}
-      <div class="launcher-body">
+      <div class="launcher-body sleek-scrollbar">
         {#if relocateState.type}
           <!-- Relocation Form View -->
           <div class="form-box">
@@ -327,7 +327,7 @@
                 </button>
               </div>
               
-              <div class="launcher-workspace-list">
+              <div class="launcher-workspace-list sleek-scrollbar">
                 {#each workspaces as w}
                   {#if w.exists}
                     <button
@@ -398,7 +398,7 @@
                 <div class="loading-text">Loading vaults...</div>
               </div>
             {:else if vaults.length > 0}
-              <div class="launcher-workspace-list">
+              <div class="launcher-workspace-list sleek-scrollbar">
                 {#each vaults as v}
                   <button
                     class="launcher-workspace-row"

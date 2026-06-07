@@ -348,7 +348,7 @@
         <button on:click={openExternal}>Open Externally</button>
     </div>
 
-    <div class="log-output" bind:this={logContainer}>
+    <div class="log-output sleek-scrollbar" bind:this={logContainer}>
         {#each filteredLogs as log (log.id)}
             {#if currentMode === 'Normal'}
                 <div class="line">

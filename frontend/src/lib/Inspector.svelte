@@ -798,31 +798,7 @@
     display: flex;
     flex-direction: column;
     gap: 12px;
-    scrollbar-width: auto;
-    scrollbar-color: rgba(255, 255, 255, 0.28) transparent;
   }
-
-  .inspector-body::-webkit-scrollbar {
-    width: 16px;
-  }
-
-  .inspector-body::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  .inspector-body::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.22);
-    border-radius: 10px;
-    border: 4px solid transparent;
-    background-clip: content-box;
-    min-height: 40px;
-  }
-
-  .inspector-body::-webkit-scrollbar-thumb:hover {
-    background: rgba(255, 255, 255, 0.34);
-    background-clip: content-box;
-  }
-
 
   .group-container {
     background: var(--bg-panel);

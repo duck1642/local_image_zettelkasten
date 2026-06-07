@@ -38,7 +38,7 @@
     <span class="total-badge">{items.length} items</span>
   </div>
 
-  <div class="queue-scroll">
+  <div class="queue-scroll sleek-scrollbar">
     <div class="queue-section-header">
       <span class="section-indicator blue-dot"></span>
       <span class="section-title">Pending Decisions ({pendingItems.length})</span>
@@ -149,19 +149,7 @@
     gap: 8px;
   }
 
-  .queue-scroll::-webkit-scrollbar {
-    width: 6px;
-  }
-  .queue-scroll::-webkit-scrollbar-track {
-    background: transparent;
-  }
-  .queue-scroll::-webkit-scrollbar-thumb {
-    background: #30363d;
-    border-radius: 3px;
-  }
-  .queue-scroll::-webkit-scrollbar-thumb:hover {
-    background: #484f58;
-  }
+
 
   .queue-section-header {
     display: flex;

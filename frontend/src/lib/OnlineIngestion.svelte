@@ -727,7 +727,7 @@
       </div>
 
       {#if directiveSuggestionsOpen && directiveSuggestions.length > 0}
-        <div bind:this={directiveSuggestionsListEl} class="directive-suggestions" style="top: {directiveSuggestionTop}px; left: {directiveSuggestionLeft}px;">
+        <div bind:this={directiveSuggestionsListEl} class="directive-suggestions sleek-scrollbar" style="top: {directiveSuggestionTop}px; left: {directiveSuggestionLeft}px;">
           {#each directiveSuggestions as suggestion, i}
             <button
               type="button"
@@ -783,7 +783,7 @@
 
   <div class="monitor-area">
     <div class="monitor-header">Ingestion Monitor</div>
-    <div class="monitor-logs" bind:this={monitorContainer}>
+    <div class="monitor-logs sleek-scrollbar" bind:this={monitorContainer}>
       {#each monitorLogs as log (log.id)}
         <div class="log-line">
           <span class="time">{log.timestamp?.split(' ')[1] || log.timestamp || ''}</span>

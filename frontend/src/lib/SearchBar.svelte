@@ -292,7 +292,7 @@
       </button>
     {/if}
     {#if showSuggestions && suggestions.length > 0}
-      <ul bind:this={suggestionsListEl} class="suggestions-dropdown" style={`left: ${suggestionLeft}px;`}>
+      <ul bind:this={suggestionsListEl} class="suggestions-dropdown sleek-scrollbar" style={`left: ${suggestionLeft}px;`}>
         {#each suggestions as suggestion, i}
           <li>
             <button type="button" class:active={i === activeSuggestionIndex} on:click={() => selectSuggestion(suggestion.value)}>

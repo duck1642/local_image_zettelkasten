@@ -606,7 +606,6 @@
     flex: 1;
     margin: 0;
     padding: 2px 8px 2px 0;
-    scrollbar-width: thin;
   }
 
   .maintenance-grid {
@@ -1067,34 +1066,7 @@
   }
 
 
-  /* Premium, dark-themed thin scrollbar styling matching other panels */
-  .health-modal .health-detail,
-  .shortcuts-list-scroll {
-    scrollbar-width: thin;
-    scrollbar-color: #30363d transparent;
-  }
 
-  .health-modal .health-detail::-webkit-scrollbar,
-  .shortcuts-list-scroll::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
-  }
-
-  .health-modal .health-detail::-webkit-scrollbar-track,
-  .shortcuts-list-scroll::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  .health-modal .health-detail::-webkit-scrollbar-thumb,
-  .shortcuts-list-scroll::-webkit-scrollbar-thumb {
-    background: #30363d;
-    border-radius: 3px;
-  }
-
-  .health-modal .health-detail::-webkit-scrollbar-thumb:hover,
-  .shortcuts-list-scroll::-webkit-scrollbar-thumb:hover {
-    background: #484f58;
-  }
 
   .shortcuts-list-scroll {
     display: flex;
