@@ -9,7 +9,8 @@ from runtime_context import (
     has_runtime_context,
     try_get_runtime_context,
 )
-from runtime_activation import activate_runtime_context
+from path_policy import validate_workspace_config_paths, workspace_relative_path
+from runtime_activation import activate_runtime_context, active_vault_is_usable
 from api.guards import (
     require_workspace_context,
     require_usable_vault_context,
@@ -313,13 +314,13 @@ def _config_runtime_info() -> dict:
 
     ctx = get_runtime_context()
     active_vault = ctx.active_vault
-    mode = "obsidian" if ctx.root.name.casefold() == "lmz" and ctx.root.parent != ctx.root else "default"
+    mode = "lmz" if ctx.root.name.casefold() == "lmz" and ctx.root.parent != ctx.root else "default"
     return {
         "config_path": str(ctx.config_path),
         "config_root": str(ctx.root),
         "topic_root": str(ctx.topics_dir),
         "workspace_mode": mode,
-        "workspace_label": "Obsidian workspace" if mode == "obsidian" else "Default workspace",
+        "workspace_label": "LMZ workspace" if mode == "lmz" else "Default workspace",
         "workspace_registry": str(REGISTRY_PATH),
         "active_vault": active_vault.id,
         "active_vault_name": active_vault.name,
@@ -356,6 +357,10 @@ async def update_app_config(new_config: dict):
 def _update_app_config_sync(new_config: dict):
     safe_config = _strip_config_secrets(new_config)
     safe_config.pop("_runtime", None)
+    try:
+        validate_workspace_config_paths(safe_config, get_runtime_context().root)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     atomic_write_text(get_runtime_context().config_path, yaml.dump(safe_config, default_flow_style=False, allow_unicode=True))
     invalidate_config_cache()
     return {"status": "success"}
@@ -425,22 +430,22 @@ def _set_workspace_active_sync(body: dict):
     }
 
 
-@router.post("/api/workspaces/obsidian")
-async def add_obsidian_workspace(body: dict):
-    return await asyncio.to_thread(_add_obsidian_workspace_sync, body)
+@router.post("/api/workspaces")
+async def create_workspace(body: dict):
+    return await asyncio.to_thread(_create_workspace_sync, body)
 
 
-def _add_obsidian_workspace_sync(body: dict):
-    from tools.maintenance.setup_obsidian_workspace import setup_obsidian_workspace
+def _create_workspace_sync(body: dict):
+    from tools.maintenance.setup_workspace import setup_lmz_workspace
     from workspaces import register_workspace, workspace_list
 
-    vault_path = str((body or {}).get("path") or "").strip()
-    name = str((body or {}).get("name") or "Obsidian Workspace").strip() or "Obsidian Workspace"
+    parent_path = str((body or {}).get("path") or "").strip()
+    name = str((body or {}).get("name") or "LMZ Workspace").strip() or "LMZ Workspace"
     set_active = bool((body or {}).get("set_active"))
-    if not vault_path:
-        raise HTTPException(status_code=400, detail="Obsidian vault path is required")
+    if not parent_path:
+        raise HTTPException(status_code=400, detail="Workspace parent folder is required")
     try:
-        payload = setup_obsidian_workspace(vault_path)
+        payload = setup_lmz_workspace(parent_path)
         registry = register_workspace(name, payload["config_path"], set_active=set_active)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -451,6 +456,15 @@ def _add_obsidian_workspace_sync(body: dict):
         "restart_required": set_active,
         "items": workspace_list(),
     }
+
+
+@router.post("/api/workspaces/obsidian")
+async def add_obsidian_workspace(body: dict):
+    return await asyncio.to_thread(_add_obsidian_workspace_sync, body)
+
+
+def _add_obsidian_workspace_sync(body: dict):
+    return _create_workspace_sync(body)
 
 
 @router.get("/api/vaults")
@@ -688,20 +702,18 @@ def _load_workspace_sync(workspace_id: str):
         os.environ.pop("LMZ_CONFIG_PATH", None)
         new_ctx = build_runtime_context(config_path)
         
-        # Check if active vault root exists
         active_vault = new_ctx.active_vault
-        if active_vault and active_vault.root:
+        if active_vault and active_vault.root and not active_vault_is_usable(new_ctx):
             vault_root = Path(active_vault.root)
-            if not vault_root.exists():
-                activate_runtime_context(new_ctx, hydrate=False)
-                configure_terminal_logging()
-                return {
-                    "status": "relocate_vault",
-                    "message": f"Vault directory not found at {vault_root}",
-                    "vault_id": active_vault.id,
-                    "vault_name": active_vault.name,
-                    "vault_root": str(vault_root)
-                }
+            activate_runtime_context(new_ctx, hydrate=False)
+            configure_terminal_logging()
+            return {
+                "status": "relocate_vault",
+                "message": f"Vault directory is missing or outside the workspace at {vault_root}",
+                "vault_id": active_vault.id,
+                "vault_name": active_vault.name,
+                "vault_root": str(vault_root)
+            }
         
         activate_runtime_context(new_ctx)
         configure_terminal_logging()
@@ -778,11 +790,16 @@ def _relocate_vault_sync(vault_id: str, new_vault_root: str):
     if "vaults" not in config or clean_id not in config["vaults"]:
         raise HTTPException(status_code=404, detail="Vault not found")
         
-    resolved_root = Path(new_vault_root).resolve()
+    resolved_root = Path(new_vault_root).expanduser().resolve()
     if not resolved_root.exists():
         raise HTTPException(status_code=400, detail=f"Directory does not exist: {resolved_root}")
-        
-    config["vaults"][clean_id]["root"] = str(resolved_root)
+
+    try:
+        stored_root = workspace_relative_path(resolved_root, ctx.root, label="vault root")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    config["vaults"][clean_id]["root"] = stored_root
     _write_config(config)
     
     new_ctx = reload_runtime_context(ctx.config_path)

@@ -580,7 +580,7 @@ def test_obsidian_workspace_setup_creates_lmz_layout_and_resolves_paths(monkeypa
     assert (obsidian_vault / "lmz" / "data" / "topics" / "obsidian_topic.md").exists()
     assert utils.note_path_for(item_hash, storage_id).exists()
     runtime = web_api._load_public_config_sync()["_runtime"]
-    assert runtime["workspace_mode"] == "obsidian"
+    assert runtime["workspace_mode"] == "lmz"
     assert runtime["active_vault"] == "default"
     shutil.rmtree(obsidian_vault, ignore_errors=True)
 
@@ -602,10 +602,10 @@ def test_workspace_api_lists_registers_and_sets_active(monkeypatch, tmp_path):
         assert initial["active"] == "default"
         assert initial["items"][0]["id"] == "default"
 
-        added = web_api._add_obsidian_workspace_sync({"path": str(obsidian_vault), "name": "API Obsidian"})
-        assert any(item["name"] == "API Obsidian" for item in added["items"])
+        added = web_api._create_workspace_sync({"path": str(obsidian_vault), "name": "API Workspace"})
+        assert any(item["name"] == "API Workspace" for item in added["items"])
 
-        workspace_id = next(item["id"] for item in added["items"] if item["name"] == "API Obsidian")
+        workspace_id = next(item["id"] for item in added["items"] if item["name"] == "API Workspace")
         active = web_api._set_workspace_active_sync({"id": workspace_id})
         assert active["restart_required"] is False
         assert active["active"] == workspace_id

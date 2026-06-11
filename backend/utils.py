@@ -222,14 +222,14 @@ def _default_config(ctx: WorkspaceContext | None = None) -> dict:
     vault = runtime.active_vault
     return {
         'paths': {
-            'secrets': str(runtime.secrets_dir),
-            'models': str(runtime.models_dir),
+            'secrets': 'secrets',
+            'models': 'data/models',
         },
         'active_vault': vault.id or 'default',
         'vaults': {
             vault.id or 'default': {
                 'name': vault.name or 'Default',
-                'root': str(vault.root or (runtime.root / 'data' / 'vaults' / 'default')),
+                'root': 'data/vaults/default',
             }
         },
         'ui': {

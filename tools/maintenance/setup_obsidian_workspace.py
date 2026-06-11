@@ -3,130 +3,21 @@ import json
 import sys
 from pathlib import Path
 
-import yaml
-
-
 ROOT = Path(__file__).resolve().parents[2]
-FORBIDDEN = {
-    ROOT,
-    ROOT / "data",
-    ROOT / "config",
-    ROOT / "logs",
-    ROOT / "secrets",
-}
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
-
-def _resolve(path: str | Path) -> Path:
-    return Path(path).expanduser().resolve()
-
-
-def _is_relative_to(path: Path, root: Path) -> bool:
-    try:
-        path.relative_to(root)
-        return True
-    except ValueError:
-        return False
-
-
-def _guard_vault_path(vault_path: Path):
-    resolved = _resolve(vault_path)
-    forbidden = {_resolve(path) for path in FORBIDDEN}
-    if resolved in forbidden:
-        raise ValueError(f"refusing unsafe Obsidian vault path: {resolved}")
-    for path in forbidden:
-        if _is_relative_to(resolved, path):
-            raise ValueError(f"refusing Obsidian vault inside runtime path: {resolved}")
+from tools.maintenance.setup_workspace import lmz_workspace_config, setup_lmz_workspace
 
 
 def obsidian_config() -> dict:
-    return {
-        "external_tools": {
-            "cookies_path": "data/secrets/cookies.txt",
-            "proxy": "",
-            "user_agent": "LMZ Obsidian workspace",
-        },
-        "firewall": {
-            "allowed_extensions": [".jpg", ".jpeg", ".png", ".gif", ".webp", ".jfif", ".mp4", ".webm", ".ogv"],
-            "allowed_mimes": ["image/jpeg", "image/png", "image/gif", "image/webp", "video/mp4", "video/webm", "video/ogg"],
-        },
-        "hash_algorithm": "sha256",
-        "active_vault": "default",
-        "vaults": {
-            "default": {
-                "name": "Default",
-                "root": "data/vaults/default",
-            },
-        },
-        "paths": {
-            "models": "data/models",
-            "secrets": "data/secrets",
-        },
-        "processing": {
-            "background_preset": "white",
-            "custom_color": [255, 255, 255],
-            "flatten_transparency": True,
-        },
-        "tagging": {
-            "enabled": True,
-            "model_repo": "SmilingWolf/wd-vit-tagger-v3",
-            "device": "auto",
-            "display_source": "yaml",
-            "threshold": 0.35,
-            "max_tags": 30,
-            "fail_ingestion_on_error": False,
-            "video": {
-                "enabled": True,
-                "frame_count": 5,
-                "merge_min_frames": 2,
-                "merge_high_confidence": 0.75,
-            },
-        },
-        "ui": {
-            "vault_layout_mode": "masonry",
-            "vault_tile_min_width": 190,
-            "inspector_width": 400,
-            "inspector_visible": True,
-            "ram_track_enabled": False,
-        },
-    }
+    return lmz_workspace_config()
 
 
 def setup_obsidian_workspace(vault_path: str | Path, overwrite_config: bool = False) -> dict:
-    obsidian_vault = _resolve(vault_path)
-    _guard_vault_path(obsidian_vault)
-    workspace = obsidian_vault / "lmz"
-    config_path = workspace / "config.yaml"
-    directories = [
-        workspace / "data" / "topics",
-        workspace / "data" / "vaults" / "default" / "vault" / "notes",
-        workspace / "data" / "vaults" / "default" / "vault" / "assets",
-        workspace / "data" / "vaults" / "default" / "db",
-        workspace / "data" / "vaults" / "default" / "logs" / "raw",
-        workspace / "data" / "vaults" / "default" / "logs" / "structured",
-        workspace / "data" / "vaults" / "default" / "review",
-        workspace / "data" / "vaults" / "default" / "wd-tags",
-        workspace / "data" / "vaults" / "default" / "ui_cache" / "thumbnails",
-        workspace / "data" / "vaults" / "default" / "queues",
-        workspace / "data" / "vaults" / "default" / "batches",
-        workspace / "data" / "vaults" / "default" / "input",
-        workspace / "data" / "vaults" / "default" / "local_ingest",
-        workspace / "data" / "vaults" / "default" / "online_ingest",
-        workspace / "data" / "models",
-        workspace / "data" / "secrets",
-    ]
-    for directory in directories:
-        directory.mkdir(parents=True, exist_ok=True)
-    wrote_config = False
-    if overwrite_config or not config_path.exists():
-        config_path.write_text(yaml.safe_dump(obsidian_config(), sort_keys=False, allow_unicode=True), encoding="utf-8")
-        wrote_config = True
-    return {
-        "obsidian_vault": str(obsidian_vault),
-        "workspace": str(workspace),
-        "config_path": str(config_path),
-        "wrote_config": wrote_config,
-        "directories": [str(path) for path in directories],
-    }
+    payload = setup_lmz_workspace(vault_path, overwrite_config=overwrite_config)
+    payload["obsidian_vault"] = payload["workspace_parent"]
+    return payload
 
 
 def main(argv=None) -> int:

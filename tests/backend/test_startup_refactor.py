@@ -1,5 +1,8 @@
 import importlib
+import shutil
 import sys
+import tempfile
+import time
 from pathlib import Path
 
 import pytest
@@ -123,6 +126,55 @@ def test_launcher_mode_serves_recovery_routes_without_workspace(monkeypatch, tmp
     )
     assert ui_log_response.status_code == 200
     assert ui_log_response.json()["status"] == "ok"
+
+
+def test_launcher_mode_creates_lmz_workspace_and_keeps_legacy_endpoint(monkeypatch, tmp_path):
+    app_module = fresh_api(monkeypatch, tmp_path)
+    workspaces = importlib.import_module("workspaces")
+    registry_path = tmp_path / "workspaces.yaml"
+    write_registry(
+        registry_path,
+        "default",
+        {"default": {"name": "Default", "config_path": "config/config.yaml"}},
+    )
+    monkeypatch.setattr(workspaces, "REGISTRY_PATH", registry_path)
+
+    client = TestClient(app_module.app)
+    key = api_key(client)
+    parent = (Path(tempfile.gettempdir()) / f"lmz-api-workspace-{time.time_ns()}").resolve()
+    legacy_parent = (Path(tempfile.gettempdir()) / f"lmz-api-legacy-workspace-{time.time_ns()}").resolve()
+
+    try:
+        response = client.post(
+            "/api/workspaces",
+            json={"path": str(parent), "name": "API Workspace"},
+            headers={"X-LMZ-API-KEY": key},
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "success"
+        config_path = parent / "lmz" / "config.yaml"
+        assert Path(payload["workspace"]["config_path"]) == config_path
+        saved_config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        assert saved_config["vaults"]["default"]["root"] == "data/vaults/default"
+        assert saved_config["paths"]["models"] == "data/models"
+        assert saved_config["paths"]["secrets"] == "data/secrets"
+        assert saved_config["external_tools"]["cookies_path"] == "data/secrets/cookies.txt"
+        load = client.post("/api/workspaces/api-workspace/load", headers={"X-LMZ-API-KEY": key})
+        assert load.status_code == 200
+        assert load.json()["status"] == "success"
+
+        legacy = client.post(
+            "/api/workspaces/obsidian",
+            json={"path": str(legacy_parent), "name": "Legacy Workspace"},
+            headers={"X-LMZ-API-KEY": key},
+        )
+        assert legacy.status_code == 200
+        assert Path(legacy.json()["workspace"]["config_path"]) == legacy_parent / "lmz" / "config.yaml"
+    finally:
+        shutil.rmtree(parent, ignore_errors=True)
+        shutil.rmtree(legacy_parent, ignore_errors=True)
 
 
 def test_missing_workspace_config_load_does_not_persist_active(monkeypatch, tmp_path):
@@ -254,6 +306,47 @@ def test_vault_relocation_activates_runtime_and_vault_logs(monkeypatch, tmp_path
 
     assert relocate.status_code == 200
     assert relocate.json()["status"] == "success"
+    saved_config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    assert saved_config["vaults"]["default"]["root"] == "data/vaults/default"
     location = client.get("/api/logs/location").json()
     assert location["mode"] == "vault"
     assert location["vault"] == "default"
+
+
+def test_vault_relocation_rejects_outside_workspace(monkeypatch, tmp_path):
+    app_module = fresh_api(monkeypatch, tmp_path)
+    workspaces = importlib.import_module("workspaces")
+    registry_path = tmp_path / "workspaces.yaml"
+    ws_root = tmp_path / "workspace"
+    ws_root.mkdir()
+    config_path = ws_root / "config.yaml"
+    workspace_config(config_path)
+    vault_root = ws_root / "data" / "vaults" / "default"
+    vault_root.mkdir(parents=True)
+    outside_root = tmp_path / "outside-vault"
+    outside_root.mkdir()
+    write_registry(
+        registry_path,
+        "default",
+        {
+            "default": {"name": "Default", "config_path": "config/config.yaml"},
+            "ready": {"name": "Ready", "config_path": str(config_path)},
+        },
+    )
+    monkeypatch.setattr(workspaces, "REGISTRY_PATH", registry_path)
+    patch_runtime_services(monkeypatch)
+
+    client = TestClient(app_module.app)
+    key = api_key(client)
+    response = client.post("/api/workspaces/ready/load", headers={"X-LMZ-API-KEY": key})
+    assert response.json()["status"] == "success"
+
+    relocate = client.post(
+        "/api/vaults/relocate",
+        json={"vault_id": "default", "new_vault_root": str(outside_root)},
+        headers={"X-LMZ-API-KEY": key},
+    )
+
+    assert relocate.status_code == 400
+    saved_config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    assert saved_config["vaults"]["default"]["root"] == "data/vaults/default"

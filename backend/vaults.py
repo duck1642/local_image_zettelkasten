@@ -9,6 +9,7 @@ from pathlib import Path
 import yaml
 
 from db.sqlite_operator import allocate_storage_id, init_database
+from path_policy import vault_root_is_inside_workspace, vault_root_is_usable
 from runtime_context import VaultContext, WorkspaceContext, get_runtime_context
 from utils import atomic_write_text
 
@@ -212,8 +213,8 @@ def set_active_vault(vault_id: str, ctx: WorkspaceContext | None = None) -> dict
     if vault_id not in config["vaults"]:
         raise KeyError(f"vault not found: {vault_id}")
     root = vault_root(config["vaults"][vault_id], ctx)
-    if not root.exists():
-        raise ValueError(f"vault root does not exist: {root}")
+    if not vault_root_is_usable(root, runtime.root):
+        raise ValueError(f"vault root is missing or outside workspace: {root}")
     config["active_vault"] = vault_id
     _write_config(config, ctx)
 
@@ -242,6 +243,8 @@ def delete_vault(vault_id: str, confirm: bool = False, ctx: WorkspaceContext | N
     if vault_id not in config["vaults"]:
         raise KeyError(f"vault not found: {vault_id}")
     root = vault_root(config["vaults"][vault_id], ctx)
+    if not vault_root_is_inside_workspace(root, _config_root(ctx)):
+        raise ValueError(f"vault root is outside workspace: {root}")
     if root.exists() and _vault_non_empty(root) and not confirm:
         raise ValueError("vault is not empty; pass confirm=true")
     if root.exists():

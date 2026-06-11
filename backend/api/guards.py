@@ -1,4 +1,5 @@
 from fastapi import HTTPException
+from path_policy import vault_root_is_usable
 from runtime_context import get_runtime_context, RuntimeNotLoadedError, WorkspaceContext, VaultContext
 from runtime_activation import active_vault_is_usable
 
@@ -25,7 +26,7 @@ def require_usable_target_vault_context(vault_id: str) -> VaultContext:
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    if not root or not root.exists():
+    if not root or not vault_root_is_usable(root, ctx.root):
         raise HTTPException(status_code=503, detail=f"Target vault is offline or missing: {vault_id}")
 
     target_workspace_ctx = _ctx_for_vault(vault_id, ctx)

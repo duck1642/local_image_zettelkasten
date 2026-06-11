@@ -5,10 +5,10 @@
   export let workspaceBusy = false;
   export let workspaceRestartRequired = false;
   export let workspaceResult = '';
-  export let obsidianPath = '';
-  export let obsidianName = 'Obsidian Workspace';
+  export let workspaceParentPath = '';
+  export let workspaceName = 'LMZ Workspace';
   export let onSetActiveWorkspace: (id: string) => void;
-  export let onAddObsidianWorkspace: () => void;
+  export let onCreateWorkspace: () => void;
 </script>
 
 <div class="workspace-actions settings-workspace-actions">
@@ -63,13 +63,13 @@
     {/each}
   </div>
 
-  <h4 class="settings-section-title settings-subsection-muted">Register Obsidian Workspace</h4>
+  <h4 class="settings-section-title settings-subsection-muted">Create LMZ Workspace</h4>
   <div class="add-workspace settings-dashed-panel">
-    <input class="settings-mono-input" type="text" placeholder="Full path to Obsidian vault" bind:value={obsidianPath} />
-    <input type="text" placeholder="Workspace label" bind:value={obsidianName} />
-    <button class="settings-icon-button" type="button" on:click={onAddObsidianWorkspace} disabled={workspaceBusy || !obsidianPath.trim()}>
+    <input class="settings-mono-input" type="text" placeholder="Parent folder for LMZ workspace" bind:value={workspaceParentPath} />
+    <input type="text" placeholder="Workspace label" bind:value={workspaceName} />
+    <button class="settings-icon-button" type="button" on:click={onCreateWorkspace} disabled={workspaceBusy || !workspaceParentPath.trim()}>
       <IconPlus size={11} />
-      Add Obsidian
+      Create Workspace
     </button>
   </div>
   

@@ -26,7 +26,7 @@
     previewVaultMergeApi,
     pruneWorkspaceMetadata,
     rebuildWorkspaceMetadata,
-    registerObsidianWorkspace,
+    createWorkspace as createWorkspaceApi,
     removeVault,
     repairVaultHealthApi,
     scanAuth,
@@ -64,8 +64,8 @@
   let workspaceActive = '';
   let workspaceBusy = false;
   let workspaceResult = '';
-  let obsidianPath = '';
-  let obsidianName = 'Obsidian Workspace';
+  let workspaceParentPath = '';
+  let workspaceName = 'LMZ Workspace';
   let workspaceRestartRequired = false;
   let vaults: any[] = [];
   let vaultActive = '';
@@ -158,21 +158,21 @@
     }
   }
 
-  async function addObsidianWorkspace() {
-    const path = obsidianPath.trim();
+  async function createWorkspace() {
+    const path = workspaceParentPath.trim();
     if (!path || workspaceBusy) return;
     workspaceBusy = true;
     workspaceResult = '';
     try {
-      const payload = await registerObsidianWorkspace(path, obsidianName.trim() || 'Obsidian Workspace');
+      const payload = await createWorkspaceApi(path, workspaceName.trim() || 'LMZ Workspace');
       workspaceActive = String(payload?.active || workspaceActive);
       workspaces = Array.isArray(payload?.items) ? payload.items : workspaces;
       workspaceResult = 'workspace registered';
-      obsidianPath = '';
-      uiLog('INFO', 'Obsidian workspace registered', { path });
+      workspaceParentPath = '';
+      uiLog('INFO', 'Workspace registered', { path });
     } catch (error) {
       workspaceResult = `error: ${String(error)}`;
-      uiLog('ERROR', 'Obsidian workspace registration failed', { path, error: String(error) });
+      uiLog('ERROR', 'Workspace registration failed', { path, error: String(error) });
     } finally {
       workspaceBusy = false;
     }
@@ -538,10 +538,10 @@
           {workspaceBusy}
           {workspaceRestartRequired}
           {workspaceResult}
-          bind:obsidianPath
-          bind:obsidianName
+          bind:workspaceParentPath
+          bind:workspaceName
           onSetActiveWorkspace={setActiveWorkspace}
-          onAddObsidianWorkspace={addObsidianWorkspace}
+          onCreateWorkspace={createWorkspace}
         />
       </SettingsRuntimePanel>
     {:else if activeSettingsTab === 'vaults'}

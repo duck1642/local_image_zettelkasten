@@ -599,4 +599,10 @@ VSCode-friendly test launchers:
   - Target-vault health/repair/backup/export paths validate the requested vault root before touching vault files.
   - Recreated ignored disposable `tests/generated/test-workspace` and initialized its empty test vault.
   - Guard regression and startup/runtime-focused backend tests pass; needs longer real-vault recovery smoke before closing fully.
+- Workspace naming / portable path policy:
+  - workspace creation UI/API now uses generic LMZ workspace wording while preserving `<parent>/lmz` creation semantics.
+  - `POST /api/workspaces` creates/registers LMZ workspaces; legacy `/api/workspaces/obsidian` remains as a compatibility alias.
+  - workspace config path policy keeps internal paths relative and rejects outside-workspace vault roots.
+  - vault relocation stores relative roots and rejects roots outside the active workspace.
+  - needs real-vault smoke for workspace creation, vault relocation, and config save validation before closing fully.
 

@@ -1,10 +1,11 @@
 from pathlib import Path
 
+from path_policy import vault_root_is_usable
 from runtime_context import WorkspaceContext, set_runtime_context
 
 
 def active_vault_is_usable(ctx: WorkspaceContext) -> bool:
-    return bool(ctx and ctx.active_vault and Path(ctx.active_vault.root).exists())
+    return bool(ctx and ctx.active_vault and vault_root_is_usable(Path(ctx.active_vault.root), ctx.root))
 
 
 def activate_runtime_context(ctx: WorkspaceContext, *, hydrate: bool = True) -> dict:

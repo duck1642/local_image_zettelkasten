@@ -18,12 +18,16 @@ export async function activateWorkspace(id: string) {
   }));
 }
 
-export async function registerObsidianWorkspace(path: string, name: string) {
-  return readJson(await apiFetch('/api/workspaces/obsidian', {
+export async function createWorkspace(path: string, name: string) {
+  return readJson(await apiFetch('/api/workspaces', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ path, name })
   }));
+}
+
+export async function registerObsidianWorkspace(path: string, name: string) {
+  return createWorkspace(path, name);
 }
 
 export async function fetchVaults() {

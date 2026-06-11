@@ -173,8 +173,8 @@ async function installMockVaultApi(
       config_path: 'C:/ObsidianVault/lmz/config.yaml',
       config_root: 'C:/ObsidianVault/lmz',
       topic_root: 'C:/ObsidianVault/lmz/data/topics',
-      workspace_mode: 'obsidian',
-      workspace_label: 'Obsidian workspace',
+      workspace_mode: 'lmz',
+      workspace_label: 'LMZ workspace',
       active_vault: 'default',
       active_vault_name: 'Default',
       active_vault_root: 'C:/ObsidianVault/lmz/data/vaults/default'
@@ -248,14 +248,14 @@ async function installMockVaultApi(
       workspaceItems = workspaceItems.map((item) => ({ ...item, active: item.id === workspaceActive }));
       return fulfillJson(route, { status: 'success', active: workspaceActive, restart_required: true, items: workspaceItems });
     }
-    if (url.pathname === '/api/workspaces/obsidian' && request.method() === 'POST') {
+    if ((url.pathname === '/api/workspaces' || url.pathname === '/api/workspaces/obsidian') && request.method() === 'POST') {
       const payload = JSON.parse(request.postData() || '{}');
       await options.onWorkspaceAction?.('add', payload);
       workspaceItems = [
         ...workspaceItems,
         {
           id: 'obsidian-workspace',
-          name: payload.name || 'Obsidian Workspace',
+          name: payload.name || 'LMZ Workspace',
           config_path: `${payload.path}/lmz/config.yaml`,
           active: false,
           exists: true
@@ -1016,7 +1016,7 @@ test('settings shows workspace paths from config runtime metadata', async ({ pag
   await page.getByRole('button', { name: /Settings/ }).click();
   await page.getByRole('button', { name: 'Workspace' }).click();
 
-  await expect(page.getByText('Obsidian workspace', { exact: true })).toBeVisible();
+  await expect(page.getByText('LMZ workspace', { exact: true })).toBeVisible();
   await expect(page.getByText('C:/ObsidianVault/lmz/config.yaml').first()).toBeVisible();
   await expect(page.getByText('C:/ObsidianVault/lmz/data/topics')).toBeVisible();
 });
@@ -1033,9 +1033,9 @@ test('settings registers and activates workspaces for next restart', async ({ pa
   await page.getByRole('button', { name: 'Activate' }).first().click();
   await expect(page.getByText('Restart required to apply changes to the active workspace.')).toBeVisible();
 
-  await page.getByPlaceholder('Full path to Obsidian vault').fill('F:/Archive/Main');
+  await page.getByPlaceholder('Parent folder for LMZ workspace').fill('F:/Archive/Main');
   await page.getByPlaceholder('Workspace label').fill('Main Vault');
-  await page.getByRole('button', { name: 'Add Obsidian' }).click();
+  await page.getByRole('button', { name: 'Create Workspace' }).click();
 
   await expect(page.getByText('Main Vault')).toBeVisible();
   expect(actions).toEqual([

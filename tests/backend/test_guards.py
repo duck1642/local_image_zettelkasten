@@ -123,3 +123,90 @@ def test_missing_vault_root_returns_503_and_does_not_create_files(monkeypatch, t
 
     # Crucial assertion: the missing vault directory was NOT created, and no database file exists
     assert not missing_vault_root.exists()
+
+
+def test_config_save_rejects_absolute_vault_root(monkeypatch, tmp_path):
+    app_module = fresh_api(monkeypatch, tmp_path)
+    workspaces = importlib.import_module("workspaces")
+
+    registry_path = tmp_path / "workspaces.yaml"
+    ws_root = tmp_path / "workspace"
+    ws_root.mkdir()
+    vault_root = ws_root / "data" / "vaults" / "default"
+    vault_root.mkdir(parents=True)
+    config_path = ws_root / "config.yaml"
+    workspace_config(config_path, "data/vaults/default")
+
+    write_registry(
+        registry_path,
+        "default",
+        {
+            "default": {"name": "Default", "config_path": "config/config.yaml"},
+            "ready": {"name": "Ready", "config_path": str(config_path)},
+        },
+    )
+    monkeypatch.setattr(workspaces, "REGISTRY_PATH", registry_path)
+
+    client = TestClient(app_module.app)
+    key = api_key(client)
+    load = client.post("/api/workspaces/ready/load", headers={"X-LMZ-API-KEY": key})
+    assert load.status_code == 200
+    assert load.json()["status"] == "success"
+
+    outside_root = tmp_path / "outside"
+    response = client.post(
+        "/api/config",
+        json={"active_vault": "default", "vaults": {"default": {"name": "Default", "root": str(outside_root)}}},
+        headers={"X-LMZ-API-KEY": key},
+    )
+
+    assert response.status_code == 400
+    assert "vaults.default.root must be relative" in response.text
+
+
+def test_delete_vault_refuses_outside_workspace_root(monkeypatch, tmp_path):
+    app_module = fresh_api(monkeypatch, tmp_path)
+    workspaces = importlib.import_module("workspaces")
+
+    registry_path = tmp_path / "workspaces.yaml"
+    ws_root = tmp_path / "workspace"
+    ws_root.mkdir()
+    default_root = ws_root / "data" / "vaults" / "default"
+    default_root.mkdir(parents=True)
+    outside_root = tmp_path / "outside-vault"
+    outside_root.mkdir()
+    config_path = ws_root / "config.yaml"
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "active_vault": "default",
+                "vaults": {
+                    "default": {"name": "Default", "root": "data/vaults/default"},
+                    "bad": {"name": "Bad", "root": str(outside_root)},
+                },
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+
+    write_registry(
+        registry_path,
+        "default",
+        {
+            "default": {"name": "Default", "config_path": "config/config.yaml"},
+            "ready": {"name": "Ready", "config_path": str(config_path)},
+        },
+    )
+    monkeypatch.setattr(workspaces, "REGISTRY_PATH", registry_path)
+
+    client = TestClient(app_module.app)
+    key = api_key(client)
+    load = client.post("/api/workspaces/ready/load", headers={"X-LMZ-API-KEY": key})
+    assert load.status_code == 200
+    assert load.json()["status"] == "success"
+
+    response = client.delete("/api/vaults/bad?confirm=true", headers={"X-LMZ-API-KEY": key})
+
+    assert response.status_code == 400
+    assert outside_root.exists()
