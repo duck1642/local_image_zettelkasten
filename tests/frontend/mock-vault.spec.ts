@@ -248,7 +248,7 @@ async function installMockVaultApi(
       workspaceItems = workspaceItems.map((item) => ({ ...item, active: item.id === workspaceActive }));
       return fulfillJson(route, { status: 'success', active: workspaceActive, restart_required: true, items: workspaceItems });
     }
-    if ((url.pathname === '/api/workspaces' || url.pathname === '/api/workspaces/obsidian') && request.method() === 'POST') {
+    if (url.pathname === '/api/workspaces' && request.method() === 'POST') {
       const payload = JSON.parse(request.postData() || '{}');
       await options.onWorkspaceAction?.('add', payload);
       workspaceItems = [

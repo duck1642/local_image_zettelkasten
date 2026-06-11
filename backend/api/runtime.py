@@ -458,14 +458,6 @@ def _create_workspace_sync(body: dict):
     }
 
 
-@router.post("/api/workspaces/obsidian")
-async def add_obsidian_workspace(body: dict):
-    return await asyncio.to_thread(_add_obsidian_workspace_sync, body)
-
-
-def _add_obsidian_workspace_sync(body: dict):
-    return _create_workspace_sync(body)
-
 
 @router.get("/api/vaults")
 async def get_vaults():

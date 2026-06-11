@@ -194,7 +194,6 @@ VSCode-friendly test launchers:
 
 ### P1 Workspace / Vault Runtime
 
-- Add/update workspace creation so it is global, not Obsidian-only.
 - Add vault creation flow.
 - Audit vault switching reliability across DB paths, search index, metadata index, watchdogs, logs, review cache, RAM/search state, and frontend stores.
 - Design and implement vault merge flow.
@@ -365,7 +364,7 @@ VSCode-friendly test launchers:
   - Stats and Inspector show topic and WD counts through facet/index data.
   - Inspector supports per-item draft topic/WD editing, WD-tag removal, and promote WD tag to manual topic.
   - topic files are created/reused on save, notes store relative links, and legacy plain topics remain readable/indexable.
-  - Obsidian workspace mode uses `<ObsidianVault>/lmz/` with the same relative workspace/vault layout.
+  - LMZ workspace mode uses `<parent>/lmz/` with the same relative workspace/vault layout.
   - workspace chooser and workspace registry are implemented; env `LMZ_CONFIG_PATH` still overrides registry.
   - multiple vault support is implemented with per-workspace shared metadata and per-vault DB/assets/review/logs/cache folders.
   - topic rename is implemented from Stats Topics via explicit `...` action and backend `POST /api/topics/rename`.
@@ -601,7 +600,7 @@ VSCode-friendly test launchers:
   - Guard regression and startup/runtime-focused backend tests pass; needs longer real-vault recovery smoke before closing fully.
 - Workspace naming / portable path policy:
   - workspace creation UI/API now uses generic LMZ workspace wording while preserving `<parent>/lmz` creation semantics.
-  - `POST /api/workspaces` creates/registers LMZ workspaces; legacy `/api/workspaces/obsidian` remains as a compatibility alias.
+  - `POST /api/workspaces` creates/registers LMZ workspaces; legacy `/api/workspaces/obsidian` has been removed.
   - workspace config path policy keeps internal paths relative and rejects outside-workspace vault roots.
   - vault relocation stores relative roots and rejects roots outside the active workspace.
   - needs real-vault smoke for workspace creation, vault relocation, and config save validation before closing fully.

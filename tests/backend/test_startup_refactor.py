@@ -128,7 +128,7 @@ def test_launcher_mode_serves_recovery_routes_without_workspace(monkeypatch, tmp
     assert ui_log_response.json()["status"] == "ok"
 
 
-def test_launcher_mode_creates_lmz_workspace_and_keeps_legacy_endpoint(monkeypatch, tmp_path):
+def test_launcher_mode_creates_lmz_workspace(monkeypatch, tmp_path):
     app_module = fresh_api(monkeypatch, tmp_path)
     workspaces = importlib.import_module("workspaces")
     registry_path = tmp_path / "workspaces.yaml"
@@ -142,7 +142,6 @@ def test_launcher_mode_creates_lmz_workspace_and_keeps_legacy_endpoint(monkeypat
     client = TestClient(app_module.app)
     key = api_key(client)
     parent = (Path(tempfile.gettempdir()) / f"lmz-api-workspace-{time.time_ns()}").resolve()
-    legacy_parent = (Path(tempfile.gettempdir()) / f"lmz-api-legacy-workspace-{time.time_ns()}").resolve()
 
     try:
         response = client.post(
@@ -164,17 +163,9 @@ def test_launcher_mode_creates_lmz_workspace_and_keeps_legacy_endpoint(monkeypat
         load = client.post("/api/workspaces/api-workspace/load", headers={"X-LMZ-API-KEY": key})
         assert load.status_code == 200
         assert load.json()["status"] == "success"
-
-        legacy = client.post(
-            "/api/workspaces/obsidian",
-            json={"path": str(legacy_parent), "name": "Legacy Workspace"},
-            headers={"X-LMZ-API-KEY": key},
-        )
-        assert legacy.status_code == 200
-        assert Path(legacy.json()["workspace"]["config_path"]) == legacy_parent / "lmz" / "config.yaml"
     finally:
         shutil.rmtree(parent, ignore_errors=True)
-        shutil.rmtree(legacy_parent, ignore_errors=True)
+
 
 
 def test_missing_workspace_config_load_does_not_persist_active(monkeypatch, tmp_path):

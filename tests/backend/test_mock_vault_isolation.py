@@ -526,14 +526,14 @@ def test_workspace_registry_resolves_active_and_env_override(monkeypatch, tmp_pa
     assert utils.CONFIG_PATH == FIXTURE / "config.yaml"
 
 
-def test_obsidian_workspace_setup_creates_lmz_layout_and_resolves_paths(monkeypatch, tmp_path):
-    setup_tool = load_maintenance_script("setup_obsidian_workspace")
-    obsidian_vault = (Path(tempfile.gettempdir()) / f"lmz-obsidian-test-{time.time_ns()}").resolve()
+def test_workspace_setup_creates_lmz_layout_and_resolves_paths(monkeypatch, tmp_path):
+    setup_tool = load_maintenance_script("setup_workspace")
+    workspace_parent = (Path(tempfile.gettempdir()) / f"lmz-workspace-test-{time.time_ns()}").resolve()
 
-    payload = setup_tool.setup_obsidian_workspace(obsidian_vault)
+    payload = setup_tool.setup_lmz_workspace(workspace_parent)
     config_path = Path(payload["config_path"])
 
-    assert config_path == obsidian_vault / "lmz" / "config.yaml"
+    assert config_path == workspace_parent / "lmz" / "config.yaml"
     for relative in [
         "data/topics",
         "data/vaults/default/vault/notes",
@@ -544,7 +544,7 @@ def test_obsidian_workspace_setup_creates_lmz_layout_and_resolves_paths(monkeypa
         "data/vaults/default/review",
         "data/vaults/default/wd-tags",
     ]:
-        assert (obsidian_vault / "lmz" / relative).exists()
+        assert (workspace_parent / "lmz" / relative).exists()
 
     monkeypatch.setenv("LMZ_CONFIG_PATH", str(config_path))
     if str(BACKEND) not in sys.path:
@@ -556,11 +556,11 @@ def test_obsidian_workspace_setup_creates_lmz_layout_and_resolves_paths(monkeypa
     sqlite_operator = importlib.import_module("db.sqlite_operator")
     web_api = importlib.import_module("web_api")
 
-    assert utils.CONFIG_ROOT == obsidian_vault / "lmz"
-    assert utils.TOPICS_DIR == obsidian_vault / "lmz" / "data" / "topics"
-    assert utils.VAULT_DIR == obsidian_vault / "lmz" / "data" / "vaults" / "default" / "vault"
-    assert utils.DB_PATH == obsidian_vault / "lmz" / "data" / "vaults" / "default" / "db" / "lmz_main.db"
-    assert utils.get_configured_cookie_path() == obsidian_vault / "lmz" / "data" / "secrets" / "cookies.txt"
+    assert utils.CONFIG_ROOT == workspace_parent / "lmz"
+    assert utils.TOPICS_DIR == workspace_parent / "lmz" / "data" / "topics"
+    assert utils.VAULT_DIR == workspace_parent / "lmz" / "data" / "vaults" / "default" / "vault"
+    assert utils.DB_PATH == workspace_parent / "lmz" / "data" / "vaults" / "default" / "db" / "lmz_main.db"
+    assert utils.get_configured_cookie_path() == workspace_parent / "lmz" / "data" / "secrets" / "cookies.txt"
     utils.validate_config_schema(utils.get_config())
     conn = sqlite_operator.init_database()
     item_hash = "97" * 32
@@ -577,32 +577,32 @@ def test_obsidian_workspace_setup_creates_lmz_layout_and_resolves_paths(monkeypa
 
     detail = web_api._update_item_sync(item_hash, web_api.ItemUpdate(topics=["obsidian topic"]))
     assert detail["topics"] == ["obsidian_topic"]
-    assert (obsidian_vault / "lmz" / "data" / "topics" / "obsidian_topic.md").exists()
+    assert (workspace_parent / "lmz" / "data" / "topics" / "obsidian_topic.md").exists()
     assert utils.note_path_for(item_hash, storage_id).exists()
     runtime = web_api._load_public_config_sync()["_runtime"]
     assert runtime["workspace_mode"] == "lmz"
     assert runtime["active_vault"] == "default"
-    shutil.rmtree(obsidian_vault, ignore_errors=True)
+    shutil.rmtree(workspace_parent, ignore_errors=True)
 
 
-def test_obsidian_workspace_setup_refuses_runtime_paths(tmp_path):
-    setup_tool = load_maintenance_script("setup_obsidian_workspace")
+def test_workspace_setup_refuses_runtime_paths(tmp_path):
+    setup_tool = load_maintenance_script("setup_workspace")
     for dangerous in [ROOT, ROOT / "data", ROOT / "config", ROOT / "logs", ROOT / "secrets"]:
         with pytest.raises(ValueError):
-            setup_tool.setup_obsidian_workspace(dangerous)
+            setup_tool.setup_lmz_workspace(dangerous)
 
 
 def test_workspace_api_lists_registers_and_sets_active(monkeypatch, tmp_path):
     web_api, workspaces = fresh_backend(monkeypatch, tmp_path, "web_api", "workspaces")
     registry_path = tmp_path / "workspaces.yaml"
     monkeypatch.setattr(workspaces, "REGISTRY_PATH", registry_path)
-    obsidian_vault = (Path(tempfile.gettempdir()) / f"lmz-obsidian-api-test-{time.time_ns()}").resolve()
+    workspace_parent = (Path(tempfile.gettempdir()) / f"lmz-api-test-{time.time_ns()}").resolve()
     try:
         initial = web_api._get_workspaces_sync()
         assert initial["active"] == "default"
         assert initial["items"][0]["id"] == "default"
 
-        added = web_api._create_workspace_sync({"path": str(obsidian_vault), "name": "API Workspace"})
+        added = web_api._create_workspace_sync({"path": str(workspace_parent), "name": "API Workspace"})
         assert any(item["name"] == "API Workspace" for item in added["items"])
 
         workspace_id = next(item["id"] for item in added["items"] if item["name"] == "API Workspace")
@@ -610,7 +610,7 @@ def test_workspace_api_lists_registers_and_sets_active(monkeypatch, tmp_path):
         assert active["restart_required"] is False
         assert active["active"] == workspace_id
     finally:
-        shutil.rmtree(obsidian_vault, ignore_errors=True)
+        shutil.rmtree(workspace_parent, ignore_errors=True)
 
 
 def test_vault_api_creates_sets_active_and_rejects_active_delete(monkeypatch, tmp_path):
@@ -747,11 +747,11 @@ def test_active_workspace_and_vault_switches_are_preflight_guarded(monkeypatch, 
     web_api, vaults, workspaces = fresh_backend(monkeypatch, tmp_path, "web_api", "vaults", "workspaces")
     registry_path = tmp_path / "workspaces.yaml"
     monkeypatch.setattr(workspaces, "REGISTRY_PATH", registry_path)
-    obsidian_vault = (Path(tempfile.gettempdir()) / f"lmz-switch-guard-test-{time.time_ns()}").resolve()
+    workspace_parent = (Path(tempfile.gettempdir()) / f"lmz-switch-guard-test-{time.time_ns()}").resolve()
     try:
         created = web_api._create_vault_sync({"name": "Guard Target"})
         assert any(item["id"] == "guard-target" for item in created["items"])
-        added = web_api._add_obsidian_workspace_sync({"path": str(obsidian_vault), "name": "Guard Workspace"})
+        added = web_api._create_workspace_sync({"path": str(workspace_parent), "name": "Guard Workspace"})
         workspace_id = next(item["id"] for item in added["items"] if item["name"] == "Guard Workspace")
 
         ctx = web_api.get_runtime_context()
@@ -800,7 +800,7 @@ def test_active_workspace_and_vault_switches_are_preflight_guarded(monkeypatch, 
             with state.repair_lock:
                 state.repair_running = False
     finally:
-        shutil.rmtree(obsidian_vault, ignore_errors=True)
+        shutil.rmtree(workspace_parent, ignore_errors=True)
 
 
 def test_vault_merge_reallocates_storage_ids_and_keeps_source(monkeypatch, tmp_path):

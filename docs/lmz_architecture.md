@@ -6,7 +6,7 @@ Local Media Zettelkasten (LMZ) is a local media archive and zettelkasten system 
 
 It ingests local files and external URLs, validates media, stores original assets under compact storage IDs while keeping SHA256 as item identity, indexes runtime metadata in SQLite, generates Obsidian-compatible markdown notes, keeps local WD tag reports in sharded JSON cache files, and exposes a Tauri/Svelte desktop UI through a local FastAPI backend.
 
-Runtime state stays outside source code under a workspace root. Default mode uses the repo root as the workspace. Obsidian mode uses `<ObsidianVault>/lmz/` as the workspace.
+Runtime state stays outside source code under a workspace root. Default mode uses the repo root as the workspace. LMZ workspace mode uses `<parent>/lmz/` as the workspace.
 
 ## Product Domains
 
@@ -411,7 +411,7 @@ Vault-level data:
 
 The workspace registry lives at `config/workspaces.yaml` locally and is not intended for git because it may contain absolute paths. `config/workspaces.example.yaml` is the committed template. Runtime switching is supported through guarded Settings/API flows: active ingest and metadata repair state block switches, then runtime context, search state, metadata watchdogs, and frontend session state are invalidated for the new workspace/vault.
 
-Obsidian mode is the same layout under `<ObsidianVault>/lmz/`.
+LMZ workspace mode is the same layout under `<parent>/lmz/`.
 
 ### Item Storage
 
@@ -547,7 +547,7 @@ Core API areas:
 - Review workflow: review count, review item list, review actions.
 - Review cleanup: `/api/review/cleanup`.
 - Config: `/api/config`.
-- Workspaces: `/api/workspaces`, `/api/workspaces/active`, `/api/workspaces/obsidian`.
+- Workspaces: `/api/workspaces`, `/api/workspaces/active`.
 - Vaults: `/api/vaults`, `/api/vaults/active`, vault rename/delete/merge endpoints.
 - Workspace metadata maintenance: `/api/workspace-metadata/rebuild`, `/api/workspace-metadata/prune`.
 - Artist/platform dictionaries: `/api/artists`, `/api/platforms`, artist detail/edit/alias/link/merge endpoints.
@@ -771,7 +771,7 @@ Refinement still expected:
 
 - `config/workspaces.yaml` stores registered workspaces and active workspace.
 - `LMZ_CONFIG_PATH` overrides the registry.
-- Settings can register Obsidian workspaces and switch the active workspace dynamically when runtime preflight allows it.
+- Settings can register LMZ workspaces and switch the active workspace dynamically when runtime preflight allows it.
 
 Each workspace has a `config.yaml` with one active vault:
 

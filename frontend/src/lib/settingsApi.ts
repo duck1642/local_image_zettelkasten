@@ -26,10 +26,6 @@ export async function createWorkspace(path: string, name: string) {
   }));
 }
 
-export async function registerObsidianWorkspace(path: string, name: string) {
-  return createWorkspace(path, name);
-}
-
 export async function fetchVaults() {
   return readJson(await apiFetch('/api/vaults'));
 }
