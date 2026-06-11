@@ -15,6 +15,8 @@
         "title": "LMZ - Management Center",
         "width": 580,
         "height": 580,
+        "center": true,
+        "backgroundColor": "#090d16",
         "resizable": false,
         "fullscreen": false
       }

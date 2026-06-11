@@ -1,6 +1,7 @@
 @layer base, components;
 
 :root {
+  --bg-startup: #090d16;
   --bg-main: #0d1117;
   --bg-panel: #161b22;
   --bg-input: #0d1117;
@@ -30,7 +31,7 @@
     margin: 0;
     padding: 0;
     overflow: hidden;
-    background-color: var(--bg-main);
+    background-color: var(--bg-startup);
     color: var(--text-main);
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     font-size: 13px;

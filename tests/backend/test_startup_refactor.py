@@ -116,6 +116,14 @@ def test_launcher_mode_serves_recovery_routes_without_workspace(monkeypatch, tmp
     assert logs_response.status_code == 200
     assert logs_response.json()["mode"] == "startup"
 
+    ui_log_response = client.post(
+        "/api/logs/ui",
+        json={"level": "INFO", "message": "launcher log probe", "extra": {}},
+        headers={"X-LMZ-API-KEY": api_key(client)},
+    )
+    assert ui_log_response.status_code == 200
+    assert ui_log_response.json()["status"] == "ok"
+
 
 def test_missing_workspace_config_load_does_not_persist_active(monkeypatch, tmp_path):
     app_module = fresh_api(monkeypatch, tmp_path)

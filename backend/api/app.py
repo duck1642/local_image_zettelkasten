@@ -33,6 +33,7 @@ LAUNCHER_SAFE_EXACT_PATHS = {
     "/api/logs",
     "/api/logs/location",
     "/api/logs/open",
+    "/api/logs/ui",
     "/api/workspaces",
     "/api/workspaces/active",
     "/api/workspaces/relocate",

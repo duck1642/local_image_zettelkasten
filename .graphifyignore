@@ -7,6 +7,13 @@
 !dev.py
 !pyproject.toml
 !pytest.ini
+!frontend/package.json
+!frontend/svelte.config.js
+!frontend/vite.config.ts
+!frontend/tsconfig.json
+!frontend/tsconfig.app.json
+!frontend/tsconfig.node.json
+!frontend/playwright.config.ts
 
 # Config template only
 !config/
@@ -20,10 +27,21 @@
 !frontend/
 !frontend/src/
 !frontend/src/**
+!frontend/src-tauri/
+!frontend/src-tauri/src/
+!frontend/src-tauri/src/**
+!frontend/src-tauri/Cargo.toml
+!frontend/src-tauri/tauri.conf.json
+!frontend/src-tauri/capabilities/
+!frontend/src-tauri/capabilities/**
 
 # Durable docs
 !docs/
 !docs/**
+
+# Tests and test harnesses
+!tests/
+!tests/**
 
 # Maintenance tools and shared browser-extension source
 !tools/
@@ -40,7 +58,10 @@
 frontend/node_modules/
 frontend/dist/
 frontend/.vite/
-frontend/src-tauri/
+frontend/package-lock.json
+frontend/src-tauri/target/
+frontend/src-tauri/Cargo.lock
+frontend/src-tauri/icons/
 frontend/src/lib/icons/
 frontend/src/lib/renderers/archive/
 backend/__pycache__/
@@ -49,11 +70,16 @@ tools/browser_extension/edge/
 tools/browser_extension/chrome/
 tools/browser_extension/firefox/
 graphify-out/
+graphify-out.*/
 data/
 logs/
 secrets/
 backups/
-tests/
 test-results/
 test_input/
 test_videos/
+tests/fixtures/
+tests/perf-results/
+tests/.drivers/
+tests/perf/tauri_webview_perf/package-lock.json
+tests/perf/tauri_webview_perf/node_modules/

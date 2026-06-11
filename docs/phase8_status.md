@@ -177,10 +177,19 @@ VSCode-friendly test launchers:
 
 ## Workspace / Vault Control Backlog
 
+### Trace Order
+
+1. Startup / launcher failure.
+2. Workspace/vault activation.
+3. Vault switch stale state.
+4. Maintenance safety.
+5. Workspace/vault management gaps.
+6. Path model audit.
+7. Import/export.
+8. Auth UI / auth scan.
+
 ### P0 Stability / Startup
 
-- Investigate startup white box.
-- Audit why `POST /api/logs/ui` can return `503 Service Unavailable` during startup/launcher mode.
 - Verify launcher-safe API routes stay available before workspace/vault activation.
 
 ### P1 Workspace / Vault Runtime
@@ -578,9 +587,9 @@ VSCode-friendly test launchers:
   - Active workspace registry persistence: workspace loads are validated before `set_active_workspace()` persists the selection, preventing broken selections from locking out users.
   - Svelte layout fix: restructured missing workspaces row inside `Launcher.svelte` to prevent Svelte nested `<button>` warnings.
   - Verified by dedicated backend tests in `tests/backend/test_startup_refactor.py` and 29 passing mock-vault frontend tests.
-
-### Useful Checks
-
-- **Frontend Dependencies:** Run `npm outdated` in the `frontend/` directory to see a table of current vs. latest npm packages.
-- **Backend Dependencies:** Run `pip list --outdated` with your Python virtual environment activated to check for updates on PyPI. Note: `yt-dlp` and `gallery-dl` are auto-updated by the maintenance script.
+- Startup launcher polish:
+  - Native Tauri startup background now matches launcher base color to avoid white WebView flash.
+  - Initial launcher window is centered by Tauri config instead of a visible post-mount Svelte recenter.
+  - `POST /api/logs/ui` is launcher-safe, so startup UI logs can be captured before workspace/vault activation.
+  - Targeted startup tests pass with alternate pytest temp base; needs fresh manual startup smoke before closing fully.
 

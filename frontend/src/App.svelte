@@ -29,20 +29,6 @@
   let stopStats: (() => void) | null = null;
   let stopRam: (() => void) | null = null;
 
-  async function resizeForLauncher() {
-    try {
-      const { getCurrentWindow } = await import('@tauri-apps/api/window');
-      const { LogicalSize } = await import('@tauri-apps/api/dpi');
-      const appWindow = getCurrentWindow();
-      await appWindow.setResizable(true);
-      await appWindow.setSize(new LogicalSize(580, 580));
-      await appWindow.setResizable(false);
-      await appWindow.center();
-    } catch {
-      // Non-tauri context
-    }
-  }
-
   async function resizeForMainApp() {
     try {
       const { getCurrentWindow } = await import('@tauri-apps/api/window');
@@ -285,8 +271,6 @@
       activeWorkspaceId = 'default';
       activeVaultId = 'default';
       uiLog('INFO', 'Test mode detected: bypassing workspace launcher');
-    } else {
-      void resizeForLauncher();
     }
 
     (async () => {
