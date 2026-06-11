@@ -10,6 +10,11 @@ from runtime_context import (
     try_get_runtime_context,
 )
 from runtime_activation import activate_runtime_context
+from api.guards import (
+    require_workspace_context,
+    require_usable_vault_context,
+    require_usable_target_vault_context,
+)
 
 router = APIRouter()
 
@@ -22,6 +27,7 @@ async def get_session_key(request: Request):
 
 @router.get("/api/metadata-index/status")
 async def get_metadata_index_status():
+    require_usable_vault_context()
     return await asyncio.to_thread(_get_metadata_index_status_sync)
 
 def _get_metadata_index_status_sync():
@@ -33,19 +39,23 @@ def _get_metadata_index_status_sync():
 
 @router.post("/api/metadata-index/rebuild")
 async def rebuild_metadata_index():
+    require_usable_vault_context()
     return await asyncio.to_thread(start_metadata_repair_worker, True, True)
 
 @router.post("/api/workspace-metadata/rebuild")
 async def rebuild_workspace_metadata_route():
+    require_workspace_context()
     return await asyncio.to_thread(rebuild_workspace_metadata)
 
 @router.post("/api/workspace-metadata/prune")
 async def prune_workspace_metadata_route():
+    require_workspace_context()
     return await asyncio.to_thread(prune_unused_workspace_metadata)
 
 
 @router.get("/api/system/memory")
 async def get_system_memory():
+    require_workspace_context()
     return await asyncio.to_thread(_get_system_memory_sync)
 
 def _get_system_memory_sync():
@@ -335,10 +345,12 @@ def _load_public_config_sync() -> dict:
 
 @router.get("/api/config")
 async def get_app_config():
+    require_workspace_context()
     return await asyncio.to_thread(_load_public_config_sync)
 
 @router.post("/api/config")
 async def update_app_config(new_config: dict):
+    require_workspace_context()
     return await asyncio.to_thread(_update_app_config_sync, new_config)
 
 def _update_app_config_sync(new_config: dict):
@@ -443,6 +455,7 @@ def _add_obsidian_workspace_sync(body: dict):
 
 @router.get("/api/vaults")
 async def get_vaults():
+    require_workspace_context()
     return await asyncio.to_thread(_get_vaults_sync)
 
 
@@ -454,6 +467,7 @@ def _get_vaults_sync():
 
 @router.post("/api/vaults")
 async def create_vault(body: dict):
+    require_workspace_context()
     return await asyncio.to_thread(_create_vault_sync, body)
 
 
@@ -474,6 +488,7 @@ def _create_vault_sync(body: dict):
 
 @router.patch("/api/vaults/{vault_id}")
 async def rename_vault(vault_id: str, body: dict):
+    require_workspace_context()
     return await asyncio.to_thread(_rename_vault_sync, vault_id, body)
 
 
@@ -491,6 +506,7 @@ def _rename_vault_sync(vault_id: str, body: dict):
 
 @router.post("/api/vaults/active")
 async def set_vault_active(body: dict):
+    require_workspace_context()
     blocked = await asyncio.to_thread(_runtime_switch_blocker)
     if blocked:
         return blocked
@@ -514,6 +530,7 @@ def _set_vault_active_sync(body: dict):
 
 @router.delete("/api/vaults/{vault_id}")
 async def delete_vault(vault_id: str, confirm: bool = Query(False)):
+    require_workspace_context()
     return await asyncio.to_thread(_delete_vault_sync, vault_id, confirm)
 
 
@@ -530,6 +547,7 @@ def _delete_vault_sync(vault_id: str, confirm: bool = False):
 
 @router.post("/api/vaults/{target_id}/merge-preview")
 async def preview_vault_merge(target_id: str, body: dict):
+    require_workspace_context()
     return await asyncio.to_thread(_preview_vault_merge_sync, target_id, body)
 
 
@@ -547,6 +565,7 @@ def _preview_vault_merge_sync(target_id: str, body: dict):
 
 @router.post("/api/vaults/{target_id}/merge")
 async def merge_vaults(target_id: str, body: dict):
+    require_workspace_context()
     return await asyncio.to_thread(_merge_vaults_sync, target_id, body)
 
 
@@ -565,6 +584,7 @@ def _merge_vaults_sync(target_id: str, body: dict):
 
 @router.get("/api/vaults/{vault_id}/health")
 async def get_vault_health(vault_id: str):
+    require_usable_target_vault_context(vault_id)
     return await asyncio.to_thread(_get_vault_health_sync, vault_id)
 
 
@@ -581,6 +601,7 @@ def _get_vault_health_sync(vault_id: str):
 
 @router.post("/api/vaults/{vault_id}/repair")
 async def repair_vault(vault_id: str, body: dict):
+    require_usable_target_vault_context(vault_id)
     return await asyncio.to_thread(_repair_vault_sync, vault_id, body)
 
 
@@ -601,6 +622,7 @@ def _repair_vault_sync(vault_id: str, body: dict):
 
 @router.post("/api/vaults/{vault_id}/backup")
 async def backup_vault(vault_id: str):
+    require_usable_target_vault_context(vault_id)
     return await asyncio.to_thread(_backup_vault_sync, vault_id)
 
 
@@ -617,6 +639,7 @@ def _backup_vault_sync(vault_id: str):
 
 @router.post("/api/vaults/{vault_id}/export")
 async def export_vault(vault_id: str):
+    require_usable_target_vault_context(vault_id)
     return await asyncio.to_thread(_export_vault_sync, vault_id)
 
 
@@ -741,6 +764,7 @@ def _relocate_workspace_sync(workspace_id: str, new_config_path: str):
 
 @router.post("/api/vaults/relocate")
 async def relocate_vault(body: RelocateVaultRequest):
+    require_workspace_context()
     return await asyncio.to_thread(_relocate_vault_sync, body.vault_id, body.new_vault_root)
 
 def _relocate_vault_sync(vault_id: str, new_vault_root: str):
@@ -775,6 +799,7 @@ def _relocate_vault_sync(vault_id: str, new_vault_root: str):
 
 @router.post("/api/vaults/import")
 async def import_vault(body: dict):
+    require_workspace_context()
     return await asyncio.to_thread(_import_vault_sync, body)
 
 

@@ -1,9 +1,10 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from api.guards import require_usable_vault_context
 
 from api.common import *
 from api.library import _delete_item_after_replacement
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_usable_vault_context)])
 import asyncio
 _review_locks: dict[str, asyncio.Lock] = {}
 

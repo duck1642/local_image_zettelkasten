@@ -1,5 +1,6 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import RedirectResponse
+from api.guards import require_usable_vault_context
 
 from api.common import *
 from metadata_maintenance import (
@@ -12,7 +13,7 @@ from metadata_maintenance import (
 )
 from topics import ensure_topic_file, slugify_topic_label
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_usable_vault_context)])
 
 @router.get("/api/stats")
 async def get_stats():

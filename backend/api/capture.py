@@ -1,12 +1,13 @@
 import re
 import threading
 
-from fastapi import APIRouter, File, Form, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
+from api.guards import require_usable_vault_context
 
 from api.common import *
 from validators import get_mime_type, is_allowed_mime
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_usable_vault_context)])
 
 STAGED_ID_RE = re.compile(r"^staged_\d{8}_\d{6}_[0-9a-f]{8}$")
 CAPTURE_STAGE_DIR_NAME = "capture_staging"

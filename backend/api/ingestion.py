@@ -1,12 +1,13 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from urllib.parse import parse_qs, urlparse
+from api.guards import require_usable_vault_context
 
 from api.common import *
 from artists import ensure_artist_schema
 from platforms import ensure_platform_schema
 from platforms import normalize_platform_key
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_usable_vault_context)])
 
 class QueueUpdate(BaseModel):
     content: str
