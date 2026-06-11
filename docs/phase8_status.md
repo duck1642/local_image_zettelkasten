@@ -592,4 +592,11 @@ VSCode-friendly test launchers:
   - Initial launcher window is centered by Tauri config instead of a visible post-mount Svelte recenter.
   - `POST /api/logs/ui` is launcher-safe, so startup UI logs can be captured before workspace/vault activation.
   - Targeted startup tests pass with alternate pytest temp base; needs fresh manual startup smoke before closing fully.
+- API guard layer / missing vault protection:
+  - `backend/api/guards.py` adds explicit workspace, active-vault, and target-vault guards.
+  - Pre-runtime middleware route groups now use explicit public/log/workspace naming while keeping behavior unchanged.
+  - Vault-dependent routes now fail with clean `503` instead of creating folders or blank DBs when the active vault root is missing.
+  - Target-vault health/repair/backup/export paths validate the requested vault root before touching vault files.
+  - Recreated ignored disposable `tests/generated/test-workspace` and initialized its empty test vault.
+  - Guard regression and startup/runtime-focused backend tests pass; needs longer real-vault recovery smoke before closing fully.
 

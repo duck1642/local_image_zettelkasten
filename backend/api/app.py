@@ -27,26 +27,33 @@ from api.common import (
 )
 from api import capture, ingestion, library, logs, review, runtime
 
-LAUNCHER_SAFE_EXACT_PATHS = {
+# These paths must work before workspace/vault runtime exists. Vault/data
+# routes stay blocked here and use api.guards for route-specific validation.
+PRE_RUNTIME_PUBLIC_PATHS = {
     "/",
     "/api/session-key",
+}
+PRE_RUNTIME_LOG_PATHS = {
     "/api/logs",
     "/api/logs/location",
     "/api/logs/open",
     "/api/logs/ui",
+}
+PRE_RUNTIME_WORKSPACE_PATHS = {
     "/api/workspaces",
     "/api/workspaces/active",
     "/api/workspaces/relocate",
 }
-LAUNCHER_SAFE_PREFIXES = (
+PRE_RUNTIME_WORKSPACE_LOAD_PREFIXES = (
     "/api/workspaces/",
 )
 
 
-def _is_launcher_safe_path(path: str) -> bool:
-    if path in LAUNCHER_SAFE_EXACT_PATHS:
+def _is_pre_runtime_path(path: str) -> bool:
+    pre_runtime_paths = PRE_RUNTIME_PUBLIC_PATHS | PRE_RUNTIME_LOG_PATHS | PRE_RUNTIME_WORKSPACE_PATHS
+    if path in pre_runtime_paths:
         return True
-    return any(path.startswith(prefix) and path.endswith("/load") for prefix in LAUNCHER_SAFE_PREFIXES)
+    return any(path.startswith(prefix) and path.endswith("/load") for prefix in PRE_RUNTIME_WORKSPACE_LOAD_PREFIXES)
 
 
 def _load_env_workspace_if_requested():
@@ -129,7 +136,7 @@ async def local_api_guard(request: Request, call_next):
             status_code = getattr(exc, "status_code", 500)
             detail = getattr(exc, "detail", str(exc))
             return JSONResponse(status_code=status_code, content={"detail": detail})
-    if request.method != "OPTIONS" and not has_runtime_context() and not _is_launcher_safe_path(request.url.path):
+    if request.method != "OPTIONS" and not has_runtime_context() and not _is_pre_runtime_path(request.url.path):
         return JSONResponse(status_code=503, content={"detail": "Workspace not loaded"})
     try:
         return await call_next(request)
