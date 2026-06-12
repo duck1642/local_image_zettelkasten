@@ -56,9 +56,10 @@ def validate_vault_root_value(value: object, workspace_root: Path, label: str) -
 def validate_workspace_config_paths(config: dict, workspace_root: Path):
     paths = config.get("paths")
     if isinstance(paths, dict):
-        for key in ("models", "secrets"):
-            if key in paths:
-                _validate_relative_value(paths[key], workspace_root, f"paths.{key}")
+        if "models" in paths:
+            raise ValueError("paths.models is no longer supported; models are stored in app data/models")
+        if "secrets" in paths:
+            _validate_relative_value(paths["secrets"], workspace_root, "paths.secrets")
 
     external_tools = config.get("external_tools")
     if isinstance(external_tools, dict) and external_tools.get("cookies_path"):

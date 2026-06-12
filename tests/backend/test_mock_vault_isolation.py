@@ -92,6 +92,8 @@ def test_config_override_resolves_paths_inside_mock_vault(monkeypatch, tmp_path)
     assert utils.CONFIG_PATH == tmp_path / "mock-vault" / "config.yaml"
     assert ctx.config_path == utils.CONFIG_PATH
     assert ctx.root == utils.CONFIG_ROOT
+    assert ctx.models_dir == ROOT / "data" / "models"
+    assert utils.MODELS_DIR == ROOT / "data" / "models"
     assert ctx.active_vault.id == utils.ACTIVE_VAULT_ID
     assert ctx.active_vault.root == utils.ACTIVE_VAULT_ROOT
     assert ctx.active_vault.db_path == utils.DB_PATH
@@ -545,6 +547,7 @@ def test_workspace_setup_creates_lmz_layout_and_resolves_paths(monkeypatch, tmp_
         "data/vaults/default/wd-tags",
     ]:
         assert (workspace_parent / "lmz" / relative).exists()
+    assert not (workspace_parent / "lmz" / "data" / "models").exists()
 
     monkeypatch.setenv("LMZ_CONFIG_PATH", str(config_path))
     if str(BACKEND) not in sys.path:
@@ -557,6 +560,7 @@ def test_workspace_setup_creates_lmz_layout_and_resolves_paths(monkeypatch, tmp_
     web_api = importlib.import_module("web_api")
 
     assert utils.CONFIG_ROOT == workspace_parent / "lmz"
+    assert utils.MODELS_DIR == ROOT / "data" / "models"
     assert utils.TOPICS_DIR == workspace_parent / "lmz" / "data" / "topics"
     assert utils.VAULT_DIR == workspace_parent / "lmz" / "data" / "vaults" / "default" / "vault"
     assert utils.DB_PATH == workspace_parent / "lmz" / "data" / "vaults" / "default" / "db" / "lmz_main.db"
@@ -583,6 +587,55 @@ def test_workspace_setup_creates_lmz_layout_and_resolves_paths(monkeypatch, tmp_
     assert runtime["workspace_mode"] == "lmz"
     assert runtime["active_vault"] == "default"
     shutil.rmtree(workspace_parent, ignore_errors=True)
+
+
+def test_workspace_config_rejects_legacy_models_path(monkeypatch, tmp_path):
+    utils, = fresh_backend(monkeypatch, tmp_path, "utils")
+    config = utils.get_config()
+    config.setdefault("paths", {})["models"] = "data/models"
+
+    with pytest.raises(ValueError, match="paths.models"):
+        utils.validate_config_schema(config)
+
+
+def test_runtime_context_rejects_legacy_models_path(monkeypatch, tmp_path):
+    runtime_context, = fresh_backend(monkeypatch, tmp_path, "runtime_context")
+    workspace_root = tmp_path / "bad-workspace"
+    workspace_root.mkdir()
+    config_path = workspace_root / "config.yaml"
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "active_vault": "default",
+                "vaults": {"default": {"name": "Default", "root": "data/vaults/default"}},
+                "paths": {"models": "data/models", "secrets": "data/secrets"},
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="paths.models"):
+        runtime_context.build_runtime_context(config_path)
+
+
+def test_tagger_model_lookup_uses_runtime_models_dir(monkeypatch, tmp_path):
+    service, = fresh_backend(monkeypatch, tmp_path, "tagging.service")
+    expected_dir = tmp_path / "app-models"
+    calls = []
+
+    def fake_download(**kwargs):
+        calls.append(kwargs)
+        return str(Path(kwargs["local_dir"]) / kwargs["filename"])
+
+    monkeypatch.setattr(service, "get_runtime_context", lambda: types.SimpleNamespace(models_dir=expected_dir))
+
+    model_path, tags_path = service._ensure_model_files("org/test-model", fake_download)
+
+    assert calls
+    assert {call["local_dir"] for call in calls} == {str(expected_dir / "test-model")}
+    assert model_path == expected_dir / "test-model" / "model.onnx"
+    assert tags_path == expected_dir / "test-model" / "selected_tags.csv"
 
 
 def test_workspace_setup_refuses_runtime_paths(tmp_path):
@@ -910,7 +963,6 @@ def test_update_app_config_invalidates_config_cache(monkeypatch, tmp_path):
         "vaults": {"default": {"name": "Default", "root": "data/vaults/default"}},
         "paths": {
             "secrets": "data/secrets",
-            "models": "data/models",
         },
         "firewall": {"allowed_extensions": [".jpg"], "allowed_mimes": ["image/jpeg"]},
         "hash_algorithm": "sha256",

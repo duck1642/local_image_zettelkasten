@@ -199,6 +199,7 @@ VSCode-friendly test launchers:
 - Design and implement vault merge flow.
 - Evaluate workspace merge later after vault merge behavior is clear.
 - Verify vault/workspace internals keep relative paths where practical.
+- Keep WD/tagger model storage app-global at `data/models`; workspace configs must not contain `paths.models`.
 - Keep config/workspace YAML paths machine-local/absolute where needed.
 - Use relocation/recovery flows to handle synced config files whose absolute paths moved across machines.
 

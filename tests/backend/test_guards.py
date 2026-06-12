@@ -164,6 +164,48 @@ def test_config_save_rejects_absolute_vault_root(monkeypatch, tmp_path):
     assert "vaults.default.root must be relative" in response.text
 
 
+def test_config_save_rejects_legacy_models_path(monkeypatch, tmp_path):
+    app_module = fresh_api(monkeypatch, tmp_path)
+    workspaces = importlib.import_module("workspaces")
+
+    registry_path = tmp_path / "workspaces.yaml"
+    ws_root = tmp_path / "workspace"
+    ws_root.mkdir()
+    vault_root = ws_root / "data" / "vaults" / "default"
+    vault_root.mkdir(parents=True)
+    config_path = ws_root / "config.yaml"
+    workspace_config(config_path, "data/vaults/default")
+
+    write_registry(
+        registry_path,
+        "default",
+        {
+            "default": {"name": "Default", "config_path": "config/config.yaml"},
+            "ready": {"name": "Ready", "config_path": str(config_path)},
+        },
+    )
+    monkeypatch.setattr(workspaces, "REGISTRY_PATH", registry_path)
+
+    client = TestClient(app_module.app)
+    key = api_key(client)
+    load = client.post("/api/workspaces/ready/load", headers={"X-LMZ-API-KEY": key})
+    assert load.status_code == 200
+    assert load.json()["status"] == "success"
+
+    response = client.post(
+        "/api/config",
+        json={
+            "active_vault": "default",
+            "vaults": {"default": {"name": "Default", "root": "data/vaults/default"}},
+            "paths": {"models": "data/models", "secrets": "data/secrets"},
+        },
+        headers={"X-LMZ-API-KEY": key},
+    )
+
+    assert response.status_code == 400
+    assert "paths.models is no longer supported" in response.text
+
+
 def test_delete_vault_refuses_outside_workspace_root(monkeypatch, tmp_path):
     app_module = fresh_api(monkeypatch, tmp_path)
     workspaces = importlib.import_module("workspaces")

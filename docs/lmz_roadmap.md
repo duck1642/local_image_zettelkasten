@@ -191,7 +191,7 @@ Build and stabilize the local-first Tauri/Svelte vault app, backend API, metadat
 - Added color-sensitive Stats/Inspector chip styling for rating, character, topic, and general tags.
 - Split logs into raw terminal output and structured JSONL streams.
 - Added readable and raw log display modes in the UI.
-- Added a reusable local WD tagging service with local model storage under `data/models/`.
+- Added a reusable local WD tagging service with shared app-level model storage under `data/models/`.
 - Added detailed WD tag cache, now stored under active-vault compact `wd-tags/{hash[:2]}/{storage_id}.json` paths.
 - Added distilled WD fields to markdown frontmatter.
 - Added image and video WD tagging; videos use sampled frame tagging and merged suggestions.

@@ -295,6 +295,7 @@ local_media_zettelkasten/
     perf-results/
     *.bat
   data/
+    models/
     workspace.db
     topics/
     vaults/
@@ -317,7 +318,6 @@ local_media_zettelkasten/
         logs/
           raw/
           structured/
-    models/
   secrets/
   backups/
   docs/
@@ -877,7 +877,7 @@ Local WD tagging lives under `backend/tagging/`.
 Behavior:
 
 - Public API: `tag_media(media_path, item_hash=None, config=None, storage_id=None)`.
-- Model files live under workspace `data/models/`.
+- Model files live under app-level `data/models/`.
 - Detailed cache lives under active vault `wd-tags/{hash[:2]}/{storage_id}.json`.
 - Markdown notes receive distilled WD fields.
 - Images are tagged directly.

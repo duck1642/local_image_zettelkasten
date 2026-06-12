@@ -182,9 +182,10 @@ def validate_config_schema(config: dict):
         if not isinstance(config['paths'], dict):
             errors.append("Key 'paths' must be a dictionary")
         else:
-            for key in ['secrets', 'models']:
-                if key in config['paths'] and not isinstance(config['paths'][key], str):
-                    errors.append(f"Key 'paths.{key}' must be a string")
+            if 'models' in config['paths']:
+                errors.append("Key 'paths.models' is no longer supported; models are stored in app data/models")
+            if 'secrets' in config['paths'] and not isinstance(config['paths']['secrets'], str):
+                errors.append("Key 'paths.secrets' must be a string")
 
     if 'firewall' not in config:
         errors.append("Missing mandatory section: 'firewall'")
@@ -223,7 +224,6 @@ def _default_config(ctx: WorkspaceContext | None = None) -> dict:
     return {
         'paths': {
             'secrets': 'secrets',
-            'models': 'data/models',
         },
         'active_vault': vault.id or 'default',
         'vaults': {

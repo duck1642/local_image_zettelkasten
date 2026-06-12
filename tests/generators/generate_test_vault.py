@@ -205,7 +205,6 @@ def _config() -> dict:
         },
         "log_level": "INFO",
         "paths": {
-            "models": "data/models",
             "secrets": "data/secrets",
         },
         "processing": {

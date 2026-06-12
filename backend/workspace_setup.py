@@ -58,7 +58,6 @@ def lmz_workspace_config() -> dict:
             },
         },
         "paths": {
-            "models": "data/models",
             "secrets": "data/secrets",
         },
         "processing": {
@@ -111,7 +110,6 @@ def setup_lmz_workspace(parent_path: str | Path, overwrite_config: bool = False)
         workspace / "data" / "vaults" / "default" / "input",
         workspace / "data" / "vaults" / "default" / "local_ingest",
         workspace / "data" / "vaults" / "default" / "online_ingest",
-        workspace / "data" / "models",
         workspace / "data" / "secrets",
     ]
     for directory in directories:

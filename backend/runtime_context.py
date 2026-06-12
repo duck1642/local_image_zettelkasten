@@ -123,6 +123,8 @@ def build_runtime_context(config_path: str | Path | None = None, active_vault_id
     root = _config_root_for(resolved_config_path)
     config = _load_config(resolved_config_path)
     paths = config.get("paths", {}) if isinstance(config.get("paths"), dict) else {}
+    if "models" in paths:
+        raise ValueError("paths.models is no longer supported; models are stored in app data/models")
     vaults = config.get("vaults", {}) if isinstance(config.get("vaults"), dict) else {}
     if not vaults:
         raise RuntimeError("config.yaml must define vaults")
@@ -137,7 +139,7 @@ def build_runtime_context(config_path: str | Path | None = None, active_vault_id
         root=root,
         topics_dir=(root / "data" / "topics").resolve(),
         secrets_dir=_resolve_from_root(root, paths.get("secrets") or "secrets"),
-        models_dir=_resolve_from_root(root, paths.get("models") or "data/models"),
+        models_dir=(PROJECT_ROOT / "data" / "models").resolve(),
         workspace_db_path=root / "data" / "workspace.db",
         active_vault=active_vault,
         vaults_configured=bool(vaults),

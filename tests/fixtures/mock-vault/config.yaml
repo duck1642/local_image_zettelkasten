@@ -35,7 +35,6 @@ ingestion_concurrency:
       jitter_range: [0, 0]
 log_level: INFO
 paths:
-  models: data/models
   secrets: data/secrets
 processing:
   background_preset: white

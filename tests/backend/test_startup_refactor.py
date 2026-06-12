@@ -157,9 +157,10 @@ def test_launcher_mode_creates_lmz_workspace(monkeypatch, tmp_path):
         assert Path(payload["workspace"]["config_path"]) == config_path
         saved_config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
         assert saved_config["vaults"]["default"]["root"] == "data/vaults/default"
-        assert saved_config["paths"]["models"] == "data/models"
+        assert "models" not in saved_config["paths"]
         assert saved_config["paths"]["secrets"] == "data/secrets"
         assert saved_config["external_tools"]["cookies_path"] == "data/secrets/cookies.txt"
+        assert not (parent / "lmz" / "data" / "models").exists()
         load = client.post("/api/workspaces/api-workspace/load", headers={"X-LMZ-API-KEY": key})
         assert load.status_code == 200
         assert load.json()["status"] == "success"
