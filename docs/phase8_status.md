@@ -188,21 +188,6 @@ VSCode-friendly test launchers:
 7. Import/export.
 8. Auth UI / auth scan.
 
-### P0 Stability / Startup
-
-- Verify launcher-safe API routes stay available before workspace/vault activation.
-
-### P1 Workspace / Vault Runtime
-
-- Add vault creation flow.
-- Audit vault switching reliability across DB paths, search index, metadata index, watchdogs, logs, review cache, RAM/search state, and frontend stores.
-- Design and implement vault merge flow.
-- Evaluate workspace merge later after vault merge behavior is clear.
-- Verify vault/workspace internals keep relative paths where practical.
-- Keep WD/tagger model storage app-global at `data/models`; workspace configs must not contain `paths.models`.
-- Keep config/workspace YAML paths machine-local/absolute where needed.
-- Use relocation/recovery flows to handle synced config files whose absolute paths moved across machines.
-
 ### P1 Maintenance Safety
 
 - Audit Settings maintenance buttons, especially actions that touch DB state.
@@ -266,6 +251,26 @@ VSCode-friendly test launchers:
 - Current operational completion checkpoints remain below under `Done But Needs Check`.
 
 ## Done But Needs Check
+
+- P0 Stability / Startup:
+  - Launcher-safe API routes stay available before workspace/vault activation.
+  - Startup UI logs are available in launcher mode.
+  - Native Tauri startup background matches launcher base color to avoid white WebView flash.
+  - Initial launcher window is centered by Tauri config instead of visible post-mount recentering.
+  - Needs longer fresh-start manual smoke because a brief WebView default dark surface can still appear before CSS loads.
+
+- P1 Workspace / Vault Runtime:
+  - Workspace creation flow is implemented with `<parent>/lmz/config.yaml`.
+  - Vault creation flow is implemented and constrained to selected workspaces.
+  - Workspace and vault switching activate the correct runtime context.
+  - Active vault paths, DB paths, logs, search state, metadata state, review cache, RAM/search state, and frontend stores are switch-aware at implementation level.
+  - Vault merge preview/confirm is implemented.
+  - Workspace merge remains deferred until vault merge behavior is clearer.
+  - Vault/workspace internals keep relative paths where practical.
+  - Config/workspace YAML keeps machine-local absolute paths where needed.
+  - Relocation/recovery flows handle synced config files whose absolute paths moved across machines.
+  - WD/tagger model storage is app-global at `data/models`; workspace configs must not contain `paths.models`.
+  - Verified with targeted tests plus Desktop workspace/vault ingest placement smoke; needs longer real-use switching/ingest/search/log smoke before closing fully.
 
 - Phase C prerequisites and tag/topic maintenance:
   - Inspector topic workflow is implemented:
