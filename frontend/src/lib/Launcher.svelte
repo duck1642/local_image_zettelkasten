@@ -10,6 +10,7 @@
     IconSettings,
     IconAlertTriangle,
     IconCheckCircle,
+    IconChevronUp,
     IconServer,
     IconChevronLeft
   } from './icons';
@@ -45,6 +46,12 @@
   let actionBusy = false;
   let statusMessage = '';
   let errorMessage = '';
+  let nameDialog: 'workspace' | 'vault' | null = null;
+  let pendingWorkspacePath = '';
+  let pendingWorkspaceName = '';
+  let pendingVaultName = 'New Vault';
+  let visibleWorkspacePaths = new Set<string>();
+  let visibleVaultPaths = new Set<string>();
 
   // Relocation state
   let relocateState: {
@@ -74,6 +81,64 @@
       errorMessage = 'Could not load workspaces. Make sure backend is running.';
     } finally {
       loading = false;
+    }
+  }
+
+  function defaultNameFromPath(path: string) {
+    const clean = path.replace(/[\\/]+$/, '');
+    const parts = clean.split(/[\\/]/);
+    return parts[parts.length - 1] || 'LMZ Workspace';
+  }
+
+  async function addWorkspace() {
+    if (actionBusy) return;
+    try {
+      errorMessage = '';
+      statusMessage = 'Selecting workspace parent folder...';
+      const selection = await openDialog({
+        directory: true,
+        multiple: false
+      });
+      if (!selection) {
+        statusMessage = '';
+        return;
+      }
+      pendingWorkspacePath = String(selection);
+      pendingWorkspaceName = defaultNameFromPath(String(selection));
+      nameDialog = 'workspace';
+      statusMessage = '';
+    } catch (e) {
+      uiLog('ERROR', 'Failed to select workspace folder from launcher', { error: String(e) });
+      errorMessage = `Failed to select workspace folder: ${String(e)}`;
+      statusMessage = '';
+    }
+  }
+
+  async function confirmAddWorkspace() {
+    const name = pendingWorkspaceName.trim();
+    if (!name || !pendingWorkspacePath || actionBusy) return;
+    try {
+      actionBusy = true;
+      statusMessage = 'Creating workspace...';
+      const res = await apiFetch('/api/workspaces', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: pendingWorkspacePath, name })
+      });
+      if (!res.ok) {
+        const payload = await res.json().catch(() => ({}));
+        throw new Error(payload?.detail || `HTTP ${res.status}`);
+      }
+      nameDialog = null;
+      pendingWorkspacePath = '';
+      statusMessage = 'Workspace created.';
+      await fetchWorkspaces();
+    } catch (e) {
+      uiLog('ERROR', 'Failed to create workspace from launcher', { error: String(e) });
+      errorMessage = `Failed to create workspace: ${String(e)}`;
+      statusMessage = '';
+    } finally {
+      actionBusy = false;
     }
   }
 
@@ -146,6 +211,71 @@
     } finally {
       loadingVaults = false;
     }
+  }
+
+  async function addVault() {
+    if (actionBusy || !selectedWorkspace) return;
+    pendingVaultName = 'New Vault';
+    nameDialog = 'vault';
+  }
+
+  async function confirmAddVault() {
+    const name = pendingVaultName.trim();
+    if (!name || actionBusy || !selectedWorkspace) return;
+    try {
+      actionBusy = true;
+      errorMessage = '';
+      statusMessage = 'Creating vault...';
+      const res = await apiFetch('/api/vaults', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name })
+      });
+      if (!res.ok) {
+        const payload = await res.json().catch(() => ({}));
+        throw new Error(payload?.detail || `HTTP ${res.status}`);
+      }
+      nameDialog = null;
+      pendingVaultName = 'New Vault';
+      statusMessage = 'Vault created.';
+      await fetchVaults();
+    } catch (e) {
+      uiLog('ERROR', 'Failed to create vault from launcher', { error: String(e) });
+      errorMessage = `Failed to create vault: ${String(e)}`;
+      statusMessage = '';
+    } finally {
+      actionBusy = false;
+    }
+  }
+
+  function closeNameDialog() {
+    if (actionBusy) return;
+    nameDialog = null;
+    pendingWorkspacePath = '';
+    pendingWorkspaceName = '';
+    pendingVaultName = 'New Vault';
+  }
+
+  function toggleWorkspacePath(id: string, event: Event) {
+    event.stopPropagation();
+    const next = new Set(visibleWorkspacePaths);
+    if (next.has(id)) {
+      next.delete(id);
+    } else {
+      next.add(id);
+    }
+    visibleWorkspacePaths = next;
+  }
+
+  function toggleVaultPath(id: string, event: Event) {
+    event.stopPropagation();
+    const next = new Set(visibleVaultPaths);
+    if (next.has(id)) {
+      next.delete(id);
+    } else {
+      next.add(id);
+    }
+    visibleVaultPaths = next;
   }
 
   async function openVault(vault: VaultItem) {
@@ -277,7 +407,6 @@
         <IconServer size={32} className="logo-icon" />
       </div>
       <h1 class="title">Local Media Zettelkasten</h1>
-      <p class="subtitle">Secure, portable, agent-assisted media archive manager</p>
     </header>
 
     {#if loading}
@@ -318,15 +447,18 @@
 
         {:else if step === 'workspaces'}
           <!-- Step 1: Workspace Selection -->
-          {#if workspaces.length > 0}
-            <section class="launcher-section">
-              <div class="section-header">
-                <h3>Select a workspace</h3>
-                <button class="icon-btn" on:click={fetchWorkspaces} disabled={actionBusy} title="Refresh workspaces">
-                  <IconRefresh size={12} />
-                </button>
-              </div>
-              
+          <section class="launcher-section">
+            <div class="section-header">
+              <h3>Select a workspace</h3>
+              <button class="icon-btn" on:click={fetchWorkspaces} disabled={actionBusy} title="Refresh workspaces">
+                <IconRefresh size={12} />
+              </button>
+              <button class="icon-btn" on:click={addWorkspace} disabled={actionBusy} title="Add workspace">
+                <IconPlus size={12} />
+              </button>
+            </div>
+
+            {#if workspaces.length > 0}
               <div class="launcher-workspace-list sleek-scrollbar">
                 {#each workspaces as w}
                   {#if w.exists}
@@ -338,26 +470,45 @@
                     >
                       <div class="launcher-row-info">
                         <div class="launcher-name-line">
+                          <IconServer size={14} className="workspace-icon" />
                           <span class="workspace-name">{w.name}</span>
                           <span class="launcher-status-badge launcher-found">
                             <span class="dot"></span>
                             Found
                           </span>
                         </div>
-                        <div class="launcher-path-line" title={w.config_path}>{w.config_path}</div>
+                        {#if visibleWorkspacePaths.has(w.id)}
+                          <div class="launcher-path-line" title={w.config_path}>{w.config_path}</div>
+                        {/if}
                       </div>
+                      <span
+                        class="path-toggle-btn"
+                        class:open={visibleWorkspacePaths.has(w.id)}
+                        role="button"
+                        tabindex="0"
+                        title={visibleWorkspacePaths.has(w.id) ? 'Hide config path' : 'Show config path'}
+                        on:click={(event) => toggleWorkspacePath(w.id, event)}
+                        on:keydown={(event) => {
+                          if (event.key === 'Enter' || event.key === ' ') toggleWorkspacePath(w.id, event);
+                        }}
+                      >
+                        <IconChevronUp size={12} />
+                      </span>
                     </button>
                   {:else}
                     <div class="launcher-workspace-row missing">
                       <div class="launcher-row-info">
                         <div class="launcher-name-line">
+                          <IconServer size={14} className="workspace-icon" />
                           <span class="workspace-name">{w.name}</span>
                           <span class="launcher-status-badge launcher-missing">
                             <span class="dot"></span>
                             Missing
                           </span>
                         </div>
-                        <div class="launcher-path-line" title={w.config_path}>{w.config_path}</div>
+                        {#if visibleWorkspacePaths.has(w.id)}
+                          <div class="launcher-path-line" title={w.config_path}>{w.config_path}</div>
+                        {/if}
                       </div>
                       <div class="launcher-row-actions">
                         <button class="row-action-btn secondary relocate" on:click={() => {
@@ -366,29 +517,40 @@
                         }} disabled={actionBusy}>
                           Relocate
                         </button>
+                        <button
+                          class="path-toggle-btn"
+                          type="button"
+                          class:open={visibleWorkspacePaths.has(w.id)}
+                          title={visibleWorkspacePaths.has(w.id) ? 'Hide config path' : 'Show config path'}
+                          on:click={(event) => toggleWorkspacePath(w.id, event)}
+                        >
+                          <IconChevronUp size={12} />
+                        </button>
                       </div>
                     </div>
                   {/if}
                 {/each}
               </div>
-            </section>
-          {:else}
-            <div class="empty-state">
-              <p>No workspaces found.</p>
-            </div>
-          {/if}
+            {:else}
+              <div class="empty-state">
+                <p>No workspaces found.</p>
+              </div>
+            {/if}
+          </section>
 
         {:else if step === 'vaults'}
           <!-- Step 2: Vault Selection -->
           <section class="launcher-section">
-            <div class="section-header">
+            <div class="section-header vault-section-header">
               <button class="back-btn" on:click={goBack} disabled={actionBusy} title="Back to workspaces">
                 <IconChevronLeft size={14} />
-                <span>Back</span>
               </button>
               <h3>{selectedWorkspace?.name || 'Workspace'}</h3>
               <button class="icon-btn" on:click={fetchVaults} disabled={actionBusy || loadingVaults} title="Refresh vaults">
                 <IconRefresh size={12} />
+              </button>
+              <button class="icon-btn" on:click={addVault} disabled={actionBusy || loadingVaults} title="Add vault">
+                <IconPlus size={12} />
               </button>
             </div>
 
@@ -418,12 +580,24 @@
                           {v.exists ? 'Found' : 'Missing'}
                         </span>
                       </div>
-                      <div class="launcher-path-line" title={v.root}>{v.root}</div>
+                      {#if visibleVaultPaths.has(v.id)}
+                        <div class="launcher-path-line" title={v.root}>{v.root}</div>
+                      {/if}
                     </div>
                     <div class="launcher-row-actions">
-                      {#if v.exists}
-                        <span class="row-action-btn secondary open">Open</span>
-                      {/if}
+                      <span
+                        class="path-toggle-btn"
+                        class:open={visibleVaultPaths.has(v.id)}
+                        role="button"
+                        tabindex="0"
+                        title={visibleVaultPaths.has(v.id) ? 'Hide vault path' : 'Show vault path'}
+                        on:click={(event) => toggleVaultPath(v.id, event)}
+                        on:keydown={(event) => {
+                          if (event.key === 'Enter' || event.key === ' ') toggleVaultPath(v.id, event);
+                        }}
+                      >
+                        <IconChevronUp size={12} />
+                      </span>
                     </div>
                   </button>
                 {/each}
@@ -456,6 +630,36 @@
       </footer>
     {/if}
   </div>
+
+  {#if nameDialog}
+    <div class="launcher-dialog-backdrop" role="presentation">
+      <div class="launcher-dialog" role="dialog" aria-modal="true" aria-labelledby="launcher-name-dialog-title" tabindex="-1">
+        <h3 id="launcher-name-dialog-title">
+          {nameDialog === 'workspace' ? 'Create Workspace' : 'Create Vault'}
+        </h3>
+        {#if nameDialog === 'workspace'}
+          <label class="launcher-field">
+            <span>Workspace name</span>
+            <input type="text" bind:value={pendingWorkspaceName} on:keydown={(event) => event.key === 'Enter' && confirmAddWorkspace()} />
+          </label>
+          <div class="launcher-path-line dialog-path" title={pendingWorkspacePath}>{pendingWorkspacePath}</div>
+        {:else}
+          <label class="launcher-field">
+            <span>Vault name</span>
+            <input type="text" bind:value={pendingVaultName} on:keydown={(event) => event.key === 'Enter' && confirmAddVault()} />
+          </label>
+        {/if}
+        <div class="form-buttons dialog-buttons">
+          <button class="primary-action-btn" type="button" disabled={actionBusy || (nameDialog === 'workspace' ? !pendingWorkspaceName.trim() : !pendingVaultName.trim())} on:click={nameDialog === 'workspace' ? confirmAddWorkspace : confirmAddVault}>
+            Create
+          </button>
+          <button class="row-action-btn secondary" type="button" disabled={actionBusy} on:click={closeNameDialog}>
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -530,12 +734,6 @@
     -webkit-text-fill-color: transparent;
   }
 
-  .subtitle {
-    font-size: 12px;
-    color: var(--text-muted);
-    margin: 0;
-  }
-
   .spinner-area {
     display: flex;
     flex-direction: column;
@@ -593,6 +791,12 @@
     gap: 8px;
   }
 
+  .vault-section-header {
+    display: grid;
+    grid-template-columns: 8px 1fr 20px 20px;
+    column-gap: 8px;
+  }
+
   .section-header h3 {
     font-size: 11px;
     font-weight: 700;
@@ -606,22 +810,21 @@
   .back-btn {
     display: flex;
     align-items: center;
-    gap: 4px;
+    justify-content: flex-start;
+    width: 20px;
+    margin-left: -4px;
     background: transparent;
     border: none;
-    padding: 4px 8px 4px 4px;
+    padding: 4px 0;
     color: var(--text-muted);
     border-radius: 4px;
     cursor: pointer;
-    font-size: 11px;
-    font-weight: 600;
     transition: color 0.15s ease, background 0.15s ease;
     flex-shrink: 0;
   }
 
   .back-btn:hover {
     color: var(--text-bright);
-    background: var(--bg-hover);
   }
 
   .icon-btn {
@@ -649,7 +852,6 @@
     max-height: 200px;
     overflow-y: auto;
     width: 100%;
-    padding-right: 4px;
   }
 
   .launcher-workspace-row {
@@ -704,7 +906,8 @@
     width: 100%;
   }
 
-  :global(.vault-icon) {
+  :global(.vault-icon),
+  :global(.workspace-icon) {
     color: var(--text-muted);
     flex-shrink: 0;
   }
@@ -713,6 +916,37 @@
     font-size: 14px;
     font-weight: 600;
     color: var(--text-bright);
+  }
+
+  .path-toggle-btn {
+    width: 20px;
+    height: 20px;
+    margin-right: -4px;
+    padding: 0;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-muted);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+
+  .path-toggle-btn:hover,
+  .path-toggle-btn:focus-visible {
+    color: var(--text-bright);
+    outline: none;
+  }
+
+  .path-toggle-btn :global(svg) {
+    transform: rotate(180deg);
+    transition: transform 0.12s ease;
+  }
+
+  .path-toggle-btn.open :global(svg) {
+    transform: rotate(0deg);
   }
 
   .launcher-active-badge {
@@ -833,6 +1067,68 @@
     align-items: center;
     gap: 12px;
     margin-top: 8px;
+  }
+
+  .launcher-dialog-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 1100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(1, 4, 9, 0.64);
+    padding: 16px;
+  }
+
+  .launcher-dialog {
+    width: min(420px, 100%);
+    background: #161b22;
+    border: 1px solid var(--border-dim);
+    border-radius: 8px;
+    box-shadow: 0 16px 42px rgba(0, 0, 0, 0.48);
+    padding: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .launcher-dialog h3 {
+    margin: 0;
+    font-size: 15px;
+    color: var(--text-bright);
+  }
+
+  .launcher-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    color: var(--text-muted);
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .launcher-field input {
+    width: 100%;
+    background: #0d1117;
+    border: 1px solid var(--border-dim);
+    border-radius: 6px;
+    color: var(--text-main);
+    padding: 8px 10px;
+    font: inherit;
+  }
+
+  .launcher-field input:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+  }
+
+  .dialog-path {
+    max-width: 100%;
+  }
+
+  .dialog-buttons {
+    justify-content: flex-end;
+    margin-top: 0;
   }
 
   .primary-action-btn {

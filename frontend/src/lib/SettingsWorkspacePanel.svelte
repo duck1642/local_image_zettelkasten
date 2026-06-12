@@ -39,7 +39,7 @@
               <span class="missing-badge">Missing Config</span>
             {/if}
           </div>
-          <code class="settings-code">{workspace.config_path}</code>
+          <code class="settings-code" title={workspace.config_path}>{workspace.config_path}</code>
         </div>
         <button
           class="settings-small-action"

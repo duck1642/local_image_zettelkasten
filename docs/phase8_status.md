@@ -590,6 +590,7 @@ VSCode-friendly test launchers:
   - Native Tauri startup background now matches launcher base color to avoid white WebView flash.
   - Initial launcher window is centered by Tauri config instead of a visible post-mount Svelte recenter.
   - `POST /api/logs/ui` is launcher-safe, so startup UI logs can be captured before workspace/vault activation.
+  - Needs follow-up: startup can still briefly show a WebView default dark surface before `app.css` loads; likely `index.html`/unstyled document gap.
   - Targeted startup tests pass with alternate pytest temp base; needs fresh manual startup smoke before closing fully.
 - API guard layer / missing vault protection:
   - `backend/api/guards.py` adds explicit workspace, active-vault, and target-vault guards.

@@ -46,7 +46,7 @@
               <span class="missing-badge">Missing Vault Directory</span>
             {/if}
           </div>
-          <code class="settings-code">{vault.root}</code>
+          <code class="settings-code" title={vault.root}>{vault.root}</code>
         </div>
         <div class="row-actions row-actions-centered">
           <button

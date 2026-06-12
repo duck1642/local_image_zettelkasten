@@ -436,7 +436,7 @@ async def create_workspace(body: dict):
 
 
 def _create_workspace_sync(body: dict):
-    from tools.maintenance.setup_workspace import setup_lmz_workspace
+    from workspace_setup import setup_lmz_workspace
     from workspaces import register_workspace, workspace_list
 
     parent_path = str((body or {}).get("path") or "").strip()
