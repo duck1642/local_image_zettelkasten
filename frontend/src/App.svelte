@@ -7,6 +7,7 @@
   import SettingsView from './lib/SettingsView.svelte';
   import StatsView from './lib/StatsView.svelte';
   import VaultView from './lib/VaultView.svelte';
+  import Toaster from './lib/Toaster.svelte';
   import { log as uiLog } from './lib/logger';
   import { ramStats, startRamTracker } from './lib/ramStore';
   import { queueStats, reviewCount, reviewStats, startSharedStatsPolling } from './lib/statsStore';
@@ -384,6 +385,7 @@
 {#if !workspaceLoaded}
   <Launcher on:loaded={handleWorkspaceLoaded} />
 {:else}
+  <Toaster />
   <div class="root-container">
     {#if dragOverlayVisible}
       <div class="drop-overlay">

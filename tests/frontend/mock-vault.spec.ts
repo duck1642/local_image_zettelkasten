@@ -1058,7 +1058,7 @@ test('settings previews vault merge and runs vault health package actions', asyn
   await page.getByRole('button', { name: 'Preview Merge' }).click();
   await expect(page.getByText('1 importable').first()).toBeVisible();
   await page.getByRole('button', { name: 'Merge Vaults' }).click();
-  await expect(page.getByText('merged 1 items')).toBeVisible();
+  await expect(page.getByText('merged 1 items', { exact: true })).toBeVisible();
 
   await page.getByRole('button', { name: 'Audit Health' }).click();
   await expect(page.getByText('3 issues').first()).toBeVisible();

@@ -3,6 +3,7 @@
   import ConfirmationModal from './ConfirmationModal.svelte';
   import { config, configDirty, configLoading, loadConfig } from './configStore';
   import { log as uiLog } from './logger';
+  import { toastStore } from './toastStore';
   import { handleRuntimeSwitch } from './runtimeStore';
   import SettingsCoreConfigPanel from './SettingsCoreConfigPanel.svelte';
   import SettingsMaintenancePanel from './SettingsMaintenancePanel.svelte';
@@ -201,10 +202,21 @@
       vaults = Array.isArray(payload?.items) ? payload.items : vaults;
       vaultName = 'New Vault';
       vaultResult = 'vault created';
+      toastStore.add({
+        type: 'success',
+        title: 'Vault Created',
+        message: `Successfully created vault "${name}".`
+      });
       uiLog('INFO', 'Vault created', { name });
     } catch (error) {
-      vaultResult = `error: ${String(error)}`;
-      uiLog('ERROR', 'Vault create failed', { name, error: String(error) });
+      const errMsg = String(error);
+      vaultResult = `error: ${errMsg}`;
+      toastStore.add({
+        type: 'error',
+        title: 'Vault Creation Failed',
+        message: errMsg
+      });
+      uiLog('ERROR', 'Vault create failed', { name, error: errMsg });
     } finally {
       vaultBusy = false;
     }
@@ -221,16 +233,32 @@
       if (payload?.restart_required !== false) {
         vaultRestartRequired = true;
         vaultResult = 'active on next restart';
+        toastStore.add({
+          type: 'info',
+          title: 'Restart Required',
+          message: `Vault "${id}" will activate on next restart.`
+        });
       } else {
         vaultRestartRequired = false;
         vaultResult = 'Vault switched dynamically!';
+        toastStore.add({
+          type: 'success',
+          title: 'Vault Activated',
+          message: `Switched to vault "${id}" dynamically.`
+        });
         await handleRuntimeSwitch(payload);
         await Promise.all([loadWorkspaces(), loadVaults()]);
       }
       uiLog('INFO', 'Vault active changed', { id });
     } catch (error) {
-      vaultResult = `error: ${String(error)}`;
-      uiLog('ERROR', 'Vault active change failed', { id, error: String(error) });
+      const errMsg = String(error);
+      vaultResult = `error: ${errMsg}`;
+      toastStore.add({
+        type: 'error',
+        title: 'Vault Activation Failed',
+        message: errMsg
+      });
+      uiLog('ERROR', 'Vault active change failed', { id, error: errMsg });
     } finally {
       vaultBusy = false;
     }
@@ -245,8 +273,19 @@
       const payload = await updateVaultName(id, name);
       vaults = Array.isArray(payload?.items) ? payload.items : vaults;
       vaultResult = 'vault renamed';
+      toastStore.add({
+        type: 'success',
+        title: 'Vault Renamed',
+        message: `Renamed "${currentName || id}" to "${name}".`
+      });
     } catch (error) {
-      vaultResult = `error: ${String(error)}`;
+      const errMsg = String(error);
+      vaultResult = `error: ${errMsg}`;
+      toastStore.add({
+        type: 'error',
+        title: 'Rename Failed',
+        message: errMsg
+      });
     } finally {
       vaultBusy = false;
     }
@@ -271,11 +310,22 @@
       const payload = await removeVault(id);
       vaults = Array.isArray(payload?.items) ? payload.items : vaults;
       vaultResult = 'vault deleted';
+      toastStore.add({
+        type: 'success',
+        title: 'Vault Deleted',
+        message: `Successfully deleted vault "${id}".`
+      });
       mergeSourceIds = mergeSourceIds.filter((value) => value !== id);
       if (mergeTargetId === id) mergeTargetId = vaultActive;
       if (healthVaultId === id) healthVaultId = vaultActive;
     } catch (error) {
-      vaultResult = `error: ${String(error)}`;
+      const errMsg = String(error);
+      vaultResult = `error: ${errMsg}`;
+      toastStore.add({
+        type: 'error',
+        title: 'Delete Failed',
+        message: errMsg
+      });
     } finally {
       vaultBusy = false;
     }
@@ -315,10 +365,22 @@
     try {
       const payload = await mergeVaultsApi(mergeTargetId, mergeSourceIds);
       mergePreview = payload;
-      mergeResult = `merged ${Number(payload.imported || 0).toLocaleString()} items`;
+      const importedCount = Number(payload.imported || 0);
+      mergeResult = `merged ${importedCount.toLocaleString()} items`;
+      toastStore.add({
+        type: 'success',
+        title: 'Vault Merge Completed',
+        message: `Successfully merged ${importedCount.toLocaleString()} items into "${mergeTargetId}".`
+      });
       await loadVaults();
     } catch (error) {
-      mergeResult = `error: ${String(error)}`;
+      const errMsg = String(error);
+      mergeResult = `error: ${errMsg}`;
+      toastStore.add({
+        type: 'error',
+        title: 'Merge Failed',
+        message: errMsg
+      });
     } finally {
       mergeBusy = false;
     }
@@ -439,6 +501,11 @@
         setMaintenanceBusy('metadata', false);
         if (metadataRebuildJob?.status === 'completed') {
           setMaintenanceResult('metadata', 'completed');
+          toastStore.add({
+            type: 'success',
+            title: 'Metadata Rebuilt',
+            message: `Rebuild finished. Errors: ${metadataRebuildJob.errors || 0}.`
+          });
           uiLog('INFO', 'Maintenance metadata rebuild completed', {
             errors: metadataRebuildJob.errors || 0,
             duration_ms: metadataRebuildJob.duration_ms || 0
@@ -446,6 +513,11 @@
         } else if (metadataRebuildJob?.status === 'error') {
           const message = String(metadataRebuildJob.message || 'metadata rebuild failed');
           setMaintenanceResult('metadata', `error: ${message}`);
+          toastStore.add({
+            type: 'error',
+            title: 'Metadata Rebuild Failed',
+            message
+          });
           uiLog('ERROR', 'Maintenance metadata rebuild failed', { error: message });
         }
       }
@@ -454,6 +526,11 @@
       setMaintenanceBusy('metadata', false);
       const text = String(error);
       setMaintenanceResult('metadata', `error: ${text}`);
+      toastStore.add({
+        type: 'error',
+        title: 'Metadata Rebuild Failed',
+        message: text
+      });
       uiLog('ERROR', 'Maintenance metadata rebuild status failed', { error: text });
     }
   }
@@ -472,6 +549,11 @@
         const payload = await scanAuth();
         const cookies = String(payload?.auth?.cookies || 'unknown');
         setMaintenanceResult(action, `OK (${cookies})`);
+        toastStore.add({
+          type: 'success',
+          title: 'Auth Scan Complete',
+          message: `Authenticated successfully. Cookies: ${cookies}.`
+        });
         uiLog('INFO', 'Maintenance action completed', { action: 'auth_scan', cookies });
       } else if (action === 'metadata') {
         const payload = await startMetadataRebuild();
@@ -487,22 +569,42 @@
         const payload = await rebuildWorkspaceMetadata();
         const after = payload?.after || {};
         setMaintenanceResult(action, `artists ${after.artists || 0}, platforms ${after.platforms || 0}, WD ${after.wd_tags || 0}`);
+        toastStore.add({
+          type: 'success',
+          title: 'Workspace Synced',
+          message: `Synced ${after.artists || 0} artists, ${after.platforms || 0} platforms, and ${after.wd_tags || 0} tags.`
+        });
         uiLog('INFO', 'Maintenance action completed', { action: 'workspace_metadata_rebuild', after });
       } else if (action === 'workspacePrune') {
         const payload = await pruneWorkspaceMetadata();
         const pruned = payload?.pruned || {};
         setMaintenanceResult(action, `pruned artists ${pruned.artists || 0}, platforms ${pruned.platforms || 0}, WD ${pruned.wd_tags || 0}`);
+        toastStore.add({
+          type: 'success',
+          title: 'Registry Pruned',
+          message: `Pruned ${pruned.artists || 0} artists, ${pruned.platforms || 0} platforms, and ${pruned.wd_tags || 0} tags.`
+        });
         uiLog('INFO', 'Maintenance action completed', { action: 'workspace_metadata_prune', pruned });
       } else {
         const payload = await cleanupReview();
         const cleaned = Number(payload?.cleaned || 0);
         const failed = Number(payload?.failed || 0);
         setMaintenanceResult(action, `cleaned ${cleaned}, failed ${failed}`);
+        toastStore.add({
+          type: 'success',
+          title: 'Review Cleaned Up',
+          message: `Cleaned up ${cleaned} items (${failed} failed).`
+        });
         uiLog('INFO', 'Maintenance action completed', { action: 'review_cleanup', cleaned, failed });
       }
     } catch (error) {
       const text = String(error);
       setMaintenanceResult(action, `error: ${text}`);
+      toastStore.add({
+        type: 'error',
+        title: 'Action Failed',
+        message: text
+      });
       uiLog('ERROR', 'Maintenance action failed', { action, error: text });
     } finally {
       if (action !== 'metadata' || !metadataRebuildJob?.running) {

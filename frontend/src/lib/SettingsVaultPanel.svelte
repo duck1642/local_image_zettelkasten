@@ -10,6 +10,8 @@
   export let onSetActiveVault: (id: string) => void;
   export let onDeleteVault: (id: string) => void;
   export let onAddVault: () => void;
+
+  $: isValidName = vaultName.trim() !== '';
 </script>
 
 <div class="workspace-actions settings-flat-actions">
@@ -91,12 +93,24 @@
   </div>
 
   <h4 class="settings-section-title settings-subsection-muted">Create New Vault</h4>
-  <div class="add-workspace settings-dashed-panel settings-add-vault">
-    <input type="text" placeholder="Desired vault folder name" bind:value={vaultName} />
-    <button class="settings-icon-button" type="button" on:click={onAddVault} disabled={vaultBusy || !vaultName.trim()}>
-      <IconPlus size={11} />
-      Create Vault
-    </button>
+  <div class="create-vault-card">
+    <div class="create-vault-row">
+      <input
+        type="text"
+        placeholder="Desired vault folder name (e.g. Notes)"
+        bind:value={vaultName}
+      />
+      <button
+        class="create-vault-btn"
+        class:active={isValidName}
+        type="button"
+        on:click={onAddVault}
+        disabled={vaultBusy || !isValidName}
+      >
+        <IconPlus size={11} />
+        Create Vault
+      </button>
+    </div>
   </div>
   
   {#if vaultResult}
