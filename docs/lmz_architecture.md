@@ -780,7 +780,7 @@ Each workspace has a `config.yaml` with one active vault:
 - `vaults`: registered vaults and relative roots inside the workspace.
 - `paths.secrets`: relative secrets path for that workspace.
 
-Vault switching is dynamic through Settings/API when runtime preflight allows it. Settings can create, rename, delete, and switch vaults. Vault merge imports source vault items into a target vault by allocating new destination `storage_id` values and copying assets/notes/cache files. Source-vault delete behavior is currently under maintenance review because UI copy and API defaults must be aligned before treating it as safe.
+Vault switching is dynamic through Settings/API when runtime preflight allows it. Settings can create, rename, delete, and switch vaults. Vault merge imports source vault items into a target vault by allocating new destination `storage_id` values and copying assets/notes/cache files. Source deletion is disabled by default; merge UI/wording still needs a clearer target/source/preview redesign before treating the workflow as polished.
 
 `backend/runtime_context.py` is the source of truth for active workspace/vault paths. Legacy `utils.py` constants remain available, but new code should prefer context-aware helpers or explicit `ctx` propagation. Maintenance scripts should use explicit workspace/vault selection rather than importing dynamic path globals.
 

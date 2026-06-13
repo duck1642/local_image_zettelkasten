@@ -156,11 +156,18 @@ VSCode-friendly test launchers:
 - Ensure maintenance logs include action start, target context/path, result, and warnings/errors.
 - Trace first: `frontend/src/lib/SettingsMaintenancePanel.svelte`, `frontend/src/lib/SettingsVaultHealthPanel.svelte`, maintenance API routes, and `tools/maintenance/`.
 - Trace findings from 2026-06-13:
-  - Vault merge UI says source vaults stay intact, but `/api/vaults/{target_id}/merge` defaults missing `delete_sources` to `true`; frontend currently omits the flag.
-  - Vault repair can run destructive actions (`derived_cache`, `review_sidecars`, `quarantine_orphans`) without backend-enforced `confirm_destructive`; current UI confirm is client-only.
-  - `backend/scripts/workspace_select.py` exists, but maintenance scripts still import runtime path globals such as `DB_PATH`, `ASSETS_DIR`, and `NOTES_DIR` instead of using explicit workspace/vault selection.
-  - Vault import can leave a partial target vault folder if zip extraction fails before config write.
-  - Review cleanup, target-vault health/backup/export, and delete-vault guards looked mostly correct during this trace.
+  - Vault delete backend guards exist, but Settings UI may bypass the non-empty-vault checkpoint by always sending `confirm=true`; inspect why the user saw no delete warning and replace with explicit delete confirmation that shows vault name, item count, and root path.
+  - Vault merge no longer defaults to deleting sources (`delete_sources` defaults false and frontend sends false), but the UI/wording remains confusing and needs a focused redesign pass.
+  - Vault repair destructive actions now require backend `confirm_destructive`; keep this as done-but-needs-smoke, not an open blocker.
+  - Maintenance scripts can be updated opportunistically, but are lower priority than app UI/API safety.
+  - Vault import/export exists and needs its own detailed audit before UX/design decisions.
+
+### P1 Maintenance Inspection Order
+
+1. Vault delete UI: trace Settings event wiring and confirmation flow; require an explicit warning before `confirm=true`.
+2. Vault merge: document current copy-only behavior, then redesign UI with clearer target/source/preview semantics.
+3. Vault repair: verify current backend confirmation and UI wording; update docs/tests if stale.
+4. Vault import/export: inspect package format, extraction rollback, path safety, config scope, and UI flow in detail.
 
 ### P1 Index Systems
 
@@ -176,6 +183,7 @@ VSCode-friendly test launchers:
 
 - Audit current vault export behavior.
 - Audit current vault import behavior.
+- Inspect current backend package code before UI changes; import/export deserves its own discussion.
 - Decide whether workspace export/import should exist separately from vault export/import.
 - Ensure imports do not preserve wrong machine-specific absolute paths.
 - Decide package scope for assets, notes, DB, config, workspace metadata, logs, and secrets.
@@ -268,10 +276,11 @@ VSCode-friendly test launchers:
     - existing dynamic workspace/vault switching paths are verified by targeted tests.
     - stale direct `DB_PATH` import was removed from the active SQLite helper.
     - vault rename/delete flows have targeted backend hardening coverage.
-    - Settings exposes vault merge preview/confirm; current source-delete behavior is under P1 maintenance review because UI copy and API defaults disagree.
+    - Settings exposes vault merge preview/confirm; source deletion is disabled by default, but merge UI/wording remains confusing and needs redesign.
     - vault health audit reports missing files, orphan files/caches, bad storage IDs, hash mismatches, stale metadata rows, facet drift, broken/unused topics, review mismatches, and workspace dictionary drift.
     - vault health and repair logic is hardened to filter expected tag caches and thumbnails by image/video MIME type, and preserve skipped/failed tagging caches from being deleted as orphans.
     - vault repair can rebuild metadata/facets, rebuild thumbnails, prune derived cache orphans, reconcile review sidecars, and quarantine orphan assets/notes.
+    - vault repair destructive actions require backend confirmation.
     - vault backup/export/import package flows are exposed through backend APIs and Settings controls.
     - Split/separate vault flows are deferred until the real workflow is clearer.
     - Optional metadata maintenance (hiding/ignoring WD tags) is handled.
