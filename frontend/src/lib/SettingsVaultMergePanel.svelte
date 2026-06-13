@@ -5,7 +5,6 @@
   export let mergeSourceIds: string[] = [];
   export let mergePreview: any = null;
   export let mergeBusy = false;
-  export let mergeResult = '';
   export let onToggleMergeSource: (id: string, checked: boolean) => void;
   export let onPreviewVaultMerge: () => void;
   export let onConfirmVaultMerge: () => void;
@@ -56,9 +55,4 @@
     </div>
   {/if}
   
-  {#if mergeResult}
-    <div class="workspace-result settings-result">
-      {mergeResult}
-    </div>
-  {/if}
 </div>

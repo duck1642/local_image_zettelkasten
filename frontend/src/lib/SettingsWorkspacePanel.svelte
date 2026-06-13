@@ -4,7 +4,6 @@
   export let workspaceActive = '';
   export let workspaceBusy = false;
   export let workspaceRestartRequired = false;
-  export let workspaceResult = '';
   export let workspaceParentPath = '';
   export let workspaceName = 'LMZ Workspace';
   export let onSetActiveWorkspace: (id: string) => void;
@@ -72,10 +71,4 @@
       Create Workspace
     </button>
   </div>
-  
-  {#if workspaceResult}
-    <div class="workspace-result settings-result">
-      {workspaceResult}
-    </div>
-  {/if}
 </div>

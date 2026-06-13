@@ -7,11 +7,9 @@
   export let vaultActive = '';
   export let healthVaultId = '';
   export let healthBusy = false;
-  export let healthResult = '';
   export let healthReport: any = null;
   export let healthDetailsOpen = false;
   export let repairErrors: Array<{ hash: string; storage_id: string; status: string; error: string }> = [];
-  export let backupResult = '';
   export let importPackagePath = '';
   export let importVaultName = '';
   export let onAuditVaultHealth: () => void;
@@ -87,11 +85,6 @@
     <VaultHealthDetailsModal {healthReport} {repairErrors} onClose={() => healthDetailsOpen = false} />
   {/if}
 
-  {#if healthResult}
-    <div class="workspace-result settings-result health-result">
-      {healthResult}
-    </div>
-  {/if}
 
   <span class="settings-mini-label">Backup & Portability Packager</span>
   
@@ -115,9 +108,4 @@
     </button>
   </div>
 
-  {#if backupResult}
-    <div class="workspace-result settings-result">
-      {backupResult}
-    </div>
-  {/if}
 </div>

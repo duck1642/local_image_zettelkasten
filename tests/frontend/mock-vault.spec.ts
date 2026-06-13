@@ -1038,7 +1038,7 @@ test('settings registers and activates workspaces for next restart', async ({ pa
   await page.getByPlaceholder('Workspace label').fill('Main Vault');
   await page.getByRole('button', { name: 'Create Workspace' }).click();
 
-  await expect(page.getByText('Main Vault')).toBeVisible();
+  await expect(page.getByText('Main Vault', { exact: true })).toBeVisible();
   expect(actions).toEqual([
     { action: 'active', payload: { id: 'obsidian-main' } },
     { action: 'add', payload: { path: 'F:/Archive/Main', name: 'Main Vault' } }
@@ -1058,19 +1058,19 @@ test('settings previews vault merge and runs vault health package actions', asyn
   await page.getByRole('button', { name: 'Preview Merge' }).click();
   await expect(page.getByText('1 importable').first()).toBeVisible();
   await page.getByRole('button', { name: 'Merge Vaults' }).click();
-  await expect(page.getByText('merged 1 items', { exact: true })).toBeVisible();
+  await expect(page.getByText('Vault Merge Completed')).toBeVisible();
 
   await page.getByRole('button', { name: 'Audit Health' }).click();
   await expect(page.getByText('3 issues').first()).toBeVisible();
   await page.getByRole('button', { name: 'Repair Active Vault' }).click();
-  await expect(page.getByText(/0 total remain/)).toBeVisible();
+  await expect(page.getByText('Repair Complete')).toBeVisible();
 
   await page.getByRole('button', { name: 'Backup Vault Folder' }).click();
-  await expect(page.getByText(/backup: C:\/ObsidianVault/)).toBeVisible();
+  await expect(page.getByText('Backup Successful')).toBeVisible();
   await page.getByPlaceholder('Path to imported .zip vault package').fill('C:/Exports/default.lmzvault.zip');
   await page.getByPlaceholder('Imported vault display name').fill('Imported');
   await page.getByRole('button', { name: 'Import Vault' }).click();
-  await expect(page.getByText('imported imported')).toBeVisible();
+  await expect(page.getByText('Vault Imported')).toBeVisible();
 
   expect(actions).toEqual([
     { action: 'merge-preview', payload: { source_vault_ids: ['archive'] } },

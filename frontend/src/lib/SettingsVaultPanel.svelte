@@ -4,7 +4,6 @@
   export let vaultActive = '';
   export let vaultBusy = false;
   export let vaultRestartRequired = false;
-  export let vaultResult = '';
   export let vaultName = 'New Vault';
   export let onRenameVault: (id: string, currentName: string) => void;
   export let onSetActiveVault: (id: string) => void;
@@ -113,10 +112,5 @@
     </div>
   </div>
   
-  {#if vaultResult}
-    <div class="workspace-result settings-result">
-      {vaultResult}
-    </div>
-  {/if}
   <slot />
 </div>

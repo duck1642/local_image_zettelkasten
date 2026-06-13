@@ -145,16 +145,32 @@
       if (payload?.restart_required !== false) {
         workspaceRestartRequired = true;
         workspaceResult = 'active on next restart';
+        toastStore.add({
+          type: 'info',
+          title: 'Restart Required',
+          message: `Workspace "${id}" will activate on next restart.`
+        });
       } else {
         workspaceRestartRequired = false;
         workspaceResult = 'Workspace switched dynamically!';
+        toastStore.add({
+          type: 'success',
+          title: 'Workspace Activated',
+          message: `Switched to workspace "${id}" dynamically.`
+        });
         await handleRuntimeSwitch(payload);
         await Promise.all([loadWorkspaces(), loadVaults()]);
       }
       uiLog('INFO', 'Workspace active changed', { id });
     } catch (error) {
-      workspaceResult = `error: ${String(error)}`;
-      uiLog('ERROR', 'Workspace active change failed', { id, error: String(error) });
+      const errMsg = String(error);
+      workspaceResult = `error: ${errMsg}`;
+      toastStore.add({
+        type: 'error',
+        title: 'Workspace Switch Failed',
+        message: errMsg
+      });
+      uiLog('ERROR', 'Workspace active change failed', { id, error: errMsg });
     } finally {
       workspaceBusy = false;
     }
@@ -170,11 +186,22 @@
       workspaceActive = String(payload?.active || workspaceActive);
       workspaces = Array.isArray(payload?.items) ? payload.items : workspaces;
       workspaceResult = 'workspace registered';
+      toastStore.add({
+        type: 'success',
+        title: 'Workspace Created',
+        message: `Successfully registered workspace "${workspaceName.trim() || 'LMZ Workspace'}".`
+      });
       workspaceParentPath = '';
       uiLog('INFO', 'Workspace registered', { path });
     } catch (error) {
-      workspaceResult = `error: ${String(error)}`;
-      uiLog('ERROR', 'Workspace registration failed', { path, error: String(error) });
+      const errMsg = String(error);
+      workspaceResult = `error: ${errMsg}`;
+      toastStore.add({
+        type: 'error',
+        title: 'Workspace Creation Failed',
+        message: errMsg
+      });
+      uiLog('ERROR', 'Workspace registration failed', { path, error: errMsg });
     } finally {
       workspaceBusy = false;
     }
@@ -390,12 +417,17 @@
     if (!healthVaultId || healthBusy) return;
     healthBusy = true;
     healthResult = 'auditing...';
-      healthReport = null;
-      healthDetailsOpen = false;
+    healthReport = null;
+    healthDetailsOpen = false;
     try {
       const payload = await fetchVaultHealth(healthVaultId);
       healthReport = payload;
       healthResult = healthSummary(payload);
+      toastStore.add({
+        type: 'success',
+        title: 'Audit Complete',
+        message: `Audit finished: ${healthSummary(payload)}.`
+      });
       uiLog('INFO', 'Vault health audit completed', {
         vault: healthVaultId,
         issues: payload?.issue_count || 0,
@@ -404,8 +436,14 @@
         facet_drift: payload?.facet_drift?.length || 0
       });
     } catch (error) {
-      healthResult = `error: ${String(error)}`;
-      uiLog('ERROR', 'Vault health audit failed', { vault: healthVaultId, error: String(error) });
+      const errMsg = String(error);
+      healthResult = `error: ${errMsg}`;
+      toastStore.add({
+        type: 'error',
+        title: 'Audit Failed',
+        message: errMsg
+      });
+      uiLog('ERROR', 'Vault health audit failed', { vault: healthVaultId, error: errMsg });
     } finally {
       healthBusy = false;
     }
@@ -420,8 +458,12 @@
       const payload = await repairVaultHealthApi(healthVaultId, true);
       healthReport = payload.after || null;
       repairErrors = payload.wd_tagging?.errors || [];
-      // Keep details panel openable (don't force-close after repair)
       healthResult = repairSummary(payload);
+      toastStore.add({
+        type: 'success',
+        title: 'Repair Complete',
+        message: repairSummary(payload)
+      });
       uiLog('INFO', 'Vault repair completed', {
         vault: healthVaultId,
         fixed: payload?.fixed_issue_count || 0,
@@ -432,8 +474,14 @@
       });
       await loadVaults();
     } catch (error) {
-      healthResult = `error: ${String(error)}`;
-      uiLog('ERROR', 'Vault repair failed', { vault: healthVaultId, error: String(error) });
+      const errMsg = String(error);
+      healthResult = `error: ${errMsg}`;
+      toastStore.add({
+        type: 'error',
+        title: 'Repair Failed',
+        message: errMsg
+      });
+      uiLog('ERROR', 'Vault repair failed', { vault: healthVaultId, error: errMsg });
     } finally {
       healthBusy = false;
     }
@@ -447,8 +495,19 @@
     try {
       const payload = await packageVault(id, kind);
       backupResult = `${kind}: ${payload.package_path || 'created'}`;
+      toastStore.add({
+        type: 'success',
+        title: kind === 'backup' ? 'Backup Successful' : 'Export Successful',
+        message: `${kind === 'backup' ? 'Backup' : 'Export'} created at: ${payload.package_path || 'default location'}.`
+      });
     } catch (error) {
-      backupResult = `error: ${String(error)}`;
+      const errMsg = String(error);
+      backupResult = `error: ${errMsg}`;
+      toastStore.add({
+        type: 'error',
+        title: kind === 'backup' ? 'Backup Failed' : 'Export Failed',
+        message: errMsg
+      });
     } finally {
       healthBusy = false;
     }
@@ -465,8 +524,19 @@
       importPackagePath = '';
       importVaultName = '';
       backupResult = `imported ${payload.vault || 'vault'}`;
+      toastStore.add({
+        type: 'success',
+        title: 'Vault Imported',
+        message: `Successfully imported vault "${payload.vault || 'vault'}".`
+      });
     } catch (error) {
-      backupResult = `error: ${String(error)}`;
+      const errMsg = String(error);
+      backupResult = `error: ${errMsg}`;
+      toastStore.add({
+        type: 'error',
+        title: 'Import Failed',
+        message: errMsg
+      });
     } finally {
       healthBusy = false;
     }
@@ -650,7 +720,6 @@
           {workspaceActive}
           {workspaceBusy}
           {workspaceRestartRequired}
-          {workspaceResult}
           bind:workspaceParentPath
           bind:workspaceName
           onSetActiveWorkspace={setActiveWorkspace}
@@ -664,7 +733,6 @@
           {vaultActive}
           {vaultBusy}
           {vaultRestartRequired}
-          {vaultResult}
           bind:vaultName
           onRenameVault={renameVault}
           onSetActiveVault={setActiveVault}
@@ -687,14 +755,11 @@
           bind:mergeSourceIds
           bind:mergePreview
           {mergeBusy}
-          {mergeResult}
           bind:healthVaultId
           {healthBusy}
-          {healthResult}
           {healthReport}
           bind:healthDetailsOpen
           {repairErrors}
-          {backupResult}
           bind:importPackagePath
           bind:importVaultName
           onToggleMergeSource={toggleMergeSource}
