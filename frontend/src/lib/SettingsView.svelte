@@ -714,7 +714,8 @@
     {#if activeSettingsTab === 'general'}
       <SettingsCoreConfigPanel />
     {:else if activeSettingsTab === 'workspace' && $config._runtime}
-      <SettingsRuntimePanel runtime={$config._runtime}>
+      <SettingsRuntimePanel runtime={$config._runtime} />
+      <div class="workspace-panel">
         <SettingsWorkspacePanel
           {workspaces}
           {workspaceActive}
@@ -725,7 +726,7 @@
           onSetActiveWorkspace={setActiveWorkspace}
           onCreateWorkspace={createWorkspace}
         />
-      </SettingsRuntimePanel>
+      </div>
     {:else if activeSettingsTab === 'vaults'}
       <div class="workspace-panel">
         <SettingsVaultPanel

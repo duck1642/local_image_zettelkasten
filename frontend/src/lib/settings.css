@@ -1184,4 +1184,41 @@
     color: #ffffff !important;
   }
 
+  .create-workspace-form {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+  }
+
+  .select-folder-btn {
+    height: 34px;
+    padding: 0 12px;
+    font-size: 12px;
+    border-radius: 6px;
+    border: 1px solid var(--border-dim);
+    background: var(--bg-panel);
+    color: var(--text-muted);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    box-sizing: border-box;
+    flex-shrink: 0;
+  }
+
+  .select-folder-btn:hover:not(:disabled) {
+    border-color: var(--border-hover);
+    color: var(--text-main);
+  }
+
+  .visually-hidden-input {
+    position: absolute;
+    left: -9999px;
+    top: -9999px;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+  }
+
 

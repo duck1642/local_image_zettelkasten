@@ -39,6 +39,5 @@
         <span>Environment override is active. Registry changes apply only after restarting without LMZ_CONFIG_PATH.</span>
       </div>
     {/if}
-    <slot />
   </div>
 {/if}
