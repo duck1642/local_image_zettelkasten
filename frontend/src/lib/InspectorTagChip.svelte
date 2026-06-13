@@ -191,6 +191,10 @@
       box-sizing: border-box;
   }
 
+  .chip-action:last-child {
+      padding-right: 1px;
+  }
+
   .tag-chip:hover .chip-action,
   .tag-chip:focus-within .chip-action {
       width: 24px;

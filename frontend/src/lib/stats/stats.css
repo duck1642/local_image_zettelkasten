@@ -433,7 +433,9 @@ body.artist-list-resizing {
     background: transparent;
     color: var(--chip-color);
     padding: 0;
-    font-size: 13px;
+    font-family: inherit;
+    font-size: 11px;
+    font-weight: 600;
     line-height: 1.2;
     cursor: pointer;
     max-width: 100%;
@@ -446,7 +448,10 @@ body.artist-list-resizing {
   }
 
   .stat-chip .value {
-    padding: 6px 0 6px 10px;
+    display: flex;
+    align-items: center;
+    height: 100%;
+    padding: 0 0 0 10px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -529,6 +534,10 @@ body.artist-list-resizing {
     background: transparent;
     color: var(--text-muted);
     cursor: pointer;
+  }
+
+  .stats-chip-action:last-child {
+    padding-right: 2px;
   }
 
   .stats-chip-action.action-rename:hover {

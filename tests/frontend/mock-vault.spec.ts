@@ -1339,3 +1339,6 @@ test('stats metadata actions update topic and wd facets', async ({ page }) => {
   await page.getByRole('button', { name: 'Delete', exact: true }).click();
   await expect(page.locator('.stat-chip').filter({ hasText: 'mock-topic' })).toHaveCount(0);
 });
+
+
+
