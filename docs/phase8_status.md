@@ -104,53 +104,11 @@ VSCode-friendly test launchers:
 - `/sort-newest`, `/sort-oldest`, `/sort-artist`.
 - `/media-all`, `/media-image`, `/media-video`.
 
-## Deferred / Will Do Later
+## Deferred / Later
 
-### Search/index improvements
+### Runtime / Packaging Hardening
 
-- persistent search/facet tables beyond current derived metadata index if needed for scale.
-- search chips.
-- Search/index scaling:
-  - RAM hydration still bulk-loads pHash, tile, URL, and video signatures.
-
-### Source metadata maintenance
-
-- source URL normalization migration tool.
-- normalization is active in runtime paths (`source_url_norm` is written on ingest/update).
-- existing rows are backfilled lazily by `init_database()`.
-- no standalone migration/maintenance tool exists yet.
-
-
-
-### Phase D - UI Polish
-
-- Review panel design refinement.
-- Fullscreen board/view refinements.
-- Remaining Inspector fine polish and tag workflow edge cases.
-- Remaining Stats/Settings fine polish after real use.
-- Custom context menu for vault tiles.
-- Animation-aware GIF handling beyond first-frame thumbnail/tag behavior.
-- Video hover preview strategy:
-  - current hover preview can download original video.
-  - options: file-size cap, backend preview clip endpoint, animated WebP thumbnail.
-- Video embedding performance:
-  - sampled frame extraction now uses one FFmpeg subprocess per batch.
-  - embedding/tagging still depends on extracting sampled original video frames.
-
-### Phase E - Browser Extension Follow-Up
-
-- Browser extension MVP is implemented in Phase 9.
-- Remaining follow-up:
-  - fuller Chrome manual smoke.
-  - longer Firefox compatibility smoke.
-  - more real-world capture testing for blob/canvas/auth-gated/protected media.
-  - optional platform preset/alias management after real extension use settles platform names.
-
-### Final Phase - Runtime / Packaging Hardening
-
-- Dynamic sidecar port coordination:
-  - startup handshake/API base/CSP/lifecycle.
-  - remove fixed `localhost:8000` assumptions from frontend/Tauri runtime paths.
+- Dynamic sidecar port coordination: startup handshake, API base, CSP, lifecycle, and removing fixed `localhost:8000`.
 - Packaging-time security checks.
 - Clean-machine release validation.
 
@@ -190,16 +148,23 @@ VSCode-friendly test launchers:
 
 ### P1 Maintenance Safety
 
-- Audit Settings maintenance buttons, especially actions that touch DB state.
-- Ensure destructive maintenance actions clearly show selected workspace/vault before execution.
-- Prevent maintenance actions from crashing the app when runtime/vault is missing or paths are invalid.
-- Keep UI maintenance behavior aligned with script maintenance behavior.
+- Audit Settings maintenance actions: metadata rebuild, vault health audit/repair, thumbnail repair, review cleanup, auth scan, exposed update tools, backup/export/import.
+- Verify launcher, missing-vault, workspace-switch, and vault-switch behavior; prevent stale imported path constants.
+- Ensure destructive actions show selected workspace/vault/target path, require confirmation, refuse unsafe paths, and report partial failures.
+- Ensure DB/filesystem failures surface in UI, clear loading state, and repeated clicks do not start duplicate jobs.
+- Align UI actions and maintenance scripts: workspace/vault selection, missing-path warnings, no import-time dynamic paths.
+- Ensure maintenance logs include action start, target context/path, result, and warnings/errors.
+- Trace first: `SettingsMaintenancePanel.svelte`, `SettingsVaultHealthPanel.svelte`, maintenance API routes, and `tools/maintenance/`.
 
 ### P1 Index Systems
 
 - Audit search index activation/reset/hydration on startup, workspace load, vault switch, and vault relocation.
 - Audit metadata index activation/reset/hydration and repair/watchdog lifecycle on the same transitions.
 - Check review cache, RAM/search indexes, and other long-lived state for stale-vault leakage.
+- Keep longer-term search/index scale work separate from runtime correctness:
+  - persistent search/facet tables beyond current derived metadata index if needed for scale.
+  - search chips.
+  - RAM hydration still bulk-loads pHash, tile, URL, and video signatures.
 
 ### P2 Import / Export
 
@@ -208,12 +173,17 @@ VSCode-friendly test launchers:
 - Decide whether workspace export/import should exist separately from vault export/import.
 - Ensure imports do not preserve wrong machine-specific absolute paths.
 - Decide package scope for assets, notes, DB, config, workspace metadata, logs, and secrets.
+- Source URL normalization migration remains missing; runtime writes `source_url_norm` and existing rows are lazily backfilled by `init_database()`.
 
-### P2 Settings UX
+### P2 Settings / UI UX
 
 - Redesign workspace/vault/maintenance settings sections for clearer state and actions.
 - Make path state explicit: active, valid, missing, relocated, synced-from-another-machine risk.
 - Fix confusing input boxes in workspace/vault/settings/maintenance panels.
+- Keep Settings polish tied to behavior fixes; avoid broad visual-only rewrites unless the behavior is already being touched.
+- Keep UI polish sparse and opportunistic while behavior fixes are active.
+- Remaining polish: Review panel, fullscreen board/view, Inspector tag edges, context menu, GIF animation policy, video preview strategy.
+- Video embedding/tagging still depends on extracting sampled original video frames.
 
 ### P2 Auth
 
