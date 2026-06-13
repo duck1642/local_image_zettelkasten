@@ -498,17 +498,29 @@
 
   <div class="local-monitor-panel">
     <div class="local-status">
-      <div class="monitor-header">Local Run Status</div>
+      <div class="monitor-header">
+        <span>Local Run Status</span>
+        <div class="monitor-actions">
+          <button type="button" class="icon-btn-chip-text" on:click={refreshLocalStatus}>
+            <IconRefresh size={12} />
+            <span>Refresh</span>
+          </button>
+          <button type="button" class="icon-btn-chip-text" on:click={retryLocalFailed} disabled={localStatus.running || localStatus.failed_paths.length === 0}>
+            <IconRefresh size={12} />
+            <span>Retry Session</span>
+          </button>
+        </div>
+      </div>
       <div class="local-status-terminal">
         <div class="terminal-row pipeline-metrics">
           <span class="metric">PHASE: <strong class="uppercase text-bright">{localStatus.phase}</strong></span>
-          <span class="divider">-</span>
+          <span class="metric-divider">-</span>
           <span class="metric">SCANNED: <strong>{localStatus.scanned}</strong></span>
-          <span class="divider">-</span>
+          <span class="metric-divider">-</span>
           <span class="metric">STAGED: <strong>{localStatus.staged}</strong></span>
-          <span class="divider">-</span>
+          <span class="metric-divider">-</span>
           <span class="metric">QUEUED: <strong>{localStatus.queued}</strong></span>
-          <span class="divider">-</span>
+          <span class="metric-divider">-</span>
           <span class="metric">PROCESSED: <strong>{localStatus.processed}</strong></span>
         </div>
         <div class="terminal-row outcomes">
@@ -526,16 +538,7 @@
           </span>
         </div>
       </div>
-      <div class="footer-btns">
-        <button type="button" class="icon-btn-chip-text" on:click={refreshLocalStatus}>
-          <IconRefresh size={12} />
-          <span>Refresh</span>
-        </button>
-        <button type="button" class="icon-btn-chip-text" on:click={retryLocalFailed} disabled={localStatus.running || localStatus.failed_paths.length === 0}>
-          <IconRefresh size={12} />
-          <span>Retry Session</span>
-        </button>
-      </div>
+
       <div class="local-results sleek-scrollbar">
         {#each localStatus.results.slice(-120).reverse() as result}
           <div class="result-line">

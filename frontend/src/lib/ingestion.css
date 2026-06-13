@@ -458,14 +458,48 @@ textarea:focus {
 
 .monitor-header {
   background: rgba(255, 255, 255, 0.02);
-  padding: 5px 10px;
+  padding: 4px 10px;
   font-size: 12px;
   color: var(--accent-primary);
-  text-align: left;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   border-bottom: 1px solid var(--border-dim);
   font-family: 'Segoe UI', system-ui, sans-serif;
   font-weight: 600;
   flex-shrink: 0;
+  height: 38px;
+  box-sizing: border-box;
+}
+
+.monitor-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.monitor-actions .icon-btn-chip-text {
+  height: 26px;
+  padding: 0 8px;
+  font-size: 11px;
+  border-radius: 4px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-muted);
+  transition: all 0.15s ease;
+}
+
+.monitor-actions .icon-btn-chip-text:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-main);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.monitor-actions .icon-btn-chip-text:disabled {
+  opacity: 0.35;
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-muted);
 }
 
 .monitor-logs, .local-list, .local-results {
@@ -710,7 +744,7 @@ textarea:focus {
   gap: 8px;
   padding: 12px;
   background: #010409;
-  border-bottom: 1px solid var(--border-dim);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
   font-family: 'Consolas', monospace;
 }
 
@@ -731,7 +765,7 @@ textarea:focus {
   font-variant-numeric: tabular-nums;
 }
 
-.terminal-row.pipeline-metrics .divider {
+.terminal-row.pipeline-metrics .metric-divider {
   color: #30363d;
 }
 
