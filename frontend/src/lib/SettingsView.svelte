@@ -10,7 +10,8 @@
   import SettingsRuntimePanel from './SettingsRuntimePanel.svelte';
   import SettingsShortcutsPanel from './SettingsShortcutsPanel.svelte';
   import SettingsVaultPanel from './SettingsVaultPanel.svelte';
-  import SettingsVaultToolsPanel from './SettingsVaultToolsPanel.svelte';
+  import SettingsVaultMergePanel from './SettingsVaultMergePanel.svelte';
+  import SettingsVaultHealthPanel from './SettingsVaultHealthPanel.svelte';
   import SettingsWorkspacePanel from './SettingsWorkspacePanel.svelte';
   import { IconSettings, IconMerge, IconAlertTriangle } from './icons';
   import {
@@ -748,14 +749,23 @@
         </span>
         Vault Tools
       </h4>
-      <div class="workspace-panel settings-tools-panel">
-        <SettingsVaultToolsPanel
+      <div class="workspace-panel">
+        <SettingsVaultMergePanel
           {vaults}
-          {vaultActive}
           bind:mergeTargetId
           bind:mergeSourceIds
           bind:mergePreview
           {mergeBusy}
+          onToggleMergeSource={toggleMergeSource}
+          onPreviewVaultMerge={previewVaultMerge}
+          onConfirmVaultMerge={confirmVaultMerge}
+          {checkedValue}
+        />
+      </div>
+      <div class="workspace-panel">
+        <SettingsVaultHealthPanel
+          {vaults}
+          {vaultActive}
           bind:healthVaultId
           {healthBusy}
           {healthReport}
@@ -763,14 +773,10 @@
           {repairErrors}
           bind:importPackagePath
           bind:importVaultName
-          onToggleMergeSource={toggleMergeSource}
-          onPreviewVaultMerge={previewVaultMerge}
-          onConfirmVaultMerge={confirmVaultMerge}
           onAuditVaultHealth={auditVaultHealth}
           onRepairVaultHealth={repairVaultHealth}
           onBackupVault={backupVault}
           onImportVaultPackage={importVaultPackage}
-          {checkedValue}
         />
       </div>
       <SettingsMaintenancePanel
