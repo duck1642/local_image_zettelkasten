@@ -24,7 +24,17 @@
     if (busy) return;
     dispatch('confirm');
   }
+
+  function handleKeydown(event: KeyboardEvent) {
+    if (!open || busy) return;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      handleCancel();
+    }
+  }
 </script>
+
+<svelte:window on:keydown={handleKeydown} />
 
 {#if open}
   <div class="modal-backdrop" role="presentation" on:click={handleCancel}>
