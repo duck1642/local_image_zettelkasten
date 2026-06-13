@@ -122,6 +122,7 @@
           running = false;
           fetchStats();
           if (!isDirty) loadQueue(currentQueue);
+          window.dispatchEvent(new CustomEvent('lmz:vault-changed'));
         }
       } catch {
         // ignore parse errors

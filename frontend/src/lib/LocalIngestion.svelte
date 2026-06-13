@@ -98,6 +98,7 @@
   $: if (localStatus) {
     if (wasRunning && !localStatus.running) {
       cleanSuccessfulPaths();
+      window.dispatchEvent(new CustomEvent('lmz:vault-changed'));
     }
     wasRunning = localStatus.running;
   }

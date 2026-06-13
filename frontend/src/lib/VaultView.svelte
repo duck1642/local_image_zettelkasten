@@ -29,6 +29,8 @@
 
   const dispatch = createEventDispatcher();
   export let filterRequest: { id: string; query: string } | null = null;
+  export let active = false;
+  let isDirty = false;
 
   let items: VaultItem[] = [];
   let groupedItems: VaultGroup[] = [];
@@ -74,6 +76,10 @@
   $: loadedHashOrder = items.map((item) => item.hash);
   $: attachInfiniteScroll(sentinelEl, currentLayoutMode);
   $: observeLayoutHost(layoutHostEl);
+  $: if (active && isDirty) {
+    isDirty = false;
+    refreshFromTop();
+  }
   $: if ($config) {
     const nextMode = normalizeLayoutMode($config);
     const nextWidth = normalizeTileMinWidth($config?.ui?.vault_tile_min_width);
@@ -531,6 +537,14 @@
     refreshFromTop();
   }
 
+  function handleVaultChanged() {
+    if (active) {
+      refreshFromTop();
+    } else {
+      isDirty = true;
+    }
+  }
+
   function handleVaultWheel(event: WheelEvent) {
     if (!event.ctrlKey) return;
     event.preventDefault();
@@ -567,10 +581,12 @@
 
   onMount(() => {
     window.addEventListener('lmz:refresh', handleGlobalRefresh);
+    window.addEventListener('lmz:vault-changed', handleVaultChanged);
     fetchConfig();
     fetchItems();
     return () => {
       window.removeEventListener('lmz:refresh', handleGlobalRefresh);
+      window.removeEventListener('lmz:vault-changed', handleVaultChanged);
       intersectionCleanup?.();
       resizeCleanup?.();
       stopInspectorResize();

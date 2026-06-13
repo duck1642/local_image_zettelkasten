@@ -213,6 +213,7 @@
         alert(payload?.message || 'Action returned warning.');
       } else {
         uiLog('INFO', 'Review action succeeded', { action, filename: current.filename, display_name: displayName(current), message: payload?.message || '' });
+        window.dispatchEvent(new CustomEvent('lmz:vault-changed'));
       }
       await loadReview();
     } catch (e) {
@@ -250,6 +251,7 @@
         cleaned_orphans: payload?.cleaned_orphans ?? 0,
         failed_orphans: payload?.failed_orphans ?? 0
       });
+      window.dispatchEvent(new CustomEvent('lmz:vault-changed'));
       await loadReview();
     } catch (e) {
       mediaMounted = true;
