@@ -431,7 +431,7 @@
              Its IntersectionObserver/ResizeObserver are idle when display:none, so the cost is negligible.
              Other tabs use {#if} since they can re-fetch on demand. -->
         <div class:hidden={activeTab !== 'vault'} class="tab-panel" data-drop-zone="vault">
-          <VaultView filterRequest={pendingVaultFilterRequest} on:status={handleVaultStatus} />
+          <VaultView active={activeTab === 'vault'} filterRequest={pendingVaultFilterRequest} on:status={handleVaultStatus} />
         </div>
         {#if activeTab === 'review'}
           <div class="view-shell"><ReviewView /></div>

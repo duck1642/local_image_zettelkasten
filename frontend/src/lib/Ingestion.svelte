@@ -41,6 +41,6 @@
   {#if ingestMode === 'online'}
     <OnlineIngestion />
   {:else}
-    <LocalIngestion {dropRequest} />
+    <LocalIngestion bind:dropRequest={dropRequest} />
   {/if}
 </div>

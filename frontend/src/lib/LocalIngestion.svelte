@@ -91,6 +91,34 @@
       skipped: dropRequest.summary?.skipped ?? (dropRequest.skipped || []).length,
       staged_new: added
     });
+    dropRequest = null;
+  }
+
+  let wasRunning = false;
+  $: if (localStatus) {
+    if (wasRunning && !localStatus.running) {
+      cleanSuccessfulPaths();
+    }
+    wasRunning = localStatus.running;
+  }
+
+  function cleanSuccessfulPaths() {
+    const results = localStatus.results || [];
+    if (results.length === 0) return;
+
+    localPaths = localPaths.filter(stagedPath => {
+      const itemsUnderPath = results.filter(r => {
+        if (!r.source_path) return false;
+        return r.source_path === stagedPath || 
+               r.source_path.startsWith(stagedPath + '\\') || 
+               r.source_path.startsWith(stagedPath + '/');
+      });
+
+      if (itemsUnderPath.length === 0) return true;
+
+      const hasFailure = itemsUnderPath.some(r => r.status === 'failed');
+      return hasFailure;
+    });
   }
 
   function emptyLocalStatus(): LocalStatus {
