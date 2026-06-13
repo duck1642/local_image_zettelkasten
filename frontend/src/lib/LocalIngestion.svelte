@@ -107,12 +107,15 @@
     const results = localStatus.results || [];
     if (results.length === 0) return;
 
+    const normalizePath = (p: string) => String(p || '').toLowerCase().replace(/\\/g, '/').replace(/\/+$/, '');
+
     localPaths = localPaths.filter(stagedPath => {
+      const normalizedStaged = normalizePath(stagedPath);
       const itemsUnderPath = results.filter(r => {
         if (!r.source_path) return false;
-        return r.source_path === stagedPath || 
-               r.source_path.startsWith(stagedPath + '\\') || 
-               r.source_path.startsWith(stagedPath + '/');
+        const normalizedSource = normalizePath(r.source_path);
+        return normalizedSource === normalizedStaged || 
+               normalizedSource.startsWith(normalizedStaged + '/');
       });
 
       if (itemsUnderPath.length === 0) return true;
@@ -443,28 +446,25 @@
 
       <div class="local-default-item local-platform-wrap">
         <label class="field-label" for="local-platform-select">Platform</label>
-        <select id="local-platform-select" class="local-platform-select" bind:value={localDefaults.platform}>
-          {#each platformSelectOptions as platform}
-            <option value={platform}>{platform}</option>
-          {/each}
-        </select>
+        <div class="platform-row">
+          <select id="local-platform-select" class="local-platform-select" bind:value={localDefaults.platform}>
+            {#each platformSelectOptions as platform}
+              <option value={platform}>{platform}</option>
+            {/each}
+          </select>
+          <div class="local-toolbar">
+            <button type="button" class="icon-btn-chip-text" on:click={pickLocalFiles} disabled={localStatus.running} title="Add Files">
+              <IconPlus size={14} />
+            </button>
+            <button type="button" class="icon-btn-chip-text" on:click={pickLocalFolders} disabled={localStatus.running} title="Add Folder">
+              <IconFolder size={14} />
+            </button>
+            <button type="button" class="icon-btn-chip-text" on:click={clearLocalPaths} disabled={localStatus.running || localPaths.length === 0} title="Clear All">
+              <IconTrash size={14} />
+            </button>
+          </div>
+        </div>
       </div>
-    </div>
-
-
-    <div class="local-toolbar">
-      <button type="button" class="icon-btn-chip-text" on:click={pickLocalFiles} disabled={localStatus.running}>
-        <IconPlus size={12} />
-        <span>Files</span>
-      </button>
-      <button type="button" class="icon-btn-chip-text" on:click={pickLocalFolders} disabled={localStatus.running}>
-        <IconFolder size={12} />
-        <span>Folder</span>
-      </button>
-      <button type="button" class="icon-btn-chip-text" on:click={clearLocalPaths} disabled={localStatus.running || localPaths.length === 0}>
-        <IconTrash size={12} />
-        <span>Clear</span>
-      </button>
     </div>
 
     <div class="local-list sleek-scrollbar">
