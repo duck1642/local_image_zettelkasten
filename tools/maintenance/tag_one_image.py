@@ -8,11 +8,12 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 from tagging import tag_media
-from utils import ASSETS_DIR, get_config
+from utils import get_config
+import utils
 
 
 def find_first_image() -> Path | None:
-    for path in ASSETS_DIR.rglob("*"):
+    for path in utils.ASSETS_DIR.rglob("*"):
         if path.is_file() and path.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp", ".gif", ".jfif"}:
             return path
     return None
@@ -23,6 +24,11 @@ def main():
     parser.add_argument("image", nargs="?")
     parser.add_argument("--device", choices=["auto", "cpu", "cuda"])
     args = parser.parse_args()
+
+    from runtime_context import has_runtime_context
+    if not has_runtime_context():
+        from scripts.workspace_select import select_runtime_context
+        select_runtime_context("tag_one_image")
 
     image_path = Path(args.image).resolve() if args.image else find_first_image()
     if not image_path:

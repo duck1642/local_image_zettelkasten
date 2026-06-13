@@ -252,3 +252,184 @@ def test_delete_vault_refuses_outside_workspace_root(monkeypatch, tmp_path):
 
     assert response.status_code == 400
     assert outside_root.exists()
+
+def test_vault_merge_safety_and_defaults(monkeypatch, tmp_path):
+    app_module = fresh_api(monkeypatch, tmp_path)
+    workspaces = importlib.import_module("workspaces")
+    db_sqlite = importlib.import_module("db.sqlite_operator")
+
+    registry_path = tmp_path / "workspaces.yaml"
+    ws_root = tmp_path / "workspace"
+    ws_root.mkdir()
+
+    active_root = ws_root / "data" / "vaults" / "active"
+    active_root.mkdir(parents=True)
+    target_root = ws_root / "data" / "vaults" / "target"
+    target_root.mkdir(parents=True)
+    source_root = ws_root / "data" / "vaults" / "source"
+    source_root.mkdir(parents=True)
+
+    config_path = ws_root / "config.yaml"
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "active_vault": "active",
+                "vaults": {
+                    "active": {"name": "Active", "root": "data/vaults/active"},
+                    "target": {"name": "Target", "root": "data/vaults/target"},
+                    "source": {"name": "Source", "root": "data/vaults/source"},
+                },
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+
+    write_registry(
+        registry_path,
+        "ready",
+        {
+            "default": {"name": "Default", "config_path": "config/config.yaml"},
+            "ready": {"name": "Ready", "config_path": str(config_path)},
+        },
+    )
+    monkeypatch.setattr(workspaces, "REGISTRY_PATH", registry_path)
+
+    client = TestClient(app_module.app)
+    key = api_key(client)
+    load = client.post("/api/workspaces/ready/load", headers={"X-LMZ-API-KEY": key})
+    assert load.status_code == 200
+
+    # 1. Target DB is missing
+    preview_res = client.post(
+        "/api/vaults/target/merge-preview",
+        json={"source_vault_ids": ["source"]},
+        headers={"X-LMZ-API-KEY": key},
+    )
+    assert preview_res.status_code == 400
+    assert "target database is missing" in preview_res.json()["detail"]
+
+    merge_res = client.post(
+        "/api/vaults/target/merge",
+        json={"source_vault_ids": ["source"]},
+        headers={"X-LMZ-API-KEY": key},
+    )
+    assert merge_res.status_code == 400
+    assert "target database is missing" in merge_res.json()["detail"]
+
+    # Initialize target DB
+    db_sqlite.init_database(target_root / "db" / "lmz_main.db")
+
+    # 2. Source DB is missing
+    preview_res = client.post(
+        "/api/vaults/target/merge-preview",
+        json={"source_vault_ids": ["source"]},
+        headers={"X-LMZ-API-KEY": key},
+    )
+    assert preview_res.status_code == 400
+    assert "source database is missing" in preview_res.json()["detail"]
+
+    merge_res = client.post(
+        "/api/vaults/target/merge",
+        json={"source_vault_ids": ["source"]},
+        headers={"X-LMZ-API-KEY": key},
+    )
+    assert merge_res.status_code == 400
+    assert "source database is missing" in merge_res.json()["detail"]
+
+    # Initialize source DB
+    db_sqlite.init_database(source_root / "db" / "lmz_main.db")
+
+    # 3. Successful merge-preview
+    preview_res = client.post(
+        "/api/vaults/target/merge-preview",
+        json={"source_vault_ids": ["source"]},
+        headers={"X-LMZ-API-KEY": key},
+    )
+    assert preview_res.status_code == 200
+    assert preview_res.json()["total_items"] == 0
+
+    # 4. Successful merge (delete_sources defaults to false/parsed strictly)
+    merge_res = client.post(
+        "/api/vaults/target/merge",
+        json={"source_vault_ids": ["source"]},
+        headers={"X-LMZ-API-KEY": key},
+    )
+    assert merge_res.status_code == 200
+
+    # Assert source vault was not deleted
+    assert source_root.exists()
+
+
+def test_vault_repair_safety(monkeypatch, tmp_path):
+    app_module = fresh_api(monkeypatch, tmp_path)
+    workspaces = importlib.import_module("workspaces")
+    db_sqlite = importlib.import_module("db.sqlite_operator")
+
+    registry_path = tmp_path / "workspaces.yaml"
+    ws_root = tmp_path / "workspace"
+    ws_root.mkdir()
+
+    default_root = ws_root / "data" / "vaults" / "default"
+    default_root.mkdir(parents=True)
+    db_sqlite.init_database(default_root / "db" / "lmz_main.db")
+
+    config_path = ws_root / "config.yaml"
+    workspace_config(config_path, vault_root="data/vaults/default")
+
+    write_registry(
+        registry_path,
+        "ready",
+        {
+            "default": {"name": "Default", "config_path": "config/config.yaml"},
+            "ready": {"name": "Ready", "config_path": str(config_path)},
+        },
+    )
+    monkeypatch.setattr(workspaces, "REGISTRY_PATH", registry_path)
+
+    client = TestClient(app_module.app)
+    key = api_key(client)
+    load = client.post("/api/workspaces/ready/load", headers={"X-LMZ-API-KEY": key})
+    assert load.status_code == 200
+
+    # 1. Destructive actions without confirm (implicit/empty actions list) -> 400
+    res = client.post(
+        "/api/vaults/default/repair",
+        json={},
+        headers={"X-LMZ-API-KEY": key},
+    )
+    assert res.status_code == 400
+    assert "destructive actions require confirmation" in res.json()["detail"]
+
+    # 2. Destructive actions without confirm (explicit actions list containing derived_cache) -> 400
+    res = client.post(
+        "/api/vaults/default/repair",
+        json={"actions": ["derived_cache"]},
+        headers={"X-LMZ-API-KEY": key},
+    )
+    assert res.status_code == 400
+    assert "destructive actions require confirmation" in res.json()["detail"]
+
+    # 3. Non-destructive actions only (e.g. thumbnails) without confirm -> 200
+    res = client.post(
+        "/api/vaults/default/repair",
+        json={"actions": ["thumbnails"]},
+        headers={"X-LMZ-API-KEY": key},
+    )
+    assert res.status_code == 200
+
+    # 4. Destructive actions with confirm (implicit/empty actions list) -> 200
+    res = client.post(
+        "/api/vaults/default/repair",
+        json={"confirm_destructive": True},
+        headers={"X-LMZ-API-KEY": key},
+    )
+    assert res.status_code == 200
+
+    # 5. Destructive actions with confirm (explicit actions list containing derived_cache) -> 200
+    res = client.post(
+        "/api/vaults/default/repair",
+        json={"actions": ["derived_cache"], "confirm_destructive": True},
+        headers={"X-LMZ-API-KEY": key},
+    )
+    assert res.status_code == 200

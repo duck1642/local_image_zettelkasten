@@ -1,4 +1,4 @@
-﻿import argparse
+import argparse
 import shutil
 import sys
 from datetime import datetime
@@ -12,7 +12,8 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 from md_generator import normalize_topic_list
-from utils import NOTES_DIR, PROJECT_ROOT as LMZ_ROOT
+from utils import PROJECT_ROOT as LMZ_ROOT
+import utils
 
 
 def split_frontmatter(text: str):
@@ -29,7 +30,7 @@ def backup_notes() -> Path:
     backup_root.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     backup_path = backup_root / f"notes_before_topic_normalize_{stamp}"
-    shutil.copytree(NOTES_DIR, backup_path / "notes")
+    shutil.copytree(utils.NOTES_DIR, backup_path / "notes")
     return backup_path
 
 
@@ -64,7 +65,7 @@ def run(apply: bool) -> dict:
     if apply:
         backup_path = backup_notes()
         print(f"Backup: {backup_path}")
-    for path in sorted(NOTES_DIR.rglob("*.md")):
+    for path in sorted(utils.NOTES_DIR.rglob("*.md")):
         results["notes"] += 1
         try:
             status = normalize_note(path, apply)
@@ -85,6 +86,12 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--apply", action="store_true")
     args = parser.parse_args()
+
+    from runtime_context import has_runtime_context
+    if not has_runtime_context():
+        from scripts.workspace_select import select_runtime_context
+        select_runtime_context("normalize_topics")
+
     results = run(args.apply)
     mode = "APPLY" if args.apply else "DRY-RUN"
     print(f"{mode} notes={results['notes']} normalized={results['normalized']} unchanged={results['unchanged']} skipped={results['skipped']} errors={results['errors']}")

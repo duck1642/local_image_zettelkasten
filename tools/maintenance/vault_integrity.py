@@ -14,7 +14,8 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 from db.sqlite_operator import allocate_storage_id
-from utils import ASSETS_DIR, DB_PATH, NOTES_DIR, PROJECT_ROOT, asset_path_for, note_path_for
+from utils import PROJECT_ROOT, asset_path_for, note_path_for
+import utils
 
 
 def asset_path(file_hash: str, file_extension: str, mime_type: str = "", storage_id: str = "") -> Path:
@@ -25,7 +26,7 @@ def load_notes() -> dict:
     notes = {}
     link_pattern = re.compile(r"!\[\]\((.*?)\)")
 
-    for note_path in NOTES_DIR.rglob("*.md"):
+    for note_path in utils.NOTES_DIR.rglob("*.md"):
         text = note_path.read_text(encoding="utf-8")
         if not text.startswith("---"):
             continue
@@ -76,7 +77,7 @@ def load_db_rows(conn: sqlite3.Connection) -> dict:
 
 def collect_assets() -> dict:
     assets = {}
-    for file_path in ASSETS_DIR.rglob("*"):
+    for file_path in utils.ASSETS_DIR.rglob("*"):
         if file_path.is_file():
             assets[file_path.stem] = file_path
     return assets
@@ -163,7 +164,7 @@ def backup_db() -> Path:
     BACKUPS_DIR.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     backup_path = BACKUPS_DIR / f"lmz_main_{stamp}.db"
-    shutil.copy2(DB_PATH, backup_path)
+    shutil.copy2(utils.DB_PATH, backup_path)
     return backup_path
 
 
@@ -255,7 +256,12 @@ def main():
     parser.add_argument("--apply", action="store_true")
     args = parser.parse_args()
 
-    conn = sqlite3.connect(DB_PATH)
+    from runtime_context import has_runtime_context
+    if not has_runtime_context():
+        from scripts.workspace_select import select_runtime_context
+        select_runtime_context("vault_integrity")
+
+    conn = sqlite3.connect(utils.DB_PATH)
     try:
         report = build_report(conn)
         print_report(report)

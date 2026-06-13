@@ -4,9 +4,9 @@
 
 Local Media Zettelkasten (LMZ) is a local media archive and zettelkasten system for images, GIFs, and videos.
 
-It ingests local files and external URLs, validates media, stores original assets under compact storage IDs while keeping SHA256 as item identity, indexes runtime metadata in SQLite, generates Obsidian-compatible markdown notes, keeps local WD tag reports in sharded JSON cache files, and exposes a Tauri/Svelte desktop UI through a local FastAPI backend.
+It ingests local files and external URLs, validates media, stores original assets under compact storage IDs while keeping SHA256 as item identity, indexes runtime metadata in SQLite, generates LMZ markdown/YAML notes, keeps local WD tag reports in sharded JSON cache files, and exposes a Tauri/Svelte desktop UI through a local FastAPI backend.
 
-Runtime state stays outside source code under a workspace root. Default mode uses the repo root as the workspace. LMZ workspace mode uses `<parent>/lmz/` as the workspace.
+Runtime state stays outside source code under a workspace root. Default mode uses the repo root as the workspace. LMZ workspace mode uses `<parent>/lmz/` as the workspace. Heavy shared model files are app-global under `data/models/`, not workspace-local.
 
 ## Product Domains
 
@@ -772,15 +772,17 @@ Refinement still expected:
 - `config/workspaces.yaml` stores registered workspaces and active workspace.
 - `LMZ_CONFIG_PATH` overrides the registry.
 - Settings can register LMZ workspaces and switch the active workspace dynamically when runtime preflight allows it.
+- Workspace registry entries may use machine-local absolute `config_path` values.
 
 Each workspace has a `config.yaml` with one active vault:
 
 - `active_vault`: active vault id.
-- `vaults`: registered vaults and their roots.
+- `vaults`: registered vaults and relative roots inside the workspace.
+- `paths.secrets`: relative secrets path for that workspace.
 
-Vault switching is dynamic through Settings/API when runtime preflight allows it. Settings can create, rename, delete, and switch vaults. Vault merge imports source vault items into a target vault by allocating new destination `storage_id` values and copying assets/notes/cache files.
+Vault switching is dynamic through Settings/API when runtime preflight allows it. Settings can create, rename, delete, and switch vaults. Vault merge imports source vault items into a target vault by allocating new destination `storage_id` values and copying assets/notes/cache files. Source-vault delete behavior is currently under maintenance review because UI copy and API defaults must be aligned before treating it as safe.
 
-`backend/runtime_context.py` is the source of truth for active workspace/vault paths. Legacy `utils.py` constants remain available, but new code should prefer context-aware helpers or explicit `ctx` propagation.
+`backend/runtime_context.py` is the source of truth for active workspace/vault paths. Legacy `utils.py` constants remain available, but new code should prefer context-aware helpers or explicit `ctx` propagation. Maintenance scripts should use explicit workspace/vault selection rather than importing dynamic path globals.
 
 ## Ingestion Integrity
 
@@ -843,15 +845,16 @@ External downloader authentication is config-driven but secrets-backed.
 
 Credential storage:
 
-- `config/config.yaml`: non-secret defaults, including relative `external_tools.cookies_path`.
-- `secrets/.secrets.yaml`: sensitive overrides such as `pixiv_token` and `cookies_path`.
-- `secrets/cookies.txt`: Netscape cookie jar used by gallery-dl and yt-dlp.
+- workspace `config.yaml`: non-secret defaults, including relative `external_tools.cookies_path`.
+- workspace secrets dir, usually `data/secrets/`: sensitive overrides such as `pixiv_token` and `cookies_path`.
+- workspace cookie jar, usually `data/secrets/cookies.txt`: Netscape cookie jar used by gallery-dl and yt-dlp.
 - `/api/config` returns and saves public config only; secret keys are stripped before UI round-trips can write `config.yaml`.
 
 Path handling:
 
-- Relative cookie paths resolve from the project root.
-- Current default: `secrets/cookies.txt`.
+- Relative cookie paths resolve from the active workspace root.
+- LMZ workspace default: `data/secrets/cookies.txt`.
+- Repo/default workspace configs may still use `secrets/cookies.txt`.
 - Secret values are merged into `external_tools` at runtime by `get_config()`.
 
 Platform expectations:

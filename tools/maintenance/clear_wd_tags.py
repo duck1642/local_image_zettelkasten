@@ -12,6 +12,7 @@ if str(SRC_DIR) not in sys.path:
 
 from db.sqlite_operator import init_database
 from utils import note_path_for, wd_tag_cache_path_for
+import utils
 
 
 WD_KEYS = ["wd_rating", "wd_character_tags", "wd_tags"]
@@ -117,6 +118,12 @@ def main():
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--summary-json", action="store_true")
     args = parser.parse_args()
+
+    from runtime_context import has_runtime_context
+    if not has_runtime_context():
+        from scripts.workspace_select import select_runtime_context
+        select_runtime_context("clear_wd_tags")
+
     results = run(args.hash or "", args.target, args.apply)
     if args.summary_json:
         print(json.dumps(results, indent=2))

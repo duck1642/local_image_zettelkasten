@@ -1,6 +1,6 @@
   # LMZ Current Status
 
-Last updated: 2026-06-07
+Last updated: 2026-06-13
 
 ## Current Status
 
@@ -9,7 +9,7 @@ LMZ is a local-first media vault desktop app with launcher-mode workspace/vault 
 - Frontend: Tauri + Svelte, with virtualized vault grid/masonry views and split feature panels.
 - Backend: local FastAPI/Python API under `backend/`, launched by the desktop app or dev commands.
 - Runtime model: backend may start without an active workspace; vault-dependent services activate after workspace/vault selection or relocation.
-- Workspace/vault model: workspace config can contain machine-local absolute paths; vault internals should keep portable relative paths where practical.
+- Workspace/vault model: `config/workspaces.yaml` may contain machine-local absolute workspace config paths; workspace `config.yaml` should keep vault roots and internal paths portable/relative.
 - Data model: SQLite owns item identity/source fields; Markdown mirrors identity fields and remains the editable source for topics/WD metadata.
 - Active risk areas: workspace/vault control, maintenance safety, startup launcher behavior, index lifecycle, import/export, and auth clarity.
 - Old Flet and PySide/PyQt UI paths are inactive.
@@ -58,7 +58,7 @@ VSCode-friendly test launchers:
 - Backend API: `backend/web_api.py`.
 - Ingestion CLI: `backend/core.py`, launched by `main.py` or `lmz`.
 - Workspace registry/config loading supports launcher mode before an active runtime exists.
-- Workspace config owns registered vault definitions and machine-local vault roots.
+- Workspace registry owns machine-local workspace config paths; each workspace config owns registered vault definitions with relative vault roots.
 - Workspace DB and shared topic/metadata libraries are workspace-scoped.
 - Active runtime context points at one selected workspace and one active vault.
 - Active vault root contains the vault DB, files, caches, review area, ingest staging, and vault logs.
@@ -72,7 +72,7 @@ VSCode-friendly test launchers:
 - Online ingest staging: `<vault_root>/online_ingest/`.
 - Vault logs: `<vault_root>/logs/raw/`, `<vault_root>/logs/structured/`.
 - Startup logs: `logs/startup/raw/`, `logs/startup/structured/`.
-- Secrets: `secrets/`.
+- Secrets: workspace `paths.secrets`, usually `data/secrets/` for LMZ workspaces; app/default configs may still use `secrets/`.
 
 ## Documentation Notes
 
@@ -154,7 +154,13 @@ VSCode-friendly test launchers:
 - Ensure DB/filesystem failures surface in UI, clear loading state, and repeated clicks do not start duplicate jobs.
 - Align UI actions and maintenance scripts: workspace/vault selection, missing-path warnings, no import-time dynamic paths.
 - Ensure maintenance logs include action start, target context/path, result, and warnings/errors.
-- Trace first: `SettingsMaintenancePanel.svelte`, `SettingsVaultHealthPanel.svelte`, maintenance API routes, and `tools/maintenance/`.
+- Trace first: `frontend/src/lib/SettingsMaintenancePanel.svelte`, `frontend/src/lib/SettingsVaultHealthPanel.svelte`, maintenance API routes, and `tools/maintenance/`.
+- Trace findings from 2026-06-13:
+  - Vault merge UI says source vaults stay intact, but `/api/vaults/{target_id}/merge` defaults missing `delete_sources` to `true`; frontend currently omits the flag.
+  - Vault repair can run destructive actions (`derived_cache`, `review_sidecars`, `quarantine_orphans`) without backend-enforced `confirm_destructive`; current UI confirm is client-only.
+  - `backend/scripts/workspace_select.py` exists, but maintenance scripts still import runtime path globals such as `DB_PATH`, `ASSETS_DIR`, and `NOTES_DIR` instead of using explicit workspace/vault selection.
+  - Vault import can leave a partial target vault folder if zip extraction fails before config write.
+  - Review cleanup, target-vault health/backup/export, and delete-vault guards looked mostly correct during this trace.
 
 ### P1 Index Systems
 
@@ -234,7 +240,7 @@ VSCode-friendly test launchers:
   - Vault creation flow is implemented and constrained to selected workspaces.
   - Workspace and vault switching activate the correct runtime context.
   - Active vault paths, DB paths, logs, search state, metadata state, review cache, RAM/search state, and frontend stores are switch-aware at implementation level.
-  - Vault merge preview/confirm is implemented.
+  - Vault merge preview/confirm exists, but source-delete behavior is unsafe/misleading until the P1 maintenance finding is fixed.
   - Workspace merge remains deferred until vault merge behavior is clearer.
   - Vault/workspace internals keep relative paths where practical.
   - Config/workspace YAML keeps machine-local absolute paths where needed.
@@ -262,7 +268,7 @@ VSCode-friendly test launchers:
     - existing dynamic workspace/vault switching paths are verified by targeted tests.
     - stale direct `DB_PATH` import was removed from the active SQLite helper.
     - vault rename/delete flows have targeted backend hardening coverage.
-    - Settings exposes vault merge preview/confirm with support for destructive merging (optionally deleting source vaults on success and unlinking all copied target files on execution failure).
+    - Settings exposes vault merge preview/confirm; current source-delete behavior is under P1 maintenance review because UI copy and API defaults disagree.
     - vault health audit reports missing files, orphan files/caches, bad storage IDs, hash mismatches, stale metadata rows, facet drift, broken/unused topics, review mismatches, and workspace dictionary drift.
     - vault health and repair logic is hardened to filter expected tag caches and thumbnails by image/video MIME type, and preserve skipped/failed tagging caches from being deleted as orphans.
     - vault repair can rebuild metadata/facets, rebuild thumbnails, prune derived cache orphans, reconcile review sidecars, and quarantine orphan assets/notes.

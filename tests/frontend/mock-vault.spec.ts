@@ -290,7 +290,8 @@ async function installMockVaultApi(
     }
     if (utilityMatch) {
       const action = utilityMatch[2] as 'health' | 'repair' | 'backup' | 'export';
-      await options.onVaultAction?.(action);
+      const payload = request.method() === 'POST' ? JSON.parse(request.postData() || '{}') : undefined;
+      await options.onVaultAction?.(action, payload);
       if (action === 'health') {
         return fulfillJson(route, {
           status: 'success',
@@ -1071,7 +1072,14 @@ test('settings previews vault merge and runs vault health package actions', asyn
   await page.getByRole('button', { name: 'Import Vault' }).click();
   await expect(page.getByText('imported imported')).toBeVisible();
 
-  expect(actions.map((entry) => entry.action)).toEqual(['merge-preview', 'merge', 'health', 'repair', 'backup', 'import']);
+  expect(actions).toEqual([
+    { action: 'merge-preview', payload: { source_vault_ids: ['archive'] } },
+    { action: 'merge', payload: { source_vault_ids: ['archive'], delete_sources: false } },
+    { action: 'health', payload: undefined },
+    { action: 'repair', payload: { actions: ['metadata', 'thumbnails', 'wd_tagging', 'derived_cache', 'review_sidecars', 'quarantine_orphans'], confirm_destructive: true } },
+    { action: 'backup', payload: {} },
+    { action: 'import', payload: { package_path: 'C:/Exports/default.lmzvault.zip', name: 'Imported' } }
+  ]);
 });
 
 test('settings metadata rebuild shows progress only for maintenance job', async ({ page }) => {

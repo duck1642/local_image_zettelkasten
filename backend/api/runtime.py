@@ -579,7 +579,7 @@ def _merge_vaults_sync(target_id: str, body: dict):
     from vaults import merge_vaults
 
     sources = list((body or {}).get("source_vault_ids") or [])
-    delete_sources = bool((body or {}).get("delete_sources", True))
+    delete_sources = (body or {}).get("delete_sources") is True
     try:
         return merge_vaults(target_id, sources, delete_sources=delete_sources)
     except KeyError as exc:
@@ -618,7 +618,7 @@ def _repair_vault_sync(vault_id: str, body: dict):
         return repair_vault(
             vault_id,
             actions=list((body or {}).get("actions") or []),
-            confirm_destructive=bool((body or {}).get("confirm_destructive")),
+            confirm_destructive=(body or {}).get("confirm_destructive") is True,
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc))

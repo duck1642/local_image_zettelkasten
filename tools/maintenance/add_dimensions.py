@@ -1,5 +1,6 @@
 import subprocess
 import sys
+import argparse
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -9,6 +10,7 @@ if str(SRC) not in sys.path:
 
 from db.sqlite_operator import init_database
 from utils import asset_path_for
+import utils
 
 def get_image_dimensions(path: Path):
     try:
@@ -70,6 +72,14 @@ def add_dimensions():
         conn.close()
 
 def main():
+    parser = argparse.ArgumentParser(description="Populate missing media dimensions in the active vault DB.")
+    parser.parse_args()
+
+    from runtime_context import has_runtime_context
+    if not has_runtime_context():
+        from scripts.workspace_select import select_runtime_context
+        select_runtime_context("add_dimensions")
+
     print("--- Adding dimensions to database ---")
     add_dimensions()
 

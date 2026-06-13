@@ -70,7 +70,7 @@ export async function mergeVaultsApi(targetId: string, sourceVaultIds: string[])
   return readJson(await apiFetch(`/api/vaults/${encodeURIComponent(targetId)}/merge`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ source_vault_ids: sourceVaultIds })
+    body: JSON.stringify({ source_vault_ids: sourceVaultIds, delete_sources: false })
   }));
 }
 
@@ -78,12 +78,13 @@ export async function fetchVaultHealth(id: string) {
   return readJson(await apiFetch(`/api/vaults/${encodeURIComponent(id)}/health`));
 }
 
-export async function repairVaultHealthApi(id: string) {
+export async function repairVaultHealthApi(id: string, confirmDestructive = false) {
   return readJson(await apiFetch(`/api/vaults/${encodeURIComponent(id)}/repair`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      actions: ['metadata', 'thumbnails', 'wd_tagging', 'derived_cache', 'review_sidecars', 'quarantine_orphans']
+      actions: ['metadata', 'thumbnails', 'wd_tagging', 'derived_cache', 'review_sidecars', 'quarantine_orphans'],
+      confirm_destructive: confirmDestructive
     })
   }));
 }

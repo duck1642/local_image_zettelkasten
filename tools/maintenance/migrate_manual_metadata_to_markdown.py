@@ -7,13 +7,13 @@ from pathlib import Path
 
 import yaml
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SRC_DIR = PROJECT_ROOT / "backend"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from utils import DB_PATH, NOTES_DIR, PROJECT_ROOT as LMZ_ROOT, atomic_write_text, note_path_for
+from utils import PROJECT_ROOT as LMZ_ROOT, atomic_write_text, note_path_for
+import utils
 
 
 def split_frontmatter(text: str):
@@ -34,8 +34,8 @@ def backup_notes() -> Path:
     while backup_path.exists():
         suffix += 1
         backup_path = backup_root / f"notes_before_manual_metadata_migration_{stamp}_{suffix}"
-    if NOTES_DIR.exists():
-        shutil.copytree(NOTES_DIR, backup_path / "notes")
+    if utils.NOTES_DIR.exists():
+        shutil.copytree(utils.NOTES_DIR, backup_path / "notes")
     else:
         (backup_path / "notes").mkdir(parents=True, exist_ok=True)
     return backup_path
@@ -59,7 +59,6 @@ def migrate_note(row: dict, apply: bool) -> str:
     parts = split_frontmatter(text.lstrip("\ufeff"))
     if not parts:
         return "invalid_frontmatter"
-
     raw_frontmatter, body = parts
     data = yaml.safe_load(raw_frontmatter) or {}
     if not isinstance(data, dict):
@@ -95,7 +94,7 @@ def run(apply: bool) -> dict:
     if apply:
         results["backup"] = str(backup_notes())
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(utils.DB_PATH)
     try:
         rows = load_db_rows(conn)
     finally:
@@ -125,6 +124,12 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--apply", action="store_true")
     args = parser.parse_args()
+
+    from runtime_context import has_runtime_context
+    if not has_runtime_context():
+        from scripts.workspace_select import select_runtime_context
+        select_runtime_context("migrate_manual_metadata_to_markdown")
+
     results = run(args.apply)
     mode = "APPLY" if args.apply else "DRY-RUN"
     if results["backup"]:

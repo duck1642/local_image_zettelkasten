@@ -21,16 +21,16 @@ from metadata_index import (
     reindex_stale_metadata_batch,
     stale_metadata_count,
 )
-from utils import DB_PATH
+import utils
 
 
 BATCH_SIZE = FULL_REBUILD_BATCH_SIZE
 
 
 def open_database():
-    if not DB_PATH.exists():
-        raise FileNotFoundError(f"database not found: {DB_PATH}")
-    conn = sqlite3.connect(DB_PATH, timeout=5)
+    if not utils.DB_PATH.exists():
+        raise FileNotFoundError(f"database not found: {utils.DB_PATH}")
+    conn = sqlite3.connect(utils.DB_PATH, timeout=5)
     cursor = conn.cursor()
     cursor.execute("PRAGMA journal_mode=WAL;")
     cursor.execute("PRAGMA foreign_keys = ON;")
@@ -178,6 +178,12 @@ def parse_args(argv=None):
 
 def main(argv=None) -> int:
     args = parse_args(argv)
+
+    from runtime_context import has_runtime_context
+    if not has_runtime_context():
+        from scripts.workspace_select import select_runtime_context
+        select_runtime_context("metadata_index_rebuild")
+
     mode = "full" if args.full else "stale" if args.stale else "status"
     try:
         report = run(mode, args.limit, deep_validate=args.deep_validate)

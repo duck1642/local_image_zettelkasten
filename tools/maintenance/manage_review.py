@@ -1,18 +1,25 @@
-﻿
-
 import json
 import shutil
+import sys
+import argparse
 from pathlib import Path
-from utils import REVIEW_DIR, get_config
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+SRC_DIR = PROJECT_ROOT / "backend"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
+
+import utils
+from utils import get_config
 from processor import process_file
 
 def review_sidecar_path(path: Path) -> Path:
     return path.with_suffix(path.suffix + '.json')
 
 def get_review_items():
-    if not REVIEW_DIR.exists():
+    if not utils.REVIEW_DIR.exists():
         return []
-    return sorted([f for f in REVIEW_DIR.iterdir() if f.is_file() and f.suffix != '.json'])
+    return sorted([f for f in utils.REVIEW_DIR.iterdir() if f.is_file() and f.suffix != '.json'])
 
 def interactive_menu():
     while True:
@@ -109,7 +116,7 @@ def manage_single_item(item_path):
         reject_file(item_path.name)
 
 def approve_file(filename):
-    file_path = REVIEW_DIR / filename
+    file_path = utils.REVIEW_DIR / filename
     json_path = review_sidecar_path(file_path)
 
     if not file_path.exists():
@@ -137,7 +144,7 @@ def approve_file(filename):
         print(f"   [ERROR] Error: {message}")
 
 def reject_file(filename):
-    file_path = REVIEW_DIR / filename
+    file_path = utils.REVIEW_DIR / filename
     json_path = review_sidecar_path(file_path)
 
     if file_path.exists():
@@ -147,8 +154,20 @@ def reject_file(filename):
     if json_path.exists():
         json_path.unlink()
 
-if __name__ == "__main__":
+def main(argv=None):
+    parser = argparse.ArgumentParser(description="Interactively manage active-vault review items.")
+    parser.parse_args(argv)
+
+    from runtime_context import has_runtime_context
+    if not has_runtime_context():
+        from scripts.workspace_select import select_runtime_context
+        select_runtime_context("manage_review")
     try:
         interactive_menu()
     except KeyboardInterrupt:
         print("\n[INFO] Exiting Review Manager.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,6 +1,7 @@
 import shutil
 import sqlite3
 import sys
+import argparse
 from datetime import datetime
 from pathlib import Path
 
@@ -10,7 +11,7 @@ SRC = ROOT / "backend"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from utils import DB_PATH
+import utils
 
 
 ITEM_COLUMNS = [
@@ -120,7 +121,15 @@ def _migrate(conn: sqlite3.Connection):
 
 
 def main():
-    db_path = Path(DB_PATH)
+    parser = argparse.ArgumentParser(description="Drop the legacy items.topics column from the active vault DB.")
+    parser.parse_args()
+
+    from runtime_context import has_runtime_context
+    if not has_runtime_context():
+        from scripts.workspace_select import select_runtime_context
+        select_runtime_context("migrate_drop_topics_column")
+
+    db_path = Path(utils.DB_PATH)
     if not db_path.exists():
         print(f"[ERROR] Database not found: {db_path}")
         raise SystemExit(1)

@@ -284,21 +284,36 @@ def preview_vault_merge(target_id: str, source_ids: list[str], ctx: WorkspaceCon
         raise ValueError("target cannot be a source")
     if target_id not in vaults:
         raise KeyError(f"vault not found: {target_id}")
-    target_db = vault_db_path(vault_root(vaults[target_id], ctx))
+    workspace_root = _config_root(ctx)
+    target_root = vault_root(vaults[target_id], ctx)
+    if not vault_root_is_usable(target_root, workspace_root):
+        raise ValueError(f"target vault is offline or missing: {target_id}")
+    target_db = vault_db_path(target_root)
+    if not target_db.exists():
+        raise ValueError(f"target database is missing: {target_id}")
+
     target_hashes = set()
-    if target_db.exists():
-        conn = sqlite3.connect(target_db)
+    conn = sqlite3.connect(target_db)
+    try:
         target_hashes = {row[0] for row in conn.execute("SELECT hash FROM items").fetchall()}
+    finally:
         conn.close()
+
     payload = {"target": target_id, "sources": [], "total_items": 0, "duplicates": 0, "importable": 0}
     for source_id in sources:
         if source_id not in vaults:
             raise KeyError(f"vault not found: {source_id}")
-        source_db = vault_db_path(vault_root(vaults[source_id], ctx))
-        rows = []
-        if source_db.exists():
-            conn = sqlite3.connect(source_db)
+        source_root = vault_root(vaults[source_id], ctx)
+        if not vault_root_is_usable(source_root, workspace_root):
+            raise ValueError(f"source vault is offline or missing: {source_id}")
+        source_db = vault_db_path(source_root)
+        if not source_db.exists():
+            raise ValueError(f"source database is missing: {source_id}")
+
+        conn = sqlite3.connect(source_db)
+        try:
             rows = conn.execute("SELECT hash FROM items").fetchall()
+        finally:
             conn.close()
         total = len(rows)
         duplicates = sum(1 for (item_hash,) in rows if item_hash in target_hashes)
@@ -315,7 +330,10 @@ def merge_vaults(target_id: str, source_ids: list[str], delete_sources: bool = F
     config = _ensure_vault_registry(_read_config(ctx))
     vaults = config["vaults"]
     target_root = vault_root(vaults[vault_id_slug(target_id)], ctx)
-    target_conn = init_database(vault_db_path(target_root))
+    target_db = vault_db_path(target_root)
+    if not target_db.exists():
+        raise ValueError(f"target database is missing: {target_id}")
+    target_conn = init_database(target_db)
     copied_paths: list[Path] = []
 
     def safe_copy(src: Path, dst: Path) -> bool:
@@ -742,6 +760,10 @@ def repair_vault(vault_id: str, actions: list[str] | None = None, confirm_destru
     unknown = sorted(selected - allowed)
     if unknown:
         raise ValueError(f"unknown repair actions: {', '.join(unknown)}")
+    destructive_actions = {"derived_cache", "review_sidecars", "quarantine_orphans"}
+    requested_destructive = selected.intersection(destructive_actions)
+    if requested_destructive and not confirm_destructive:
+        raise ValueError(f"destructive actions require confirmation: {', '.join(sorted(requested_destructive))}")
     if "metadata" in selected and repair_ctx.active_vault.id != get_runtime_context().active_vault.id:
         raise ValueError("metadata repair is only supported for the active vault")
     if "wd_tagging" in selected and repair_ctx.active_vault.id != get_runtime_context().active_vault.id:
@@ -901,19 +923,25 @@ def import_vault_package(package_path: str | Path, name: str | None = None, vaul
         root = vault_root(entry, ctx)
         if root.exists() and _vault_non_empty(root):
             raise ValueError(f"target vault root is not empty: {root}")
-        root.mkdir(parents=True, exist_ok=True)
-        for member in archive.infolist():
-            if member.is_dir() or member.filename == "lmz-vault-package.yaml":
-                continue
-            target = (root / member.filename).resolve()
-            if root.resolve() not in target.parents and target != root.resolve():
-                raise ValueError(f"unsafe package path: {member.filename}")
-            target.parent.mkdir(parents=True, exist_ok=True)
-            with archive.open(member) as src, target.open("wb") as dst:
-                shutil.copyfileobj(src, dst)
-    create_vault_layout(root, initialize_db=not vault_db_path(root).exists())
-    config["vaults"][clean_id] = entry
-    _write_config(config, ctx)
+        root_existed_before = root.exists()
+        try:
+            root.mkdir(parents=True, exist_ok=True)
+            for member in archive.infolist():
+                if member.is_dir() or member.filename == "lmz-vault-package.yaml":
+                    continue
+                target = (root / member.filename).resolve()
+                if root.resolve() not in target.parents and target != root.resolve():
+                    raise ValueError(f"unsafe package path: {member.filename}")
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with archive.open(member) as src, target.open("wb") as dst:
+                    shutil.copyfileobj(src, dst)
+            create_vault_layout(root, initialize_db=not vault_db_path(root).exists())
+            config["vaults"][clean_id] = entry
+            _write_config(config, ctx)
+        except Exception:
+            if not root_existed_before and root.exists():
+                shutil.rmtree(root, ignore_errors=True)
+            raise
     return {"status": "success", "vault": clean_id, "items": vault_list(ctx)}
 
 

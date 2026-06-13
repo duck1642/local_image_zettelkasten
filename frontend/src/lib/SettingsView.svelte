@@ -344,7 +344,7 @@
     healthBusy = true;
     healthResult = 'repairing...';
     try {
-      const payload = await repairVaultHealthApi(healthVaultId);
+      const payload = await repairVaultHealthApi(healthVaultId, true);
       healthReport = payload.after || null;
       repairErrors = payload.wd_tagging?.errors || [];
       // Keep details panel openable (don't force-close after repair)
