@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import ConfirmationModal from './ConfirmationModal.svelte';
   import { config, configDirty, configLoading, loadConfig } from './configStore';
   import { log as uiLog } from './logger';
   import { handleRuntimeSwitch } from './runtimeStore';
@@ -10,7 +11,7 @@
   import SettingsVaultPanel from './SettingsVaultPanel.svelte';
   import SettingsVaultToolsPanel from './SettingsVaultToolsPanel.svelte';
   import SettingsWorkspacePanel from './SettingsWorkspacePanel.svelte';
-  import { IconSettings, IconMerge } from './icons';
+  import { IconSettings, IconMerge, IconAlertTriangle } from './icons';
   import {
     activateVault,
     activateWorkspace,
@@ -251,9 +252,19 @@
     }
   }
 
-  async function deleteVault(id: string) {
+  let deleteVaultConfirmOpen = false;
+  let deleteVaultConfirmId = '';
+
+  function deleteVault(id: string) {
     if (!id || vaultBusy) return;
-    if (!confirm(`Delete vault "${id}"? This removes that vault folder.`)) return;
+    deleteVaultConfirmId = id;
+    deleteVaultConfirmOpen = true;
+  }
+
+  async function confirmDeleteVault() {
+    const id = deleteVaultConfirmId;
+    deleteVaultConfirmOpen = false;
+    if (!id || vaultBusy) return;
     vaultBusy = true;
     vaultResult = '';
     try {
@@ -604,4 +615,23 @@
       <SettingsShortcutsPanel />
     {/if}
   {/if}
+
+  <ConfirmationModal
+    open={deleteVaultConfirmOpen}
+    title="Delete Vault"
+    confirmLabel="Delete"
+    danger={true}
+    busy={vaultBusy}
+    on:cancel={() => deleteVaultConfirmOpen = false}
+    on:confirm={confirmDeleteVault}
+  >
+    <div class="delete-warning-box">
+      <span class="warning-icon">
+        <IconAlertTriangle size={14} />
+      </span>
+      <span class="warning-message">
+        Permanently delete vault directory <code>{deleteVaultConfirmId}</code>? All files, notes, and database entries will be erased.
+      </span>
+    </div>
+  </ConfirmationModal>
 </div>
