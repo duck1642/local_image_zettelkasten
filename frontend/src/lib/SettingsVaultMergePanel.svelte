@@ -85,24 +85,24 @@
     </div>
   </div>
 
-  <div class="merge-preview-box" class:stale={mergePreview && !mergePreviewCurrent}>
-    {#if mergePreview && mergePreviewCurrent}
-      <div class="merge-preview-grid">
-        <IconChart size={12} />
-        <span>Selected vaults <strong>{selectedCount}</strong></span>
-        <span>Total <strong>{Number(mergePreview.total_items || 0).toLocaleString()}</strong></span>
-        <span>Duplicates <strong>{Number(mergePreview.duplicates || 0).toLocaleString()}</strong></span>
-        <span>Importable <strong class="text-success">{Number(mergePreview.importable || 0).toLocaleString()}</strong></span>
-        <span>Sources changed <strong>No</strong></span>
-      </div>
-    {:else if mergePreview && !mergePreviewCurrent}
-      <span>Preview needs refresh.</span>
-    {:else}
-      <span>No preview yet.</span>
-    {/if}
-  </div>
+  <div class="merge-preview-action-row">
+    <div class="merge-preview-box" class:stale={mergePreview && !mergePreviewCurrent}>
+      {#if mergePreview && mergePreviewCurrent}
+        <div class="merge-preview-grid">
+          <IconChart size={12} />
+          <span>Selected vaults <strong>{selectedCount}</strong></span>
+          <span>Total <strong>{Number(mergePreview.total_items || 0).toLocaleString()}</strong></span>
+          <span>Duplicates <strong>{Number(mergePreview.duplicates || 0).toLocaleString()}</strong></span>
+          <span>Importable <strong class="text-success">{Number(mergePreview.importable || 0).toLocaleString()}</strong></span>
+          <span>Sources changed <strong>No</strong></span>
+        </div>
+      {:else if mergePreview && !mergePreviewCurrent}
+        <span>Preview needs refresh.</span>
+      {:else}
+        <span>No preview yet.</span>
+      {/if}
+    </div>
 
-  <div class="merge-action-bar">
     <div class="merge-buttons">
       <button
         class="select-folder-btn"

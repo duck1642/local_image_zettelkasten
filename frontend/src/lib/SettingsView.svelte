@@ -12,6 +12,7 @@
   import SettingsVaultPanel from './SettingsVaultPanel.svelte';
   import SettingsVaultMergePanel from './SettingsVaultMergePanel.svelte';
   import SettingsVaultHealthPanel from './SettingsVaultHealthPanel.svelte';
+  import SettingsVaultPackagesPanel from './SettingsVaultPackagesPanel.svelte';
   import SettingsWorkspacePanel from './SettingsWorkspacePanel.svelte';
   import { IconSettings, IconAlertTriangle } from './icons';
   import {
@@ -876,12 +877,18 @@
           {healthReport}
           bind:healthDetailsOpen
           {repairErrors}
+          onAuditVaultHealth={auditVaultHealth}
+          onRepairVaultHealth={repairVaultHealth}
+        />
+      </div>
+      <div class="workspace-panel">
+        <SettingsVaultPackagesPanel
+          {healthVaultId}
+          {healthBusy}
           bind:importPackagePath
           bind:importVaultName
           {importPreview}
           {importPreviewCurrent}
-          onAuditVaultHealth={auditVaultHealth}
-          onRepairVaultHealth={repairVaultHealth}
           onBackupVault={requestVaultPackage}
           onPreviewImportVaultPackage={previewImportVaultPackage}
           onConfirmImportVaultPackage={confirmImportVaultPackage}

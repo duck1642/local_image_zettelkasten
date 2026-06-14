@@ -1117,9 +1117,13 @@ test('settings previews vault merge and runs vault health package actions', asyn
   await page.getByLabel('Include review state').check();
   await page.getByRole('button', { name: 'Export', exact: true }).click();
   await expect(page.getByText('Export Successful')).toBeVisible();
-  await page.getByPlaceholder('Path to imported .lmzvault.zip package').fill('C:/Exports/default.lmzvault.zip');
+  await page.getByTestId('import-package-path').evaluate((element) => {
+    const input = element as HTMLInputElement;
+    input.value = 'C:/Exports/default.lmzvault.zip';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
   await page.getByPlaceholder('Imported vault display name').fill('Imported');
-  await page.locator('.settings-import-row').getByRole('button', { name: 'Preview' }).click();
+  await page.locator('.vault-package-import-row').getByRole('button', { name: 'Preview' }).click();
   await expect(page.locator('.import-preview-box')).toContainText('Exported Vault');
   await page.getByRole('button', { name: 'Import Vault' }).click();
   await page.getByRole('button', { name: 'Import', exact: true }).click();

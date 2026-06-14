@@ -399,12 +399,6 @@
     margin-top: 0;
   }
 
-  .vault-tool-panel-separated {
-    margin-top: 24px;
-    padding-top: 18px;
-    border-top: 1px solid var(--border-dim);
-  }
-
   .vault-tool-panel h5 {
     margin: 0 0 8px 0;
     color: var(--text-bright);
@@ -418,8 +412,26 @@
     margin-top: 10px;
   }
 
-  .vault-package-row {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .vault-health-controls {
+    display: grid;
+    grid-template-columns: minmax(220px, 1fr) auto;
+    gap: 12px;
+    align-items: end;
+    padding: 12px;
+    border: 1px solid var(--border-dim);
+    border-radius: 8px;
+    background: var(--bg-main);
+  }
+
+  .vault-health-select {
+    display: grid;
+    gap: 6px;
+  }
+
+  .vault-health-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(128px, 1fr));
+    gap: 8px;
   }
 
   .settings-row-spaced {
@@ -443,18 +455,97 @@
     letter-spacing: 0.5px;
   }
 
+  .settings-mini-label.inline {
+    margin: 0;
+  }
+
   .settings-source-label {
     display: inline-block;
     margin-top: 0;
     margin-bottom: 0;
   }
 
-  .settings-import-row {
-    grid-template-columns: minmax(0, 2fr) minmax(160px, 1fr) 100px 120px;
-    background: rgba(255, 255, 255, 0.01);
-    border: 1px dashed var(--border-dim);
-    border-radius: 6px;
+  .vault-package-import-row {
+    display: grid;
+    grid-template-columns: 36px minmax(0, 1.25fr) minmax(0, 0.9fr) auto;
+    gap: 8px;
+    align-items: center;
+    margin-top: 0;
+    min-width: 0;
+  }
+
+  .vault-package-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 86px 86px;
+    gap: 10px;
+    margin-top: 12px;
+  }
+
+  .vault-package-card {
+    display: grid;
+    gap: 10px;
     padding: 12px;
+    border: 1px solid var(--border-dim);
+    border-radius: 8px;
+    background: var(--bg-main);
+  }
+
+  .vault-package-card-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-bright);
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .vault-package-card .settings-icon-button {
+    min-height: 34px;
+  }
+
+  .vault-package-small-card {
+    align-content: start;
+  }
+
+  .vault-package-icon-button,
+  .vault-package-file-button {
+    width: 36px;
+    min-width: 36px;
+    padding-left: 0;
+    padding-right: 0;
+  }
+
+  .vault-package-test-path-input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .vault-package-path-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-muted);
+    font-family: 'Consolas', monospace;
+    font-size: 12px;
+    line-height: 1;
+    padding: 10px 12px;
+    border: 1px solid var(--border-dim);
+    border-radius: 6px;
+    background: var(--bg-panel);
+  }
+
+  .vault-package-name-input {
+    min-width: 0;
+  }
+
+  .vault-package-import-actions {
+    display: grid;
+    grid-template-columns: 36px 36px;
+    gap: 8px;
   }
 
   .import-preview-box {
@@ -900,12 +991,29 @@
   }
 
   @media (max-width: 600px) {
-    .settings-import-row {
+    .vault-health-controls,
+    .vault-package-grid,
+    .vault-package-import-row {
+      grid-template-columns: 1fr !important;
+    }
+
+    .vault-health-actions,
+    .vault-package-import-actions {
       grid-template-columns: 1fr;
     }
 
     .health-scorecard-grid {
       grid-template-columns: repeat(2, 1fr);
+    }
+  }
+
+  @media (max-width: 900px) {
+    .vault-package-grid {
+      grid-template-columns: minmax(0, 1fr) 86px;
+    }
+
+    .vault-package-import-card {
+      grid-column: 1 / -1;
     }
   }
 
@@ -1383,8 +1491,15 @@
     overflow-wrap: anywhere;
   }
 
-  .merge-preview-box {
+  .merge-preview-action-row {
+    display: grid;
+    grid-template-columns: minmax(220px, 1fr) auto;
+    gap: 12px;
+    align-items: center;
     margin-top: 12px;
+  }
+
+  .merge-preview-box {
     min-height: 36px;
     display: flex;
     align-items: center;
@@ -1413,15 +1528,18 @@
     color: var(--text-bright);
   }
 
-  .merge-action-bar {
-    margin-top: 12px;
-    display: flex;
-    justify-content: flex-end;
-    width: 100%;
-  }
-
   .merge-buttons {
     display: flex;
     gap: 8px;
     flex-shrink: 0;
+  }
+
+  @media (max-width: 700px) {
+    .merge-preview-action-row {
+      grid-template-columns: 1fr;
+    }
+
+    .merge-buttons {
+      justify-content: flex-end;
+    }
   }
