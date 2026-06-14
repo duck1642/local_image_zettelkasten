@@ -28,9 +28,11 @@
     importVaultPackageApi,
     packageVault,
     previewImportVaultPackageApi,
+    previewRestoreBackupPackageApi,
     previewMergedVaultApi,
     pruneWorkspaceMetadata,
     rebuildWorkspaceMetadata,
+    restoreBackupPackageApi,
     createWorkspace as createWorkspaceApi,
     removeVault,
     repairVaultHealthApi,
@@ -102,6 +104,9 @@
   let packageConfirmVaultId = '';
   let exportIncludeReview = false;
   let importConfirmOpen = false;
+  let restoreConfirmOpen = false;
+  let restorePackagePath = '';
+  let restorePreview: any = null;
   let activeSettingsTab: SettingsTab = 'general';
   const settingsTabs: Array<{ value: SettingsTab; label: string }> = [
     { value: 'general', label: 'General' },
@@ -653,6 +658,68 @@
     }
   }
 
+  async function requestRestoreBackup(packagePath: string) {
+    const path = String(packagePath || '').trim();
+    if (!path || healthBusy) return;
+    healthBusy = true;
+    backupResult = '';
+    restorePackagePath = path;
+    restorePreview = null;
+    restoreConfirmOpen = false;
+    try {
+      const payload = await previewRestoreBackupPackageApi(path);
+      restorePreview = payload;
+      restoreConfirmOpen = true;
+      backupResult = `restore preview ${payload?.source_vault?.name || payload?.source_vault?.id || 'vault'}`;
+      toastStore.add({
+        type: 'success',
+        title: 'Backup Preview Ready',
+        message: `Validated backup for "${payload?.source_vault?.name || payload?.source_vault?.id || 'vault'}".`
+      });
+    } catch (error) {
+      const errMsg = String(error);
+      backupResult = `error: ${errMsg}`;
+      toastStore.add({
+        type: 'error',
+        title: 'Restore Preview Failed',
+        message: errMsg
+      });
+    } finally {
+      healthBusy = false;
+    }
+  }
+
+  async function executeRestoreBackup() {
+    const path = restorePackagePath.trim();
+    const fingerprint = String(restorePreview?.package_fingerprint || '');
+    if (!path || !fingerprint || healthBusy) return;
+    healthBusy = true;
+    backupResult = '';
+    try {
+      const payload = await restoreBackupPackageApi(path, fingerprint);
+      vaults = Array.isArray(payload?.items) ? payload.items : vaults;
+      restoreConfirmOpen = false;
+      restorePackagePath = '';
+      restorePreview = null;
+      backupResult = `restored ${payload.name || payload.vault || 'vault'}`;
+      toastStore.add({
+        type: 'success',
+        title: 'Backup Restored',
+        message: `Restored backup as "${payload.name || payload.vault || 'vault'}".`
+      });
+    } catch (error) {
+      const errMsg = String(error);
+      backupResult = `error: ${errMsg}`;
+      toastStore.add({
+        type: 'error',
+        title: 'Restore Failed',
+        message: errMsg
+      });
+    } finally {
+      healthBusy = false;
+    }
+  }
+
   function setMaintenanceBusy(action: MaintenanceAction, busy: boolean) {
     maintenanceBusy = { ...maintenanceBusy, [action]: busy };
   }
@@ -893,6 +960,7 @@
           onPreviewImportVaultPackage={previewImportVaultPackage}
           onConfirmImportVaultPackage={confirmImportVaultPackage}
           onImportInputChanged={invalidateImportPreview}
+          onRestoreBackup={requestRestoreBackup}
         />
       </div>
       <SettingsMaintenancePanel
@@ -968,6 +1036,27 @@
       <span class="warning-message">
         Create vault <code>{importVaultName.trim()}</code> from package
         <code>{importPreview?.source_vault?.name || importPreview?.source_vault?.id || 'vault'}</code>.
+      </span>
+    </div>
+  </ConfirmationModal>
+
+  <ConfirmationModal
+    open={restoreConfirmOpen}
+    title="Restore Backup"
+    confirmLabel="Restore"
+    busy={healthBusy}
+    on:cancel={() => restoreConfirmOpen = false}
+    on:confirm={executeRestoreBackup}
+  >
+    <div class="confirm-info-box">
+      <span class="warning-icon">
+        <IconAlertTriangle size={14} />
+      </span>
+      <span class="warning-message">
+        Restore backup <code>{restorePreview?.source_vault?.name || restorePreview?.source_vault?.id || 'vault'}</code>
+        as new vault <code>{restorePreview?.target_name || restorePreview?.target_id || 'restored vault'}</code>.
+        {Number(restorePreview?.counts?.items || 0).toLocaleString()} items.
+        Existing vaults will not be overwritten.
       </span>
     </div>
   </ConfirmationModal>

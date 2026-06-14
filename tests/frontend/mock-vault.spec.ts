@@ -83,7 +83,7 @@ async function installMockVaultApi(
     metadataRebuildResponse?: unknown;
     metadataStatusSequence?: unknown[];
     onWorkspaceAction?: (action: 'add' | 'active', payload?: any) => Promise<void> | void;
-    onVaultAction?: (action: 'merge-preview' | 'merge' | 'health' | 'repair' | 'backup' | 'export' | 'import-preview' | 'import', payload?: any) => Promise<void> | void;
+    onVaultAction?: (action: 'merge-preview' | 'merge' | 'health' | 'repair' | 'backup' | 'export' | 'import-preview' | 'import' | 'restore-preview' | 'restore', payload?: any) => Promise<void> | void;
   } = {}
 ) {
   let items = cloneItems();
@@ -348,11 +348,35 @@ async function installMockVaultApi(
         warnings: []
       });
     }
+    if (url.pathname === '/api/vaults/restore-preview' && request.method() === 'POST') {
+      const payload = JSON.parse(request.postData() || '{}');
+      await options.onVaultAction?.('restore-preview', payload);
+      return fulfillJson(route, {
+        status: 'preview',
+        package_path: payload.package_path,
+        package_fingerprint: 'fingerprint-restored',
+        package_type: 'lmz_vault_backup',
+        package_version: 1,
+        created_at: '2026-06-14T00:00:00+00:00',
+        source_vault: { id: 'default', name: 'Default' },
+        contents: { db: true, assets: true, notes: true, review: true, logs: true },
+        counts: { items: 3, files: 12 },
+        file_count: 12,
+        target_name: 'Restored Default',
+        target_id: 'restored-default'
+      });
+    }
     if (url.pathname === '/api/vaults/import' && request.method() === 'POST') {
       const payload = JSON.parse(request.postData() || '{}');
       await options.onVaultAction?.('import', payload);
       vaultItems = [...vaultItems, { id: 'imported', name: payload.target_name || 'Imported', root: 'C:/Imported', active: false, exists: true, item_count: 0 }];
       return fulfillJson(route, { status: 'success', vault: 'imported', items: vaultItems });
+    }
+    if (url.pathname === '/api/vaults/restore' && request.method() === 'POST') {
+      const payload = JSON.parse(request.postData() || '{}');
+      await options.onVaultAction?.('restore', payload);
+      vaultItems = [...vaultItems, { id: 'restored-default', name: 'Restored Default', root: 'C:/RestoredDefault', active: false, exists: true, item_count: 3 }];
+      return fulfillJson(route, { status: 'success', vault: 'restored-default', name: 'Restored Default', items: vaultItems });
     }
     return fulfillJson(route, { detail: 'not found' }, 404);
   });
@@ -708,7 +732,7 @@ async function openMockVault(
     onItemsRequest?: (url: URL) => Promise<void> | void;
     onItemPatch?: (payload: any) => Promise<void> | void;
     onWorkspaceAction?: (action: 'add' | 'active', payload?: any) => Promise<void> | void;
-    onVaultAction?: (action: 'merge-preview' | 'merge' | 'health' | 'repair' | 'backup' | 'export' | 'import-preview' | 'import', payload?: any) => Promise<void> | void;
+    onVaultAction?: (action: 'merge-preview' | 'merge' | 'health' | 'repair' | 'backup' | 'export' | 'import-preview' | 'import' | 'restore-preview' | 'restore', payload?: any) => Promise<void> | void;
   } = {}
 ) {
   await installMockVaultApi(page, options);

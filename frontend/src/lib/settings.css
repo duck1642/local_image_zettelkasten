@@ -476,7 +476,7 @@
 
   .vault-package-grid {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 86px 86px;
+    grid-template-columns: minmax(0, 1fr) 86px 108px;
     gap: 10px;
     margin-top: 12px;
   }
@@ -505,6 +505,12 @@
 
   .vault-package-small-card {
     align-content: start;
+  }
+
+  .vault-package-small-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
   }
 
   .vault-package-icon-button,
@@ -1009,7 +1015,7 @@
 
   @media (max-width: 900px) {
     .vault-package-grid {
-      grid-template-columns: minmax(0, 1fr) 86px;
+      grid-template-columns: minmax(0, 1fr) 108px;
     }
 
     .vault-package-import-card {

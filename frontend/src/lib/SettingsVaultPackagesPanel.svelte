@@ -1,6 +1,6 @@
 <script lang="ts">
   import { open as openDialog } from '@tauri-apps/plugin-dialog';
-  import { IconCopy, IconDownload, IconFileText, IconFolder, IconPlus } from './icons';
+  import { IconCopy, IconDownload, IconFileText, IconFolder, IconPlus, IconRefresh } from './icons';
 
   export let healthVaultId = '';
   export let healthBusy = false;
@@ -12,6 +12,7 @@
   export let onPreviewImportVaultPackage: () => void;
   export let onConfirmImportVaultPackage: () => void;
   export let onImportInputChanged: () => void;
+  export let onRestoreBackup: (packagePath: string) => void;
 
   async function onSelectImportPackage() {
     if (healthBusy) return;
@@ -27,6 +28,20 @@
       }
     } catch (error) {
       console.error('Failed to open package picker:', error);
+    }
+  }
+
+  async function onSelectRestoreBackup() {
+    if (healthBusy) return;
+    try {
+      const selection = await openDialog({
+        directory: false,
+        multiple: false,
+        filters: [{ name: 'LMZ backup package', extensions: ['lmzbackup.zip', 'zip'] }]
+      });
+      if (selection) onRestoreBackup(String(selection));
+    } catch (error) {
+      console.error('Failed to open backup picker:', error);
     }
   }
 </script>
@@ -93,9 +108,14 @@
       <IconCopy size={12} />
       Backup
     </div>
-    <button class="settings-icon-button vault-package-icon-button" type="button" on:click={() => onBackupVault('backup')} disabled={healthBusy || !healthVaultId} aria-label="Backup Vault Folder" title="Backup Vault Folder">
-      <IconCopy size={13} />
-    </button>
+    <div class="vault-package-small-actions">
+      <button class="settings-icon-button vault-package-icon-button" type="button" on:click={() => onBackupVault('backup')} disabled={healthBusy || !healthVaultId} aria-label="Backup Vault Folder" title="Backup Vault Folder">
+        <IconCopy size={13} />
+      </button>
+      <button class="settings-icon-button vault-package-icon-button" type="button" on:click={onSelectRestoreBackup} disabled={healthBusy} aria-label="Restore Backup" title="Restore Backup">
+        <IconRefresh size={13} />
+      </button>
+    </div>
   </div>
 </div>
 

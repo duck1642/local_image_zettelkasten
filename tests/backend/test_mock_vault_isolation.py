@@ -830,6 +830,8 @@ def test_vault_backup_export_and_import_package(monkeypatch, tmp_path):
 
     with pytest.raises(ValueError, match="expected package type"):
         vaults.preview_import_vault_package(backup["package_path"])
+    with pytest.raises(ValueError, match="expected package type"):
+        vaults.preview_restore_backup_package(exported["package_path"])
 
     preview = vaults.preview_import_vault_package(exported["package_path"])
     assert preview["package_type"] == "lmz_vault_export"
@@ -850,6 +852,28 @@ def test_vault_backup_export_and_import_package(monkeypatch, tmp_path):
     imported_root = Path(next(item["root"] for item in imported["items"] if item["id"] == "imported-portable"))
 
     assert (imported_root / "vault" / "notes" / "aa" / "marker.md").read_text(encoding="utf-8") == "portable"
+
+    restore_preview = vaults.preview_restore_backup_package(backup["package_path"])
+    assert restore_preview["package_type"] == "lmz_vault_backup"
+    assert restore_preview["target_name"] == "Restored Portable Vault"
+    assert restore_preview["target_id"] == "restored-portable-vault"
+    with pytest.raises(ValueError, match="confirmation"):
+        vaults.restore_backup_package(backup["package_path"], package_fingerprint_value=restore_preview["package_fingerprint"])
+    with pytest.raises(ValueError, match="fingerprint"):
+        vaults.restore_backup_package(backup["package_path"], package_fingerprint_value="bad", confirm=True)
+
+    restored = vaults.restore_backup_package(
+        backup["package_path"],
+        package_fingerprint_value=restore_preview["package_fingerprint"],
+        confirm=True,
+    )
+    restored_root = Path(next(item["root"] for item in restored["items"] if item["id"] == "restored-portable-vault"))
+    assert (restored_root / "vault" / "notes" / "aa" / "marker.md").read_text(encoding="utf-8") == "portable"
+    assert (restored_root / "review" / "pending.json").read_text(encoding="utf-8") == "review-state"
+
+    second_restore_preview = vaults.preview_restore_backup_package(backup["package_path"])
+    assert second_restore_preview["target_name"] == "Restored Portable Vault 2"
+    assert second_restore_preview["target_id"] == "restored-portable-vault-2"
 
 
 def test_vault_package_skips_symlinked_files(monkeypatch, tmp_path):
@@ -903,6 +927,19 @@ def test_vault_import_preview_rejects_invalid_packages(monkeypatch, tmp_path):
     with pytest.raises(ValueError, match="unsafe archive path"):
         vaults.preview_import_vault_package(traversal)
 
+    backup_traversal = tmp_path / "backup-traversal.lmzbackup.zip"
+    backup_manifest = {
+        **manifest,
+        "package_type": "lmz_vault_backup",
+        "contents": {"db": False, "assets": True, "notes": True, "review": True, "logs": True},
+    }
+    with zipfile.ZipFile(backup_traversal, "w") as archive:
+        archive.writestr("lmz-package.yaml", yaml.safe_dump(backup_manifest))
+        archive.writestr("../escape.txt", "bad")
+
+    with pytest.raises(ValueError, match="unsafe archive path"):
+        vaults.preview_restore_backup_package(backup_traversal)
+
 
 def test_vault_import_rolls_back_on_config_write_failure(monkeypatch, tmp_path):
     vaults = fresh_backend(monkeypatch, tmp_path, "vaults")[0]
@@ -933,6 +970,36 @@ def test_vault_import_rolls_back_on_config_write_failure(monkeypatch, tmp_path):
     assert "rollback-import" not in config["vaults"]
     imports_tmp = ctx.root / ".tmp" / "imports"
     assert not imports_tmp.exists() or not any(imports_tmp.iterdir())
+
+
+def test_vault_restore_rolls_back_on_config_write_failure(monkeypatch, tmp_path):
+    vaults = fresh_backend(monkeypatch, tmp_path, "vaults")[0]
+    source = vaults.create_vault("Restore Rollback Source")
+    source_root = Path(next(item["root"] for item in source["items"] if item["id"] == "restore-rollback-source"))
+    marker = source_root / "vault" / "notes" / "aa" / "marker.md"
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text("restore rollback", encoding="utf-8")
+    backup = vaults.backup_vault("restore-rollback-source", confirm=True)
+    preview = vaults.preview_restore_backup_package(backup["package_path"])
+    ctx = vaults._ctx()
+    target_root = ctx.root / "data" / "vaults" / "restored-restore-rollback-source"
+
+    def fail_write_config(config, ctx=None):
+        raise RuntimeError("config write failed")
+
+    monkeypatch.setattr(vaults, "_write_config", fail_write_config)
+    with pytest.raises(RuntimeError, match="config write failed"):
+        vaults.restore_backup_package(
+            backup["package_path"],
+            package_fingerprint_value=preview["package_fingerprint"],
+            confirm=True,
+        )
+
+    assert not target_root.exists()
+    config = yaml.safe_load(ctx.config_path.read_text(encoding="utf-8"))
+    assert "restored-restore-rollback-source" not in config["vaults"]
+    restores_tmp = ctx.root / ".tmp" / "restores"
+    assert not restores_tmp.exists() or not any(restores_tmp.iterdir())
 
 
 def test_vault_import_rolls_back_on_final_move_failure(monkeypatch, tmp_path):

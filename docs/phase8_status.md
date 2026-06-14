@@ -165,7 +165,7 @@ VSCode-friendly test launchers:
   - Similar matches should eventually go to review/quarantine or be reported in the merge result; first pass can report them without auto-deleting or auto-skipping.
   - Vault repair destructive actions now require backend `confirm_destructive`; keep this as done-but-needs-smoke, not an open blocker.
   - Maintenance scripts can be updated opportunistically, but are lower priority than app UI/API safety.
-  - Vault backup/export/import package split is implemented and safety-hardened; remaining work is real-vault smoke and later restore/open-folder affordances.
+  - Vault backup/export/import package split is implemented and safety-hardened; backup restore creates a new vault, while real-vault smoke and open-folder affordances remain.
   - Remaining browser `confirm()` usages should be reviewed and migrated case-by-case to the reusable confirmation modal for destructive or high-risk actions.
   - `ConfirmationModal` still needs focus placement/trap polish.
   - Toast z-index can appear above modals and should be normalized.
@@ -175,7 +175,7 @@ VSCode-friendly test launchers:
 1. Vault delete UI: trace Settings event wiring and confirmation flow; require an explicit warning before `confirm=true`.
 2. Vault merge: smoke create-merged-vault workflow on real vaults and design later similar-item review/reporting.
 3. Vault repair: verify current backend confirmation and UI wording; update docs/tests if stale.
-4. Vault backup/export/import: smoke strict package creation, preview-first import, native file picker flow, rollback behavior, and cross-machine path safety.
+4. Vault backup/export/import/restore: smoke strict package creation, restore-to-new-vault, preview-first import, native file picker flow, rollback behavior, and cross-machine path safety.
 
 ### P1 Index Systems
 
@@ -191,15 +191,16 @@ VSCode-friendly test launchers:
 
 - Backup/export/import package split is implemented, safety-hardened, and needs real-vault smoke:
   - `backup` creates confirmed workspace-local `.lmzbackup.zip` full snapshots under `backups/vaults/<id>/`.
+  - restore accepts only `.lmzbackup.zip` packages and creates a new non-overwriting vault.
   - `export` creates confirmed portable `.lmzvault.zip` packages under `exports/vaults/<id>/`.
   - export includes DB/assets/notes by default and review state only when requested.
   - import is preview-first, requires fingerprint + confirmation, stages into `.tmp/imports/`, writes config last, and rolls back on failure.
   - strict `lmz-package.yaml` manifests replaced the old filename/loose-ZIP fallback.
   - backup/export skip symlinked files and validate packaged file paths remain inside the vault root.
   - import uses strict stage-to-final rename and cleans partial final roots plus staging on failure.
-  - real-vault validation is intentionally deferred by user; run backup, export, import-to-new-vault, source-unchanged, and imported-vault-open checks before closing this area.
+  - real-vault validation is intentionally deferred by user; run backup, export, restore-to-new-vault, import-to-new-vault, source-unchanged, and imported/restored-vault-open checks before closing this area.
 - Remaining follow-ups:
-  - backup restore is deferred.
+  - backup restore replace/overwrite mode is deferred.
   - package import now uses a native file picker in Settings; persistent copy/open-folder affordances remain optional.
   - decide later whether workspace-level export/import should exist separately from vault packages.
 - Ensure imports do not preserve wrong machine-specific absolute paths.
@@ -301,7 +302,7 @@ VSCode-friendly test launchers:
     - vault health and repair logic is hardened to filter expected tag caches and thumbnails by image/video MIME type, and preserve skipped/failed tagging caches from being deleted as orphans.
     - vault repair can rebuild metadata/facets, rebuild thumbnails, prune derived cache orphans, reconcile review sidecars, and quarantine orphan assets/notes.
     - vault repair destructive actions require backend confirmation.
-    - vault backup/export/import package flows are split into strict backup snapshots, portable exports, and preview-first imports through backend APIs and Settings controls.
+    - vault backup/export/import package flows are split into strict backup snapshots, restore-to-new-vault, portable exports, and preview-first imports through backend APIs and Settings controls.
     - Split/separate vault flows are deferred until the real workflow is clearer.
     - Optional metadata maintenance (hiding/ignoring WD tags) is handled.
     - Optional UX polish (search chips, richer Inspector tag editing) is reviewed and deferred.

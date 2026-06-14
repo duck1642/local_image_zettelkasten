@@ -46,6 +46,7 @@ VAULT_LOCAL_DIRS = (
     "online_ingest",
 )
 EXPORT_IMPORT_ROOTS = {"db", "vault", "review"}
+BACKUP_RESTORE_ROOTS = {relative.split("/", 1)[0] for relative in VAULT_LOCAL_DIRS} | {"quarantine"}
 
 
 def vault_id_slug(value: str) -> str:
@@ -1188,6 +1189,16 @@ def _validate_export_import_layout(manifest: dict, members: list[zipfile.ZipInfo
             raise ValueError("export package contains review files but manifest does not include review")
 
 
+def _validate_backup_restore_layout(manifest: dict, members: list[zipfile.ZipInfo]) -> None:
+    contents = manifest.get("contents") or {}
+    names = {member.filename for member in members}
+    if contents.get("db") and "db/lmz_main.db" not in names:
+        raise ValueError("backup package is missing db/lmz_main.db")
+    for name in names:
+        if name.startswith("db/") and name != "db/lmz_main.db":
+            raise ValueError(f"unsupported backup package db path: {name}")
+
+
 def _read_export_package(package_path: str | Path) -> tuple[Path, str, dict, list[zipfile.ZipInfo]]:
     source = _import_package_source(package_path)
     fingerprint = package_fingerprint(source)
@@ -1201,6 +1212,35 @@ def _read_export_package(package_path: str | Path) -> tuple[Path, str, dict, lis
     except VaultPackageError as exc:
         raise ValueError(str(exc)) from exc
     return source, fingerprint, manifest, members
+
+
+def _read_backup_package(package_path: str | Path) -> tuple[Path, str, dict, list[zipfile.ZipInfo]]:
+    source = _import_package_source(package_path)
+    fingerprint = package_fingerprint(source)
+    try:
+        with zipfile.ZipFile(source, "r") as archive:
+            manifest = load_manifest_from_archive(archive, expected_type=BACKUP_PACKAGE_TYPE)
+            members = validate_archive_members(archive, allowed_roots=BACKUP_RESTORE_ROOTS)
+            _validate_backup_restore_layout(manifest, members)
+    except zipfile.BadZipFile as exc:
+        raise ValueError("invalid vault backup zip") from exc
+    except VaultPackageError as exc:
+        raise ValueError(str(exc)) from exc
+    return source, fingerprint, manifest, members
+
+
+def _unique_restored_vault_name_id(source_name: str, ctx: WorkspaceContext | None = None) -> tuple[str, str]:
+    config = _ensure_vault_registry(_read_config(ctx))
+    vaults = config["vaults"]
+    existing_names = {str(entry.get("name") or "").strip().casefold() for entry in vaults.values()}
+    base_name = f"Restored {str(source_name or '').strip() or 'Vault'}"
+    for index in range(1, 1000):
+        candidate_name = base_name if index == 1 else f"{base_name} {index}"
+        candidate_id = vault_id_slug(candidate_name)
+        candidate_root = _config_root(ctx) / "data" / "vaults" / candidate_id
+        if candidate_id not in vaults and candidate_name.casefold() not in existing_names and not candidate_root.exists():
+            return candidate_name, candidate_id
+    raise ValueError("could not generate a unique restored vault name")
 
 
 def preview_import_vault_package(package_path: str | Path, target_name: str | None = None, ctx: WorkspaceContext | None = None) -> dict:
@@ -1232,6 +1272,26 @@ def preview_import_vault_package(package_path: str | Path, target_name: str | No
         "target_id": selected_id,
         "target_exists": collision,
         "warnings": warnings,
+    }
+
+
+def preview_restore_backup_package(package_path: str | Path, ctx: WorkspaceContext | None = None) -> dict:
+    source, fingerprint, manifest, members = _read_backup_package(package_path)
+    source_vault = manifest["source_vault"]
+    target_name, target_id = _unique_restored_vault_name_id(str(source_vault.get("name") or source_vault.get("id") or source.stem), ctx)
+    return {
+        "status": "preview",
+        "package_path": str(source),
+        "package_fingerprint": fingerprint,
+        "package_type": manifest["package_type"],
+        "package_version": manifest["package_version"],
+        "created_at": manifest.get("created_at"),
+        "source_vault": dict(source_vault),
+        "contents": dict(manifest.get("contents") or {}),
+        "counts": dict(manifest.get("counts") or {}),
+        "file_count": len(members),
+        "target_name": target_name,
+        "target_id": target_id,
     }
 
 
@@ -1286,6 +1346,60 @@ def import_vault_package(
     return {
         "status": "success",
         "vault": clean_id,
+        "package_fingerprint": fingerprint,
+        "items": vault_list(runtime),
+    }
+
+
+def restore_backup_package(
+    package_path: str | Path,
+    package_fingerprint_value: str | None = None,
+    confirm: bool = False,
+    ctx: WorkspaceContext | None = None,
+) -> dict:
+    if not confirm:
+        raise ValueError("restore requires confirmation")
+    if not str(package_fingerprint_value or "").strip():
+        raise ValueError("restore requires package_fingerprint from preview")
+    runtime = _ctx(ctx)
+    _package_preflight(runtime)
+    with package_operation_lock(f"{runtime.config_path}:restore"):
+        source, fingerprint, manifest, members = _read_backup_package(package_path)
+        if fingerprint != str(package_fingerprint_value).strip():
+            raise ValueError("package fingerprint does not match preview")
+        source_vault = manifest["source_vault"]
+        display_name, clean_id = _unique_restored_vault_name_id(
+            str(source_vault.get("name") or source_vault.get("id") or source.stem),
+            runtime,
+        )
+        entry = {"name": display_name, "root": f"data/vaults/{clean_id}"}
+        final_root = vault_root(entry, runtime)
+        if final_root.exists():
+            raise ValueError(f"target vault root already exists: {final_root}")
+
+        stage_parent = runtime.root / ".tmp" / "restores" / operation_id()
+        stage_root = stage_parent / "vault"
+        config = _ensure_vault_registry(_read_config(runtime))
+        try:
+            with zipfile.ZipFile(source, "r") as archive:
+                extract_members(archive, stage_root, members)
+            create_vault_layout(stage_root, initialize_db=not vault_db_path(stage_root).exists())
+            conn = init_database(vault_db_path(stage_root))
+            conn.close()
+            final_root.parent.mkdir(parents=True, exist_ok=True)
+            _rename_import_stage(stage_root, final_root)
+            config["vaults"][clean_id] = entry
+            _write_config(config, runtime)
+        except Exception:
+            if final_root.exists():
+                shutil.rmtree(final_root, ignore_errors=True)
+            raise
+        finally:
+            shutil.rmtree(stage_parent, ignore_errors=True)
+    return {
+        "status": "success",
+        "vault": clean_id,
+        "name": display_name,
         "package_fingerprint": fingerprint,
         "items": vault_list(runtime),
     }

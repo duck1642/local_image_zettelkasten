@@ -121,6 +121,26 @@ export async function importVaultPackageApi(packagePath: string, targetName: str
   }));
 }
 
+export async function previewRestoreBackupPackageApi(packagePath: string) {
+  return readJson(await apiFetch('/api/vaults/restore-preview', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ package_path: packagePath })
+  }));
+}
+
+export async function restoreBackupPackageApi(packagePath: string, packageFingerprint = '') {
+  return readJson(await apiFetch('/api/vaults/restore', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      package_path: packagePath,
+      package_fingerprint: packageFingerprint,
+      confirm: true
+    })
+  }));
+}
+
 export async function scanAuth() {
   return readJson(await apiFetch('/api/auth/scan', { method: 'POST' }));
 }
