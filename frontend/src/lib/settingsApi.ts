@@ -100,11 +100,11 @@ export async function packageVault(id: string, kind: 'backup' | 'export', option
   }));
 }
 
-export async function previewImportVaultPackageApi(packagePath: string) {
+export async function previewImportVaultPackageApi(packagePath: string, targetName = '') {
   return readJson(await apiFetch('/api/vaults/import-preview', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ package_path: packagePath })
+    body: JSON.stringify({ package_path: packagePath, target_name: targetName || undefined })
   }));
 }
 

@@ -83,7 +83,7 @@ async function installMockVaultApi(
     metadataRebuildResponse?: unknown;
     metadataStatusSequence?: unknown[];
     onWorkspaceAction?: (action: 'add' | 'active', payload?: any) => Promise<void> | void;
-    onVaultAction?: (action: 'merge-preview' | 'merge' | 'health' | 'repair' | 'backup' | 'export' | 'import', payload?: any) => Promise<void> | void;
+    onVaultAction?: (action: 'merge-preview' | 'merge' | 'health' | 'repair' | 'backup' | 'export' | 'import-preview' | 'import', payload?: any) => Promise<void> | void;
   } = {}
 ) {
   let items = cloneItems();
@@ -325,12 +325,33 @@ async function installMockVaultApi(
       if (action === 'repair') {
         return fulfillJson(route, { status: 'success', after: { issue_count: 0, missing_files: {}, orphans: {}, facet_drift: [] } });
       }
-      return fulfillJson(route, { status: 'success', package_path: `C:/ObsidianVault/lmz/${action}s/default.lmzvault.zip` });
+      const extension = action === 'backup' ? 'lmzbackup.zip' : 'lmzvault.zip';
+      return fulfillJson(route, { status: 'success', package_path: `C:/ObsidianVault/lmz/${action}s/default.${extension}` });
+    }
+    if (url.pathname === '/api/vaults/import-preview' && request.method() === 'POST') {
+      const payload = JSON.parse(request.postData() || '{}');
+      await options.onVaultAction?.('import-preview', payload);
+      return fulfillJson(route, {
+        status: 'preview',
+        package_path: payload.package_path,
+        package_fingerprint: 'fingerprint-imported',
+        package_type: 'lmz_vault_export',
+        package_version: 1,
+        source_vault: { id: 'exported', name: 'Exported Vault' },
+        contents: { db: true, assets: true, notes: true, review: false },
+        counts: { items: 3, files: 7 },
+        suggested_target_name: 'Exported Vault',
+        suggested_target_id: 'exported-vault',
+        target_name: payload.target_name || 'Exported Vault',
+        target_id: (payload.target_name || 'Exported Vault').toLowerCase().replace(/\s+/g, '-'),
+        target_exists: false,
+        warnings: []
+      });
     }
     if (url.pathname === '/api/vaults/import' && request.method() === 'POST') {
       const payload = JSON.parse(request.postData() || '{}');
       await options.onVaultAction?.('import', payload);
-      vaultItems = [...vaultItems, { id: 'imported', name: payload.name || 'Imported', root: 'C:/Imported', active: false, exists: true, item_count: 0 }];
+      vaultItems = [...vaultItems, { id: 'imported', name: payload.target_name || 'Imported', root: 'C:/Imported', active: false, exists: true, item_count: 0 }];
       return fulfillJson(route, { status: 'success', vault: 'imported', items: vaultItems });
     }
     return fulfillJson(route, { detail: 'not found' }, 404);
@@ -687,7 +708,7 @@ async function openMockVault(
     onItemsRequest?: (url: URL) => Promise<void> | void;
     onItemPatch?: (payload: any) => Promise<void> | void;
     onWorkspaceAction?: (action: 'add' | 'active', payload?: any) => Promise<void> | void;
-    onVaultAction?: (action: 'merge-preview' | 'merge' | 'health' | 'repair' | 'backup' | 'export' | 'import', payload?: any) => Promise<void> | void;
+    onVaultAction?: (action: 'merge-preview' | 'merge' | 'health' | 'repair' | 'backup' | 'export' | 'import-preview' | 'import', payload?: any) => Promise<void> | void;
   } = {}
 ) {
   await installMockVaultApi(page, options);
@@ -1090,10 +1111,18 @@ test('settings previews vault merge and runs vault health package actions', asyn
   await expect(page.getByText('Repair Complete')).toBeVisible();
 
   await page.getByRole('button', { name: 'Backup Vault Folder' }).click();
+  await page.getByRole('button', { name: 'Backup', exact: true }).click();
   await expect(page.getByText('Backup Successful')).toBeVisible();
-  await page.getByPlaceholder('Path to imported .zip vault package').fill('C:/Exports/default.lmzvault.zip');
+  await page.getByRole('button', { name: 'Export Vault Package' }).click();
+  await page.getByLabel('Include review state').check();
+  await page.getByRole('button', { name: 'Export', exact: true }).click();
+  await expect(page.getByText('Export Successful')).toBeVisible();
+  await page.getByPlaceholder('Path to imported .lmzvault.zip package').fill('C:/Exports/default.lmzvault.zip');
   await page.getByPlaceholder('Imported vault display name').fill('Imported');
+  await page.getByRole('button', { name: 'Preview' }).click();
+  await expect(page.locator('.import-preview-box')).toContainText('Exported Vault');
   await page.getByRole('button', { name: 'Import Vault' }).click();
+  await page.getByRole('button', { name: 'Import', exact: true }).click();
   await expect(page.getByText('Vault Imported')).toBeVisible();
 
   expect(actions).toEqual([
@@ -1101,8 +1130,10 @@ test('settings previews vault merge and runs vault health package actions', asyn
     { action: 'merge', payload: { name: 'Merged Vault', source_vault_ids: ['default', 'archive'] } },
     { action: 'health', payload: undefined },
     { action: 'repair', payload: { actions: ['metadata', 'thumbnails', 'wd_tagging', 'derived_cache', 'review_sidecars', 'quarantine_orphans'], confirm_destructive: true } },
-    { action: 'backup', payload: {} },
-    { action: 'import', payload: { package_path: 'C:/Exports/default.lmzvault.zip', name: 'Imported' } }
+    { action: 'backup', payload: { confirm: true } },
+    { action: 'export', payload: { confirm: true, include_review: true } },
+    { action: 'import-preview', payload: { package_path: 'C:/Exports/default.lmzvault.zip', target_name: 'Imported' } },
+    { action: 'import', payload: { package_path: 'C:/Exports/default.lmzvault.zip', target_name: 'Imported', package_fingerprint: 'fingerprint-imported', confirm: true } }
   ]);
 });
 

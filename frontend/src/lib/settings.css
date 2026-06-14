@@ -450,10 +450,36 @@
   }
 
   .settings-import-row {
+    grid-template-columns: minmax(0, 2fr) minmax(160px, 1fr) 100px 120px;
     background: rgba(255, 255, 255, 0.01);
     border: 1px dashed var(--border-dim);
     border-radius: 6px;
     padding: 12px;
+  }
+
+  .import-preview-box {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    align-items: center;
+    margin-top: 10px;
+    padding: 9px 12px;
+    border: 1px solid rgba(31, 111, 235, 0.22);
+    border-radius: 6px;
+    background: rgba(31, 111, 235, 0.06);
+    color: var(--text-main);
+    font-size: 11px;
+  }
+
+  .import-preview-box.stale {
+    border-style: dashed;
+    color: var(--text-muted);
+  }
+
+  .import-preview-box.warning {
+    border-color: rgba(248, 81, 73, 0.35);
+    background: rgba(248, 81, 73, 0.08);
+    color: #ffb4ad;
   }
 
   .merge-preview,
@@ -874,6 +900,10 @@
   }
 
   @media (max-width: 600px) {
+    .settings-import-row {
+      grid-template-columns: 1fr;
+    }
+
     .health-scorecard-grid {
       grid-template-columns: repeat(2, 1fr);
     }
@@ -1102,6 +1132,19 @@
     border-radius: 4px;
     color: var(--text-bright);
     font-family: var(--font-mono, monospace);
+  }
+
+  .settings-modal-checkbox {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+    color: var(--text-main);
+    font-size: 12px;
+  }
+
+  .settings-modal-checkbox input {
+    margin: 0;
   }
 
   /* Redesigned Create Vault Card */

@@ -829,7 +829,10 @@ def _import_vault_preview_sync(body: dict):
     from vaults import preview_import_vault_package
 
     try:
-        return preview_import_vault_package(str((body or {}).get("package_path") or "").strip())
+        return preview_import_vault_package(
+            str((body or {}).get("package_path") or "").strip(),
+            target_name=str((body or {}).get("target_name") or (body or {}).get("name") or "").strip() or None,
+        )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except ValueError as exc:

@@ -1168,14 +1168,16 @@ def _read_export_package(package_path: str | Path) -> tuple[Path, str, dict, lis
     return source, fingerprint, manifest, members
 
 
-def preview_import_vault_package(package_path: str | Path, ctx: WorkspaceContext | None = None) -> dict:
+def preview_import_vault_package(package_path: str | Path, target_name: str | None = None, ctx: WorkspaceContext | None = None) -> dict:
     runtime = _ctx(ctx)
     source, fingerprint, manifest, members = _read_export_package(package_path)
     config = _ensure_vault_registry(_read_config(runtime))
     source_vault = manifest["source_vault"]
     suggested_name = str(source_vault.get("name") or source_vault.get("id") or source.stem).strip()
     suggested_id = vault_id_slug(suggested_name)
-    collision = suggested_id in config["vaults"] or (runtime.root / "data" / "vaults" / suggested_id).exists()
+    selected_name = str(target_name or "").strip() or suggested_name
+    selected_id = vault_id_slug(selected_name)
+    collision = selected_id in config["vaults"] or (runtime.root / "data" / "vaults" / selected_id).exists()
     warnings = []
     if collision:
         warnings.append("target_vault_exists")
@@ -1191,6 +1193,8 @@ def preview_import_vault_package(package_path: str | Path, ctx: WorkspaceContext
         "file_count": len(members),
         "suggested_target_name": suggested_name,
         "suggested_target_id": suggested_id,
+        "target_name": selected_name,
+        "target_id": selected_id,
         "target_exists": collision,
         "warnings": warnings,
     }

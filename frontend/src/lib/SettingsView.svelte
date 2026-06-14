@@ -26,6 +26,7 @@
     fetchWorkspaces,
     importVaultPackageApi,
     packageVault,
+    previewImportVaultPackageApi,
     previewMergedVaultApi,
     pruneWorkspaceMetadata,
     rebuildWorkspaceMetadata,
@@ -47,6 +48,7 @@
 
   type MaintenanceAction = 'auth' | 'metadata' | 'workspaceMetadata' | 'workspacePrune' | 'review';
   type SettingsTab = 'general' | 'workspace' | 'vaults' | 'maintenance' | 'shortcuts';
+  type PackageAction = 'backup' | 'export';
   let maintenanceBusy: Record<MaintenanceAction, boolean> = {
     auth: false,
     metadata: false,
@@ -92,6 +94,13 @@
   let backupResult = '';
   let importPackagePath = '';
   let importVaultName = '';
+  let importPreview: any = null;
+  let importPreviewKey = '';
+  let packageConfirmOpen = false;
+  let packageConfirmKind: PackageAction = 'backup';
+  let packageConfirmVaultId = '';
+  let exportIncludeReview = false;
+  let importConfirmOpen = false;
   let activeSettingsTab: SettingsTab = 'general';
   const settingsTabs: Array<{ value: SettingsTab; label: string }> = [
     { value: 'general', label: 'General' },
@@ -104,6 +113,8 @@
   $: if (!healthVaultId && vaultActive) healthVaultId = vaultActive;
   $: currentMergePreviewKey = mergeRequestKey(mergedVaultName, mergeSourceIds);
   $: mergePreviewCurrent = Boolean(mergePreview) && mergePreviewKey === currentMergePreviewKey;
+  $: currentImportPreviewKey = importRequestKey(importPackagePath, importVaultName);
+  $: importPreviewCurrent = Boolean(importPreview) && importPreviewKey === currentImportPreviewKey;
 
   function defaultMergedVaultName() {
     return `Merged Vault - ${new Date().toISOString().slice(0, 10)}`;
@@ -119,6 +130,18 @@
   function invalidateMergePreview() {
     mergePreview = null;
     mergePreviewKey = '';
+  }
+
+  function importRequestKey(path: string, name: string) {
+    return JSON.stringify({
+      package_path: path.trim(),
+      target_name: name.trim()
+    });
+  }
+
+  function invalidateImportPreview() {
+    importPreview = null;
+    importPreviewKey = '';
   }
 
   function checkedValue(event: Event) {
@@ -519,13 +542,24 @@
     }
   }
 
-  async function backupVault(kind: 'backup' | 'export') {
+  function requestVaultPackage(kind: PackageAction) {
     const id = healthVaultId || vaultActive;
+    if (!id || healthBusy) return;
+    packageConfirmKind = kind;
+    packageConfirmVaultId = id;
+    exportIncludeReview = false;
+    packageConfirmOpen = true;
+  }
+
+  async function executeVaultPackage() {
+    const id = packageConfirmVaultId;
+    const kind = packageConfirmKind;
     if (!id || healthBusy) return;
     healthBusy = true;
     backupResult = '';
     try {
-      const payload = await packageVault(id, kind);
+      const payload = await packageVault(id, kind, { includeReview: exportIncludeReview });
+      packageConfirmOpen = false;
       backupResult = `${kind}: ${payload.package_path || 'created'}`;
       toastStore.add({
         type: 'success',
@@ -545,16 +579,60 @@
     }
   }
 
-  async function importVaultPackage() {
+  async function previewImportVaultPackage() {
     const path = importPackagePath.trim();
+    const name = importVaultName.trim();
     if (!path || healthBusy) return;
+    healthBusy = true;
+    invalidateImportPreview();
+    backupResult = '';
+    try {
+      const payload = await previewImportVaultPackageApi(path, name);
+      importPreview = payload;
+      importPreviewKey = importRequestKey(path, name || String(payload?.target_name || payload?.suggested_target_name || ''));
+      if (!name && payload?.target_name) {
+        importVaultName = String(payload.target_name);
+        importPreviewKey = importRequestKey(path, importVaultName);
+      }
+      backupResult = `preview ${payload?.source_vault?.name || payload?.source_vault?.id || 'vault'}`;
+      toastStore.add({
+        type: 'success',
+        title: 'Package Preview Ready',
+        message: `Validated package for "${payload?.source_vault?.name || payload?.source_vault?.id || 'vault'}".`
+      });
+    } catch (error) {
+      const errMsg = String(error);
+      backupResult = `error: ${errMsg}`;
+      toastStore.add({
+        type: 'error',
+        title: 'Preview Failed',
+        message: errMsg
+      });
+    } finally {
+      healthBusy = false;
+    }
+  }
+
+  function confirmImportVaultPackage() {
+    if (!importPreviewCurrent || !importVaultName.trim() || healthBusy) return;
+    importConfirmOpen = true;
+  }
+
+  async function executeImportVaultPackage() {
+    const path = importPackagePath.trim();
+    const name = importVaultName.trim();
+    const fingerprint = String(importPreview?.package_fingerprint || '');
+    if (!path || !name || !fingerprint || !importPreviewCurrent || healthBusy) return;
     healthBusy = true;
     backupResult = '';
     try {
-      const payload = await importVaultPackageApi(path, importVaultName.trim());
+      const payload = await importVaultPackageApi(path, name, fingerprint);
       vaults = Array.isArray(payload?.items) ? payload.items : vaults;
       importPackagePath = '';
       importVaultName = '';
+      importPreview = null;
+      importPreviewKey = '';
+      importConfirmOpen = false;
       backupResult = `imported ${payload.vault || 'vault'}`;
       toastStore.add({
         type: 'success',
@@ -800,10 +878,14 @@
           {repairErrors}
           bind:importPackagePath
           bind:importVaultName
+          {importPreview}
+          {importPreviewCurrent}
           onAuditVaultHealth={auditVaultHealth}
           onRepairVaultHealth={repairVaultHealth}
-          onBackupVault={backupVault}
-          onImportVaultPackage={importVaultPackage}
+          onBackupVault={requestVaultPackage}
+          onPreviewImportVaultPackage={previewImportVaultPackage}
+          onConfirmImportVaultPackage={confirmImportVaultPackage}
+          onImportInputChanged={invalidateImportPreview}
         />
       </div>
       <SettingsMaintenancePanel
@@ -832,6 +914,53 @@
       </span>
       <span class="warning-message">
         Permanently delete vault directory <code>{deleteVaultConfirmId}</code>? All files, notes, and database entries will be erased.
+      </span>
+    </div>
+  </ConfirmationModal>
+
+  <ConfirmationModal
+    open={packageConfirmOpen}
+    title={packageConfirmKind === 'backup' ? 'Create Backup' : 'Export Vault'}
+    confirmLabel={packageConfirmKind === 'backup' ? 'Backup' : 'Export'}
+    busy={healthBusy}
+    on:cancel={() => packageConfirmOpen = false}
+    on:confirm={executeVaultPackage}
+  >
+    <div class="confirm-info-box">
+      <span class="warning-icon">
+        <IconAlertTriangle size={14} />
+      </span>
+      <span class="warning-message">
+        {#if packageConfirmKind === 'backup'}
+          Create a full restore snapshot for <code>{packageConfirmVaultId}</code>.
+        {:else}
+          Create a portable export package for <code>{packageConfirmVaultId}</code>.
+        {/if}
+      </span>
+    </div>
+    {#if packageConfirmKind === 'export'}
+      <label class="settings-modal-checkbox">
+        <input type="checkbox" bind:checked={exportIncludeReview} disabled={healthBusy} />
+        <span>Include review state</span>
+      </label>
+    {/if}
+  </ConfirmationModal>
+
+  <ConfirmationModal
+    open={importConfirmOpen}
+    title="Import Vault"
+    confirmLabel="Import"
+    busy={healthBusy}
+    on:cancel={() => importConfirmOpen = false}
+    on:confirm={executeImportVaultPackage}
+  >
+    <div class="confirm-info-box">
+      <span class="warning-icon">
+        <IconAlertTriangle size={14} />
+      </span>
+      <span class="warning-message">
+        Create vault <code>{importVaultName.trim()}</code> from package
+        <code>{importPreview?.source_vault?.name || importPreview?.source_vault?.id || 'vault'}</code>.
       </span>
     </div>
   </ConfirmationModal>

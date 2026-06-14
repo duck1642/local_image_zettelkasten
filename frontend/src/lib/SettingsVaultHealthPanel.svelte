@@ -12,10 +12,14 @@
   export let repairErrors: Array<{ hash: string; storage_id: string; status: string; error: string }> = [];
   export let importPackagePath = '';
   export let importVaultName = '';
+  export let importPreview: any = null;
+  export let importPreviewCurrent = false;
   export let onAuditVaultHealth: () => void;
   export let onRepairVaultHealth: () => void;
   export let onBackupVault: (kind: 'backup' | 'export') => void;
-  export let onImportVaultPackage: () => void;
+  export let onPreviewImportVaultPackage: () => void;
+  export let onConfirmImportVaultPackage: () => void;
+  export let onImportInputChanged: () => void;
 
   $: hasIssues = healthReport ? (healthReport.issue_count > 0) : false;
 </script>
@@ -93,17 +97,46 @@
     </button>
     <button class="settings-icon-button" type="button" on:click={() => onBackupVault('export')} disabled={healthBusy || !healthVaultId}>
       <IconFileText size={11} />
-      Export Vault Database
+      Export Vault Package
     </button>
   </div>
 
   <div class="vault-tool-row settings-import-row">
-    <input class="settings-mono-input" type="text" placeholder="Path to imported .zip vault package" bind:value={importPackagePath} />
-    <input type="text" placeholder="Imported vault display name" bind:value={importVaultName} />
-    <button class="settings-icon-button" type="button" on:click={onImportVaultPackage} disabled={healthBusy || !importPackagePath.trim()}>
+    <input
+      class="settings-mono-input"
+      type="text"
+      placeholder="Path to imported .lmzvault.zip package"
+      bind:value={importPackagePath}
+      on:input={onImportInputChanged}
+    />
+    <input
+      type="text"
+      placeholder="Imported vault display name"
+      bind:value={importVaultName}
+      on:input={onImportInputChanged}
+    />
+    <button class="settings-icon-button" type="button" on:click={onPreviewImportVaultPackage} disabled={healthBusy || !importPackagePath.trim()}>
+      <IconFileText size={11} />
+      Preview
+    </button>
+    <button class="settings-icon-button" type="button" on:click={onConfirmImportVaultPackage} disabled={healthBusy || !importPreviewCurrent || !importVaultName.trim() || importPreview?.target_exists}>
       <IconPlus size={11} />
       Import Vault
     </button>
   </div>
+
+  {#if importPreview}
+    <div class="import-preview-box" class:stale={!importPreviewCurrent} class:warning={importPreview?.target_exists}>
+      <span>
+        {importPreviewCurrent ? 'Preview' : 'Preview stale'}:
+        {importPreview?.source_vault?.name || importPreview?.source_vault?.id || 'Vault'}
+      </span>
+      <span>{Number(importPreview?.counts?.items || 0).toLocaleString()} items</span>
+      <span>Target: {importPreview?.target_id || '-'}</span>
+      {#if importPreview?.target_exists}
+        <span>Target already exists</span>
+      {/if}
+    </div>
+  {/if}
 
 </div>
