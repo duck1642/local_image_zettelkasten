@@ -190,12 +190,25 @@ VSCode-friendly test launchers:
 
 ### P2 Import / Export
 
-- Audit current vault export behavior.
-- Audit current vault import behavior.
-- Inspect current backend package code before UI changes; import/export deserves its own discussion.
-- Decide whether workspace export/import should exist separately from vault export/import.
+- Current `backup` and `export` behavior is identical except destination folder; UI label `Export Vault Database` is misleading because backend exports the full vault folder.
+- Define the vault package contract before UI polish:
+  - required manifest, package type/version, expected directory layout, and supported package scope.
+  - decide whether workspace export/import should exist separately from vault export/import.
+- Harden import package validation:
+  - reject missing/invalid manifests instead of accepting arbitrary ZIPs by filename fallback.
+  - add tests for traversal/absolute members, corrupt ZIPs, duplicate vault IDs, missing manifest, and bad package shape.
+- Harden import rollback:
+  - existing empty target roots can receive partial extracted files on failure because cleanup only removes roots created during import.
+  - import should stage or track created paths so failed imports leave no partial vault.
+- Clarify backup/export consistency:
+  - backup currently copies live files with `rglob`, including DB, without locking/snapshot assumptions.
+  - decide whether backup must pause writes, snapshot DB, or report best-effort semantics.
+- Improve import/export UI:
+  - raw text package path should become a file picker or preview-first flow.
+  - import should show package summary and require confirmation before writing config/files.
+  - package path/results should be persistent, not toast-only.
+- Add missing frontend coverage for export.
 - Ensure imports do not preserve wrong machine-specific absolute paths.
-- Decide package scope for assets, notes, DB, config, workspace metadata, logs, and secrets.
 - Source URL normalization migration remains missing; runtime writes `source_url_norm` and existing rows are lazily backfilled by `init_database()`.
 
 ### P2 Settings / UI UX
