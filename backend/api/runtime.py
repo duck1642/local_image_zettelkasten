@@ -630,16 +630,16 @@ def _repair_vault_sync(vault_id: str, body: dict):
 
 
 @router.post("/api/vaults/{vault_id}/backup")
-async def backup_vault(vault_id: str):
+async def backup_vault(vault_id: str, body: dict | None = None):
     require_usable_target_vault_context(vault_id)
-    return await asyncio.to_thread(_backup_vault_sync, vault_id)
+    return await asyncio.to_thread(_backup_vault_sync, vault_id, body or {})
 
 
-def _backup_vault_sync(vault_id: str):
+def _backup_vault_sync(vault_id: str, body: dict | None = None):
     from vaults import backup_vault
 
     try:
-        return backup_vault(vault_id, confirm=True)
+        return backup_vault(vault_id, confirm=(body or {}).get("confirm") is True)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except ValueError as exc:
@@ -647,16 +647,20 @@ def _backup_vault_sync(vault_id: str):
 
 
 @router.post("/api/vaults/{vault_id}/export")
-async def export_vault(vault_id: str):
+async def export_vault(vault_id: str, body: dict | None = None):
     require_usable_target_vault_context(vault_id)
-    return await asyncio.to_thread(_export_vault_sync, vault_id)
+    return await asyncio.to_thread(_export_vault_sync, vault_id, body or {})
 
 
-def _export_vault_sync(vault_id: str):
+def _export_vault_sync(vault_id: str, body: dict | None = None):
     from vaults import export_vault
 
     try:
-        return export_vault(vault_id, confirm=True)
+        return export_vault(
+            vault_id,
+            confirm=(body or {}).get("confirm") is True,
+            include_review=(body or {}).get("include_review") is True,
+        )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except ValueError as exc:
