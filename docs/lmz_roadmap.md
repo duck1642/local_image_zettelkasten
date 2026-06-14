@@ -235,8 +235,8 @@ Build and stabilize the local-first Tauri/Svelte vault app, backend API, metadat
 - Replaced sidecar startup panics with logged errors.
 - Added a practical Tauri CSP for local backend/media access.
 - Added Settings maintenance actions for auth scan, metadata rebuild, review cleanup, workspace metadata rebuild, and workspace metadata prune.
-- Added Settings vault tools for merge preview/merge, vault health audit/repair details, backup/export/import, create/rename/delete, and active vault selection.
-- Split Settings into focused panels, shared API wrappers, utilities, and CSS.
+- Added Settings vault tools for create-merged-vault preview/create, vault health audit/repair details, backup/export/import packages, create/rename/delete, and active vault selection.
+- Split Settings into focused panels, including separate merge, vault health, vault package, system maintenance, workspace, vault, runtime, shortcuts, shared API wrappers, utilities, and CSS.
 - Added tabbed Settings navigation to reduce visible panel bloat while preserving existing tools.
 - Added config cache with mtime invalidation after Settings writes.
 - Added log stream heartbeats, truncate/rotation handling, tail-on-connect, and bounded frontend reconnects.

@@ -231,6 +231,7 @@ local_media_zettelkasten/
         SettingsVaultPanel.svelte
         SettingsVaultMergePanel.svelte
         SettingsVaultHealthPanel.svelte
+        SettingsVaultPackagesPanel.svelte
         SettingsWorkspacePanel.svelte
         VaultHealthDetailsModal.svelte
         settingsApi.ts
@@ -594,8 +595,8 @@ Top-level structure:
   - `ReviewInboxList.svelte`: pending/cleanup queue list and item navigation.
 - `StatsView.svelte`: orchestration shell for Stats tabs, runtime-session reset, facet filtering handoff, artist flows, and topic/WD maintenance modals.
 - `LogsView.svelte`: structured/raw log viewer.
-- `SettingsView.svelte`: Settings page owner for config/workspace/vault loading, refresh lifecycle, tab state, and action handlers.
-  - Settings panels: core config, runtime paths, workspaces, vaults, vault tools, merge, health/package tools, maintenance, shortcuts, and vault health details modal.
+- `SettingsView.svelte`: Settings page owner for config/workspace/vault loading, refresh lifecycle, tab state, confirmation modals, toast feedback, and action handlers.
+  - Settings panels: core config, runtime paths, workspaces, vaults, create-merged-vault, vault health, backup/import/export packages, system maintenance, shortcuts, and vault health details modal.
   - `settingsApi.ts`, `settingsUtils.ts`, and `settings.css`: Settings API wrappers, summary helpers, and shared styles.
 
 Shared frontend infrastructure:
@@ -779,7 +780,7 @@ Each workspace has a `config.yaml` with one active vault:
 - `vaults`: registered vaults and relative roots inside the workspace.
 - `paths.secrets`: relative secrets path for that workspace.
 
-Vault switching is dynamic through Settings/API when runtime preflight allows it. Settings can create, rename, delete, and switch vaults. Vault merge creates a new merged vault from selected source vaults, allocates new destination `storage_id` values, skips exact hash duplicates, copies assets/notes/cache files, and leaves source vaults untouched.
+Vault switching is dynamic through Settings/API when runtime preflight allows it. Settings can create, rename, delete, and switch vaults. Vault merge creates a new merged vault from selected source vaults, allocates new destination `storage_id` values, skips exact hash duplicates, copies assets/notes/cache files, and leaves source vaults untouched. Vault package tools are split from health controls: backup creates workspace-local snapshots, export creates portable `.lmzvault.zip` packages, and import is preview-first with native package selection.
 
 `backend/runtime_context.py` is the source of truth for active workspace/vault paths. Legacy `utils.py` constants remain available, but new code should prefer context-aware helpers or explicit `ctx` propagation. Maintenance scripts should use explicit workspace/vault selection rather than importing dynamic path globals.
 

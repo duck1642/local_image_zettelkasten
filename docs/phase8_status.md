@@ -154,7 +154,7 @@ VSCode-friendly test launchers:
 - Ensure DB/filesystem failures surface in UI, clear loading state, and repeated clicks do not start duplicate jobs.
 - Align UI actions and maintenance scripts: workspace/vault selection, missing-path warnings, no import-time dynamic paths.
 - Ensure maintenance logs include action start, target context/path, result, and warnings/errors.
-- Trace first: `frontend/src/lib/SettingsMaintenancePanel.svelte`, `frontend/src/lib/SettingsVaultHealthPanel.svelte`, maintenance API routes, and `tools/maintenance/`.
+- Trace first: `frontend/src/lib/SettingsMaintenancePanel.svelte`, `frontend/src/lib/SettingsVaultHealthPanel.svelte`, `frontend/src/lib/SettingsVaultPackagesPanel.svelte`, maintenance/package API routes, and `tools/maintenance/`.
 - Trace findings from 2026-06-13:
   - Vault delete backend guards exist, but Settings UI may bypass the non-empty-vault checkpoint by always sending `confirm=true`; inspect why the user saw no delete warning and replace with explicit delete confirmation that shows vault name, item count, and root path.
   - Create-merged-vault flow is implemented as the active merge model; old target-vault merge endpoints were removed.
@@ -165,8 +165,7 @@ VSCode-friendly test launchers:
   - Similar matches should eventually go to review/quarantine or be reported in the merge result; first pass can report them without auto-deleting or auto-skipping.
   - Vault repair destructive actions now require backend `confirm_destructive`; keep this as done-but-needs-smoke, not an open blocker.
   - Maintenance scripts can be updated opportunistically, but are lower priority than app UI/API safety.
-  - Vault import/export exists and needs its own detailed audit before UX/design decisions.
-  - Import/export still needs a backend package, rollback, and path-safety audit.
+  - Vault backup/export/import package split is implemented and safety-hardened; remaining work is real-vault smoke and later restore/open-folder affordances.
   - Remaining browser `confirm()` usages should be reviewed and migrated case-by-case to the reusable confirmation modal for destructive or high-risk actions.
   - `ConfirmationModal` still needs focus placement/trap polish.
   - Toast z-index can appear above modals and should be normalized.
@@ -176,7 +175,7 @@ VSCode-friendly test launchers:
 1. Vault delete UI: trace Settings event wiring and confirmation flow; require an explicit warning before `confirm=true`.
 2. Vault merge: smoke create-merged-vault workflow on real vaults and design later similar-item review/reporting.
 3. Vault repair: verify current backend confirmation and UI wording; update docs/tests if stale.
-4. Vault import/export: inspect package format, extraction rollback, path safety, config scope, and UI flow in detail.
+4. Vault backup/export/import: smoke strict package creation, preview-first import, native file picker flow, rollback behavior, and cross-machine path safety.
 
 ### P1 Index Systems
 
@@ -190,16 +189,18 @@ VSCode-friendly test launchers:
 
 ### P2 Import / Export
 
-- Backup/export/import package split is implemented and needs real-vault smoke:
+- Backup/export/import package split is implemented, safety-hardened, and needs real-vault smoke:
   - `backup` creates confirmed workspace-local `.lmzbackup.zip` full snapshots under `backups/vaults/<id>/`.
   - `export` creates confirmed portable `.lmzvault.zip` packages under `exports/vaults/<id>/`.
   - export includes DB/assets/notes by default and review state only when requested.
   - import is preview-first, requires fingerprint + confirmation, stages into `.tmp/imports/`, writes config last, and rolls back on failure.
   - strict `lmz-package.yaml` manifests replaced the old filename/loose-ZIP fallback.
+  - backup/export skip symlinked files and validate packaged file paths remain inside the vault root.
+  - import uses strict stage-to-final rename and cleans partial final roots plus staging on failure.
+  - real-vault validation is intentionally deferred by user; run backup, export, import-to-new-vault, source-unchanged, and imported-vault-open checks before closing this area.
 - Remaining follow-ups:
   - backup restore is deferred.
-  - raw import path can become a native file picker later.
-  - package success paths are toast-only by current choice; persistent copy/open-folder affordances remain optional.
+  - package import now uses a native file picker in Settings; persistent copy/open-folder affordances remain optional.
   - decide later whether workspace-level export/import should exist separately from vault packages.
 - Ensure imports do not preserve wrong machine-specific absolute paths.
 - Source URL normalization migration remains missing; runtime writes `source_url_norm` and existing rows are lazily backfilled by `init_database()`.
@@ -214,6 +215,7 @@ VSCode-friendly test launchers:
 - Clean stale inline result state in `SettingsView.svelte` after toast migration.
 - Replace remaining Obsidian-specific maintenance copy with generic workspace/LMZ wording.
 - Do a responsive/live visual pass for the Settings maintenance panels.
+- Settings maintenance panels were split into separate top-level merge, vault health, backup/import/export, and system maintenance panels; still needs live visual smoke in the real app.
 - Remaining polish: Review panel, fullscreen board/view, Inspector tag edges, context menu, GIF animation policy, video preview strategy.
 - Video embedding/tagging still depends on extracting sampled original video frames.
 
@@ -329,10 +331,11 @@ VSCode-friendly test launchers:
     - `SettingsVaultPanel.svelte`
     - `SettingsVaultMergePanel.svelte`
     - `SettingsVaultHealthPanel.svelte`
+    - `SettingsVaultPackagesPanel.svelte`
     - `SettingsWorkspacePanel.svelte`
     - `VaultHealthDetailsModal.svelte`
     - `settingsApi.ts`, `settingsUtils.ts`, and `settings.css`.
-  - Settings now uses tabbed sections and reduced text-heavy actions while preserving existing API behavior.
+  - Settings now uses tabbed sections, split maintenance panels, local icons, and reduced text-heavy actions while preserving existing API behavior.
   - Ingestion UI is split between `OnlineIngestion.svelte`, `LocalIngestion.svelte`, and shared `ingestion.css`.
   - Online queue metadata directives are implemented:
     - shared queue parser supports comments, `@artist: name`, `@platform: name`, URL groups, and `---`.
