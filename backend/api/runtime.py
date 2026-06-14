@@ -591,43 +591,6 @@ def _create_merged_vault_sync(body: dict):
     return payload
 
 
-@router.post("/api/vaults/{target_id}/merge-preview")
-async def preview_vault_merge(target_id: str, body: dict):
-    require_workspace_context()
-    return await asyncio.to_thread(_preview_vault_merge_sync, target_id, body)
-
-
-def _preview_vault_merge_sync(target_id: str, body: dict):
-    from vaults import preview_vault_merge
-
-    sources = list((body or {}).get("source_vault_ids") or [])
-    try:
-        return preview_vault_merge(target_id, sources)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-
-
-@router.post("/api/vaults/{target_id}/merge")
-async def merge_vaults(target_id: str, body: dict):
-    require_workspace_context()
-    return await asyncio.to_thread(_merge_vaults_sync, target_id, body)
-
-
-def _merge_vaults_sync(target_id: str, body: dict):
-    from vaults import merge_vaults
-
-    sources = list((body or {}).get("source_vault_ids") or [])
-    delete_sources = (body or {}).get("delete_sources") is True
-    try:
-        return merge_vaults(target_id, sources, delete_sources=delete_sources)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-
-
 @router.get("/api/vaults/{vault_id}/health")
 async def get_vault_health(vault_id: str):
     require_usable_target_vault_context(vault_id)

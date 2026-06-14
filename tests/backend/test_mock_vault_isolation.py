@@ -856,50 +856,6 @@ def test_active_workspace_and_vault_switches_are_preflight_guarded(monkeypatch, 
         shutil.rmtree(workspace_parent, ignore_errors=True)
 
 
-def test_vault_merge_reallocates_storage_ids_and_keeps_source(monkeypatch, tmp_path):
-    vaults, sqlite_operator = fresh_backend(monkeypatch, tmp_path, "vaults", "db.sqlite_operator")
-    vaults.create_vault("Source")
-    vaults.create_vault("Target")
-    items = {item["id"]: item for item in vaults.vault_list()}
-    source_root = Path(items["source"]["root"])
-    target_root = Path(items["target"]["root"])
-
-    item_hash = "ab" * 32
-    source_storage_id = "00000000000a"
-    source_db = Path(items["source"]["db_path"])
-    conn = sqlite_operator.init_database(source_db)
-    conn.execute(
-        """
-        INSERT INTO items(hash, storage_id, original_filename, file_extension, mime_type, size_bytes, date_added, source_url, source_url_norm, platform, source_artist, phash)
-        VALUES (?, ?, ?, '.jpg', 'image/jpeg', 10, '2026-01-01 00:00:00', '', '', 'Local', 'Artist', '')
-        """,
-        (item_hash, source_storage_id, "source.jpg"),
-    )
-    conn.commit()
-    conn.close()
-    source_asset = source_root / "vault" / "assets" / item_hash[:2] / f"{source_storage_id}.jpg"
-    source_note = source_root / "vault" / "notes" / item_hash[:2] / f"{source_storage_id}.md"
-    source_asset.parent.mkdir(parents=True, exist_ok=True)
-    source_note.parent.mkdir(parents=True, exist_ok=True)
-    source_asset.write_bytes(b"asset")
-    source_note.write_text("---\ntopics: []\n---\n", encoding="utf-8")
-
-    result = vaults.merge_vaults("target", ["source"], delete_sources=False)
-
-    target_conn = sqlite3.connect(items["target"]["db_path"])
-    source_conn = sqlite3.connect(items["source"]["db_path"])
-    target_row = target_conn.execute("SELECT storage_id FROM items WHERE hash = ?", (item_hash,)).fetchone()
-    source_count = source_conn.execute("SELECT COUNT(*) FROM items").fetchone()[0]
-    target_conn.close()
-    source_conn.close()
-
-    assert result["imported"] == 1
-    assert target_row is not None
-    assert target_row[0] != source_storage_id
-    assert (target_root / "vault" / "assets" / item_hash[:2] / f"{target_row[0]}.jpg").exists()
-    assert source_count == 1
-
-
 def test_create_merged_vault_skips_exact_duplicates_and_keeps_sources(monkeypatch, tmp_path):
     vaults, sqlite_operator = fresh_backend(monkeypatch, tmp_path, "vaults", "db.sqlite_operator")
     vaults.create_vault("Source A")

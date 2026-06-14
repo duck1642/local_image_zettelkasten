@@ -300,67 +300,28 @@ def test_vault_merge_safety_and_defaults(monkeypatch, tmp_path):
     load = client.post("/api/workspaces/ready/load", headers={"X-LMZ-API-KEY": key})
     assert load.status_code == 200
 
-    # 1. Target DB is missing
+    # 1. Source DB is missing
     preview_res = client.post(
-        "/api/vaults/target/merge-preview",
-        json={"source_vault_ids": ["source"]},
-        headers={"X-LMZ-API-KEY": key},
-    )
-    assert preview_res.status_code == 400
-    assert "target database is missing" in preview_res.json()["detail"]
-
-    merge_res = client.post(
-        "/api/vaults/target/merge",
-        json={"source_vault_ids": ["source"]},
-        headers={"X-LMZ-API-KEY": key},
-    )
-    assert merge_res.status_code == 400
-    assert "target database is missing" in merge_res.json()["detail"]
-
-    # Initialize target DB
-    db_sqlite.init_database(target_root / "db" / "lmz_main.db")
-
-    # 2. Source DB is missing
-    preview_res = client.post(
-        "/api/vaults/target/merge-preview",
-        json={"source_vault_ids": ["source"]},
+        "/api/vaults/merge-preview",
+        json={"name": "Merged Guard", "source_vault_ids": ["target", "source"]},
         headers={"X-LMZ-API-KEY": key},
     )
     assert preview_res.status_code == 400
     assert "source database is missing" in preview_res.json()["detail"]
 
     merge_res = client.post(
-        "/api/vaults/target/merge",
-        json={"source_vault_ids": ["source"]},
+        "/api/vaults/merge",
+        json={"name": "Merged Guard", "source_vault_ids": ["target", "source"]},
         headers={"X-LMZ-API-KEY": key},
     )
     assert merge_res.status_code == 400
     assert "source database is missing" in merge_res.json()["detail"]
 
-    # Initialize source DB
+    # Initialize source DBs
+    db_sqlite.init_database(target_root / "db" / "lmz_main.db")
     db_sqlite.init_database(source_root / "db" / "lmz_main.db")
 
-    # 3. Successful merge-preview
-    preview_res = client.post(
-        "/api/vaults/target/merge-preview",
-        json={"source_vault_ids": ["source"]},
-        headers={"X-LMZ-API-KEY": key},
-    )
-    assert preview_res.status_code == 200
-    assert preview_res.json()["total_items"] == 0
-
-    # 4. Successful merge (delete_sources defaults to false/parsed strictly)
-    merge_res = client.post(
-        "/api/vaults/target/merge",
-        json={"source_vault_ids": ["source"]},
-        headers={"X-LMZ-API-KEY": key},
-    )
-    assert merge_res.status_code == 200
-
-    # Assert source vault was not deleted
-    assert source_root.exists()
-
-    # 5. New merged-vault endpoints create a separate vault from selected sources
+    # 2. New merged-vault endpoints create a separate vault from selected sources
     preview_res = client.post(
         "/api/vaults/merge-preview",
         json={"name": "Merged Guard", "source_vault_ids": ["target", "source"]},

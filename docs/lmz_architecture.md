@@ -229,7 +229,6 @@ local_media_zettelkasten/
         SettingsRuntimePanel.svelte
         SettingsShortcutsPanel.svelte
         SettingsVaultPanel.svelte
-        SettingsVaultToolsPanel.svelte
         SettingsVaultMergePanel.svelte
         SettingsVaultHealthPanel.svelte
         SettingsWorkspacePanel.svelte
@@ -780,7 +779,7 @@ Each workspace has a `config.yaml` with one active vault:
 - `vaults`: registered vaults and relative roots inside the workspace.
 - `paths.secrets`: relative secrets path for that workspace.
 
-Vault switching is dynamic through Settings/API when runtime preflight allows it. Settings can create, rename, delete, and switch vaults. Vault merge imports source vault items into a target vault by allocating new destination `storage_id` values and copying assets/notes/cache files. Source deletion is disabled by default; merge UI/wording still needs a clearer target/source/preview redesign before treating the workflow as polished.
+Vault switching is dynamic through Settings/API when runtime preflight allows it. Settings can create, rename, delete, and switch vaults. Vault merge creates a new merged vault from selected source vaults, allocates new destination `storage_id` values, skips exact hash duplicates, copies assets/notes/cache files, and leaves source vaults untouched.
 
 `backend/runtime_context.py` is the source of truth for active workspace/vault paths. Legacy `utils.py` constants remain available, but new code should prefer context-aware helpers or explicit `ctx` propagation. Maintenance scripts should use explicit workspace/vault selection rather than importing dynamic path globals.
 

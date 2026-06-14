@@ -157,11 +157,8 @@ VSCode-friendly test launchers:
 - Trace first: `frontend/src/lib/SettingsMaintenancePanel.svelte`, `frontend/src/lib/SettingsVaultHealthPanel.svelte`, maintenance API routes, and `tools/maintenance/`.
 - Trace findings from 2026-06-13:
   - Vault delete backend guards exist, but Settings UI may bypass the non-empty-vault checkpoint by always sending `confirm=true`; inspect why the user saw no delete warning and replace with explicit delete confirmation that shows vault name, item count, and root path.
-  - Vault merge no longer defaults to deleting sources (`delete_sources` defaults false and frontend sends false), but the UI/wording remains confusing and needs a focused redesign pass.
-  - Settings merge UI cleanup is partly done, but backend merge behavior still needs audit.
-  - Current merge only exact-hash skips/imports; similar-item-to-review behavior is not implemented.
-  - Merge redesign direction: create a new merged vault from selected source vaults instead of merging into an existing target vault.
-  - Merged-vault flow should ask for the new vault name, selected vaults, preview/dry run, then create/import into the new vault; source vaults remain untouched.
+  - Create-merged-vault flow is implemented as the active merge model; old target-vault merge endpoints were removed.
+  - Merged-vault flow asks for the new vault name, selected vaults, preview/dry run, then creates/imports into the new vault; source vaults remain untouched.
   - Merge can reuse vault creation, storage allocation, duplicate lookup, copy helpers, DB insert helpers, metadata refresh, and health/audit helpers where context-aware.
   - Merge should not blindly reuse normal local ingest or active-vault-only helpers because vault merge must preserve existing records and avoid source writes.
   - Exact hash duplicates should be skipped; pHash/tile/video-signature similar matches should not be auto-skipped unless confidence policy is explicitly designed.
@@ -177,7 +174,7 @@ VSCode-friendly test launchers:
 ### P1 Maintenance Inspection Order
 
 1. Vault delete UI: trace Settings event wiring and confirmation flow; require an explicit warning before `confirm=true`.
-2. Vault merge: document current copy-only behavior, then redesign UI with clearer target/source/preview semantics.
+2. Vault merge: smoke create-merged-vault workflow on real vaults and design later similar-item review/reporting.
 3. Vault repair: verify current backend confirmation and UI wording; update docs/tests if stale.
 4. Vault import/export: inspect package format, extraction rollback, path safety, config scope, and UI flow in detail.
 
@@ -227,7 +224,6 @@ VSCode-friendly test launchers:
 - Review `docs/lmz_architecture.md` against current backend/frontend shape.
 - Reconcile `docs/lmz_roadmap.md` phase notes with current status.
 - Keep status doc as the operational handoff source.
-- Remove stale `SettingsVaultToolsPanel.svelte` references from architecture/status docs.
 
 ### Recommended Fix Batches
 
@@ -292,7 +288,7 @@ VSCode-friendly test launchers:
     - existing dynamic workspace/vault switching paths are verified by targeted tests.
     - stale direct `DB_PATH` import was removed from the active SQLite helper.
     - vault rename/delete flows have targeted backend hardening coverage.
-    - Settings exposes vault merge preview/confirm; source deletion is disabled by default, but merge UI/wording remains confusing and needs redesign.
+    - Settings exposes create-merged-vault preview/confirm; source vaults remain untouched and old target-vault merge endpoints are removed.
     - vault health audit reports missing files, orphan files/caches, bad storage IDs, hash mismatches, stale metadata rows, facet drift, broken/unused topics, review mismatches, and workspace dictionary drift.
     - vault health and repair logic is hardened to filter expected tag caches and thumbnails by image/video MIME type, and preserve skipped/failed tagging caches from being deleted as orphans.
     - vault repair can rebuild metadata/facets, rebuild thumbnails, prune derived cache orphans, reconcile review sidecars, and quarantine orphan assets/notes.
@@ -325,7 +321,6 @@ VSCode-friendly test launchers:
     - `SettingsRuntimePanel.svelte`
     - `SettingsShortcutsPanel.svelte`
     - `SettingsVaultPanel.svelte`
-    - `SettingsVaultToolsPanel.svelte`
     - `SettingsVaultMergePanel.svelte`
     - `SettingsVaultHealthPanel.svelte`
     - `SettingsWorkspacePanel.svelte`

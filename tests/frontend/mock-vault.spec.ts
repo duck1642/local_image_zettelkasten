@@ -268,7 +268,6 @@ async function installMockVaultApi(
   await page.route('**/api/vaults**', async (route) => {
     const request = route.request();
     const url = new URL(request.url());
-    const mergeMatch = url.pathname.match(/\/api\/vaults\/([^/]+)\/(merge-preview|merge)$/);
     const utilityMatch = url.pathname.match(/\/api\/vaults\/([^/]+)\/(health|repair|backup|export)$/);
     if (url.pathname === '/api/vaults' && request.method() === 'GET') {
       return fulfillJson(route, { active: vaultActive, items: vaultItems });
@@ -308,21 +307,6 @@ async function installMockVaultApi(
         skipped: action === 'merge' ? 1 : undefined,
         items: vaultItems
       });
-    }
-    if (mergeMatch && request.method() === 'POST') {
-      const payload = JSON.parse(request.postData() || '{}');
-      const action = mergeMatch[2] as 'merge-preview' | 'merge';
-      await options.onVaultAction?.(action, payload);
-      const response = {
-        target: mergeMatch[1],
-        sources: [{ id: 'archive', items: 2, duplicates: 1, importable: 1 }],
-        total_items: 2,
-        duplicates: 1,
-        importable: 1,
-        imported: action === 'merge' ? 1 : undefined,
-        skipped: action === 'merge' ? 1 : undefined
-      };
-      return fulfillJson(route, response);
     }
     if (utilityMatch) {
       const action = utilityMatch[2] as 'health' | 'repair' | 'backup' | 'export';
