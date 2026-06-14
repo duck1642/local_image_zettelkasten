@@ -2,6 +2,7 @@ import hashlib
 import json
 import shutil
 import sqlite3
+import tempfile
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -12,6 +13,16 @@ from db.sqlite_operator import allocate_storage_id, init_database
 from path_policy import vault_root_is_inside_workspace, vault_root_is_usable
 from runtime_context import VaultContext, WorkspaceContext, get_runtime_context
 from utils import atomic_write_text
+from vault_packages import (
+    BACKUP_PACKAGE_TYPE,
+    MANIFEST_NAME,
+    VaultPackageError,
+    build_manifest,
+    manifest_bytes,
+    package_operation_lock,
+    snapshot_sqlite_database,
+    utc_package_timestamp,
+)
 
 
 VAULT_LOCAL_DIRS = (
@@ -138,6 +149,18 @@ def _safe_package_name(value: str) -> str:
     return vault_id_slug(value).replace("-", "_")
 
 
+def _package_preflight(ctx: WorkspaceContext | None = None) -> None:
+    try:
+        from api.ingestion import runtime_switch_preflight
+
+        preflight = runtime_switch_preflight(_ctx(ctx))
+    except Exception as exc:
+        raise ValueError("package operation preflight failed") from exc
+    if not preflight.get("allowed"):
+        blockers = ", ".join(str(value) for value in preflight.get("blockers") or []) or "unknown"
+        raise ValueError(f"package operation blocked: {blockers}")
+
+
 def create_vault_layout(root: Path, initialize_db: bool = True):
     for relative in VAULT_LOCAL_DIRS:
         (root / relative).mkdir(parents=True, exist_ok=True)
@@ -233,6 +256,17 @@ def _vault_non_empty(root: Path) -> bool:
         if path.is_file():
             return True
     return False
+
+
+def _vault_item_count(root: Path) -> int:
+    db_path = vault_db_path(root)
+    if not db_path.exists():
+        return 0
+    conn = sqlite3.connect(db_path)
+    try:
+        return int(conn.execute("SELECT COUNT(*) FROM items").fetchone()[0] or 0)
+    finally:
+        conn.close()
 
 
 def delete_vault(vault_id: str, confirm: bool = False, ctx: WorkspaceContext | None = None) -> dict:
@@ -947,11 +981,81 @@ def repair_vault(vault_id: str, actions: list[str] | None = None, confirm_destru
     return result
 
 
-def backup_vault(vault_id: str, ctx: WorkspaceContext | None = None, package_dir: Path | None = None) -> dict:
+def backup_vault(vault_id: str, ctx: WorkspaceContext | None = None, confirm: bool = False) -> dict:
+    if not confirm:
+        raise ValueError("backup requires confirmation")
+    runtime = _ctx(ctx)
+    _package_preflight(runtime)
+    clean_id, entry, root = _vault_entry(vault_id, runtime)
+    if not root.exists():
+        raise ValueError(f"vault root does not exist: {root}")
+    if not vault_root_is_usable(root, runtime.root):
+        raise ValueError(f"vault root is not usable: {root}")
+
+    with package_operation_lock(f"{runtime.config_path}:backup:{clean_id}"):
+        destination_dir = runtime.root / "backups" / "vaults" / clean_id
+        destination_dir.mkdir(parents=True, exist_ok=True)
+        stamp = utc_package_timestamp()
+        package_path = destination_dir / f"{_safe_package_name(clean_id)}-{stamp}.lmzbackup.zip"
+        db_path = vault_db_path(root)
+        snapshot_dir = Path(tempfile.mkdtemp(prefix="lmz-backup-db-"))
+        snapshot_db = snapshot_dir / "lmz_main.db"
+        try:
+            db_sidecars = {db_path.resolve(), Path(f"{db_path}-wal").resolve(), Path(f"{db_path}-shm").resolve()}
+            payload_files = [path for path in root.rglob("*") if path.is_file() and path.resolve() not in db_sidecars]
+            include_db = db_path.exists()
+            if include_db:
+                snapshot_sqlite_database(db_path, snapshot_db)
+            file_count = len(payload_files) + (1 if include_db else 0)
+            manifest = build_manifest(
+                package_type=BACKUP_PACKAGE_TYPE,
+                source_vault_id=clean_id,
+                source_vault_name=str(entry.get("name") or clean_id),
+                contents={
+                    "db": include_db,
+                    "assets": True,
+                    "notes": True,
+                    "review": True,
+                    "wd_cache": True,
+                    "thumbnails": True,
+                    "queues": True,
+                    "batches": True,
+                    "ingest_folders": True,
+                    "logs": True,
+                },
+                item_count=_vault_item_count(root),
+                file_count=file_count,
+            )
+            with zipfile.ZipFile(package_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+                archive.writestr(MANIFEST_NAME, manifest_bytes(manifest))
+                if include_db:
+                    archive.write(snapshot_db, "db/lmz_main.db")
+                for path in payload_files:
+                    archive.write(path, path.relative_to(root).as_posix())
+        except VaultPackageError:
+            if package_path.exists():
+                package_path.unlink()
+            raise
+        except Exception:
+            if package_path.exists():
+                package_path.unlink()
+            raise
+        finally:
+            shutil.rmtree(snapshot_dir, ignore_errors=True)
+    return {
+        "status": "success",
+        "vault": clean_id,
+        "package_type": BACKUP_PACKAGE_TYPE,
+        "package_path": str(package_path),
+        "bytes": package_path.stat().st_size,
+    }
+
+
+def export_vault(vault_id: str, ctx: WorkspaceContext | None = None) -> dict:
     clean_id, _entry, root = _vault_entry(vault_id, ctx)
     if not root.exists():
         raise ValueError(f"vault root does not exist: {root}")
-    destination_dir = package_dir or (_ctx(ctx).root / "backups")
+    destination_dir = _ctx(ctx).root / "exports"
     destination_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     package_path = destination_dir / f"{_safe_package_name(clean_id)}-{stamp}.lmzvault.zip"
@@ -961,10 +1065,6 @@ def backup_vault(vault_id: str, ctx: WorkspaceContext | None = None, package_dir
             if path.is_file():
                 archive.write(path, path.relative_to(root).as_posix())
     return {"status": "success", "vault": clean_id, "package_path": str(package_path), "bytes": package_path.stat().st_size}
-
-
-def export_vault(vault_id: str, ctx: WorkspaceContext | None = None) -> dict:
-    return backup_vault(vault_id, ctx, package_dir=_ctx(ctx).root / "exports")
 
 
 def import_vault_package(package_path: str | Path, name: str | None = None, vault_id: str | None = None, ctx: WorkspaceContext | None = None) -> dict:

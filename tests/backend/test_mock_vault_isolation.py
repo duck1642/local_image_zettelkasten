@@ -15,6 +15,7 @@ import tempfile
 import threading
 import time
 import types
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -36,7 +37,7 @@ def fresh_backend(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *module_names
     if str(BACKEND) not in sys.path:
         sys.path.insert(0, str(BACKEND))
     for name in list(sys.modules):
-        if name in {"api", "utils", "runtime_context", "runtime_activation", "web_api", "queue_service", "md_generator", "metadata_index", "metadata_maintenance", "processor", "external_ingestion", "thumbnails", "fingerprint", "artists", "platforms", "review_cache", "topics", "vaults", "workspace_db", "ingest_control"} or name.startswith(("api.", "logger", "db.", "tagging", "downloaders")):
+        if name in {"api", "utils", "runtime_context", "runtime_activation", "web_api", "queue_service", "md_generator", "metadata_index", "metadata_maintenance", "processor", "external_ingestion", "thumbnails", "fingerprint", "artists", "platforms", "review_cache", "topics", "vaults", "vault_packages", "workspace_db", "ingest_control"} or name.startswith(("api.", "logger", "db.", "tagging", "downloaders")):
             del sys.modules[name]
     return [importlib.import_module(name) for name in module_names]
 
@@ -785,12 +786,25 @@ def test_vault_backup_export_and_import_package(monkeypatch, tmp_path):
     marker.parent.mkdir(parents=True, exist_ok=True)
     marker.write_text("portable", encoding="utf-8")
 
-    backup = vaults.backup_vault("portable-vault")
+    with pytest.raises(ValueError, match="confirmation"):
+        vaults.backup_vault("portable-vault")
+
+    backup = vaults.backup_vault("portable-vault", confirm=True)
     exported = vaults.export_vault("portable-vault")
     assert Path(backup["package_path"]).exists()
     assert Path(exported["package_path"]).exists()
+    assert Path(backup["package_path"]).name.endswith(".lmzbackup.zip")
+    assert "backups" in Path(backup["package_path"]).parts
 
-    imported = vaults.import_vault_package(backup["package_path"], name="Imported Portable")
+    with zipfile.ZipFile(backup["package_path"], "r") as archive:
+        manifest = yaml.safe_load(archive.read("lmz-package.yaml").decode("utf-8"))
+        assert manifest["package_type"] == "lmz_vault_backup"
+        assert manifest["source_vault"]["id"] == "portable-vault"
+        assert manifest["contents"]["logs"] is True
+        assert "db/lmz_main.db" in archive.namelist()
+        assert "vault/notes/aa/marker.md" in archive.namelist()
+
+    imported = vaults.import_vault_package(exported["package_path"], name="Imported Portable")
     imported_root = Path(next(item["root"] for item in imported["items"] if item["id"] == "imported-portable"))
 
     assert (imported_root / "vault" / "notes" / "aa" / "marker.md").read_text(encoding="utf-8") == "portable"
