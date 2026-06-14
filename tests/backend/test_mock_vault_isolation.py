@@ -852,6 +852,32 @@ def test_vault_backup_export_and_import_package(monkeypatch, tmp_path):
     assert (imported_root / "vault" / "notes" / "aa" / "marker.md").read_text(encoding="utf-8") == "portable"
 
 
+def test_vault_package_skips_symlinked_files(monkeypatch, tmp_path):
+    vaults = fresh_backend(monkeypatch, tmp_path, "vaults")[0]
+    source = vaults.create_vault("Symlink Source")
+    source_root = Path(next(item["root"] for item in source["items"] if item["id"] == "symlink-source"))
+    asset_dir = source_root / "vault" / "assets" / "aa"
+    asset_dir.mkdir(parents=True, exist_ok=True)
+    (asset_dir / "normal.txt").write_text("normal", encoding="utf-8")
+    external_secret = tmp_path / "external-secret.txt"
+    external_secret.write_text("do-not-package", encoding="utf-8")
+    symlink = asset_dir / "secret-link.txt"
+    try:
+        symlink.symlink_to(external_secret)
+    except OSError as exc:
+        pytest.skip(f"symlink creation unavailable: {exc}")
+
+    backup = vaults.backup_vault("symlink-source", confirm=True)
+    exported = vaults.export_vault("symlink-source", confirm=True)
+
+    for package_path in (backup["package_path"], exported["package_path"]):
+        with zipfile.ZipFile(package_path, "r") as archive:
+            names = archive.namelist()
+            assert "vault/assets/aa/normal.txt" in names
+            assert "vault/assets/aa/secret-link.txt" not in names
+            assert all(archive.read(name) != b"do-not-package" for name in names if not name.endswith("/"))
+
+
 def test_vault_import_preview_rejects_invalid_packages(monkeypatch, tmp_path):
     vaults = fresh_backend(monkeypatch, tmp_path, "vaults")[0]
     missing_manifest = tmp_path / "missing-manifest.lmzvault.zip"
@@ -905,6 +931,39 @@ def test_vault_import_rolls_back_on_config_write_failure(monkeypatch, tmp_path):
     assert not target_root.exists()
     config = yaml.safe_load(ctx.config_path.read_text(encoding="utf-8"))
     assert "rollback-import" not in config["vaults"]
+    imports_tmp = ctx.root / ".tmp" / "imports"
+    assert not imports_tmp.exists() or not any(imports_tmp.iterdir())
+
+
+def test_vault_import_rolls_back_on_final_move_failure(monkeypatch, tmp_path):
+    vaults = fresh_backend(monkeypatch, tmp_path, "vaults")[0]
+    source = vaults.create_vault("Move Failure Source")
+    source_root = Path(next(item["root"] for item in source["items"] if item["id"] == "move-failure-source"))
+    marker = source_root / "vault" / "notes" / "aa" / "marker.md"
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text("move failure", encoding="utf-8")
+    exported = vaults.export_vault("move-failure-source", confirm=True)
+    preview = vaults.preview_import_vault_package(exported["package_path"])
+    ctx = vaults._ctx()
+    target_root = ctx.root / "data" / "vaults" / "move-failure-import"
+
+    def fail_rename(stage_root, final_root):
+        final_root.mkdir(parents=True)
+        (final_root / "partial.txt").write_text("partial", encoding="utf-8")
+        raise RuntimeError("final move failed")
+
+    monkeypatch.setattr(vaults, "_rename_import_stage", fail_rename)
+    with pytest.raises(RuntimeError, match="final move failed"):
+        vaults.import_vault_package(
+            exported["package_path"],
+            target_name="Move Failure Import",
+            package_fingerprint_value=preview["package_fingerprint"],
+            confirm=True,
+        )
+
+    assert not target_root.exists()
+    config = yaml.safe_load(ctx.config_path.read_text(encoding="utf-8"))
+    assert "move-failure-import" not in config["vaults"]
     imports_tmp = ctx.root / ".tmp" / "imports"
     assert not imports_tmp.exists() or not any(imports_tmp.iterdir())
 

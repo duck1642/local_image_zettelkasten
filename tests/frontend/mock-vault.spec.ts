@@ -1099,7 +1099,7 @@ test('settings previews vault merge and runs vault health package actions', asyn
   await page.locator('.merge-vault-row').filter({ hasText: 'Default' }).getByRole('checkbox').check();
   await page.locator('.merge-vault-row').filter({ hasText: 'Archive' }).getByRole('checkbox').check();
   await expect(page.getByRole('button', { name: 'Create Merged Vault' })).toBeDisabled();
-  await page.getByRole('button', { name: 'Preview' }).click();
+  await page.locator('.vault-tool-panel-first').getByRole('button', { name: 'Preview' }).click();
   await expect(page.locator('.merge-preview-box')).toContainText('Importable 4');
   await page.getByRole('button', { name: 'Create Merged Vault' }).click();
   await page.getByRole('button', { name: 'Create', exact: true }).click();
@@ -1119,7 +1119,7 @@ test('settings previews vault merge and runs vault health package actions', asyn
   await expect(page.getByText('Export Successful')).toBeVisible();
   await page.getByPlaceholder('Path to imported .lmzvault.zip package').fill('C:/Exports/default.lmzvault.zip');
   await page.getByPlaceholder('Imported vault display name').fill('Imported');
-  await page.getByRole('button', { name: 'Preview' }).click();
+  await page.locator('.settings-import-row').getByRole('button', { name: 'Preview' }).click();
   await expect(page.locator('.import-preview-box')).toContainText('Exported Vault');
   await page.getByRole('button', { name: 'Import Vault' }).click();
   await page.getByRole('button', { name: 'Import', exact: true }).click();

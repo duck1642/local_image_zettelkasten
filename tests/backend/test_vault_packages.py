@@ -35,6 +35,10 @@ def test_manifest_requires_strict_package_shape():
     with pytest.raises(vault_packages.VaultPackageError, match="absolute path"):
         vault_packages.validate_manifest(bad_paths)
 
+    bad_exact_paths = {**manifest, "source_vault": {**manifest["source_vault"], "root": "C:/Users/example/vault"}}
+    with pytest.raises(vault_packages.VaultPackageError, match="absolute path"):
+        vault_packages.validate_manifest(bad_exact_paths)
+
 
 def test_archive_member_validation_rejects_unsafe_paths(tmp_path):
     package = tmp_path / "bad.zip"

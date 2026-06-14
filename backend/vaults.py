@@ -279,7 +279,42 @@ def _files_under(root: Path, relative: str) -> list[Path]:
     base = root / relative
     if not base.exists():
         return []
-    return [path for path in base.rglob("*") if path.is_file()]
+    return _packaged_files(root, base.rglob("*"))
+
+
+def _path_has_symlink_between(root: Path, path: Path) -> bool:
+    current = path
+    while current != root:
+        if current.is_symlink():
+            return True
+        parent = current.parent
+        if parent == current:
+            break
+        current = parent
+    return root.is_symlink()
+
+
+def _resolved_inside_root(path: Path, root: Path) -> bool:
+    resolved_root = root.resolve()
+    resolved_path = path.resolve()
+    return resolved_path == resolved_root or resolved_root in resolved_path.parents
+
+
+def _packaged_files(root: Path, paths) -> list[Path]:
+    files: list[Path] = []
+    for path in paths:
+        if _path_has_symlink_between(root, path):
+            continue
+        if not path.is_file():
+            continue
+        if not _resolved_inside_root(path, root):
+            raise VaultPackageError(f"refusing to package file outside vault root: {path}")
+        files.append(path)
+    return files
+
+
+def _rename_import_stage(stage_root: Path, final_root: Path) -> None:
+    stage_root.rename(final_root)
 
 
 def delete_vault(vault_id: str, confirm: bool = False, ctx: WorkspaceContext | None = None) -> dict:
@@ -1015,7 +1050,7 @@ def backup_vault(vault_id: str, ctx: WorkspaceContext | None = None, confirm: bo
         snapshot_db = snapshot_dir / "lmz_main.db"
         try:
             db_sidecars = {db_path.resolve(), Path(f"{db_path}-wal").resolve(), Path(f"{db_path}-shm").resolve()}
-            payload_files = [path for path in root.rglob("*") if path.is_file() and path.resolve() not in db_sidecars]
+            payload_files = [path for path in _packaged_files(root, root.rglob("*")) if path.resolve() not in db_sidecars]
             include_db = db_path.exists()
             if include_db:
                 snapshot_sqlite_database(db_path, snapshot_db)
@@ -1232,7 +1267,6 @@ def import_vault_package(
 
         stage_parent = runtime.root / ".tmp" / "imports" / operation_id()
         stage_root = stage_parent / "vault"
-        moved = False
         try:
             with zipfile.ZipFile(source, "r") as archive:
                 extract_members(archive, stage_root, members)
@@ -1240,12 +1274,11 @@ def import_vault_package(
             conn = init_database(vault_db_path(stage_root))
             conn.close()
             final_root.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(stage_root), str(final_root))
-            moved = True
+            _rename_import_stage(stage_root, final_root)
             config["vaults"][clean_id] = entry
             _write_config(config, runtime)
         except Exception:
-            if moved and final_root.exists():
+            if final_root.exists():
                 shutil.rmtree(final_root, ignore_errors=True)
             raise
         finally:

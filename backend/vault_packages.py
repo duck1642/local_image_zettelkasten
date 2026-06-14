@@ -123,7 +123,8 @@ def _reject_absolute_path_fields(value, path: tuple[str, ...] = ()) -> None:
         for key, child in value.items():
             key_text = str(key)
             child_path = (*path, key_text)
-            if key_text.endswith(("_path", "_root", "_dir")) and isinstance(child, str) and _looks_absolute_path(child):
+            path_key = key_text in {"path", "root", "dir"} or key_text.endswith(("_path", "_root", "_dir"))
+            if path_key and isinstance(child, str) and _looks_absolute_path(child):
                 raise VaultPackageError(f"package manifest contains absolute path field: {'.'.join(child_path)}")
             _reject_absolute_path_fields(child, child_path)
     elif isinstance(value, list):
