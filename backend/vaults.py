@@ -18,10 +18,14 @@ from vault_packages import (
     MANIFEST_NAME,
     VaultPackageError,
     build_manifest,
+    extract_members,
+    load_manifest_from_archive,
     manifest_bytes,
     operation_id,
+    package_fingerprint,
     package_operation_lock,
     snapshot_sqlite_database,
+    validate_archive_members,
     utc_package_timestamp,
 )
 
@@ -41,6 +45,7 @@ VAULT_LOCAL_DIRS = (
     "local_ingest",
     "online_ingest",
 )
+EXPORT_IMPORT_ROOTS = {"db", "vault", "review"}
 
 
 def vault_id_slug(value: str) -> str:
@@ -1125,44 +1130,128 @@ def export_vault(vault_id: str, ctx: WorkspaceContext | None = None, confirm: bo
     }
 
 
-def import_vault_package(package_path: str | Path, name: str | None = None, vault_id: str | None = None, ctx: WorkspaceContext | None = None) -> dict:
+def _import_package_source(package_path: str | Path) -> Path:
     source = Path(package_path).expanduser().resolve()
     if not source.exists():
         raise ValueError(f"vault package not found: {source}")
-    config = _ensure_vault_registry(_read_config(ctx))
-    with zipfile.ZipFile(source, "r") as archive:
-        manifest = {}
-        try:
-            manifest = yaml.safe_load(archive.read("lmz-vault-package.yaml").decode("utf-8")) or {}
-        except KeyError:
-            manifest = {}
-        clean_id = vault_id_slug(vault_id or name or manifest.get("vault_id") or source.stem)
+    if not source.is_file():
+        raise ValueError(f"vault package is not a file: {source}")
+    return source
+
+
+def _validate_export_import_layout(manifest: dict, members: list[zipfile.ZipInfo]) -> None:
+    contents = manifest.get("contents") or {}
+    names = {member.filename for member in members}
+    if contents.get("db") and "db/lmz_main.db" not in names:
+        raise ValueError("export package is missing db/lmz_main.db")
+    for name in names:
+        if name.startswith("db/") and name != "db/lmz_main.db":
+            raise ValueError(f"unsupported export package db path: {name}")
+        if name.startswith("vault/") and not (name.startswith("vault/assets/") or name.startswith("vault/notes/")):
+            raise ValueError(f"unsupported export package vault path: {name}")
+        if name.startswith("review/") and not contents.get("review"):
+            raise ValueError("export package contains review files but manifest does not include review")
+
+
+def _read_export_package(package_path: str | Path) -> tuple[Path, str, dict, list[zipfile.ZipInfo]]:
+    source = _import_package_source(package_path)
+    fingerprint = package_fingerprint(source)
+    try:
+        with zipfile.ZipFile(source, "r") as archive:
+            manifest = load_manifest_from_archive(archive, expected_type=EXPORT_PACKAGE_TYPE)
+            members = validate_archive_members(archive, allowed_roots=EXPORT_IMPORT_ROOTS)
+            _validate_export_import_layout(manifest, members)
+    except zipfile.BadZipFile as exc:
+        raise ValueError("invalid vault package zip") from exc
+    except VaultPackageError as exc:
+        raise ValueError(str(exc)) from exc
+    return source, fingerprint, manifest, members
+
+
+def preview_import_vault_package(package_path: str | Path, ctx: WorkspaceContext | None = None) -> dict:
+    runtime = _ctx(ctx)
+    source, fingerprint, manifest, members = _read_export_package(package_path)
+    config = _ensure_vault_registry(_read_config(runtime))
+    source_vault = manifest["source_vault"]
+    suggested_name = str(source_vault.get("name") or source_vault.get("id") or source.stem).strip()
+    suggested_id = vault_id_slug(suggested_name)
+    collision = suggested_id in config["vaults"] or (runtime.root / "data" / "vaults" / suggested_id).exists()
+    warnings = []
+    if collision:
+        warnings.append("target_vault_exists")
+    return {
+        "status": "preview",
+        "package_path": str(source),
+        "package_fingerprint": fingerprint,
+        "package_type": manifest["package_type"],
+        "package_version": manifest["package_version"],
+        "source_vault": dict(source_vault),
+        "contents": dict(manifest.get("contents") or {}),
+        "counts": dict(manifest.get("counts") or {}),
+        "file_count": len(members),
+        "suggested_target_name": suggested_name,
+        "suggested_target_id": suggested_id,
+        "target_exists": collision,
+        "warnings": warnings,
+    }
+
+
+def import_vault_package(
+    package_path: str | Path,
+    target_name: str | None = None,
+    package_fingerprint_value: str | None = None,
+    confirm: bool = False,
+    ctx: WorkspaceContext | None = None,
+) -> dict:
+    if not confirm:
+        raise ValueError("import requires confirmation")
+    if not str(package_fingerprint_value or "").strip():
+        raise ValueError("import requires package_fingerprint from preview")
+    runtime = _ctx(ctx)
+    _package_preflight(runtime)
+    with package_operation_lock(f"{runtime.config_path}:import"):
+        source, fingerprint, manifest, members = _read_export_package(package_path)
+        if fingerprint != str(package_fingerprint_value).strip():
+            raise ValueError("package fingerprint does not match preview")
+        source_vault = manifest["source_vault"]
+        display_name = str(target_name or source_vault.get("name") or source_vault.get("id") or source.stem).strip()
+        if not display_name:
+            raise ValueError("target_name is required")
+        clean_id = vault_id_slug(display_name)
+        config = _ensure_vault_registry(_read_config(runtime))
         if clean_id in config["vaults"]:
             raise ValueError(f"vault already exists: {clean_id}")
-        entry = {"name": str(name or manifest.get("name") or clean_id), "root": f"data/vaults/{clean_id}"}
-        root = vault_root(entry, ctx)
-        if root.exists() and _vault_non_empty(root):
-            raise ValueError(f"target vault root is not empty: {root}")
-        root_existed_before = root.exists()
+        entry = {"name": display_name, "root": f"data/vaults/{clean_id}"}
+        final_root = vault_root(entry, runtime)
+        if final_root.exists():
+            raise ValueError(f"target vault root already exists: {final_root}")
+
+        stage_parent = runtime.root / ".tmp" / "imports" / operation_id()
+        stage_root = stage_parent / "vault"
+        moved = False
         try:
-            root.mkdir(parents=True, exist_ok=True)
-            for member in archive.infolist():
-                if member.is_dir() or member.filename == "lmz-vault-package.yaml":
-                    continue
-                target = (root / member.filename).resolve()
-                if root.resolve() not in target.parents and target != root.resolve():
-                    raise ValueError(f"unsafe package path: {member.filename}")
-                target.parent.mkdir(parents=True, exist_ok=True)
-                with archive.open(member) as src, target.open("wb") as dst:
-                    shutil.copyfileobj(src, dst)
-            create_vault_layout(root, initialize_db=not vault_db_path(root).exists())
+            with zipfile.ZipFile(source, "r") as archive:
+                extract_members(archive, stage_root, members)
+            create_vault_layout(stage_root, initialize_db=not vault_db_path(stage_root).exists())
+            conn = init_database(vault_db_path(stage_root))
+            conn.close()
+            final_root.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(stage_root), str(final_root))
+            moved = True
             config["vaults"][clean_id] = entry
-            _write_config(config, ctx)
+            _write_config(config, runtime)
         except Exception:
-            if not root_existed_before and root.exists():
-                shutil.rmtree(root, ignore_errors=True)
+            if moved and final_root.exists():
+                shutil.rmtree(final_root, ignore_errors=True)
             raise
-    return {"status": "success", "vault": clean_id, "items": vault_list(ctx)}
+        finally:
+            shutil.rmtree(stage_parent, ignore_errors=True)
+    return {
+        "status": "success",
+        "vault": clean_id,
+        "package_fingerprint": fingerprint,
+        "items": vault_list(runtime),
+    }
 
 
 def migrate_legacy_layout(copy: bool = True, overwrite: bool = False, ctx: WorkspaceContext | None = None) -> dict:

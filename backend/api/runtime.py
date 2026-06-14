@@ -815,14 +815,32 @@ async def import_vault(body: dict):
     return await asyncio.to_thread(_import_vault_sync, body)
 
 
+@router.post("/api/vaults/import-preview")
+async def import_vault_preview(body: dict):
+    require_workspace_context()
+    return await asyncio.to_thread(_import_vault_preview_sync, body)
+
+
+def _import_vault_preview_sync(body: dict):
+    from vaults import preview_import_vault_package
+
+    try:
+        return preview_import_vault_package(str((body or {}).get("package_path") or "").strip())
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
 def _import_vault_sync(body: dict):
     from vaults import import_vault_package
 
     try:
         return import_vault_package(
             str((body or {}).get("package_path") or "").strip(),
-            name=str((body or {}).get("name") or "").strip() or None,
-            vault_id=str((body or {}).get("id") or "").strip() or None,
+            target_name=str((body or {}).get("target_name") or (body or {}).get("name") or "").strip() or None,
+            package_fingerprint_value=str((body or {}).get("package_fingerprint") or "").strip(),
+            confirm=(body or {}).get("confirm") is True,
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc))

@@ -828,10 +828,85 @@ def test_vault_backup_export_and_import_package(monkeypatch, tmp_path):
         assert manifest["contents"]["review"] is True
         assert any(name.startswith("review/") for name in archive.namelist())
 
-    imported = vaults.import_vault_package(exported["package_path"], name="Imported Portable")
+    with pytest.raises(ValueError, match="expected package type"):
+        vaults.preview_import_vault_package(backup["package_path"])
+
+    preview = vaults.preview_import_vault_package(exported["package_path"])
+    assert preview["package_type"] == "lmz_vault_export"
+    assert preview["target_exists"] is True
+    assert "target_vault_exists" in preview["warnings"]
+
+    with pytest.raises(ValueError, match="confirmation"):
+        vaults.import_vault_package(exported["package_path"], target_name="Imported Portable", package_fingerprint_value=preview["package_fingerprint"])
+    with pytest.raises(ValueError, match="fingerprint"):
+        vaults.import_vault_package(exported["package_path"], target_name="Imported Portable", package_fingerprint_value="bad", confirm=True)
+
+    imported = vaults.import_vault_package(
+        exported["package_path"],
+        target_name="Imported Portable",
+        package_fingerprint_value=preview["package_fingerprint"],
+        confirm=True,
+    )
     imported_root = Path(next(item["root"] for item in imported["items"] if item["id"] == "imported-portable"))
 
     assert (imported_root / "vault" / "notes" / "aa" / "marker.md").read_text(encoding="utf-8") == "portable"
+
+
+def test_vault_import_preview_rejects_invalid_packages(monkeypatch, tmp_path):
+    vaults = fresh_backend(monkeypatch, tmp_path, "vaults")[0]
+    missing_manifest = tmp_path / "missing-manifest.lmzvault.zip"
+    with zipfile.ZipFile(missing_manifest, "w") as archive:
+        archive.writestr("vault/assets/aa/file.jpg", "data")
+
+    with pytest.raises(ValueError, match="missing package manifest"):
+        vaults.preview_import_vault_package(missing_manifest)
+
+    traversal = tmp_path / "traversal.lmzvault.zip"
+    manifest = {
+        "package_type": "lmz_vault_export",
+        "package_version": 1,
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "source_vault": {"id": "source", "name": "Source"},
+        "contents": {"db": False, "assets": True, "notes": True, "review": False},
+        "counts": {"items": 0, "files": 1},
+    }
+    with zipfile.ZipFile(traversal, "w") as archive:
+        archive.writestr("lmz-package.yaml", yaml.safe_dump(manifest))
+        archive.writestr("../escape.txt", "bad")
+
+    with pytest.raises(ValueError, match="unsafe archive path"):
+        vaults.preview_import_vault_package(traversal)
+
+
+def test_vault_import_rolls_back_on_config_write_failure(monkeypatch, tmp_path):
+    vaults = fresh_backend(monkeypatch, tmp_path, "vaults")[0]
+    source = vaults.create_vault("Rollback Source")
+    source_root = Path(next(item["root"] for item in source["items"] if item["id"] == "rollback-source"))
+    marker = source_root / "vault" / "notes" / "aa" / "marker.md"
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text("rollback", encoding="utf-8")
+    exported = vaults.export_vault("rollback-source", confirm=True)
+    preview = vaults.preview_import_vault_package(exported["package_path"])
+    ctx = vaults._ctx()
+    target_root = ctx.root / "data" / "vaults" / "rollback-import"
+
+    def fail_write_config(config, ctx=None):
+        raise RuntimeError("config write failed")
+
+    monkeypatch.setattr(vaults, "_write_config", fail_write_config)
+    with pytest.raises(RuntimeError, match="config write failed"):
+        vaults.import_vault_package(
+            exported["package_path"],
+            target_name="Rollback Import",
+            package_fingerprint_value=preview["package_fingerprint"],
+            confirm=True,
+        )
+
+    assert not target_root.exists()
+    config = yaml.safe_load(ctx.config_path.read_text(encoding="utf-8"))
+    assert "rollback-import" not in config["vaults"]
+    imports_tmp = ctx.root / ".tmp" / "imports"
+    assert not imports_tmp.exists() or not any(imports_tmp.iterdir())
 
 
 def test_active_workspace_and_vault_switches_are_preflight_guarded(monkeypatch, tmp_path):
