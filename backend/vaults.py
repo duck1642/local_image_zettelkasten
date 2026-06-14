@@ -4,7 +4,6 @@ import shutil
 import sqlite3
 import tempfile
 import zipfile
-from datetime import datetime, timezone
 from pathlib import Path
 
 import yaml
@@ -15,10 +14,12 @@ from runtime_context import VaultContext, WorkspaceContext, get_runtime_context
 from utils import atomic_write_text
 from vault_packages import (
     BACKUP_PACKAGE_TYPE,
+    EXPORT_PACKAGE_TYPE,
     MANIFEST_NAME,
     VaultPackageError,
     build_manifest,
     manifest_bytes,
+    operation_id,
     package_operation_lock,
     snapshot_sqlite_database,
     utc_package_timestamp,
@@ -267,6 +268,13 @@ def _vault_item_count(root: Path) -> int:
         return int(conn.execute("SELECT COUNT(*) FROM items").fetchone()[0] or 0)
     finally:
         conn.close()
+
+
+def _files_under(root: Path, relative: str) -> list[Path]:
+    base = root / relative
+    if not base.exists():
+        return []
+    return [path for path in base.rglob("*") if path.is_file()]
 
 
 def delete_vault(vault_id: str, confirm: bool = False, ctx: WorkspaceContext | None = None) -> dict:
@@ -996,7 +1004,7 @@ def backup_vault(vault_id: str, ctx: WorkspaceContext | None = None, confirm: bo
         destination_dir = runtime.root / "backups" / "vaults" / clean_id
         destination_dir.mkdir(parents=True, exist_ok=True)
         stamp = utc_package_timestamp()
-        package_path = destination_dir / f"{_safe_package_name(clean_id)}-{stamp}.lmzbackup.zip"
+        package_path = destination_dir / f"{_safe_package_name(clean_id)}-{stamp}-{operation_id()[:8]}.lmzbackup.zip"
         db_path = vault_db_path(root)
         snapshot_dir = Path(tempfile.mkdtemp(prefix="lmz-backup-db-"))
         snapshot_db = snapshot_dir / "lmz_main.db"
@@ -1051,20 +1059,70 @@ def backup_vault(vault_id: str, ctx: WorkspaceContext | None = None, confirm: bo
     }
 
 
-def export_vault(vault_id: str, ctx: WorkspaceContext | None = None) -> dict:
-    clean_id, _entry, root = _vault_entry(vault_id, ctx)
+def export_vault(vault_id: str, ctx: WorkspaceContext | None = None, confirm: bool = False, include_review: bool = False) -> dict:
+    if not confirm:
+        raise ValueError("export requires confirmation")
+    runtime = _ctx(ctx)
+    _package_preflight(runtime)
+    clean_id, entry, root = _vault_entry(vault_id, runtime)
     if not root.exists():
         raise ValueError(f"vault root does not exist: {root}")
-    destination_dir = _ctx(ctx).root / "exports"
-    destination_dir.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-    package_path = destination_dir / f"{_safe_package_name(clean_id)}-{stamp}.lmzvault.zip"
-    with zipfile.ZipFile(package_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr("lmz-vault-package.yaml", yaml.safe_dump({"vault_id": clean_id, "name": _vault_entry(clean_id, ctx)[1].get("name") or clean_id}, sort_keys=False))
-        for path in root.rglob("*"):
-            if path.is_file():
-                archive.write(path, path.relative_to(root).as_posix())
-    return {"status": "success", "vault": clean_id, "package_path": str(package_path), "bytes": package_path.stat().st_size}
+    if not vault_root_is_usable(root, runtime.root):
+        raise ValueError(f"vault root is not usable: {root}")
+
+    with package_operation_lock(f"{runtime.config_path}:export:{clean_id}"):
+        destination_dir = runtime.root / "exports" / "vaults" / clean_id
+        destination_dir.mkdir(parents=True, exist_ok=True)
+        stamp = utc_package_timestamp()
+        package_path = destination_dir / f"{_safe_package_name(clean_id)}-{stamp}-{operation_id()[:8]}.lmzvault.zip"
+        db_path = vault_db_path(root)
+        snapshot_dir = Path(tempfile.mkdtemp(prefix="lmz-export-db-"))
+        snapshot_db = snapshot_dir / "lmz_main.db"
+        try:
+            payload_files = _files_under(root, "vault/assets") + _files_under(root, "vault/notes")
+            if include_review:
+                payload_files += _files_under(root, "review")
+            include_db = db_path.exists()
+            if include_db:
+                snapshot_sqlite_database(db_path, snapshot_db)
+            file_count = len(payload_files) + (1 if include_db else 0)
+            manifest = build_manifest(
+                package_type=EXPORT_PACKAGE_TYPE,
+                source_vault_id=clean_id,
+                source_vault_name=str(entry.get("name") or clean_id),
+                contents={
+                    "db": include_db,
+                    "assets": True,
+                    "notes": True,
+                    "review": bool(include_review),
+                },
+                item_count=_vault_item_count(root),
+                file_count=file_count,
+            )
+            with zipfile.ZipFile(package_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+                archive.writestr(MANIFEST_NAME, manifest_bytes(manifest))
+                if include_db:
+                    archive.write(snapshot_db, "db/lmz_main.db")
+                for path in payload_files:
+                    archive.write(path, path.relative_to(root).as_posix())
+        except VaultPackageError:
+            if package_path.exists():
+                package_path.unlink()
+            raise
+        except Exception:
+            if package_path.exists():
+                package_path.unlink()
+            raise
+        finally:
+            shutil.rmtree(snapshot_dir, ignore_errors=True)
+    return {
+        "status": "success",
+        "vault": clean_id,
+        "package_type": EXPORT_PACKAGE_TYPE,
+        "include_review": bool(include_review),
+        "package_path": str(package_path),
+        "bytes": package_path.stat().st_size,
+    }
 
 
 def import_vault_package(package_path: str | Path, name: str | None = None, vault_id: str | None = None, ctx: WorkspaceContext | None = None) -> dict:

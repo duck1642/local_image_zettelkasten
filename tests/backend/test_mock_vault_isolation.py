@@ -785,14 +785,22 @@ def test_vault_backup_export_and_import_package(monkeypatch, tmp_path):
     marker = source_root / "vault" / "notes" / "aa" / "marker.md"
     marker.parent.mkdir(parents=True, exist_ok=True)
     marker.write_text("portable", encoding="utf-8")
+    review_marker = source_root / "review" / "pending.json"
+    review_marker.parent.mkdir(parents=True, exist_ok=True)
+    review_marker.write_text("review-state", encoding="utf-8")
 
     with pytest.raises(ValueError, match="confirmation"):
         vaults.backup_vault("portable-vault")
 
     backup = vaults.backup_vault("portable-vault", confirm=True)
-    exported = vaults.export_vault("portable-vault")
+    with pytest.raises(ValueError, match="confirmation"):
+        vaults.export_vault("portable-vault")
+    exported = vaults.export_vault("portable-vault", confirm=True)
+    exported_with_review = vaults.export_vault("portable-vault", confirm=True, include_review=True)
     assert Path(backup["package_path"]).exists()
     assert Path(exported["package_path"]).exists()
+    assert Path(exported["package_path"]).name.endswith(".lmzvault.zip")
+    assert "exports" in Path(exported["package_path"]).parts
     assert Path(backup["package_path"]).name.endswith(".lmzbackup.zip")
     assert "backups" in Path(backup["package_path"]).parts
 
@@ -803,6 +811,22 @@ def test_vault_backup_export_and_import_package(monkeypatch, tmp_path):
         assert manifest["contents"]["logs"] is True
         assert "db/lmz_main.db" in archive.namelist()
         assert "vault/notes/aa/marker.md" in archive.namelist()
+
+    with zipfile.ZipFile(exported["package_path"], "r") as archive:
+        manifest = yaml.safe_load(archive.read("lmz-package.yaml").decode("utf-8"))
+        names = archive.namelist()
+        assert manifest["package_type"] == "lmz_vault_export"
+        assert manifest["contents"]["review"] is False
+        assert "db/lmz_main.db" in names
+        assert "vault/notes/aa/marker.md" in names
+        assert not any(name.startswith("logs/") for name in names)
+        assert not any(name.startswith("queues/") for name in names)
+        assert not any(name.startswith("review/") for name in names)
+
+    with zipfile.ZipFile(exported_with_review["package_path"], "r") as archive:
+        manifest = yaml.safe_load(archive.read("lmz-package.yaml").decode("utf-8"))
+        assert manifest["contents"]["review"] is True
+        assert any(name.startswith("review/") for name in archive.namelist())
 
     imported = vaults.import_vault_package(exported["package_path"], name="Imported Portable")
     imported_root = Path(next(item["root"] for item in imported["items"] if item["id"] == "imported-portable"))

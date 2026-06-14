@@ -656,7 +656,7 @@ def _export_vault_sync(vault_id: str):
     from vaults import export_vault
 
     try:
-        return export_vault(vault_id)
+        return export_vault(vault_id, confirm=True)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except ValueError as exc:
