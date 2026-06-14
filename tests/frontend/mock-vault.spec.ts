@@ -273,6 +273,42 @@ async function installMockVaultApi(
     if (url.pathname === '/api/vaults' && request.method() === 'GET') {
       return fulfillJson(route, { active: vaultActive, items: vaultItems });
     }
+    if ((url.pathname === '/api/vaults/merge-preview' || url.pathname === '/api/vaults/merge') && request.method() === 'POST') {
+      const payload = JSON.parse(request.postData() || '{}');
+      const action = url.pathname.endsWith('merge-preview') ? 'merge-preview' : 'merge';
+      await options.onVaultAction?.(action, payload);
+      if (action === 'merge') {
+        vaultItems = [
+          ...vaultItems,
+          {
+            id: 'merged-vault',
+            name: payload.name || 'Merged Vault',
+            root: 'C:/ObsidianVault/lmz/data/vaults/merged-vault',
+            active: false,
+            exists: true,
+            item_count: 4
+          }
+        ];
+      }
+      return fulfillJson(route, {
+        status: action === 'merge' ? 'success' : 'preview',
+        name: payload.name || 'Merged Vault',
+        vault: 'merged-vault',
+        source_vault_ids: payload.source_vault_ids || [],
+        sources: [
+          { id: 'default', items: 3, duplicates: 0, importable: 3 },
+          { id: 'archive', items: 2, duplicates: 1, importable: 1 }
+        ],
+        total_items: 5,
+        duplicates: 1,
+        importable: 4,
+        possible_similar: 0,
+        similarity: 'unsupported',
+        imported: action === 'merge' ? 4 : undefined,
+        skipped: action === 'merge' ? 1 : undefined,
+        items: vaultItems
+      });
+    }
     if (mergeMatch && request.method() === 'POST') {
       const payload = JSON.parse(request.postData() || '{}');
       const action = mergeMatch[2] as 'merge-preview' | 'merge';
@@ -1054,11 +1090,15 @@ test('settings previews vault merge and runs vault health package actions', asyn
   await page.getByRole('button', { name: /Settings/ }).click();
   await page.getByRole('button', { name: 'Maintenance' }).click();
 
-  await page.locator('.vault-source-chip').filter({ hasText: 'Archive' }).click();
-  await page.getByRole('button', { name: 'Preview Merge' }).click();
-  await expect(page.getByText('1 importable').first()).toBeVisible();
-  await page.getByRole('button', { name: 'Merge Vaults' }).click();
-  await expect(page.getByText('Vault Merge Completed')).toBeVisible();
+  await page.getByLabel('Merged vault name').fill('Merged Vault');
+  await page.locator('.merge-vault-row').filter({ hasText: 'Default' }).getByRole('checkbox').check();
+  await page.locator('.merge-vault-row').filter({ hasText: 'Archive' }).getByRole('checkbox').check();
+  await expect(page.getByRole('button', { name: 'Create Merged Vault' })).toBeDisabled();
+  await page.getByRole('button', { name: 'Preview' }).click();
+  await expect(page.locator('.merge-preview-box')).toContainText('Importable 4');
+  await page.getByRole('button', { name: 'Create Merged Vault' }).click();
+  await page.getByRole('button', { name: 'Create', exact: true }).click();
+  await expect(page.getByText('Merged Vault Created')).toBeVisible();
 
   await page.getByRole('button', { name: 'Audit Health' }).click();
   await expect(page.getByText('3 issues').first()).toBeVisible();
@@ -1073,8 +1113,8 @@ test('settings previews vault merge and runs vault health package actions', asyn
   await expect(page.getByText('Vault Imported')).toBeVisible();
 
   expect(actions).toEqual([
-    { action: 'merge-preview', payload: { source_vault_ids: ['archive'] } },
-    { action: 'merge', payload: { source_vault_ids: ['archive'], delete_sources: false } },
+    { action: 'merge-preview', payload: { name: 'Merged Vault', source_vault_ids: ['default', 'archive'] } },
+    { action: 'merge', payload: { name: 'Merged Vault', source_vault_ids: ['default', 'archive'] } },
     { action: 'health', payload: undefined },
     { action: 'repair', payload: { actions: ['metadata', 'thumbnails', 'wd_tagging', 'derived_cache', 'review_sidecars', 'quarantine_orphans'], confirm_destructive: true } },
     { action: 'backup', payload: {} },

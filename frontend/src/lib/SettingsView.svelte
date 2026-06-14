@@ -13,20 +13,20 @@
   import SettingsVaultMergePanel from './SettingsVaultMergePanel.svelte';
   import SettingsVaultHealthPanel from './SettingsVaultHealthPanel.svelte';
   import SettingsWorkspacePanel from './SettingsWorkspacePanel.svelte';
-  import { IconSettings, IconMerge, IconAlertTriangle } from './icons';
+  import { IconSettings, IconAlertTriangle } from './icons';
   import {
     activateVault,
     activateWorkspace,
     cleanupReview,
+    createMergedVaultApi,
     createVault,
     fetchMetadataIndexStatus,
     fetchVaultHealth,
     fetchVaults,
     fetchWorkspaces,
     importVaultPackageApi,
-    mergeVaultsApi,
     packageVault,
-    previewVaultMergeApi,
+    previewMergedVaultApi,
     pruneWorkspaceMetadata,
     rebuildWorkspaceMetadata,
     createWorkspace as createWorkspaceApi,
@@ -76,11 +76,13 @@
   let vaultResult = '';
   let vaultName = 'New Vault';
   let vaultRestartRequired = false;
-  let mergeTargetId = '';
+  let mergedVaultName = defaultMergedVaultName();
   let mergeSourceIds: string[] = [];
   let mergePreview: any = null;
   let mergeBusy = false;
   let mergeResult = '';
+  let mergeConfirmOpen = false;
+  let mergePreviewKey = '';
   let healthVaultId = '';
   let healthBusy = false;
   let healthResult = '';
@@ -99,8 +101,25 @@
     { value: 'shortcuts', label: 'Shortcuts' }
   ];
 
-  $: if (!mergeTargetId && vaultActive) mergeTargetId = vaultActive;
   $: if (!healthVaultId && vaultActive) healthVaultId = vaultActive;
+  $: currentMergePreviewKey = mergeRequestKey(mergedVaultName, mergeSourceIds);
+  $: mergePreviewCurrent = Boolean(mergePreview) && mergePreviewKey === currentMergePreviewKey;
+
+  function defaultMergedVaultName() {
+    return `Merged Vault - ${new Date().toISOString().slice(0, 10)}`;
+  }
+
+  function mergeRequestKey(name: string, sourceIds: string[]) {
+    return JSON.stringify({
+      name: name.trim(),
+      source_vault_ids: sourceIds
+    });
+  }
+
+  function invalidateMergePreview() {
+    mergePreview = null;
+    mergePreviewKey = '';
+  }
 
   function checkedValue(event: Event) {
     return (event.currentTarget as HTMLInputElement).checked;
@@ -213,7 +232,6 @@
       const payload = await fetchVaults();
       vaultActive = String(payload?.active || '');
       vaults = Array.isArray(payload?.items) ? payload.items : [];
-      if (!mergeTargetId && vaultActive) mergeTargetId = vaultActive;
       if (!healthVaultId && vaultActive) healthVaultId = vaultActive;
     } catch (error) {
       vaultResult = `error: ${String(error)}`;
@@ -344,7 +362,7 @@
         message: `Successfully deleted vault "${id}".`
       });
       mergeSourceIds = mergeSourceIds.filter((value) => value !== id);
-      if (mergeTargetId === id) mergeTargetId = vaultActive;
+      invalidateMergePreview();
       if (healthVaultId === id) healthVaultId = vaultActive;
     } catch (error) {
       const errMsg = String(error);
@@ -360,22 +378,25 @@
   }
 
   function toggleMergeSource(id: string, checked: boolean) {
-    mergePreview = null;
+    invalidateMergePreview();
     if (checked) {
-      mergeSourceIds = Array.from(new Set([...mergeSourceIds, id])).filter((value) => value !== mergeTargetId);
+      mergeSourceIds = Array.from(new Set([...mergeSourceIds, id]));
     } else {
       mergeSourceIds = mergeSourceIds.filter((value) => value !== id);
     }
   }
 
   async function previewVaultMerge() {
-    if (!mergeTargetId || !mergeSourceIds.length || mergeBusy) return;
+    const name = mergedVaultName.trim();
+    if (!name || mergeSourceIds.length < 2 || mergeBusy) return;
     mergeBusy = true;
     mergeResult = '';
     mergePreview = null;
+    mergePreviewKey = '';
     try {
-      const payload = await previewVaultMergeApi(mergeTargetId, mergeSourceIds);
+      const payload = await previewMergedVaultApi(name, mergeSourceIds);
       mergePreview = payload;
+      mergePreviewKey = mergeRequestKey(name, mergeSourceIds);
       mergeResult = `preview: ${Number(payload.importable || 0).toLocaleString()} importable`;
     } catch (error) {
       mergeResult = `error: ${String(error)}`;
@@ -384,23 +405,33 @@
     }
   }
 
-  async function confirmVaultMerge() {
-    if (!mergeTargetId || !mergeSourceIds.length || mergeBusy) return;
-    if (!mergePreview && !confirm('Merge without preview?')) return;
-    if (!confirm(`Merge ${mergeSourceIds.length} source vault(s) into "${mergeTargetId}"? Sources stay intact.`)) return;
+  function confirmVaultMerge() {
+    if (!mergePreviewCurrent || mergeBusy) return;
+    mergeConfirmOpen = true;
+  }
+
+  async function executeVaultMerge() {
+    const name = mergedVaultName.trim();
+    if (!name || mergeSourceIds.length < 2 || !mergePreviewCurrent || mergeBusy) return;
     mergeBusy = true;
     mergeResult = '';
     try {
-      const payload = await mergeVaultsApi(mergeTargetId, mergeSourceIds);
+      const payload = await createMergedVaultApi(name, mergeSourceIds);
+      mergeConfirmOpen = false;
       mergePreview = payload;
+      mergePreviewKey = mergeRequestKey(name, mergeSourceIds);
       const importedCount = Number(payload.imported || 0);
       mergeResult = `merged ${importedCount.toLocaleString()} items`;
       toastStore.add({
         type: 'success',
-        title: 'Vault Merge Completed',
-        message: `Successfully merged ${importedCount.toLocaleString()} items into "${mergeTargetId}".`
+        title: 'Merged Vault Created',
+        message: `Created "${name}" with ${importedCount.toLocaleString()} imported items.`
       });
       await loadVaults();
+      mergedVaultName = defaultMergedVaultName();
+      mergeSourceIds = [];
+      mergePreview = null;
+      mergePreviewKey = '';
     } catch (error) {
       const errMsg = String(error);
       mergeResult = `error: ${errMsg}`;
@@ -743,22 +774,18 @@
         />
       </div>
     {:else if activeSettingsTab === 'maintenance'}
-      <h4 class="settings-section-title">
-        <span class="settings-title-icon">
-          <IconMerge size={14} />
-        </span>
-        Vault Tools
-      </h4>
       <div class="workspace-panel">
         <SettingsVaultMergePanel
           {vaults}
-          bind:mergeTargetId
+          bind:mergedVaultName
           bind:mergeSourceIds
           bind:mergePreview
           {mergeBusy}
+          {mergePreviewCurrent}
           onToggleMergeSource={toggleMergeSource}
           onPreviewVaultMerge={previewVaultMerge}
           onConfirmVaultMerge={confirmVaultMerge}
+          onMergeInputChanged={invalidateMergePreview}
           {checkedValue}
         />
       </div>
@@ -805,6 +832,27 @@
       </span>
       <span class="warning-message">
         Permanently delete vault directory <code>{deleteVaultConfirmId}</code>? All files, notes, and database entries will be erased.
+      </span>
+    </div>
+  </ConfirmationModal>
+
+  <ConfirmationModal
+    open={mergeConfirmOpen}
+    title="Create Merged Vault"
+    confirmLabel="Create"
+    busy={mergeBusy}
+    on:cancel={() => mergeConfirmOpen = false}
+    on:confirm={executeVaultMerge}
+  >
+    <div class="confirm-info-box">
+      <span class="warning-icon">
+        <IconAlertTriangle size={14} />
+      </span>
+      <span class="warning-message">
+        Create <code>{mergedVaultName.trim()}</code> from {mergeSourceIds.length} selected vault{mergeSourceIds.length === 1 ? '' : 's'}.
+        {Number(mergePreview?.importable || 0).toLocaleString()} items will be imported.
+        {Number(mergePreview?.duplicates || 0).toLocaleString()} exact duplicates will be skipped.
+        Source vaults will not be changed.
       </span>
     </div>
   </ConfirmationModal>

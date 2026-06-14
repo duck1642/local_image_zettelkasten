@@ -360,6 +360,24 @@ def test_vault_merge_safety_and_defaults(monkeypatch, tmp_path):
     # Assert source vault was not deleted
     assert source_root.exists()
 
+    # 5. New merged-vault endpoints create a separate vault from selected sources
+    preview_res = client.post(
+        "/api/vaults/merge-preview",
+        json={"name": "Merged Guard", "source_vault_ids": ["target", "source"]},
+        headers={"X-LMZ-API-KEY": key},
+    )
+    assert preview_res.status_code == 200
+    assert preview_res.json()["vault"] == "merged-guard"
+
+    merge_res = client.post(
+        "/api/vaults/merge",
+        json={"name": "Merged Guard", "source_vault_ids": ["target", "source"]},
+        headers={"X-LMZ-API-KEY": key},
+    )
+    assert merge_res.status_code == 200
+    assert source_root.exists()
+    assert (ws_root / "data" / "vaults" / "merged-guard").exists()
+
 
 def test_vault_repair_safety(monkeypatch, tmp_path):
     app_module = fresh_api(monkeypatch, tmp_path)

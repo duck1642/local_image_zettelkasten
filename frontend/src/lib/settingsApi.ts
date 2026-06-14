@@ -66,11 +66,27 @@ export async function previewVaultMergeApi(targetId: string, sourceVaultIds: str
   }));
 }
 
+export async function previewMergedVaultApi(name: string, sourceVaultIds: string[]) {
+  return readJson(await apiFetch('/api/vaults/merge-preview', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, source_vault_ids: sourceVaultIds })
+  }));
+}
+
 export async function mergeVaultsApi(targetId: string, sourceVaultIds: string[]) {
   return readJson(await apiFetch(`/api/vaults/${encodeURIComponent(targetId)}/merge`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ source_vault_ids: sourceVaultIds, delete_sources: false })
+  }));
+}
+
+export async function createMergedVaultApi(name: string, sourceVaultIds: string[]) {
+  return readJson(await apiFetch('/api/vaults/merge', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, source_vault_ids: sourceVaultIds })
   }));
 }
 

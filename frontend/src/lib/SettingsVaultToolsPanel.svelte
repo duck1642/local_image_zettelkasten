@@ -4,10 +4,11 @@
 
   export let vaults: any[] = [];
   export let vaultActive = '';
-  export let mergeTargetId = '';
+  export let mergedVaultName = '';
   export let mergeSourceIds: string[] = [];
   export let mergePreview: any = null;
   export let mergeBusy = false;
+  export let mergePreviewCurrent = false;
   export let healthVaultId = '';
   export let healthBusy = false;
   export let healthReport: any = null;
@@ -18,6 +19,7 @@
   export let onToggleMergeSource: (id: string, checked: boolean) => void;
   export let onPreviewVaultMerge: () => void;
   export let onConfirmVaultMerge: () => void;
+  export let onMergeInputChanged: () => void;
   export let onAuditVaultHealth: () => void;
   export let onRepairVaultHealth: () => void;
   export let onBackupVault: (kind: 'backup' | 'export') => void;
@@ -27,13 +29,15 @@
 
 <SettingsVaultMergePanel
   {vaults}
-  bind:mergeTargetId
+  bind:mergedVaultName
   bind:mergeSourceIds
   bind:mergePreview
   {mergeBusy}
+  {mergePreviewCurrent}
   {onToggleMergeSource}
   {onPreviewVaultMerge}
   {onConfirmVaultMerge}
+  {onMergeInputChanged}
   {checkedValue}
 />
 

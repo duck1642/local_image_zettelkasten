@@ -58,16 +58,8 @@
     padding: 14px;
   }
 
-  .settings-tools-panel + .maintenance-panel {
-    margin-top: 14px;
-  }
-
-  .settings-tools-panel {
-    max-width: 900px;
-  }
-
   .maintenance-panel {
-    max-width: 600px;
+    max-width: 900px;
   }
 
   .settings-section-title {
@@ -267,8 +259,7 @@
     border-top: 0;
   }
 
-  .workspace-panel > .workspace-actions:first-child,
-  .settings-tools-panel > .vault-tool-panel:first-of-type {
+  .workspace-panel > .workspace-actions:first-child {
     margin-top: 0;
     padding-top: 0;
     border-top: 0;
@@ -392,14 +383,11 @@
 
   .maintenance-panel {
     margin-top: 0;
-    display: inline-block;
-    width: fit-content;
-    max-width: 600px;
-    padding-top: 0;
-  }
-
-  .settings-tools-panel + .maintenance-panel .settings-section-title {
-    margin-top: 12px;
+    max-width: 900px;
+    border: 1px solid var(--border-dim);
+    background: var(--bg-panel);
+    border-radius: 8px;
+    padding: 14px;
   }
 
   .vault-tool-panel {
@@ -849,35 +837,6 @@
     margin: 8px 0 12px;
   }
 
-  .vault-source-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    background: var(--bg-panel);
-    border: 1px solid var(--border-dim);
-    border-radius: 6px;
-    padding: 6px 12px;
-    color: var(--text-muted);
-    font-size: 12px;
-    cursor: pointer;
-    user-select: none;
-  }
-
-  .vault-source-chip:hover {
-    border-color: var(--border-hover);
-    color: var(--text-main);
-  }
-
-  .vault-source-chip.active {
-    background: rgba(31, 111, 235, 0.08);
-    border-color: var(--accent-primary);
-    color: #ffffff;
-  }
-
-  .vault-source-chip input[type="checkbox"] {
-    display: none;
-  }
-
   /* Vault Health Scorecard */
   .health-scorecard {
     background: var(--bg-main);
@@ -971,29 +930,28 @@
     color: var(--accent-danger);
   }
 
-  .vault-source-chip.target-disabled {
-    opacity: 0.45;
-    cursor: not-allowed;
-    pointer-events: none;
-  }
-
   /* Maintenance Cards */
   .maintenance-cards {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 0;
     margin-top: 10px;
   }
 
   .maintenance-card {
-    background: var(--bg-panel);
-    border: 1px solid var(--border-dim);
-    border-radius: 8px;
+    background: transparent;
+    border: 0;
+    border-bottom: 1px solid var(--border-dim);
+    border-radius: 0;
     padding: 12px 14px;
     display: grid;
     grid-template-columns: 180px 1fr;
     align-items: center;
     gap: 16px;
+  }
+
+  .maintenance-card:last-child {
+    border-bottom: 0;
   }
 
   .maintenance-card button {
@@ -1118,6 +1076,34 @@
     font-family: var(--font-mono, monospace);
   }
 
+  .confirm-info-box {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px 12px;
+    background: rgba(31, 111, 235, 0.08);
+    border: 1px solid rgba(31, 111, 235, 0.2);
+    border-radius: 6px;
+    color: var(--text-main);
+    font-size: 12.5px;
+    line-height: 1.4;
+  }
+
+  .confirm-info-box .warning-icon {
+    color: var(--accent-primary);
+    flex-shrink: 0;
+    display: inline-flex;
+    margin-top: 2px;
+  }
+
+  .confirm-info-box code {
+    background: rgba(0, 0, 0, 0.2);
+    padding: 2px 5px;
+    border-radius: 4px;
+    color: var(--text-bright);
+    font-family: var(--font-mono, monospace);
+  }
+
   /* Redesigned Create Vault Card */
   .create-vault-card {
     background: var(--bg-panel);
@@ -1221,168 +1207,178 @@
     opacity: 0;
   }
 
-  /* Redesigned Merge Vaults layout */
-  .merge-flow-layout {
-    display: flex;
-    align-items: stretch;
-    gap: 16px;
-    margin-top: 14px;
+  /* Create Merged Vault layout */
+  .merged-vault-name-input {
     width: 100%;
+    max-width: 520px;
+    height: 34px;
+    box-sizing: border-box;
+    background: var(--bg-main);
+    border: 1px solid var(--border-dim);
+    border-radius: 6px;
+    color: var(--text-main);
+    padding: 0 10px;
+    font-size: 13px;
+    outline: none;
   }
 
-  .merge-column {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
+  .merged-vault-name-input:focus {
+    border-color: var(--border-hover);
   }
 
-  .merge-sources-column {
-    flex: 1.2;
-    min-width: 0;
+  .merge-flow-layout {
+    display: block;
+    margin-top: 0;
+    width: 100%;
   }
 
   .merge-sources-box {
     background: var(--bg-main);
     border: 1px solid var(--border-dim);
     border-radius: 6px;
-    padding: 6px;
-    height: 140px;
+    padding: 4px;
+    max-height: 220px;
     overflow-y: auto;
     display: flex;
     flex-direction: column;
     gap: 4px;
   }
 
-  .merge-source-item {
-    display: flex;
+  .merge-vault-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 28px;
     align-items: center;
-    gap: 8px;
-    padding: 6px 10px;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 13px;
-    color: var(--text-main);
     border: 1px solid transparent;
+    border-radius: 6px;
   }
 
-  .merge-source-item:hover {
+  .merge-vault-row.active {
+    background: rgba(31, 111, 235, 0.08);
+    border-color: rgba(31, 111, 235, 0.42);
+  }
+
+  .merge-vault-main {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    gap: 8px;
+    padding: 8px 10px;
+    font-size: 13px;
+    color: var(--text-main);
+    cursor: pointer;
+  }
+
+  .merge-vault-row:hover {
     background: rgba(255, 255, 255, 0.02);
   }
 
-  .merge-source-item.active {
-    background: rgba(35, 134, 54, 0.06);
-    border-color: rgba(35, 134, 54, 0.25);
+  .merge-vault-row:focus-within {
+    border-color: var(--border-hover);
+    box-shadow: 0 0 0 1px rgba(88, 166, 255, 0.18);
   }
 
   .merge-source-name {
     flex: 1;
     font-weight: 600;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .merge-source-count {
     font-size: 11px;
     color: var(--text-muted);
+    white-space: nowrap;
   }
 
-  .merge-flow-arrow-container {
+  .status-pill {
+    display: inline-flex;
+    align-items: center;
+    min-height: 16px;
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: rgba(35, 134, 54, 0.12);
+    color: var(--accent-success);
+    font-size: 10px;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+
+  .status-pill.active {
+    background: rgba(31, 111, 235, 0.18);
+    color: #79c0ff;
+  }
+
+  .status-pill.missing {
+    background: rgba(210, 153, 34, 0.12);
+    color: var(--accent-warning);
+  }
+
+  .merge-row-toggle {
+    width: 28px;
+    height: 28px;
+    display: inline-grid;
+    place-items: center;
+    background: transparent;
+    border: 0;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 0;
+  }
+
+  .merge-row-toggle[aria-expanded="false"] svg {
+    transform: rotate(180deg);
+  }
+
+  .merge-vault-path {
+    grid-column: 1 / -1;
+    padding: 0 10px 8px 34px;
+    color: var(--text-muted);
+    font-family: 'Consolas', monospace;
+    font-size: 11px;
+    overflow-wrap: anywhere;
+  }
+
+  .merge-preview-box {
+    margin-top: 12px;
+    min-height: 36px;
     display: flex;
     align-items: center;
-    justify-content: center;
-    color: var(--border-hover);
-    font-size: 14px;
-    font-weight: bold;
-    letter-spacing: 2px;
-    flex-shrink: 0;
-    width: 60px;
-  }
-
-  .merge-target-column {
-    flex: 1;
-    min-width: 0;
-  }
-
-  .merge-target-select {
-    background: var(--bg-main);
+    padding: 9px 10px;
     border: 1px solid var(--border-dim);
     border-radius: 6px;
-    padding: 8px 12px;
-    font-size: 13px;
-    color: var(--text-bright);
-    outline: none;
-    cursor: pointer;
-    height: 36px;
-  }
-
-  .merge-target-select:focus {
-    border-color: var(--border-hover);
-  }
-
-  .merge-options-section {
-    margin-top: 18px;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  .merge-options-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 16px;
     background: var(--bg-main);
-    border: 1px solid var(--border-dim);
-    border-radius: 6px;
-    padding: 12px 14px;
-  }
-
-  .merge-option-item {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-
-  .merge-option-item label {
-    font-size: 11px;
-    font-weight: 600;
     color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-  }
-
-  .merge-option-item select {
-    background: var(--bg-panel);
-    border: 1px solid var(--border-dim);
-    border-radius: 6px;
-    padding: 6px 10px;
     font-size: 12px;
-    color: var(--text-main);
-    outline: none;
-    cursor: pointer;
-    height: 32px;
   }
 
-  .merge-option-item select:focus {
-    border-color: var(--border-hover);
+  .merge-preview-box.stale {
+    border-color: rgba(210, 153, 34, 0.25);
+    color: var(--accent-warning);
+  }
+
+  .merge-preview-grid {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px 14px;
+    color: var(--text-main);
+  }
+
+  .merge-preview-grid strong {
+    color: var(--text-bright);
   }
 
   .merge-action-bar {
-    margin-top: 18px;
+    margin-top: 12px;
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
+    justify-content: flex-end;
     width: 100%;
-  }
-
-  .merge-action-bar .merge-preview {
-    margin-top: 0;
-    flex: 1;
   }
 
   .merge-buttons {
     display: flex;
     gap: 8px;
-    margin-left: auto;
     flex-shrink: 0;
   }
-
-

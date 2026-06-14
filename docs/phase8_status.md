@@ -158,9 +158,21 @@ VSCode-friendly test launchers:
 - Trace findings from 2026-06-13:
   - Vault delete backend guards exist, but Settings UI may bypass the non-empty-vault checkpoint by always sending `confirm=true`; inspect why the user saw no delete warning and replace with explicit delete confirmation that shows vault name, item count, and root path.
   - Vault merge no longer defaults to deleting sources (`delete_sources` defaults false and frontend sends false), but the UI/wording remains confusing and needs a focused redesign pass.
+  - Settings merge UI cleanup is partly done, but backend merge behavior still needs audit.
+  - Current merge only exact-hash skips/imports; similar-item-to-review behavior is not implemented.
+  - Merge redesign direction: create a new merged vault from selected source vaults instead of merging into an existing target vault.
+  - Merged-vault flow should ask for the new vault name, selected vaults, preview/dry run, then create/import into the new vault; source vaults remain untouched.
+  - Merge can reuse vault creation, storage allocation, duplicate lookup, copy helpers, DB insert helpers, metadata refresh, and health/audit helpers where context-aware.
+  - Merge should not blindly reuse normal local ingest or active-vault-only helpers because vault merge must preserve existing records and avoid source writes.
+  - Exact hash duplicates should be skipped; pHash/tile/video-signature similar matches should not be auto-skipped unless confidence policy is explicitly designed.
+  - Similar matches should eventually go to review/quarantine or be reported in the merge result; first pass can report them without auto-deleting or auto-skipping.
   - Vault repair destructive actions now require backend `confirm_destructive`; keep this as done-but-needs-smoke, not an open blocker.
   - Maintenance scripts can be updated opportunistically, but are lower priority than app UI/API safety.
   - Vault import/export exists and needs its own detailed audit before UX/design decisions.
+  - Import/export still needs a backend package, rollback, and path-safety audit.
+  - Remaining browser `confirm()` usages should be reviewed and migrated case-by-case to the reusable confirmation modal for destructive or high-risk actions.
+  - `ConfirmationModal` still needs focus placement/trap polish.
+  - Toast z-index can appear above modals and should be normalized.
 
 ### P1 Maintenance Inspection Order
 
@@ -196,6 +208,9 @@ VSCode-friendly test launchers:
 - Fix confusing input boxes in workspace/vault/settings/maintenance panels.
 - Keep Settings polish tied to behavior fixes; avoid broad visual-only rewrites unless the behavior is already being touched.
 - Keep UI polish sparse and opportunistic while behavior fixes are active.
+- Clean stale inline result state in `SettingsView.svelte` after toast migration.
+- Replace remaining Obsidian-specific maintenance copy with generic workspace/LMZ wording.
+- Do a responsive/live visual pass for the Settings maintenance panels.
 - Remaining polish: Review panel, fullscreen board/view, Inspector tag edges, context menu, GIF animation policy, video preview strategy.
 - Video embedding/tagging still depends on extracting sampled original video frames.
 
@@ -212,6 +227,7 @@ VSCode-friendly test launchers:
 - Review `docs/lmz_architecture.md` against current backend/frontend shape.
 - Reconcile `docs/lmz_roadmap.md` phase notes with current status.
 - Keep status doc as the operational handoff source.
+- Remove stale `SettingsVaultToolsPanel.svelte` references from architecture/status docs.
 
 ### Recommended Fix Batches
 

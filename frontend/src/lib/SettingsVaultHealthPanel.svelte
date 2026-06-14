@@ -20,15 +20,13 @@
   $: hasIssues = healthReport ? (healthReport.issue_count > 0) : false;
 </script>
 
-<div class="vault-tool-panel vault-tool-panel-separated">
+<div class="vault-tool-panel">
   <h4 class="settings-section-title">
     <span class="settings-title-icon">
       <IconAlertTriangle size={14} />
     </span>
     Vault Health & Portability
   </h4>
-  <div class="micro-desc settings-block-desc">Audit files, detect stale entries, quarantine orphaned records, and perform backups/restores.</div>
-  
   <div class="vault-tool-row settings-row-spaced-large">
     <select bind:value={healthVaultId}>
       {#each vaults as vault}

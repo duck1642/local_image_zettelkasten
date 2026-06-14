@@ -900,6 +900,102 @@ def test_vault_merge_reallocates_storage_ids_and_keeps_source(monkeypatch, tmp_p
     assert source_count == 1
 
 
+def test_create_merged_vault_skips_exact_duplicates_and_keeps_sources(monkeypatch, tmp_path):
+    vaults, sqlite_operator = fresh_backend(monkeypatch, tmp_path, "vaults", "db.sqlite_operator")
+    vaults.create_vault("Source A")
+    vaults.create_vault("Source B")
+    items = {item["id"]: item for item in vaults.vault_list()}
+    source_a_root = Path(items["source-a"]["root"])
+    source_b_root = Path(items["source-b"]["root"])
+
+    def add_item(vault_item, root: Path, item_hash: str, storage_id: str, filename: str):
+        conn = sqlite_operator.init_database(Path(vault_item["db_path"]))
+        conn.execute(
+            """
+            INSERT INTO items(hash, storage_id, original_filename, file_extension, mime_type, size_bytes, date_added, source_url, source_url_norm, platform, source_artist, phash)
+            VALUES (?, ?, ?, '.jpg', 'image/jpeg', 10, '2026-01-01 00:00:00', '', '', 'Local', 'Artist', '')
+            """,
+            (item_hash, storage_id, filename),
+        )
+        conn.commit()
+        conn.close()
+        asset = root / "vault" / "assets" / item_hash[:2] / f"{storage_id}.jpg"
+        note = root / "vault" / "notes" / item_hash[:2] / f"{storage_id}.md"
+        asset.parent.mkdir(parents=True, exist_ok=True)
+        note.parent.mkdir(parents=True, exist_ok=True)
+        asset.write_bytes(filename.encode("utf-8"))
+        note.write_text(f"---\nstorage_id: {storage_id}\n---\n", encoding="utf-8")
+
+    duplicate_hash = "cd" * 32
+    unique_hash = "ef" * 32
+    add_item(items["source-a"], source_a_root, duplicate_hash, "source-a-old", "duplicate-a.jpg")
+    add_item(items["source-b"], source_b_root, duplicate_hash, "source-b-old", "duplicate-b.jpg")
+    add_item(items["source-b"], source_b_root, unique_hash, "source-b-unique", "unique-b.jpg")
+
+    preview = vaults.preview_merged_vault("Merged Result", ["source-a", "source-b"])
+    assert preview["total_items"] == 3
+    assert preview["duplicates"] == 1
+    assert preview["importable"] == 2
+    assert preview["possible_similar"] == 0
+    assert preview["similarity"] == "unsupported"
+
+    result = vaults.merge_vaults_to_new("Merged Result", ["source-a", "source-b"])
+    merged = {item["id"]: item for item in vaults.vault_list()}["merged-result"]
+    merged_conn = sqlite3.connect(merged["db_path"])
+    source_a_conn = sqlite3.connect(items["source-a"]["db_path"])
+    source_b_conn = sqlite3.connect(items["source-b"]["db_path"])
+    try:
+        merged_rows = merged_conn.execute("SELECT hash, storage_id FROM items ORDER BY hash").fetchall()
+        assert len(merged_rows) == 2
+        assert {row[0] for row in merged_rows} == {duplicate_hash, unique_hash}
+        assert all(row[1] not in {"source-a-old", "source-b-old", "source-b-unique"} for row in merged_rows)
+        assert source_a_conn.execute("SELECT COUNT(*) FROM items").fetchone()[0] == 1
+        assert source_b_conn.execute("SELECT COUNT(*) FROM items").fetchone()[0] == 2
+    finally:
+        merged_conn.close()
+        source_a_conn.close()
+        source_b_conn.close()
+
+    assert result["status"] == "success"
+    assert result["imported"] == 2
+    assert result["skipped"] == 1
+    assert source_a_root.exists()
+    assert source_b_root.exists()
+
+
+def test_create_merged_vault_rolls_back_new_vault_on_copy_failure(monkeypatch, tmp_path):
+    vaults, sqlite_operator = fresh_backend(monkeypatch, tmp_path, "vaults", "db.sqlite_operator")
+    vaults.create_vault("Source A")
+    vaults.create_vault("Source B")
+    items = {item["id"]: item for item in vaults.vault_list()}
+    item_hash = "12" * 32
+    storage_id = "source-a-old"
+    source_root = Path(items["source-a"]["root"])
+    conn = sqlite_operator.init_database(Path(items["source-a"]["db_path"]))
+    conn.execute(
+        """
+        INSERT INTO items(hash, storage_id, original_filename, file_extension, mime_type, size_bytes, date_added, source_url, source_url_norm, platform, source_artist, phash)
+        VALUES (?, ?, 'source.jpg', '.jpg', 'image/jpeg', 10, '2026-01-01 00:00:00', '', '', 'Local', 'Artist', '')
+        """,
+        (item_hash, storage_id),
+    )
+    conn.commit()
+    conn.close()
+    asset = source_root / "vault" / "assets" / item_hash[:2] / f"{storage_id}.jpg"
+    asset.parent.mkdir(parents=True, exist_ok=True)
+    asset.write_bytes(b"asset")
+
+    def fail_copy(source, target):
+        raise RuntimeError("copy failed")
+
+    monkeypatch.setattr(vaults, "_copy_if_exists", fail_copy)
+    with pytest.raises(RuntimeError, match="copy failed"):
+        vaults.merge_vaults_to_new("Merged Failure", ["source-a", "source-b"])
+
+    current = {item["id"]: item for item in vaults.vault_list()}
+    assert "merged-failure" not in current
+
+
 def test_get_config_cache_hits_and_returns_defensive_copy(monkeypatch, tmp_path):
     (utils,) = fresh_backend(monkeypatch, tmp_path, "utils")
     calls = []

@@ -324,6 +324,207 @@ def preview_vault_merge(target_id: str, source_ids: list[str], ctx: WorkspaceCon
     return payload
 
 
+def _normalize_merge_sources(source_ids: list[str]) -> list[str]:
+    sources: list[str] = []
+    for value in source_ids:
+        source_id = vault_id_slug(value)
+        if source_id and source_id not in sources:
+            sources.append(source_id)
+    if len(sources) < 2:
+        raise ValueError("at least two source vault ids are required")
+    return sources
+
+
+def _validate_new_merged_vault(name: str, config: dict) -> tuple[str, str]:
+    clean_name = str(name or "").strip()
+    if not clean_name:
+        raise ValueError("merged vault name is required")
+    clean_id = vault_id_slug(clean_name)
+    vaults = config.get("vaults", {})
+    if clean_id in vaults:
+        raise ValueError(f"vault already exists: {clean_id}")
+    name_key = clean_name.casefold()
+    for entry in vaults.values():
+        if str(entry.get("name") or "").strip().casefold() == name_key:
+            raise ValueError(f"vault name already exists: {clean_name}")
+    return clean_name, clean_id
+
+
+def preview_merged_vault(name: str, source_ids: list[str], ctx: WorkspaceContext | None = None) -> dict:
+    config = _ensure_vault_registry(_read_config(ctx))
+    vaults = config["vaults"]
+    clean_name, clean_id = _validate_new_merged_vault(name, config)
+    sources = _normalize_merge_sources(source_ids)
+    workspace_root = _config_root(ctx)
+
+    payload = {
+        "status": "preview",
+        "name": clean_name,
+        "vault": clean_id,
+        "source_vault_ids": sources,
+        "sources": [],
+        "total_items": 0,
+        "duplicates": 0,
+        "importable": 0,
+        "possible_similar": 0,
+        "similarity": "unsupported",
+    }
+    seen_hashes: set[str] = set()
+    for source_id in sources:
+        if source_id not in vaults:
+            raise KeyError(f"vault not found: {source_id}")
+        source_root = vault_root(vaults[source_id], ctx)
+        if not vault_root_is_usable(source_root, workspace_root):
+            raise ValueError(f"source vault is offline or missing: {source_id}")
+        source_db = vault_db_path(source_root)
+        if not source_db.exists():
+            raise ValueError(f"source database is missing: {source_id}")
+
+        conn = sqlite3.connect(source_db)
+        try:
+            rows = conn.execute("SELECT hash FROM items").fetchall()
+        finally:
+            conn.close()
+        total = len(rows)
+        duplicates = 0
+        importable = 0
+        for (item_hash,) in rows:
+            if item_hash in seen_hashes:
+                duplicates += 1
+            else:
+                seen_hashes.add(item_hash)
+                importable += 1
+        payload["sources"].append({
+            "id": source_id,
+            "items": total,
+            "duplicates": duplicates,
+            "importable": importable,
+        })
+        payload["total_items"] += total
+        payload["duplicates"] += duplicates
+        payload["importable"] += importable
+    return payload
+
+
+def _item_columns(conn: sqlite3.Connection) -> list[str]:
+    return [row[1] for row in conn.execute("PRAGMA table_info(items)").fetchall()]
+
+
+def _copy_item_tiles(source_conn: sqlite3.Connection, target_conn: sqlite3.Connection, item_hash: str):
+    try:
+        rows = source_conn.execute(
+            "SELECT tile_index, tile_phash FROM item_tiles WHERE parent_hash = ?",
+            (item_hash,),
+        ).fetchall()
+    except sqlite3.Error:
+        return
+    if rows:
+        target_conn.executemany(
+            """
+            INSERT OR REPLACE INTO item_tiles(parent_hash, tile_index, tile_phash)
+            VALUES (?, ?, ?)
+            """,
+            [(item_hash, tile_index, tile_phash) for tile_index, tile_phash in rows],
+        )
+
+
+def merge_vaults_to_new(name: str, source_ids: list[str], ctx: WorkspaceContext | None = None) -> dict:
+    import re
+    preview = preview_merged_vault(name, source_ids, ctx)
+    clean_id = str(preview["vault"])
+    config = _ensure_vault_registry(_read_config(ctx))
+    vaults = config["vaults"]
+    created = False
+    target_conn: sqlite3.Connection | None = None
+    try:
+        create_vault(str(preview["name"]), clean_id, ctx)
+        created = True
+        target_root = vault_root(_ensure_vault_registry(_read_config(ctx))["vaults"][clean_id], ctx)
+        target_db = vault_db_path(target_root)
+        target_conn = init_database(target_db)
+        target_columns = _item_columns(target_conn)
+        copied_paths: list[Path] = []
+        imported = 0
+        skipped = 0
+        seen_hashes: set[str] = set()
+
+        def safe_copy(src: Path, dst: Path) -> bool:
+            if _copy_if_exists(src, dst):
+                copied_paths.append(dst)
+                return True
+            return False
+
+        for source_id in preview["source_vault_ids"]:
+            source_root = vault_root(vaults[source_id], ctx)
+            source_db = vault_db_path(source_root)
+            source_conn = sqlite3.connect(source_db)
+            try:
+                source_columns = _item_columns(source_conn)
+                copy_columns = [column for column in target_columns if column in source_columns]
+                if "hash" not in copy_columns or "storage_id" not in copy_columns:
+                    raise ValueError(f"source item schema is unsupported: {source_id}")
+                select_sql = f"SELECT {', '.join(copy_columns)} FROM items"
+                insert_sql = (
+                    f"INSERT INTO items({', '.join(copy_columns)}) "
+                    f"VALUES ({', '.join('?' for _ in copy_columns)})"
+                )
+                for row in source_conn.execute(select_sql).fetchall():
+                    item = dict(zip(copy_columns, row))
+                    item_hash = item.get("hash")
+                    if not item_hash:
+                        skipped += 1
+                        continue
+                    if item_hash in seen_hashes:
+                        skipped += 1
+                        continue
+                    seen_hashes.add(item_hash)
+                    old_storage_id = str(item.get("storage_id") or "")
+                    new_storage_id = allocate_storage_id(target_conn)
+                    item["storage_id"] = new_storage_id
+                    target_conn.execute(insert_sql, [item.get(column) for column in copy_columns])
+                    _copy_item_tiles(source_conn, target_conn, str(item_hash))
+
+                    if old_storage_id:
+                        ext = str(item.get("file_extension") or "")
+                        mime_type = str(item.get("mime_type") or "")
+                        old_paths = _item_paths(source_root, str(item_hash), old_storage_id, ext, mime_type)
+                        new_paths = _item_paths(target_root, str(item_hash), new_storage_id, ext, mime_type)
+                        safe_copy(old_paths["asset"], new_paths["asset"])
+                        safe_copy(old_paths["wd"], new_paths["wd"])
+                        safe_copy(old_paths["thumb"], new_paths["thumb"])
+                        if safe_copy(old_paths["note"], new_paths["note"]):
+                            text = new_paths["note"].read_text(encoding="utf-8", errors="ignore")
+                            pattern = re.compile(r"\b" + re.escape(old_storage_id) + r"\b")
+                            text = pattern.sub(new_storage_id, text)
+                            new_paths["note"].write_text(text, encoding="utf-8")
+                    imported += 1
+            finally:
+                source_conn.close()
+        target_conn.commit()
+        preview.update({
+            "status": "success",
+            "imported": imported,
+            "skipped": skipped,
+            "items": vault_list(ctx),
+        })
+        return preview
+    except Exception:
+        if target_conn is not None:
+            target_conn.rollback()
+            target_conn.close()
+            target_conn = None
+        if created:
+            try:
+                delete_vault(clean_id, confirm=True, ctx=ctx)
+            except Exception:
+                root = _config_root(ctx) / "data" / "vaults" / clean_id
+                shutil.rmtree(root, ignore_errors=True)
+        raise
+    finally:
+        if target_conn is not None:
+            target_conn.close()
+
+
 def merge_vaults(target_id: str, source_ids: list[str], delete_sources: bool = False, ctx: WorkspaceContext | None = None) -> dict:
     import re
     preview = preview_vault_merge(target_id, source_ids, ctx)
