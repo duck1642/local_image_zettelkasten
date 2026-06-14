@@ -933,7 +933,7 @@ Known packaging caveat:
 
 - Keep runtime data out of source.
 - Keep credentials under `secrets/`.
-- Keep `backups/`, generated test vaults, and perf outputs local/ignored.
+- Keep `backups/`, `exports/`, `.tmp/`, generated test vaults, and perf outputs local/ignored.
 - Keep `docs/` tracked as the durable project handoff.
 - Keep runtime workspace configs and `config/workspaces.yaml` untracked.
 - Keep active-vault data isolated under `data/vaults/<vault_id>/`.

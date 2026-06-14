@@ -190,24 +190,17 @@ VSCode-friendly test launchers:
 
 ### P2 Import / Export
 
-- Current `backup` and `export` behavior is identical except destination folder; UI label `Export Vault Database` is misleading because backend exports the full vault folder.
-- Define the vault package contract before UI polish:
-  - required manifest, package type/version, expected directory layout, and supported package scope.
-  - decide whether workspace export/import should exist separately from vault export/import.
-- Harden import package validation:
-  - reject missing/invalid manifests instead of accepting arbitrary ZIPs by filename fallback.
-  - add tests for traversal/absolute members, corrupt ZIPs, duplicate vault IDs, missing manifest, and bad package shape.
-- Harden import rollback:
-  - existing empty target roots can receive partial extracted files on failure because cleanup only removes roots created during import.
-  - import should stage or track created paths so failed imports leave no partial vault.
-- Clarify backup/export consistency:
-  - backup currently copies live files with `rglob`, including DB, without locking/snapshot assumptions.
-  - decide whether backup must pause writes, snapshot DB, or report best-effort semantics.
-- Improve import/export UI:
-  - raw text package path should become a file picker or preview-first flow.
-  - import should show package summary and require confirmation before writing config/files.
-  - package path/results should be persistent, not toast-only.
-- Add missing frontend coverage for export.
+- Backup/export/import package split is implemented and needs real-vault smoke:
+  - `backup` creates confirmed workspace-local `.lmzbackup.zip` full snapshots under `backups/vaults/<id>/`.
+  - `export` creates confirmed portable `.lmzvault.zip` packages under `exports/vaults/<id>/`.
+  - export includes DB/assets/notes by default and review state only when requested.
+  - import is preview-first, requires fingerprint + confirmation, stages into `.tmp/imports/`, writes config last, and rolls back on failure.
+  - strict `lmz-package.yaml` manifests replaced the old filename/loose-ZIP fallback.
+- Remaining follow-ups:
+  - backup restore is deferred.
+  - raw import path can become a native file picker later.
+  - package success paths are toast-only by current choice; persistent copy/open-folder affordances remain optional.
+  - decide later whether workspace-level export/import should exist separately from vault packages.
 - Ensure imports do not preserve wrong machine-specific absolute paths.
 - Source URL normalization migration remains missing; runtime writes `source_url_norm` and existing rows are lazily backfilled by `init_database()`.
 
@@ -306,7 +299,7 @@ VSCode-friendly test launchers:
     - vault health and repair logic is hardened to filter expected tag caches and thumbnails by image/video MIME type, and preserve skipped/failed tagging caches from being deleted as orphans.
     - vault repair can rebuild metadata/facets, rebuild thumbnails, prune derived cache orphans, reconcile review sidecars, and quarantine orphan assets/notes.
     - vault repair destructive actions require backend confirmation.
-    - vault backup/export/import package flows are exposed through backend APIs and Settings controls.
+    - vault backup/export/import package flows are split into strict backup snapshots, portable exports, and preview-first imports through backend APIs and Settings controls.
     - Split/separate vault flows are deferred until the real workflow is clearer.
     - Optional metadata maintenance (hiding/ignoring WD tags) is handled.
     - Optional UX polish (search chips, richer Inspector tag editing) is reviewed and deferred.
