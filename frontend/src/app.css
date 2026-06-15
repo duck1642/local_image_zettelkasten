@@ -207,6 +207,16 @@
     display: none !important;
   }
 
+  .privacy-blur .media-stack img,
+  .privacy-blur .media-stack video,
+  .privacy-blur .media-preview img,
+  .privacy-blur .media-preview video,
+  .privacy-blur .focus-media,
+  .privacy-blur .filmstrip-thumb img {
+    filter: blur(18px);
+    transform: scale(1.02);
+  }
+
   /* Completely hide the native video fullscreen button in Chromium */
   video::-webkit-media-controls-fullscreen-button {
       display: none !important;

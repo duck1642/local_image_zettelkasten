@@ -764,6 +764,41 @@
     font-size: 14px;
   }
 
+  .privacy-setting-card {
+    max-width: 1000px;
+    margin: 0 0 16px;
+    padding: 12px 14px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border-dim);
+    border-radius: 8px;
+  }
+
+  .privacy-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    cursor: pointer;
+  }
+
+  .privacy-toggle-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+    color: var(--text-muted);
+    font-size: 12px;
+  }
+
+  .privacy-toggle-copy strong {
+    color: var(--text-bright);
+    font-size: 13px;
+  }
+
+  .privacy-toggle input {
+    flex-shrink: 0;
+  }
+
   .shortcuts-grid {
     display: flex;
     flex-direction: column;

@@ -12,6 +12,7 @@
   import { ramStats, startRamTracker } from './lib/ramStore';
   import { queueStats, reviewCount, reviewStats, startSharedStatsPolling } from './lib/statsStore';
   import { apiFetch } from './lib/api';
+  import { privacyBlur } from './lib/privacyStore';
   import {
     IconFolder,
     IconDownload,
@@ -386,7 +387,7 @@
   <Launcher on:loaded={handleWorkspaceLoaded} />
 {:else}
   <Toaster />
-  <div class="root-container">
+  <div class="root-container" class:privacy-blur={$privacyBlur}>
     {#if dragOverlayVisible}
       <div class="drop-overlay">
         <div class="drop-overlay-text">{dragOverlayText}</div>

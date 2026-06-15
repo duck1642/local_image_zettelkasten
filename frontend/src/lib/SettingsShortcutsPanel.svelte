@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { IconInfoCircle, IconKeyboard } from './icons';
+  import { privacyBlur } from './privacyStore';
+  import { IconEye, IconInfoCircle, IconKeyboard } from './icons';
 </script>
 
 <div class="shortcuts-guide shortcuts-guide-wide">
@@ -9,6 +10,19 @@
     </span>
     Keyboard Shortcuts & Search Prefixes
   </h4>
+
+  <div class="privacy-setting-card">
+    <label class="privacy-toggle">
+      <span class="privacy-toggle-copy">
+        <span class="settings-title-inline">
+          <IconEye size={14} />
+          <strong>Privacy blur</strong>
+        </span>
+        <span>Blur media previews for screenshots. Local to this app window.</span>
+      </span>
+      <input type="checkbox" bind:checked={$privacyBlur} />
+    </label>
+  </div>
   
   <div class="shortcuts-container-grid">
     <!-- Navigation Column -->
