@@ -1,5 +1,6 @@
 <script lang="ts">
   import { IconChart, IconChevronUp, IconMerge } from './icons';
+  import SettingsSection from './SettingsSection.svelte';
 
   export let vaults: any[] = [];
   export let mergedVaultName = '';
@@ -31,14 +32,10 @@
   }
 </script>
 
-<div class="vault-tool-panel vault-tool-panel-first">
-  <h4 class="settings-section-title">
-    <span class="settings-title-icon">
-      <IconMerge size={14} />
-    </span>
-    Create Merged Vault
-  </h4>
-
+<SettingsSection title="Merge Vaults" description="Create a new vault from selected source vaults. Source vaults are not changed.">
+  {#snippet icon()}
+    <IconMerge size={14} />
+  {/snippet}
   <label class="settings-mini-label" for="merged-vault-name">Merged vault name</label>
   <input
     id="merged-vault-name"
@@ -116,11 +113,12 @@
         class="create-vault-btn"
         class:active={canCreate}
         type="button"
+        title="Create merged vault"
         on:click={onConfirmVaultMerge}
         disabled={!canCreate}
       >
-        Create Merged Vault
+        Create
       </button>
     </div>
   </div>
-</div>
+</SettingsSection>

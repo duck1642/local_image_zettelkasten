@@ -1,6 +1,8 @@
 <script lang="ts">
   import { metadataProgressPercent, type MetadataRebuildJob } from './settingsUtils';
   import { IconEye, IconActivity, IconFolder, IconTrash, IconClose } from './icons';
+  import SettingsActionRow from './SettingsActionRow.svelte';
+  import SettingsSection from './SettingsSection.svelte';
 
   type MaintenanceAction = 'auth' | 'metadata' | 'workspaceMetadata' | 'workspacePrune' | 'review';
 
@@ -10,75 +12,81 @@
   export let onRunMaintenance: (action: MaintenanceAction) => void;
 </script>
 
-<div class="maintenance-panel">
-  <h4 class="settings-section-title">System Maintenance</h4>
-  
+<SettingsSection title="System Maintenance" description="Local checks and rebuilds for the active workspace.">
+  {#snippet icon()}
+    <IconActivity size={14} />
+  {/snippet}
   <div class="maintenance-cards">
-    <!-- Auth Card -->
-    <div class="maintenance-card">
-      <button class="settings-icon-button" on:click={() => onRunMaintenance('auth')} disabled={maintenanceBusy.auth}>
+    <SettingsActionRow
+      title="Auth"
+      status={maintenanceResult.auth || 'Ready to scan downloader credentials.'}
+      actionLabel="Scan"
+      busyLabel="Scanning..."
+      busy={maintenanceBusy.auth}
+      onAction={() => onRunMaintenance('auth')}
+    >
+      {#snippet actionIcon()}
         <IconEye size={11} />
-        {maintenanceBusy.auth ? 'Scanning...' : 'Auth Scan'}
-      </button>
-      <div class="maintenance-card-copy">
-        <span class="maintenance-card-title">Cookie Session Ingest</span>
-        <span class="maintenance-status">{maintenanceResult.auth || 'Status: Ready to audit cookies.'}</span>
-      </div>
-    </div>
+      {/snippet}
+    </SettingsActionRow>
 
-    <!-- Metadata Card -->
-    <div class="maintenance-card expanded">
-      <button class="settings-icon-button" on:click={() => onRunMaintenance('metadata')} disabled={maintenanceBusy.metadata}>
+    <SettingsActionRow
+      title="Metadata index"
+      status={maintenanceResult.metadata || 'Ready to rebuild search and facet metadata.'}
+      actionLabel="Rebuild"
+      busyLabel="Rebuilding..."
+      busy={maintenanceBusy.metadata}
+      onAction={() => onRunMaintenance('metadata')}
+    >
+      {#snippet actionIcon()}
         <IconActivity size={11} />
-        {maintenanceBusy.metadata ? 'Rebuilding...' : 'Rebuild Index'}
-      </button>
-      <div class="maintenance-card-copy wide">
-        <span class="maintenance-card-title">Full Metadata SQL Index Rebuild</span>
-        <div class="maintenance-status metadata-progress-cell">
-          <span>{maintenanceResult.metadata || 'Status: Ready to rebuild database indexing.'}</span>
-          {#if metadataRebuildJob?.running}
-            <div class="metadata-progress" aria-label="Metadata rebuild progress">
-              <div class="metadata-progress-fill" style={`width: ${metadataProgressPercent(metadataRebuildJob)}%`}></div>
-            </div>
-          {/if}
-        </div>
-      </div>
-    </div>
+      {/snippet}
+      {#snippet details()}
+        {#if metadataRebuildJob?.running}
+          <div class="metadata-progress" aria-label="Metadata rebuild progress">
+            <div class="metadata-progress-fill" style={`width: ${metadataProgressPercent(metadataRebuildJob)}%`}></div>
+          </div>
+        {/if}
+      {/snippet}
+    </SettingsActionRow>
 
-    <!-- Workspace Metadata Card -->
-    <div class="maintenance-card">
-      <button class="settings-icon-button" on:click={() => onRunMaintenance('workspaceMetadata')} disabled={maintenanceBusy.workspaceMetadata}>
+    <SettingsActionRow
+      title="Workspace metadata"
+      status={maintenanceResult.workspaceMetadata || 'Ready to sync workspace dictionaries from vault usage.'}
+      actionLabel="Sync"
+      busyLabel="Syncing..."
+      busy={maintenanceBusy.workspaceMetadata}
+      onAction={() => onRunMaintenance('workspaceMetadata')}
+    >
+      {#snippet actionIcon()}
         <IconFolder size={11} />
-        {maintenanceBusy.workspaceMetadata ? 'Syncing...' : 'Sync Workspace'}
-      </button>
-      <div class="maintenance-card-copy">
-        <span class="maintenance-card-title">Rebuild Workspace Metadata</span>
-        <span class="maintenance-status">{maintenanceResult.workspaceMetadata || 'Status: Sync and import Obsidian Zettel tags.'}</span>
-      </div>
-    </div>
+      {/snippet}
+    </SettingsActionRow>
 
-    <!-- Workspace Prune Card -->
-    <div class="maintenance-card">
-      <button class="settings-icon-button" on:click={() => onRunMaintenance('workspacePrune')} disabled={maintenanceBusy.workspacePrune}>
+    <SettingsActionRow
+      title="Metadata registry"
+      status={maintenanceResult.workspacePrune || 'Ready to prune unused workspace dictionary entries.'}
+      actionLabel="Prune"
+      busyLabel="Pruning..."
+      busy={maintenanceBusy.workspacePrune}
+      onAction={() => onRunMaintenance('workspacePrune')}
+    >
+      {#snippet actionIcon()}
         <IconTrash size={11} />
-        {maintenanceBusy.workspacePrune ? 'Pruning...' : 'Prune Registry'}
-      </button>
-      <div class="maintenance-card-copy">
-        <span class="maintenance-card-title">Prune Workspace Registry</span>
-        <span class="maintenance-status">{maintenanceResult.workspacePrune || 'Status: Prune dead tags that no longer exist in your vault.'}</span>
-      </div>
-    </div>
+      {/snippet}
+    </SettingsActionRow>
 
-    <!-- Cleanup Review Card -->
-    <div class="maintenance-card">
-      <button class="settings-icon-button" on:click={() => onRunMaintenance('review')} disabled={maintenanceBusy.review}>
+    <SettingsActionRow
+      title="Review queue"
+      status={maintenanceResult.review || 'Ready to clear resolved review files.'}
+      actionLabel="Clean"
+      busyLabel="Cleaning..."
+      busy={maintenanceBusy.review}
+      onAction={() => onRunMaintenance('review')}
+    >
+      {#snippet actionIcon()}
         <IconClose size={11} />
-        {maintenanceBusy.review ? 'Cleaning...' : 'Cleanup Review'}
-      </button>
-      <div class="maintenance-card-copy">
-        <span class="maintenance-card-title">Cleanup Review Queues</span>
-        <span class="maintenance-status">{maintenanceResult.review || 'Status: Clear duplicates or successfully ingested items in Review.'}</span>
-      </div>
-    </div>
+      {/snippet}
+    </SettingsActionRow>
   </div>
-</div>
+</SettingsSection>

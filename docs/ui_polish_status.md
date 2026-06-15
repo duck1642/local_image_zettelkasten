@@ -10,6 +10,7 @@ Last updated: 2026-06-15
 - Logs panel second.
 - Reduce text bloat with clearer hierarchy, icons, and reusable UI pieces.
 - Keep changes small, direct, and easy to review.
+- Completed polish work has been moved into `docs/phase8_status.md`.
 
 ## Inspection Notes
 
@@ -23,17 +24,16 @@ Last updated: 2026-06-15
 
 ## Settings Findings
 
+- Maintenance polish batch is done and moved to `docs/phase8_status.md`.
+- Privacy blur is done and moved to `docs/phase8_status.md`.
+- Wide/fullscreen Settings width audit is done and moved to `docs/phase8_status.md`.
 - General tab is usable, but explanatory microcopy is too dense.
 - `AI Tagging Engine` sounds inflated. Prefer simpler `Tagging`.
 - Workspace tab is the strongest panel, but path rows are visually dense.
 - Vaults tab is usable, but action buttons repeat too much text.
-- Maintenance tab is the highest-value cleanup target.
-- Maintenance stacks merge, health, packages, and system actions into one long page.
-- Backup / Import / Export is compressed and hard to parse.
-- Import row icon-only actions need clearer labels or tooltips.
-- System Maintenance structure is good, but copy is stale.
-- `Sync Workspace` still says `Obsidian Zettel tags`; replace with generic LMZ wording.
-- Shortcuts tab is acceptable. Privacy blur fits there.
+- Settings widths are inconsistent: General 600px, Workspace/Vaults/Maintenance 900px, Shortcuts 1000px.
+- Obsidian-style direction: consistent left-aligned content column, not full-window stretching.
+- Future idea: large Obsidian-like Settings modal/shell, but keep current Settings panel for now.
 
 ## Logs Findings
 
@@ -53,12 +53,20 @@ Last updated: 2026-06-15
 
 ## First Polish Batch
 
-1. Clean the Maintenance tab.
-2. Extract small reusable Settings UI pieces where repetition is obvious.
-3. Replace stale Settings copy.
-4. Normalize action buttons with icons, short labels, and titles.
-5. Move Logs `Clear Logs` to `ConfirmationModal`.
-6. Polish Logs toolbar after Settings maintenance cleanup.
+Done and moved to `docs/phase8_status.md`:
+
+- Clean the Maintenance tab.
+- Extract small reusable Settings UI pieces where repetition is obvious.
+- Replace stale Settings copy.
+- Normalize action buttons with icons, short labels, and titles.
+- Add frontend-only Privacy blur.
+- Move Privacy blur into General -> Vault Display Settings.
+
+Still open:
+
+1. Standardize Settings content widths.
+2. Move Logs `Clear Logs` to `ConfirmationModal`.
+3. Polish Logs toolbar after Settings width cleanup.
 
 ## Screenshot References
 
@@ -78,3 +86,18 @@ Files:
 - `settings-maintenance-bottom.png`
 - `settings-shortcuts.png`
 - `logs.png`
+
+Width audit screenshots:
+
+```text
+C:\Users\BILGIS~1\AppData\Local\Temp\lmz-settings-width-audit
+```
+
+Files:
+
+- `settings-general.png`
+- `settings-workspace.png`
+- `settings-vaults.png`
+- `settings-maintenance.png`
+- `settings-shortcuts.png`
+- `measurements.json`

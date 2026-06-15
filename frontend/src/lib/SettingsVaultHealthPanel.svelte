@@ -2,6 +2,7 @@
   import { countValues } from './settingsUtils';
   import VaultHealthDetailsModal from './VaultHealthDetailsModal.svelte';
   import { IconAlertTriangle, IconCheckCircle } from './icons';
+  import SettingsSection from './SettingsSection.svelte';
 
   export let vaults: any[] = [];
   export let vaultActive = '';
@@ -16,12 +17,10 @@
   $: hasIssues = healthReport ? (healthReport.issue_count > 0) : false;
 </script>
 
-<h4 class="settings-section-title">
-  <span class="settings-title-icon">
+<SettingsSection title="Vault Health" description="Audit vault consistency and repair the active vault when needed.">
+  {#snippet icon()}
     <IconAlertTriangle size={14} />
-  </span>
-  Vault Health
-</h4>
+  {/snippet}
 
 <div class="vault-health-controls">
   <label class="vault-health-select">
@@ -33,8 +32,8 @@
     </select>
   </label>
   <div class="vault-health-actions">
-    <button class="settings-bold-button" type="button" on:click={onAuditVaultHealth} disabled={healthBusy || !healthVaultId}>Audit Health</button>
-    <button class="primary settings-bold-button" type="button" on:click={onRepairVaultHealth} disabled={healthBusy || !healthVaultId || healthVaultId !== vaultActive}>Repair Active Vault</button>
+    <button class="settings-bold-button" type="button" on:click={onAuditVaultHealth} disabled={healthBusy || !healthVaultId}>Audit</button>
+    <button class="primary settings-bold-button" type="button" on:click={onRepairVaultHealth} disabled={healthBusy || !healthVaultId || healthVaultId !== vaultActive}>Repair</button>
   </div>
 </div>
 
@@ -83,3 +82,4 @@
 {#if healthDetailsOpen && healthReport}
   <VaultHealthDetailsModal {healthReport} {repairErrors} onClose={() => healthDetailsOpen = false} />
 {/if}
+</SettingsSection>

@@ -799,7 +799,7 @@
         setMaintenanceResult(action, `OK (${cookies})`);
         toastStore.add({
           type: 'success',
-          title: 'Auth Scan Complete',
+          title: 'Auth Complete',
           message: `Authenticated successfully. Cookies: ${cookies}.`
         });
         uiLog('INFO', 'Maintenance action completed', { action: 'auth_scan', cookies });
@@ -920,49 +920,43 @@
         />
       </div>
     {:else if activeSettingsTab === 'maintenance'}
-      <div class="workspace-panel">
-        <SettingsVaultMergePanel
-          {vaults}
-          bind:mergedVaultName
-          bind:mergeSourceIds
-          bind:mergePreview
-          {mergeBusy}
-          {mergePreviewCurrent}
-          onToggleMergeSource={toggleMergeSource}
-          onPreviewVaultMerge={previewVaultMerge}
-          onConfirmVaultMerge={confirmVaultMerge}
-          onMergeInputChanged={invalidateMergePreview}
-          {checkedValue}
-        />
-      </div>
-      <div class="workspace-panel">
-        <SettingsVaultHealthPanel
-          {vaults}
-          {vaultActive}
-          bind:healthVaultId
-          {healthBusy}
-          {healthReport}
-          bind:healthDetailsOpen
-          {repairErrors}
-          onAuditVaultHealth={auditVaultHealth}
-          onRepairVaultHealth={repairVaultHealth}
-        />
-      </div>
-      <div class="workspace-panel">
-        <SettingsVaultPackagesPanel
-          {healthVaultId}
-          {healthBusy}
-          bind:importPackagePath
-          bind:importVaultName
-          {importPreview}
-          {importPreviewCurrent}
-          onBackupVault={requestVaultPackage}
-          onPreviewImportVaultPackage={previewImportVaultPackage}
-          onConfirmImportVaultPackage={confirmImportVaultPackage}
-          onImportInputChanged={invalidateImportPreview}
-          onRestoreBackup={requestRestoreBackup}
-        />
-      </div>
+      <SettingsVaultMergePanel
+        {vaults}
+        bind:mergedVaultName
+        bind:mergeSourceIds
+        bind:mergePreview
+        {mergeBusy}
+        {mergePreviewCurrent}
+        onToggleMergeSource={toggleMergeSource}
+        onPreviewVaultMerge={previewVaultMerge}
+        onConfirmVaultMerge={confirmVaultMerge}
+        onMergeInputChanged={invalidateMergePreview}
+        {checkedValue}
+      />
+      <SettingsVaultHealthPanel
+        {vaults}
+        {vaultActive}
+        bind:healthVaultId
+        {healthBusy}
+        {healthReport}
+        bind:healthDetailsOpen
+        {repairErrors}
+        onAuditVaultHealth={auditVaultHealth}
+        onRepairVaultHealth={repairVaultHealth}
+      />
+      <SettingsVaultPackagesPanel
+        {healthVaultId}
+        {healthBusy}
+        bind:importPackagePath
+        bind:importVaultName
+        {importPreview}
+        {importPreviewCurrent}
+        onBackupVault={requestVaultPackage}
+        onPreviewImportVaultPackage={previewImportVaultPackage}
+        onConfirmImportVaultPackage={confirmImportVaultPackage}
+        onImportInputChanged={invalidateImportPreview}
+        onRestoreBackup={requestRestoreBackup}
+      />
       <SettingsMaintenancePanel
         {maintenanceBusy}
         {maintenanceResult}
@@ -1063,7 +1057,7 @@
 
   <ConfirmationModal
     open={mergeConfirmOpen}
-    title="Create Merged Vault"
+    title="Merge Vaults"
     confirmLabel="Create"
     busy={mergeBusy}
     on:cancel={() => mergeConfirmOpen = false}

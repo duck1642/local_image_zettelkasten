@@ -1,6 +1,7 @@
 <script lang="ts">
   import { open as openDialog } from '@tauri-apps/plugin-dialog';
   import { IconCopy, IconDownload, IconFileText, IconFolder, IconPlus, IconRefresh } from './icons';
+  import SettingsSection from './SettingsSection.svelte';
 
   export let healthVaultId = '';
   export let healthBusy = false;
@@ -46,18 +47,16 @@
   }
 </script>
 
-<h4 class="settings-section-title">
-  <span class="settings-title-icon">
+<SettingsSection title="Packages" description="Import, export, back up, or restore vault packages.">
+  {#snippet icon()}
     <IconFileText size={14} />
-  </span>
-  Backup / Import / Export
-</h4>
+  {/snippet}
 
-<div class="vault-package-grid">
+<div class="vault-package-stack">
   <div class="vault-package-card vault-package-import-card">
     <div class="vault-package-card-title">
       <IconPlus size={12} />
-      Import
+      Import package
     </div>
     <div class="vault-package-import-row">
       <input
@@ -93,27 +92,36 @@
     </div>
   </div>
 
-  <div class="vault-package-card vault-package-small-card">
-    <div class="vault-package-card-title">
-      <IconFileText size={12} />
-      Export
+  <div class="vault-package-row">
+    <div class="vault-package-row-copy">
+      <span class="vault-package-card-title">
+        <IconDownload size={12} />
+        Export
+      </span>
+      <span class="maintenance-status">Create a portable vault package.</span>
     </div>
-    <button class="settings-icon-button vault-package-icon-button" type="button" on:click={() => onBackupVault('export')} disabled={healthBusy || !healthVaultId} aria-label="Export Vault Package" title="Export Vault Package">
+    <button class="settings-icon-button vault-package-action-button" type="button" on:click={() => onBackupVault('export')} disabled={healthBusy || !healthVaultId} aria-label="Export Vault Package" title="Export Vault Package">
       <IconDownload size={13} />
+      Export
     </button>
   </div>
 
-  <div class="vault-package-card vault-package-small-card">
-    <div class="vault-package-card-title">
-      <IconCopy size={12} />
-      Backup
+  <div class="vault-package-row">
+    <div class="vault-package-row-copy">
+      <span class="vault-package-card-title">
+        <IconCopy size={12} />
+        Backup and restore
+      </span>
+      <span class="maintenance-status">Create a restore snapshot or restore one as a new vault.</span>
     </div>
     <div class="vault-package-small-actions">
-      <button class="settings-icon-button vault-package-icon-button" type="button" on:click={() => onBackupVault('backup')} disabled={healthBusy || !healthVaultId} aria-label="Backup Vault Folder" title="Backup Vault Folder">
+      <button class="settings-icon-button vault-package-action-button" type="button" on:click={() => onBackupVault('backup')} disabled={healthBusy || !healthVaultId} aria-label="Backup Vault Folder" title="Backup Vault Folder">
         <IconCopy size={13} />
+        Backup
       </button>
-      <button class="settings-icon-button vault-package-icon-button" type="button" on:click={onSelectRestoreBackup} disabled={healthBusy} aria-label="Restore Backup" title="Restore Backup">
+      <button class="settings-icon-button vault-package-action-button" type="button" on:click={onSelectRestoreBackup} disabled={healthBusy} aria-label="Restore Backup" title="Restore Backup">
         <IconRefresh size={13} />
+        Restore
       </button>
     </div>
   </div>
@@ -132,3 +140,4 @@
     {/if}
   </div>
 {/if}
+</SettingsSection>

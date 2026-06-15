@@ -1,6 +1,7 @@
 <script lang="ts">
   import { TILE_MIN_WIDTH_CEILING, TILE_MIN_WIDTH_FLOOR } from './layout';
   import { config, configDirty, configSaving, saveCurrentConfig, updateConfig } from './configStore';
+  import { privacyBlur } from './privacyStore';
   import { IconSparkles, IconCheckCircle, IconAlertTriangle } from './icons';
 
   function setConfig(mutator: (draft: any) => void) {
@@ -47,6 +48,17 @@
         on:input={(event) => setConfig((draft) => draft.ui.vault_tile_min_width = numberValue(event))}
       />
       <span class="slider-value">{$config.ui.vault_tile_min_width}px</span>
+    </div>
+
+    <label for="settings-privacy-blur">
+      Privacy blur
+      <div class="micro-desc">Blur media previews for screenshots. Local to this app window.</div>
+    </label>
+    <div class="checkbox-group">
+      <label class="check-label" id="settings-privacy-blur">
+        <input type="checkbox" bind:checked={$privacyBlur} />
+        Blur media previews
+      </label>
     </div>
   </div>
 </div>

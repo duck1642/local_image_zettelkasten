@@ -68,6 +68,44 @@
     font-size: 14px;
   }
 
+  .settings-section {
+    max-width: 900px;
+    margin-bottom: 24px;
+    border: 1px solid var(--border-dim);
+    background: var(--bg-panel);
+    border-radius: 8px;
+    padding: 14px;
+  }
+
+  .settings-section-header {
+    margin-bottom: 12px;
+  }
+
+  .settings-section-title-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .settings-section-icon {
+    display: inline-flex;
+    align-items: center;
+    color: var(--text-main);
+  }
+
+  .settings-section-heading {
+    margin: 0;
+    color: var(--text-bright);
+    font-size: 14px;
+  }
+
+  .settings-section-description {
+    margin: 5px 0 0 22px;
+    color: var(--text-muted);
+    font-size: 12px;
+    line-height: 1.35;
+  }
+
   .settings-page-title,
   .settings-title-inline {
     display: flex;
@@ -155,6 +193,48 @@
   .settings-small-action {
     padding: 5px 12px;
     font-size: 11px;
+  }
+
+  .settings-action-row {
+    display: grid;
+    grid-template-columns: 136px minmax(0, 1fr);
+    gap: 14px;
+    align-items: center;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border-dim);
+  }
+
+  .settings-action-row:last-child {
+    border-bottom: 0;
+  }
+
+  .settings-action-row-button {
+    min-height: 30px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .settings-action-row-copy {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .settings-action-row-title {
+    color: var(--text-bright);
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .settings-action-row-status {
+    color: var(--text-muted);
+    font-size: 12px;
+    overflow-wrap: anywhere;
   }
 
   .settings-row-main {
@@ -430,7 +510,7 @@
 
   .vault-health-actions {
     display: grid;
-    grid-template-columns: repeat(2, minmax(128px, 1fr));
+    grid-template-columns: repeat(2, minmax(96px, 1fr));
     gap: 8px;
   }
 
@@ -474,6 +554,11 @@
     min-width: 0;
   }
 
+  .vault-package-stack {
+    display: grid;
+    gap: 10px;
+  }
+
   .vault-package-grid {
     display: grid;
     grid-template-columns: minmax(0, 1fr) 86px 108px;
@@ -511,6 +596,31 @@
     display: flex;
     align-items: center;
     gap: 8px;
+  }
+
+  .vault-package-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px;
+    align-items: center;
+    padding: 12px;
+    border: 1px solid var(--border-dim);
+    border-radius: 8px;
+    background: var(--bg-main);
+  }
+
+  .vault-package-row-copy {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .vault-package-action-button {
+    min-width: 92px;
+    min-height: 34px;
+    gap: 6px;
+    white-space: nowrap;
   }
 
   .vault-package-icon-button,
@@ -764,41 +874,6 @@
     font-size: 14px;
   }
 
-  .privacy-setting-card {
-    max-width: 1000px;
-    margin: 0 0 16px;
-    padding: 12px 14px;
-    background: var(--bg-panel);
-    border: 1px solid var(--border-dim);
-    border-radius: 8px;
-  }
-
-  .privacy-toggle {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    cursor: pointer;
-  }
-
-  .privacy-toggle-copy {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    min-width: 0;
-    color: var(--text-muted);
-    font-size: 12px;
-  }
-
-  .privacy-toggle-copy strong {
-    color: var(--text-bright);
-    font-size: 13px;
-  }
-
-  .privacy-toggle input {
-    flex-shrink: 0;
-  }
-
   .shortcuts-grid {
     display: flex;
     flex-direction: column;
@@ -1034,13 +1109,19 @@
   @media (max-width: 600px) {
     .vault-health-controls,
     .vault-package-grid,
+    .vault-package-row,
     .vault-package-import-row {
       grid-template-columns: 1fr !important;
     }
 
     .vault-health-actions,
-    .vault-package-import-actions {
+    .vault-package-import-actions,
+    .settings-action-row {
       grid-template-columns: 1fr;
+    }
+
+    .settings-section-description {
+      margin-left: 0;
     }
 
     .health-scorecard-grid {
@@ -1114,7 +1195,10 @@
     display: flex;
     flex-direction: column;
     gap: 0;
-    margin-top: 10px;
+    border: 1px solid var(--border-dim);
+    border-radius: 8px;
+    background: var(--bg-main);
+    overflow: hidden;
   }
 
   .maintenance-card {
@@ -1399,7 +1483,7 @@
     opacity: 0;
   }
 
-  /* Create Merged Vault layout */
+  /* Merge Vaults layout */
   .merged-vault-name-input {
     width: 100%;
     max-width: 520px;

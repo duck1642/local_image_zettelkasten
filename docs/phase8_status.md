@@ -1,6 +1,6 @@
   # LMZ Current Status
 
-Last updated: 2026-06-13
+Last updated: 2026-06-15
 
 ## Current Status
 
@@ -208,15 +208,13 @@ VSCode-friendly test launchers:
 
 ### P2 Settings / UI UX
 
-- Redesign workspace/vault/maintenance settings sections for clearer state and actions.
+- Standardize Settings panel widths; current live audit found General at 600px, Workspace/Vaults/Maintenance at 900px, and Shortcuts at 1000px.
 - Make path state explicit: active, valid, missing, relocated, synced-from-another-machine risk.
 - Fix confusing input boxes in workspace/vault/settings/maintenance panels.
 - Keep Settings polish tied to behavior fixes; avoid broad visual-only rewrites unless the behavior is already being touched.
 - Keep UI polish sparse and opportunistic while behavior fixes are active.
 - Clean stale inline result state in `SettingsView.svelte` after toast migration.
-- Replace remaining Obsidian-specific maintenance copy with generic workspace/LMZ wording.
-- Do a responsive/live visual pass for the Settings maintenance panels.
-- Settings maintenance panels were split into separate top-level merge, vault health, backup/import/export, and system maintenance panels; still needs live visual smoke in the real app.
+- Consider an Obsidian-like Settings modal/shell later, but keep the current Settings panel for now.
 - Remaining polish: Review panel, fullscreen board/view, Inspector tag edges, context menu, GIF animation policy, video preview strategy.
 - Video embedding/tagging still depends on extracting sampled original video frames.
 
@@ -337,6 +335,23 @@ VSCode-friendly test launchers:
     - `VaultHealthDetailsModal.svelte`
     - `settingsApi.ts`, `settingsUtils.ts`, and `settings.css`.
   - Settings now uses tabbed sections, split maintenance panels, local icons, and reduced text-heavy actions while preserving existing API behavior.
+  - Settings Maintenance polish is implemented:
+    - shared `SettingsSection.svelte` and `SettingsActionRow.svelte` components were added for Settings-specific reuse.
+    - Merge Vaults, Vault Health, Packages, and System Maintenance use consistent section framing and shorter action labels.
+    - stale Obsidian-specific maintenance wording was replaced with generic LMZ/workspace metadata wording.
+    - package import/export/backup/restore controls were split into clearer rows while preserving existing API behavior and confirmation flows.
+  - Privacy blur is implemented as a frontend-only local privacy toggle:
+    - persisted through `localStorage` key `lmz:privacy-blur`.
+    - applied globally through the app root class and media-only CSS blur rules.
+    - placed under General -> Vault Display Settings because it affects vault/media display and is not config-backed.
+  - Settings visual audit at 1920px/fullscreen width was completed:
+    - screenshots saved under `C:\Users\BILGIS~1\AppData\Local\Temp\lmz-settings-width-audit`.
+    - confirmed width inconsistency across General, Workspace, Vaults, Maintenance, and Shortcuts.
+    - Obsidian settings references support a consistent left-aligned content column rather than full-window stretching.
+  - Verification during polish:
+    - `cd frontend; npm.cmd run check` passed.
+    - `cd frontend; npm.cmd run test:mock-vault` passed after updating selectors for current Settings labels.
+    - `git diff --check` passed.
   - Ingestion UI is split between `OnlineIngestion.svelte`, `LocalIngestion.svelte`, and shared `ingestion.css`.
   - Online queue metadata directives are implemented:
     - shared queue parser supports comments, `@artist: name`, `@platform: name`, URL groups, and `---`.

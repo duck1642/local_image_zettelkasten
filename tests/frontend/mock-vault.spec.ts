@@ -1069,11 +1069,11 @@ test('settings maintenance actions call existing endpoints and show compact stat
 
   await page.getByRole('button', { name: /Settings/ }).click();
   await page.getByRole('button', { name: 'Maintenance' }).click();
-  await page.getByRole('button', { name: 'Auth Scan' }).click();
-  await page.getByRole('button', { name: 'Rebuild Index' }).click();
-  await page.getByRole('button', { name: 'Cleanup Review' }).click();
+  await page.getByRole('button', { name: 'Scan' }).click();
+  await page.getByRole('button', { name: 'Rebuild' }).click();
+  await page.getByRole('button', { name: 'Clean' }).click();
 
-  await expect(page.locator('.maintenance-status')).toContainText(['OK (available)', 'started', 'cleaned 0, failed 0']);
+  await expect(page.locator('.settings-action-row-status')).toContainText(['OK (available)', 'started', 'cleaned 0, failed 0']);
   expect(calls).toEqual(['auth', 'metadata', 'review']);
 });
 
@@ -1122,16 +1122,17 @@ test('settings previews vault merge and runs vault health package actions', asyn
   await page.getByLabel('Merged vault name').fill('Merged Vault');
   await page.locator('.merge-vault-row').filter({ hasText: 'Default' }).getByRole('checkbox').check();
   await page.locator('.merge-vault-row').filter({ hasText: 'Archive' }).getByRole('checkbox').check();
-  await expect(page.getByRole('button', { name: 'Create Merged Vault' })).toBeDisabled();
-  await page.locator('.vault-tool-panel-first').getByRole('button', { name: 'Preview' }).click();
+  const mergeSection = page.locator('.settings-section').filter({ hasText: 'Merge Vaults' });
+  await expect(mergeSection.getByRole('button', { name: 'Create' })).toBeDisabled();
+  await mergeSection.getByRole('button', { name: 'Preview' }).click();
   await expect(page.locator('.merge-preview-box')).toContainText('Importable 4');
-  await page.getByRole('button', { name: 'Create Merged Vault' }).click();
-  await page.getByRole('button', { name: 'Create', exact: true }).click();
+  await mergeSection.getByRole('button', { name: 'Create' }).click();
+  await page.getByLabel('Merge Vaults').getByRole('button', { name: 'Create' }).click();
   await expect(page.getByText('Merged Vault Created')).toBeVisible();
 
-  await page.getByRole('button', { name: 'Audit Health' }).click();
+  await page.getByRole('button', { name: 'Audit' }).click();
   await expect(page.getByText('3 issues').first()).toBeVisible();
-  await page.getByRole('button', { name: 'Repair Active Vault' }).click();
+  await page.getByRole('button', { name: 'Repair' }).click();
   await expect(page.getByText('Repair Complete')).toBeVisible();
 
   await page.getByRole('button', { name: 'Backup Vault Folder' }).click();
@@ -1219,11 +1220,11 @@ test('settings metadata rebuild shows progress only for maintenance job', async 
   await page.getByRole('button', { name: 'Maintenance' }).click();
   await expect(page.getByLabel('Metadata rebuild progress')).toHaveCount(0);
 
-  await page.getByRole('button', { name: 'Rebuild Index' }).click();
+  await page.getByRole('button', { name: 'Rebuild' }).click();
   await expect(page.getByLabel('Metadata rebuild progress')).toBeVisible();
-  await expect(page.locator('.maintenance-status').nth(1)).toContainText('40 / 100');
+  await expect(page.locator('.settings-action-row-status').nth(1)).toContainText('40 / 100');
   await expect(page.locator('.metadata-progress-fill')).toHaveAttribute('style', /40%/);
-  await expect(page.locator('.maintenance-status').nth(1)).toContainText('completed', { timeout: 3000 });
+  await expect(page.locator('.settings-action-row-status').nth(1)).toContainText('completed', { timeout: 3000 });
   await expect(page.getByLabel('Metadata rebuild progress')).toHaveCount(0);
 });
 
