@@ -28,6 +28,16 @@
   type QueueParsePreview = { count: number; groups: QueueParseGroup[]; warnings: QueueParseWarning[] };
   type QueueDirectiveKind = 'artist' | 'platform';
   type QueueDirectiveSuggestion = { value: string; detail?: string };
+  type MonitorLogEntry = {
+    id?: number;
+    timestamp: string;
+    level: 'INFO' | 'WARNING' | 'ERROR' | 'CRITICAL' | 'DEBUG' | 'OTHER';
+    message: string;
+    platform: string;
+    raw?: string;
+    isRaw?: boolean;
+    extras?: Record<string, any>;
+  };
 
   let currentQueue: QueueName = 'normal';
   let queueContent = '';
@@ -63,7 +73,7 @@
   let directiveSuggestionsListEl: HTMLDivElement;
   let monitorLogIdCounter = 0;
 
-  let monitorLogs: any[] = [];
+  let monitorLogs: MonitorLogEntry[] = [];
   let logSource: EventSource | null = null;
   let logReconnectTimer: number | null = null;
   let logReconnectAttempts = 0;
@@ -75,6 +85,8 @@
   const DEFAULT_EDITOR_HEIGHT = 280;
   const MIN_EDITOR_HEIGHT = 120;
   const MIN_MONITOR_HEIGHT = 120;
+  const MONITOR_LEVELS = new Set(['INFO', 'WARNING', 'ERROR', 'CRITICAL', 'DEBUG']);
+  const MONITOR_HIDDEN_EXTRA_KEYS = new Set(['timestamp', 'level', 'module', 'message', 'platform']);
 
   let currentRuntimeSessionKey = '';
 
@@ -112,20 +124,20 @@
       logReconnectTimer = null;
     }
     if (logSource) logSource.close();
-    logSource = new EventSource(apiUrl('/api/logs?filename=ingest_online.jsonl'));
+    logSource = new EventSource(apiUrl('/api/logs?filename=ingest_online.jsonl&source=vault'));
     logSource.onmessage = (e) => {
       logReconnectAttempts = 0;
+      const entry = parseMonitorLog(e.data);
+      appendMonitorLog(entry);
       try {
-        const entry = JSON.parse(e.data);
-        appendMonitorLog(entry);
         if (entry.message && entry.message.includes('Ingestion cycle complete')) {
           running = false;
           fetchStats();
           if (!isDirty) loadQueue(currentQueue);
           window.dispatchEvent(new CustomEvent('lmz:vault-changed'));
         }
-      } catch {
-        // ignore parse errors
+      } catch (error) {
+        uiLog('ERROR', 'Failed to handle ingestion monitor event', { error: String(error) });
       }
     };
     logSource.onerror = () => {
@@ -163,7 +175,67 @@
     return node.scrollHeight - node.scrollTop - node.clientHeight < 48;
   }
 
-  function appendMonitorLog(entry: any) {
+  function normalizeMonitorLevel(level: unknown): { level: MonitorLogEntry['level']; originalLevel: string } {
+    const originalLevel = String(level || '').trim().toUpperCase();
+    if (!originalLevel) return { level: 'OTHER', originalLevel: '' };
+    if (MONITOR_LEVELS.has(originalLevel)) {
+      return { level: originalLevel as MonitorLogEntry['level'], originalLevel };
+    }
+    return { level: 'OTHER', originalLevel };
+  }
+
+  function extractMonitorExtras(entry: Record<string, any>): Record<string, any> {
+    const extras: Record<string, any> = {};
+    for (const [key, value] of Object.entries(entry)) {
+      if (!MONITOR_HIDDEN_EXTRA_KEYS.has(key) && key !== 'raw' && key !== 'isRaw' && key !== 'extras') {
+        extras[key] = value;
+      }
+    }
+    return extras;
+  }
+
+  function parseMonitorLog(raw: string): MonitorLogEntry {
+    try {
+      const parsed = JSON.parse(raw);
+      const normalized = normalizeMonitorLevel(parsed.level);
+      const extras = extractMonitorExtras(parsed);
+      if (normalized.level === 'OTHER' && normalized.originalLevel) {
+        extras.original_level = normalized.originalLevel;
+      }
+      return {
+        timestamp: parsed.timestamp || '',
+        level: normalized.level,
+        message: parsed.message || '',
+        platform: parsed.platform || '',
+        raw,
+        extras
+      };
+    } catch {
+      return {
+        timestamp: '',
+        level: 'OTHER',
+        message: raw,
+        platform: '',
+        raw,
+        isRaw: true
+      };
+    }
+  }
+
+  function platformLabel(platform: string) {
+    const value = (platform || '').trim();
+    if (!value) return '';
+    if (value === 'generic' || value === 'other') return 'OTHER URL';
+    return value.toUpperCase();
+  }
+
+  function formatMonitorExtraValue(value: any): string {
+    let str = typeof value === 'string' ? value : JSON.stringify(value);
+    if (str.length > 80) str = str.substring(0, 77) + '...';
+    return str;
+  }
+
+  function appendMonitorLog(entry: MonitorLogEntry) {
     entry.id = monitorLogIdCounter++;
     const shouldScroll = !monitorContainer || isNearBottom(monitorContainer);
     monitorLogs.push(entry);
@@ -788,9 +860,16 @@
       {#each monitorLogs as log (log.id)}
         <div class="log-line">
           <span class="time">{log.timestamp?.split(' ')[1] || log.timestamp || ''}</span>
-          <span class="level {(log.level || 'INFO').toLowerCase()}">{log.level || 'INFO'}</span>
-          <span class="platform-tag {log.platform ? log.platform.toLowerCase() : ''}">{log.platform ? `[${log.platform.toUpperCase()}]` : ''}</span>
+          <span class="level {log.level.toLowerCase()}">{log.level}</span>
+          <span class="platform-tag {log.platform ? log.platform.toLowerCase() : ''}">{log.platform ? `[${platformLabel(log.platform)}]` : ''}</span>
           <span class="msg">{log.message?.trim()}</span>
+          {#if log.extras && Object.keys(log.extras).length > 0}
+            <span class="extras">
+              {#each Object.entries(log.extras) as [key, value]}
+                <span class="extra-pair"><span class="extra-key">{key}</span>=<span class="extra-val">{formatMonitorExtraValue(value)}</span></span>
+              {/each}
+            </span>
+          {/if}
         </div>
       {/each}
       {#if monitorLogs.length === 0}

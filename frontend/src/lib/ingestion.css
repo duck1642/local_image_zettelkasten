@@ -532,8 +532,11 @@ textarea:focus {
 }
 
 .level.info { color: #58a6ff; }
+.level.debug { color: #8b949e; }
 .level.warning { color: var(--accent-warning); }
 .level.error { color: var(--accent-danger); }
+.level.critical { color: var(--accent-danger); }
+.level.other { color: #d2a8ff; }
 
 .platform-tag {
   font-weight: bold;
@@ -542,7 +545,30 @@ textarea:focus {
   display: inline-block;
 }
 
+.platform-tag.youtube { color: #ff4a4a; }
+.platform-tag.pixiv { color: #0096fa; }
+.platform-tag.x { color: #1da1f2; }
+.platform-tag.instagram { color: #e1306c; }
+.platform-tag.pinterest { color: #e60023; }
+
 .msg { color: #8b949e; }
+
+.extras {
+  color: #6e7681;
+  margin-left: 8px;
+}
+
+.extra-pair {
+  margin-right: 8px;
+}
+
+.extra-key {
+  color: #8b949e;
+}
+
+.extra-val {
+  color: #c9d1d9;
+}
 
 .empty-monitor {
   color: #30363d;

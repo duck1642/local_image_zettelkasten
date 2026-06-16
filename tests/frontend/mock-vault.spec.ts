@@ -1085,6 +1085,51 @@ test('drop request does not auto-start local ingestion', async ({ page }) => {
   expect(localStartCalls).toBe(0);
 });
 
+test('online ingestion monitor preserves error and unknown log levels', async ({ page }) => {
+  await openMockVault(page, {
+    logEntriesForStream: (url) => {
+      if (url.searchParams.get('filename') === 'ingest_online.jsonl') {
+        return [
+          {
+            timestamp: '2026-06-16 11:41:45',
+            level: 'ERROR',
+            message: 'Download permanently failed',
+            platform: 'pinterest',
+            error: 'HTTP 403'
+          },
+          {
+            timestamp: '2026-06-16 11:41:46',
+            level: 'CRITICAL',
+            message: 'Worker crashed',
+            platform: 'pixiv',
+            run_id: 'run-monitor'
+          },
+          {
+            timestamp: '2026-06-16 11:41:47',
+            level: 'NOTICE',
+            message: 'Custom ingest level',
+            platform: 'x'
+          },
+          'raw ingest monitor line'
+        ];
+      }
+      return defaultMockLogs();
+    }
+  });
+
+  await page.getByRole('button', { name: /Ingestion/ }).click();
+  const monitor = page.locator('.monitor-logs');
+
+  await expect(monitor.locator('.level.error')).toContainText('ERROR');
+  await expect(monitor.locator('.level.critical')).toContainText('CRITICAL');
+  await expect(monitor.locator('.level.other')).toHaveCount(2);
+  await expect(monitor.locator('.platform-tag.pinterest')).toContainText('[PINTEREST]');
+  await expect(monitor.locator('.platform-tag.pixiv')).toContainText('[PIXIV]');
+  await expect(monitor).toContainText('original_level=NOTICE');
+  await expect(monitor).toContainText('raw ingest monitor line');
+  await expect(monitor).toContainText('HTTP 403');
+});
+
 test('local ingest identity controls use artist suggestions and platform dropdown', async ({ page }) => {
   let startPayload: any = null;
   await openMockVault(page, {
