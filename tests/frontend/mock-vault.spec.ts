@@ -71,6 +71,36 @@ async function fulfillJson(route: Route, body: unknown, status = 200) {
   await route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 }
 
+type MockLogEntry = string | Record<string, unknown>;
+
+function defaultMockLogs(): MockLogEntry[] {
+  return [
+    {
+      timestamp: '2026-06-16 10:00:00',
+      level: 'CRITICAL',
+      module: 'system',
+      message: 'Disk almost full',
+      platform: 'Pixiv',
+      run_id: 'run-42'
+    },
+    {
+      timestamp: '2026-06-16 10:00:01',
+      level: 'NOTICE',
+      module: 'custom',
+      message: 'Custom level visible',
+      platform: 'X',
+      trace_id: 'trace-42'
+    },
+    'raw console line'
+  ];
+}
+
+function logSseBody(entries: MockLogEntry[]) {
+  return entries
+    .map((entry) => `data: ${typeof entry === 'string' ? entry : JSON.stringify(entry)}\n\n`)
+    .join('');
+}
+
 async function installMockVaultApi(
   page: Page,
   options: {
@@ -84,6 +114,9 @@ async function installMockVaultApi(
     metadataStatusSequence?: unknown[];
     onWorkspaceAction?: (action: 'add' | 'active', payload?: any) => Promise<void> | void;
     onVaultAction?: (action: 'merge-preview' | 'merge' | 'health' | 'repair' | 'backup' | 'export' | 'import-preview' | 'import' | 'restore-preview' | 'restore', payload?: any) => Promise<void> | void;
+    logClearFails?: boolean;
+    onLogStream?: (url: URL) => Promise<void> | void;
+    logEntriesForStream?: (url: URL) => MockLogEntry[];
   } = {}
 ) {
   let items = cloneItems();
@@ -509,7 +542,38 @@ async function installMockVaultApi(
     return fulfillJson(route, { items: list });
   });
   await page.route('**/api/logs**', async (route) => {
-    await route.fulfill({ status: 200, contentType: 'text/event-stream', body: '' });
+    const request = route.request();
+    const url = new URL(request.url());
+    if (url.pathname === '/api/logs/ui') {
+      return fulfillJson(route, { status: 'ok' });
+    }
+    if (url.pathname === '/api/logs/location') {
+      const source = url.searchParams.get('source') || 'active';
+      const mode = source === 'console' ? 'console' : source === 'startup' ? 'startup' : 'vault';
+      return fulfillJson(route, {
+        mode,
+        label: mode === 'console' ? 'Console' : mode === 'vault' ? 'Vault logs: Default' : 'Startup logs',
+        active_mode: 'vault',
+        vault_available: true,
+        available_sources: ['startup', 'vault', 'console']
+      });
+    }
+    if (url.pathname === '/api/logs/clear') {
+      if (options.logClearFails) {
+        return fulfillJson(route, { detail: 'clear failed' }, 500);
+      }
+      return fulfillJson(route, { status: 'success' });
+    }
+    if (url.pathname === '/api/logs/open') {
+      return fulfillJson(route, { status: 'success' });
+    }
+    if (url.pathname === '/api/logs') {
+      await options.onLogStream?.(url);
+      const entries = options.logEntriesForStream?.(url) || defaultMockLogs();
+      await route.fulfill({ status: 200, contentType: 'text/event-stream', body: logSseBody(entries) });
+      return;
+    }
+    return fulfillJson(route, { detail: 'not found' }, 404);
   });
   await page.route('**/api/queue/actions/retry-failed', async (route) => fulfillJson(route, {
     status: 'success',
@@ -698,7 +762,6 @@ async function installMockVaultApi(
   });
   await page.route('**/api/local-ingest/retry-failed', async (route) => fulfillJson(route, { status: 'success', queued: 0, phase: 'idle' }));
   await page.route('**/api/local-ingest/drop-intake', async (route) => fulfillJson(route, { detail: 'unused in browser mock' }, 404));
-  await page.route('**/api/logs/ui', async (route) => fulfillJson(route, { status: 'ok' }));
   await page.route('**/mock-vault/assets/**', async (route) => {
     const assetName = new URL(route.request().url()).pathname.split('/').pop() || 'mock.svg';
     await route.fulfill({
@@ -733,6 +796,9 @@ async function openMockVault(
     onItemPatch?: (payload: any) => Promise<void> | void;
     onWorkspaceAction?: (action: 'add' | 'active', payload?: any) => Promise<void> | void;
     onVaultAction?: (action: 'merge-preview' | 'merge' | 'health' | 'repair' | 'backup' | 'export' | 'import-preview' | 'import' | 'restore-preview' | 'restore', payload?: any) => Promise<void> | void;
+    logClearFails?: boolean;
+    onLogStream?: (url: URL) => Promise<void> | void;
+    logEntriesForStream?: (url: URL) => MockLogEntry[];
   } = {}
 ) {
   await installMockVaultApi(page, options);
@@ -1057,6 +1123,102 @@ test('ram footer handles available and unavailable states', async ({ page }) => 
   await openMockVault(failingPage, { memoryFails: true });
   await expect(failingPage.locator('.ram-status')).toContainText('RAM: unavailable');
   await failingPage.close();
+});
+
+test('app logs parse JSONL, raw fallback, levels, and displayed-field search', async ({ page }) => {
+  await openMockVault(page);
+  await page.getByRole('button', { name: /App Logs/ }).click();
+
+  await expect(page.locator('.log-output')).toContainText('Disk almost full');
+  await expect(page.locator('.log-output')).toContainText('CRITICAL');
+  await expect(page.locator('.log-output')).toContainText('Custom level visible');
+  await expect(page.locator('.log-output')).toContainText('OTHER');
+  await expect(page.locator('.log-output')).toContainText('original_level=NOTICE');
+  await expect(page.locator('.log-output')).toContainText('raw console line');
+
+  await page.getByPlaceholder('Filter loaded logs...').fill('trace-42');
+  await expect(page.locator('.log-output')).toContainText('Custom level visible');
+  await expect(page.locator('.log-output')).not.toContainText('Disk almost full');
+
+  await page.getByPlaceholder('Filter loaded logs...').fill('Pixiv');
+  await expect(page.locator('.log-output')).toContainText('Disk almost full');
+
+  await page.getByPlaceholder('Filter loaded logs...').fill('2026-06-16 10:00:00');
+  await expect(page.locator('.log-output')).toContainText('Disk almost full');
+});
+
+test('app logs clear uses confirmation and preserves rows when backend fails', async ({ page }) => {
+  page.on('dialog', async (dialog) => dialog.accept());
+  await openMockVault(page, { logClearFails: true });
+  await page.getByRole('button', { name: /App Logs/ }).click();
+
+  await expect(page.locator('.log-output')).toContainText('Disk almost full');
+  await page.getByRole('button', { name: 'Clear' }).click();
+  await expect(page.getByRole('dialog', { name: /Clear vault logs/i })).toBeVisible();
+  await expect(page.getByRole('dialog')).toContainText('vault logs');
+  await page.getByRole('button', { name: 'Clear logs' }).click();
+  await expect(page.locator('.log-output')).toContainText('Disk almost full');
+});
+
+test('app logs source-specific files and console source use console output', async ({ page }) => {
+  const streamRequests: string[] = [];
+  await openMockVault(page, {
+    onLogStream: (url) => {
+      streamRequests.push(`${url.searchParams.get('source')}:${url.searchParams.get('filename')}`);
+    },
+    logEntriesForStream: (url) => {
+      if (url.searchParams.get('source') === 'console') {
+        return ['console output line'];
+      }
+      return defaultMockLogs();
+    }
+  });
+
+  await page.getByRole('button', { name: /App Logs/ }).click();
+  await expect(page.getByLabel('File')).toContainText('Local ingest');
+
+  await page.getByLabel('Source').selectOption('startup');
+  await expect(page.getByLabel('File')).not.toContainText('Local ingest');
+  await expect(page.getByLabel('File')).not.toContainText('Console output');
+
+  await page.getByLabel('Source').selectOption('console');
+  await expect(page.getByLabel('File')).toBeDisabled();
+  await expect(page.getByLabel('File')).toContainText('Console output');
+  await expect(page.locator('.log-output')).toContainText('console output line');
+  expect(streamRequests).toContain('console:console.log');
+
+  await page.getByRole('button', { name: 'Clear' }).click();
+  await expect(page.getByRole('dialog', { name: /Clear console output/i })).toBeVisible();
+});
+
+test('app logs switching source and file keeps only latest stream rows', async ({ page }) => {
+  let delayedInitial = false;
+  await openMockVault(page, {
+    onLogStream: async (url) => {
+      if (!delayedInitial && url.searchParams.get('filename') === 'system.jsonl') {
+        delayedInitial = true;
+        await new Promise((resolve) => setTimeout(resolve, 350));
+      }
+    },
+    logEntriesForStream: (url) => {
+      const filename = url.searchParams.get('filename');
+      const source = url.searchParams.get('source');
+      if (filename === 'svelte.jsonl') {
+        return [{ timestamp: '2026-06-16 10:10:00', level: 'INFO', module: 'svelte', message: `Frontend stream ${source}`, platform: '' }];
+      }
+      return [{ timestamp: '2026-06-16 10:09:00', level: 'INFO', module: 'system', message: `Backend stream ${source}`, platform: '' }];
+    }
+  });
+
+  await page.getByRole('button', { name: /App Logs/ }).click();
+  await page.getByLabel('File').selectOption('svelte.jsonl');
+  await expect(page.locator('.log-output')).toContainText('Frontend stream vault');
+  await page.waitForTimeout(500);
+  await expect(page.locator('.log-output')).not.toContainText('Backend stream');
+
+  await page.getByLabel('Source').selectOption('startup');
+  await expect(page.locator('.log-output')).toContainText('Frontend stream startup');
+  await expect(page.locator('.log-output')).not.toContainText('Frontend stream vault');
 });
 
 test('settings maintenance actions call existing endpoints and show compact statuses', async ({ page }) => {

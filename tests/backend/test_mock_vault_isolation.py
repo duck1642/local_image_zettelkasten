@@ -2971,6 +2971,28 @@ def test_stream_logs_tail_then_heartbeat_and_truncate_recovery(monkeypatch, tmp_
     assert "keep-alive" in second_text
     assert "after-clear" in third_text
 
+    console_file = web_api._log_file_for("system.jsonl", source="console")
+    assert console_file.name == "console.log"
+    console_file.parent.mkdir(parents=True, exist_ok=True)
+    console_file.write_text("console-tail\n", encoding="utf-8")
+
+    async def _run_console():
+        response = await web_api.stream_logs("system.jsonl", source="console")
+        gen = response.body_iterator
+        first_console = await gen.__anext__()
+        await gen.aclose()
+        return first_console
+
+    console_text = asyncio.run(_run_console())
+    console_text = console_text.decode() if isinstance(console_text, bytes) else str(console_text)
+    assert "console-tail" in console_text
+
+    log_file.write_text('{"message":"structured-kept"}\n', encoding="utf-8")
+    console_file.write_text("console-to-clear\n", encoding="utf-8")
+    assert web_api._clear_all_logs_sync("console") == {"status": "success"}
+    assert console_file.read_text(encoding="utf-8") == ""
+    assert "structured-kept" in log_file.read_text(encoding="utf-8")
+
 
 def test_topic_filter_not_ready_skips_disk_scan(monkeypatch, tmp_path):
     web_api, = fresh_backend(monkeypatch, tmp_path, "web_api")

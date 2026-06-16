@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy, tick } from 'svelte';
+  import ConfirmationModal from './ConfirmationModal.svelte';
   import { log as uiLog } from './logger';
   import { apiFetch, apiUrl } from './api';
   import { runtimeSessionKey } from './runtimeStore';
@@ -16,18 +17,24 @@
     platform?: string;
   }
 
+  type LogSource = 'startup' | 'vault' | 'console';
+
   let logs: LogEntry[] = [];
   let logIdCounter = 0;
   let currentFile = 'system.jsonl';
-  let logSource: 'startup' | 'vault' = 'startup';
+  let logSource: LogSource = 'startup';
   let sourceTouched = false;
   let currentMode: 'Normal' | 'Full' = 'Normal';
   let logLocationLabel = 'Startup logs';
-  let logLocationMode: 'startup' | 'vault' = 'startup';
+  let logLocationMode: LogSource = 'startup';
   let vaultLogsAvailable = false;
   let eventSource: EventSource | null = null;
   let reconnectTimer: number | null = null;
   let reconnectAttempts = 0;
+  let streamStatus: 'live' | 'reconnecting' | 'offline' = 'offline';
+  let connectionToken = 0;
+  let clearConfirmOpen = false;
+  let clearBusy = false;
   let logContainer: HTMLElement;
   let searchText = '';
   let currentRuntimeSessionKey = '';
@@ -45,25 +52,34 @@
     INFO: true,
     WARNING: true,
     ERROR: true,
+    CRITICAL: true,
+    OTHER: true,
     DEBUG: false
   };
 
-  const logFiles = [
+  const startupLogFiles = [
     { title: 'Backend', value: 'system.jsonl' },
-    { title: 'Python Stdout', value: 'terminal.log' },
     { title: 'Frontend', value: 'svelte.jsonl' },
-    { title: 'Ingest Local', value: 'ingest_local.jsonl' },
-    { title: 'Ingest Online', value: 'ingest_online.jsonl' },
-    { title: 'Review', value: 'review.jsonl' },
     { title: 'Auth', value: 'auth.jsonl' },
-    { title: 'Ingestion Audit', value: 'ingestion_audit.jsonl' },
   ];
 
-  $: logScopeLabel = logSource === 'vault' ? logLocationLabel : 'Startup logs';
-  $: displayedLogFiles = logFiles.map((file) => ({
-    ...file,
-    label: `${logScopeLabel} / ${file.value} (${file.title})`
-  }));
+  const vaultLogFiles = [
+    { title: 'Backend', value: 'system.jsonl' },
+    { title: 'Frontend', value: 'svelte.jsonl' },
+    { title: 'Local ingest', value: 'ingest_local.jsonl' },
+    { title: 'Online ingest', value: 'ingest_online.jsonl' },
+    { title: 'Review', value: 'review.jsonl' },
+    { title: 'Auth', value: 'auth.jsonl' },
+    { title: 'Audit', value: 'ingestion_audit.jsonl' },
+  ];
+
+  const consoleFile = { title: 'Console output', value: 'console.log' };
+
+  $: activeLogFiles = logSource === 'startup' ? startupLogFiles : logSource === 'vault' ? vaultLogFiles : [consoleFile];
+  $: effectiveFile = logSource === 'console' ? 'console.log' : currentFile;
+  $: logScopeLabel = logSource === 'console' ? 'Console' : logSource === 'vault' ? logLocationLabel : 'Startup logs';
+  $: clearTargetLabel = logSource === 'console' ? 'console output' : logSource === 'vault' ? 'vault logs' : 'startup logs';
+  $: streamStatusLabel = streamStatus === 'live' ? 'Live' : streamStatus === 'reconnecting' ? 'Reconnecting' : 'Offline';
 
   // Fields to exclude from inline extras (already shown in columns)
   const HIDDEN_EXTRA_KEYS = new Set(['timestamp', 'level', 'module', 'message', 'platform']);
@@ -78,9 +94,18 @@
     return extras;
   }
 
+  function normalizeLevel(level: unknown) {
+    const rawLevel = String(level || '').trim().toUpperCase();
+    if (!rawLevel) return { level: 'OTHER', originalLevel: '' };
+    if (Object.prototype.hasOwnProperty.call(levelFilters, rawLevel)) {
+      return { level: rawLevel, originalLevel: rawLevel };
+    }
+    return { level: 'OTHER', originalLevel: rawLevel };
+  }
+
   // Get module name from the current file to suppress redundant display
   function currentFileModule(): string {
-    return currentFile.replace('.jsonl', '').replace('.log', '');
+    return effectiveFile.replace('.jsonl', '').replace('.log', '');
   }
 
   function shouldShowModule(mod: string): boolean {
@@ -125,36 +150,62 @@
 
   function scheduleReconnect() {
     if (reconnectTimer !== null) return;
+    streamStatus = 'reconnecting';
     reconnectTimer = window.setTimeout(() => {
       reconnectTimer = null;
       connectToLogs();
     }, nextReconnectDelayMs());
   }
 
+  function filesForSource(source: LogSource) {
+    if (source === 'startup') return startupLogFiles;
+    if (source === 'vault') return vaultLogFiles;
+    return [consoleFile];
+  }
+
   async function connectToLogs() {
+    const token = ++connectionToken;
     if (reconnectTimer !== null) {
         clearTimeout(reconnectTimer);
         reconnectTimer = null;
     }
-    if (eventSource) eventSource.close();
+    if (eventSource) {
+      eventSource.close();
+      eventSource = null;
+    }
+    streamStatus = 'reconnecting';
     logs = [];
     await loadLogLocation();
+    if (token !== connectionToken) return;
 
-    eventSource = new EventSource(apiUrl(`/api/logs?filename=${currentFile}&source=${logSource}`));
-    eventSource.onmessage = (e) => {
+    const nextSource = new EventSource(apiUrl(`/api/logs?filename=${effectiveFile}&source=${logSource}`));
+    eventSource = nextSource;
+    nextSource.onopen = () => {
+      if (token !== connectionToken) return;
       reconnectAttempts = 0;
+      streamStatus = 'live';
+    };
+    nextSource.onmessage = (e) => {
+      if (token !== connectionToken) return;
+      reconnectAttempts = 0;
+      streamStatus = 'live';
       try {
         const raw = e.data;
         const parsed = JSON.parse(raw);
+        const normalized = normalizeLevel(parsed.level);
+        const extras = extractExtras(parsed);
+        if (normalized.level === 'OTHER' && normalized.originalLevel) {
+          extras.original_level = normalized.originalLevel;
+        }
         const entry: LogEntry = {
           timestamp: parsed.timestamp || '',
-          level: parsed.level || '',
+          level: normalized.level,
           module: parsed.module || '',
           message: parsed.message || '',
           platform: parsed.platform || '',
           raw,
           isRaw: false,
-          extras: extractExtras(parsed)
+          extras
         };
 
         appendLog(entry);
@@ -171,8 +222,10 @@
           appendLog(entry);
       }
     };
-    eventSource.onerror = () => {
-        eventSource?.close();
+    nextSource.onerror = () => {
+        if (token !== connectionToken) return;
+        nextSource.close();
+        if (eventSource === nextSource) eventSource = null;
         scheduleReconnect();
     };
   }
@@ -190,8 +243,8 @@
       if (!sourceTouched) {
         logSource = payload.active_mode === 'vault' ? 'vault' : 'startup';
       }
-      logLocationMode = payload.mode === 'vault' ? 'vault' : 'startup';
-      logLocationLabel = payload.label || (payload.mode === 'vault' ? 'Vault logs' : 'Startup logs');
+      logLocationMode = payload.mode === 'console' ? 'console' : payload.mode === 'vault' ? 'vault' : 'startup';
+      logLocationLabel = payload.label || (payload.mode === 'console' ? 'Console' : payload.mode === 'vault' ? 'Vault logs' : 'Startup logs');
     } catch {
       vaultLogsAvailable = false;
       logSource = 'startup';
@@ -201,6 +254,7 @@
   }
 
   function reconnectForRuntimeSwitch() {
+    connectionToken += 1;
     if (reconnectTimer !== null) {
       clearTimeout(reconnectTimer);
       reconnectTimer = null;
@@ -210,6 +264,7 @@
     logs = [];
     logIdCounter = 0;
     reconnectAttempts = 0;
+    streamStatus = 'offline';
     sourceTouched = false;
     connectToLogs();
   }
@@ -233,37 +288,57 @@
 
   async function openExternal() {
     try {
-      await apiFetch(`/api/logs/open?filename=${currentFile}&source=${logSource}`, { method: 'POST' });
-    } catch (e) { console.error(e); }
+      const response = await apiFetch(`/api/logs/open?filename=${effectiveFile}&source=${logSource}`, { method: 'POST' });
+      if (!response.ok) throw new Error(await response.text());
+    } catch (e) {
+      console.error(e);
+      alert('Failed to open log file.');
+    }
   }
 
-  async function clearLogs() {
-    if (!confirm("Are you sure you want to clear all log files? This cannot be undone.")) return;
+  function requestClearLogs() {
+    clearConfirmOpen = true;
+  }
+
+  async function confirmClearLogs() {
+    if (clearBusy) return;
+    clearBusy = true;
     try {
-        await apiFetch(`/api/logs/clear?source=${logSource}`, { method: 'POST' });
+        const response = await apiFetch(`/api/logs/clear?source=${logSource}`, { method: 'POST' });
+        if (!response.ok) throw new Error(await response.text());
         logs = [];
-        uiLog('INFO', 'All logs cleared by user.');
+        clearConfirmOpen = false;
+        uiLog('INFO', 'Logs cleared by user.', { source: logSource });
         connectToLogs();
     } catch (e) {
         console.error(e);
         alert("Failed to clear logs.");
+    } finally {
+        clearBusy = false;
     }
   }
 
   function handleFileChange() {
-    uiLog('DEBUG', `Switched log view to ${currentFile}`);
+    uiLog('DEBUG', `Switched log view to ${effectiveFile}`);
+    streamStatus = 'offline';
     connectToLogs();
   }
 
   function handleSourceChange() {
     sourceTouched = true;
+    const nextFiles = filesForSource(logSource);
+    const allowedFiles = nextFiles.map((file) => file.value);
+    if (!allowedFiles.includes(currentFile)) {
+      currentFile = nextFiles[0]?.value || 'system.jsonl';
+    }
+    streamStatus = 'offline';
     connectToLogs();
   }
 
   function handleGlobalRefresh(event: Event) {
     const detail = (event as CustomEvent).detail || {};
     if (detail.tab !== 'logs') return;
-    uiLog('INFO', 'Logs view refresh requested', { file: currentFile });
+    uiLog('INFO', 'Logs view refresh requested', { file: effectiveFile, source: logSource });
     connectToLogs();
   }
 
@@ -282,11 +357,25 @@
   // Filtered logs based on level and search
   $: filteredLogs = logs.filter(log => {
     // Raw lines always pass level filter
-    if (!log.isRaw && log.level && !levelFilters[log.level.toUpperCase()]) return false;
+    if (!log.isRaw) {
+      const level = log.level?.toUpperCase() || 'OTHER';
+      if (!levelFilters[level]) return false;
+    }
     // Search filter
     if (searchText) {
       const q = searchText.toLowerCase();
-      const haystack = (log.message + ' ' + (log.raw || '')).toLowerCase();
+      const extras = log.extras
+        ? Object.entries(log.extras).map(([key, value]) => `${key} ${formatExtraValue(value)}`).join(' ')
+        : '';
+      const haystack = [
+        log.timestamp,
+        log.level,
+        log.module,
+        log.platform,
+        log.message,
+        extras,
+        log.raw || ''
+      ].join(' ').toLowerCase();
       if (!haystack.includes(q)) return false;
     }
     return true;
@@ -298,34 +387,58 @@
   });
   onDestroy(() => {
     window.removeEventListener('lmz:refresh', handleGlobalRefresh);
+    connectionToken += 1;
     eventSource?.close();
     if (reconnectTimer !== null) clearTimeout(reconnectTimer);
   });
 </script>
 
 <div class="logs-container">
-    <div class="toolbar">
-        <select bind:value={logSource} on:change={handleSourceChange}>
+    <div class="logs-toolbar">
+      <div class="toolbar-row primary-row">
+        <label class="toolbar-field source-field">
+          <span>Source</span>
+          <select bind:value={logSource} on:change={handleSourceChange}>
             <option value="startup">Startup logs</option>
             {#if vaultLogsAvailable || logSource === 'vault'}
                 <option value="vault">Vault logs</option>
             {/if}
-        </select>
+            <option value="console">Console</option>
+          </select>
+        </label>
 
-        <select bind:value={currentFile} on:change={handleFileChange}>
-            {#each displayedLogFiles as file}
-                <option value={file.value}>{file.label}</option>
+        <label class="toolbar-field file-field">
+          <span>File</span>
+          <select bind:value={currentFile} on:change={handleFileChange} disabled={logSource === 'console'}>
+            {#each activeLogFiles as file}
+                <option value={file.value}>{file.title}</option>
             {/each}
-        </select>
+          </select>
+        </label>
 
-        <select bind:value={currentMode}>
+        <label class="toolbar-field view-field">
+          <span>View</span>
+          <select bind:value={currentMode}>
             <option value="Normal">Normal View</option>
             <option value="Full">Full (Raw JSON)</option>
-        </select>
+          </select>
+        </label>
 
+        <span class="stream-status {streamStatus}">{streamStatusLabel}</span>
+        <span class="log-location" title={logScopeLabel}>{logScopeLabel}</span>
+
+        <div class="toolbar-actions">
+          <button type="button" on:click={connectToLogs}>Reload</button>
+          <button type="button" on:click={openExternal}>Open</button>
+          <button type="button" class="danger-ghost" on:click={requestClearLogs}>Clear</button>
+        </div>
+      </div>
+
+      <div class="toolbar-row secondary-row">
         <div class="level-filters">
             {#each Object.entries(levelFilters) as [level, active]}
                 <button
+                    type="button"
                     class="level-pill {level.toLowerCase()}"
                     class:active={active}
                     on:click={() => toggleLevel(level)}
@@ -336,16 +449,12 @@
         <input
             class="search-box"
             type="text"
-            placeholder="Search logs..."
+            placeholder="Filter loaded logs..."
             bind:value={searchText}
         />
 
-        <div class="spacer"></div>
-        <span class="log-location">{logLocationLabel}</span>
-
-        <button on:click={connectToLogs}>Reload</button>
-        <button on:click={clearLogs}>Clear Logs</button>
-        <button on:click={openExternal}>Open Externally</button>
+        <span class="log-hint">Showing streamed/tail rows only.</span>
+      </div>
     </div>
 
     <div class="log-output sleek-scrollbar" bind:this={logContainer}>
@@ -380,6 +489,18 @@
     </div>
 </div>
 
+<ConfirmationModal
+  open={clearConfirmOpen}
+  title={`Clear ${clearTargetLabel}?`}
+  confirmLabel={clearBusy ? 'Clearing...' : 'Clear logs'}
+  danger={true}
+  busy={clearBusy}
+  on:cancel={() => (clearConfirmOpen = false)}
+  on:confirm={confirmClearLogs}
+>
+  <p>This will clear the current {clearTargetLabel} files. This cannot be undone.</p>
+</ConfirmationModal>
+
 <style>
     .logs-container {
         flex-grow: 1;
@@ -390,43 +511,119 @@
         overflow: hidden;
     }
 
-    .log-location {
-        color: var(--text-muted);
-        font-size: 12px;
-        white-space: nowrap;
-    }
-
-    .toolbar {
-        display: flex;
+    .logs-toolbar {
+        display: grid;
         gap: 8px;
-        align-items: center;
         margin-bottom: 10px;
         background: var(--bg-panel);
-        padding: 6px 12px;
+        padding: 8px 10px;
         border-radius: 8px;
         border: 1px solid var(--border-dim);
+    }
+
+    .toolbar-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+    }
+
+    .primary-row {
+        flex-wrap: nowrap;
+    }
+
+    .secondary-row {
         flex-wrap: wrap;
     }
 
-    .spacer { flex-grow: 1; }
+    .toolbar-field {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+    }
+
+    .toolbar-field span {
+        color: var(--text-muted);
+        font-size: 11px;
+        font-weight: 600;
+        white-space: nowrap;
+    }
+
+    .source-field select { width: 128px; }
+    .file-field select { width: 148px; }
+    .view-field select { width: 148px; }
 
     select {
         background: var(--bg-input);
         border: 1px solid var(--border-dim);
         color: var(--text-main);
-        padding: 4px 8px;
+        height: 28px;
+        padding: 3px 8px;
         border-radius: 6px;
         font-size: 12px;
+    }
+
+    .stream-status {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 88px;
+        height: 24px;
+        padding: 0 10px;
+        border: 1px solid var(--border-dim);
+        border-radius: 999px;
+        color: var(--text-muted);
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0;
+        text-transform: uppercase;
+    }
+
+    .stream-status.live {
+        border-color: rgba(63, 185, 80, 0.45);
+        color: #3fb950;
+        background: rgba(63, 185, 80, 0.08);
+    }
+
+    .stream-status.reconnecting {
+        border-color: rgba(210, 153, 34, 0.45);
+        color: var(--accent-warning);
+        background: rgba(210, 153, 34, 0.08);
+    }
+
+    .stream-status.offline {
+        border-color: rgba(139, 148, 158, 0.28);
+        color: #8b949e;
+        background: rgba(139, 148, 158, 0.06);
+    }
+
+    .log-location {
+        flex: 1;
+        min-width: 120px;
+        overflow: hidden;
+        color: var(--text-muted);
+        font-size: 12px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .toolbar-actions {
+        display: flex;
+        gap: 6px;
+        margin-left: auto;
     }
 
     .search-box {
         background: var(--bg-input);
         border: 1px solid var(--border-dim);
         color: var(--text-main);
-        padding: 4px 10px;
+        height: 28px;
+        padding: 3px 10px;
         border-radius: 6px;
         font-size: 12px;
-        width: 160px;
+        width: min(320px, 28vw);
+        min-width: 180px;
         outline: none;
     }
     .search-box::placeholder { color: #484f58; }
@@ -435,6 +632,7 @@
     .level-filters {
         display: flex;
         gap: 4px;
+        flex-wrap: wrap;
     }
 
     .level-pill {
@@ -452,7 +650,15 @@
     .level-pill.info.active { background: rgba(201, 209, 217, 0.12); color: #c9d1d9; }
     .level-pill.warning.active { background: rgba(210, 153, 34, 0.15); color: var(--accent-warning); }
     .level-pill.error.active { background: rgba(218, 54, 51, 0.15); color: var(--accent-danger); }
+    .level-pill.critical.active { background: rgba(248, 81, 73, 0.18); color: #ff7b72; }
+    .level-pill.other.active { background: rgba(139, 148, 158, 0.16); color: #8b949e; }
     .level-pill.debug.active { background: rgba(72, 79, 88, 0.2); color: #8b949e; }
+
+    .log-hint {
+        color: var(--text-muted);
+        font-size: 11px;
+        white-space: nowrap;
+    }
 
     .log-output {
         flex-grow: 1;
@@ -495,6 +701,8 @@
     .level.info { color: #c9d1d9; }
     .level.warning { color: var(--accent-warning); }
     .level.error { color: var(--accent-danger); }
+    .level.critical { color: #ff7b72; }
+    .level.other { color: #8b949e; }
     .level.debug { color: #484f58; }
     
     .message { color: #c9d1d9; }
@@ -523,8 +731,48 @@
 
     button {
         background: var(--bg-input);
+        border: 1px solid var(--border-dim);
+        color: var(--text-main);
+        border-radius: 6px;
         padding: 4px 12px;
         font-size: 11px;
         font-weight: 600;
+        cursor: pointer;
+    }
+
+    button:hover {
+        border-color: var(--border-hover);
+        color: var(--text-bright);
+    }
+
+    .danger-ghost {
+        color: #ff7b72;
+        border-color: rgba(248, 81, 73, 0.35);
+        background: rgba(248, 81, 73, 0.06);
+    }
+
+    .danger-ghost:hover {
+        border-color: rgba(248, 81, 73, 0.65);
+        background: rgba(248, 81, 73, 0.12);
+    }
+
+    @media (max-width: 980px) {
+        .primary-row {
+            flex-wrap: wrap;
+        }
+
+        .log-location {
+            flex-basis: 100%;
+            order: 10;
+        }
+
+        .toolbar-actions {
+            margin-left: 0;
+        }
+
+        .search-box {
+            width: 100%;
+            max-width: 360px;
+        }
     }
 </style>

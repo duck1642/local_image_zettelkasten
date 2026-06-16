@@ -113,7 +113,7 @@ _terminal_logging_configured = False
 def configure_terminal_logging():
     global _terminal_logging_configured
     raw_logs_dir, _ = log_dirs()
-    target_path = raw_logs_dir / "terminal.log"
+    target_path = raw_logs_dir / "console.log"
     if (
         _terminal_logging_configured
         and isinstance(sys.stdout, TerminalLogger)
@@ -128,8 +128,8 @@ def configure_terminal_logging():
         sys.stdout.close()
     if isinstance(sys.stderr, TerminalLogger):
         sys.stderr.close()
-    sys.stdout = TerminalLogger("terminal.log", original_stdout)
-    sys.stderr = TerminalLogger("terminal.log", original_stderr)
+    sys.stdout = TerminalLogger("console.log", original_stdout)
+    sys.stderr = TerminalLogger("console.log", original_stderr)
     _terminal_logging_configured = True
 
 configure_terminal_logging()
@@ -154,7 +154,7 @@ LOG_FILE_NAMES = {
     "review.jsonl": ("structured", "review.jsonl"),
     "auth.jsonl": ("structured", "auth.jsonl"),
     "ingestion_audit.jsonl": ("structured", "ingestion_audit.jsonl"),
-    "terminal.log": ("raw", "terminal.log"),
+    "console.log": ("raw", "console.log"),
 }
 
 
@@ -343,6 +343,8 @@ def _log_dirs_for_source(source: str = "active") -> tuple[Path, Path]:
         if not ctx.active_vault.root.exists():
             raise HTTPException(status_code=503, detail="Vault logs unavailable")
         return ctx.active_vault.logs_dir / "raw", ctx.active_vault.logs_dir / "structured"
+    if clean == "console":
+        return log_dirs()
     if clean == "active":
         return log_dirs()
     raise HTTPException(status_code=400, detail="Invalid log source")
@@ -353,6 +355,9 @@ def _log_file_for(filename: str, source: str = "active") -> Path:
         filename = filename.default
     if hasattr(source, "default"):
         source = source.default
+    source_name = str(source or "active").strip().lower()
+    if source_name == "console":
+        filename = "console.log"
     spec = LOG_FILE_NAMES.get(filename)
     if not spec:
         raise HTTPException(status_code=400, detail="Invalid log file")

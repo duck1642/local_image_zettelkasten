@@ -371,7 +371,7 @@ def generate_vault(args: argparse.Namespace) -> Path:
 
     for filename in LOG_FILES:
         (logs_dir / "structured" / filename).touch()
-    (logs_dir / "raw" / "terminal.log").touch()
+    (logs_dir / "raw" / "console.log").touch()
 
     rng = random.Random(args.seed)
     platforms = [value.strip() for value in args.platforms.split(",") if value.strip()]

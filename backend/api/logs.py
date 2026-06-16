@@ -84,6 +84,12 @@ async def get_logs_location(source: str = Query("active")):
         if not vault_available:
             raise HTTPException(status_code=503, detail="Vault logs unavailable")
         selected = active
+    elif source == "console":
+        selected = {
+            **active,
+            "mode": "console",
+            "label": "Console",
+        }
     elif source == "active":
         selected = active
     else:
@@ -93,7 +99,7 @@ async def get_logs_location(source: str = Query("active")):
         **selected,
         "active_mode": active["mode"],
         "vault_available": vault_available,
-        "available_sources": ["startup", "vault"] if vault_available else ["startup"],
+        "available_sources": ["startup", "vault", "console"] if vault_available else ["startup", "console"],
     }
 
 @router.post("/api/auth/scan")
@@ -130,6 +136,11 @@ async def clear_all_logs(source: str = Query("active")):
 
 def _clear_all_logs_sync(source: str = "active"):
     try:
+        if str(source or "").strip().lower() == "console":
+            log_file = _log_file_for("console.log", source="console")
+            log_file.parent.mkdir(parents=True, exist_ok=True)
+            log_file.write_text("", encoding="utf-8")
+            return {"status": "success"}
         raw_logs_dir, structured_logs_dir = _log_dirs_for_source(source)
         for folder in [raw_logs_dir, structured_logs_dir]:
             if folder.exists():

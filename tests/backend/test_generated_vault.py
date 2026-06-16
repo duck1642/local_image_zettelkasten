@@ -99,7 +99,7 @@ def test_generated_vault_smoke_and_isolation(tmp_path, monkeypatch):
         "data/vaults/default/logs/structured/ingest_local.jsonl",
         "data/vaults/default/logs/structured/ingest_online.jsonl",
         "data/vaults/default/logs/structured/ingestion_audit.jsonl",
-        "data/vaults/default/logs/raw/terminal.log",
+        "data/vaults/default/logs/raw/console.log",
     ]:
         assert (output / relative).exists()
 

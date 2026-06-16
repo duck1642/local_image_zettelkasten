@@ -199,6 +199,7 @@ secrets/
 backups/
 exports/
 .tmp/
+tmp/
 .vscode/
 .claude/
 

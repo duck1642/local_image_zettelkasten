@@ -904,7 +904,7 @@ Logs live under the active vault's `logs/` folder.
 
 Current layout:
 
-- `logs/raw/`: terminal output and raw tracebacks.
+- `logs/raw/`: console output and raw tracebacks.
 - `logs/structured/`: JSONL streams for system, frontend UI, local ingest, online ingest, auth status, review, and ingestion-audit events.
 
 Frontend logging is batched through `frontend/src/lib/logger.ts`.
