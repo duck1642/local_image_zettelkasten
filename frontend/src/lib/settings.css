@@ -1339,6 +1339,16 @@
     font-family: var(--font-mono, monospace);
   }
 
+  .delete-warning-box .warning-message,
+  .delete-warning-details {
+    display: grid;
+    gap: 6px;
+  }
+
+  .delete-warning-details {
+    color: var(--text-muted);
+  }
+
   .confirm-info-box {
     display: flex;
     align-items: flex-start;

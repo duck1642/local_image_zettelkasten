@@ -113,7 +113,7 @@ async function installMockVaultApi(
     metadataRebuildResponse?: unknown;
     metadataStatusSequence?: unknown[];
     onWorkspaceAction?: (action: 'add' | 'active', payload?: any) => Promise<void> | void;
-    onVaultAction?: (action: 'merge-preview' | 'merge' | 'health' | 'repair' | 'backup' | 'export' | 'import-preview' | 'import' | 'restore-preview' | 'restore', payload?: any) => Promise<void> | void;
+    onVaultAction?: (action: 'merge-preview' | 'merge' | 'delete' | 'health' | 'repair' | 'backup' | 'export' | 'import-preview' | 'import' | 'restore-preview' | 'restore', payload?: any) => Promise<void> | void;
     logClearFails?: boolean;
     onLogStream?: (url: URL) => Promise<void> | void;
     logEntriesForStream?: (url: URL) => MockLogEntry[];
@@ -304,6 +304,14 @@ async function installMockVaultApi(
     const utilityMatch = url.pathname.match(/\/api\/vaults\/([^/]+)\/(health|repair|backup|export)$/);
     if (url.pathname === '/api/vaults' && request.method() === 'GET') {
       return fulfillJson(route, { active: vaultActive, items: vaultItems });
+    }
+    const deleteMatch = url.pathname.match(/\/api\/vaults\/([^/]+)$/);
+    if (deleteMatch && request.method() === 'DELETE') {
+      const id = decodeURIComponent(deleteMatch[1]);
+      await options.onVaultAction?.('delete', { id, confirm: url.searchParams.get('confirm') === 'true' });
+      if (id === vaultActive) return fulfillJson(route, { detail: 'cannot delete active vault' }, 400);
+      vaultItems = vaultItems.filter((vault) => vault.id !== id);
+      return fulfillJson(route, { status: 'success', items: vaultItems });
     }
     if ((url.pathname === '/api/vaults/merge-preview' || url.pathname === '/api/vaults/merge') && request.method() === 'POST') {
       const payload = JSON.parse(request.postData() || '{}');
@@ -795,7 +803,7 @@ async function openMockVault(
     onItemsRequest?: (url: URL) => Promise<void> | void;
     onItemPatch?: (payload: any) => Promise<void> | void;
     onWorkspaceAction?: (action: 'add' | 'active', payload?: any) => Promise<void> | void;
-    onVaultAction?: (action: 'merge-preview' | 'merge' | 'health' | 'repair' | 'backup' | 'export' | 'import-preview' | 'import' | 'restore-preview' | 'restore', payload?: any) => Promise<void> | void;
+    onVaultAction?: (action: 'merge-preview' | 'merge' | 'delete' | 'health' | 'repair' | 'backup' | 'export' | 'import-preview' | 'import' | 'restore-preview' | 'restore', payload?: any) => Promise<void> | void;
     logClearFails?: boolean;
     onLogStream?: (url: URL) => Promise<void> | void;
     logEntriesForStream?: (url: URL) => MockLogEntry[];
@@ -1315,6 +1323,29 @@ test('settings registers and activates workspaces for next restart', async ({ pa
     { action: 'active', payload: { id: 'obsidian-main' } },
     { action: 'add', payload: { path: 'F:/Archive/Main', name: 'Main Vault' } }
   ]);
+});
+
+test('settings vault delete confirmation names target before confirm=true', async ({ page }) => {
+  const actions: Array<{ action: string; payload: any }> = [];
+  await openMockVault(page, {
+    onVaultAction: (action, payload) => actions.push({ action, payload })
+  });
+
+  await page.getByRole('button', { name: /Settings/ }).click();
+  await page.getByRole('button', { name: 'Vaults' }).click();
+
+  const archiveRow = page.locator('.workspace-row').filter({ hasText: 'Archive' });
+  await archiveRow.getByRole('button', { name: 'Delete' }).click();
+
+  const dialog = page.getByRole('dialog', { name: 'Delete Vault' });
+  await expect(dialog).toContainText('Permanently delete Archive?');
+  await expect(dialog).toContainText('Vault ID: archive');
+  await expect(dialog).toContainText('Items: 2');
+  await expect(dialog).toContainText('Root: C:/ObsidianVault/lmz/data/vaults/archive');
+
+  await dialog.getByRole('button', { name: 'Delete' }).click();
+  await expect(page.getByText('Archive')).toHaveCount(0);
+  expect(actions).toContainEqual({ action: 'delete', payload: { id: 'archive', confirm: true } });
 });
 
 test('settings previews vault merge and runs vault health package actions', async ({ page }) => {

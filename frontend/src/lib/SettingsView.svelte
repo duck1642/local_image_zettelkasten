@@ -368,6 +368,10 @@
 
   let deleteVaultConfirmOpen = false;
   let deleteVaultConfirmId = '';
+  $: deleteVaultTarget = vaults.find((vault) => vault.id === deleteVaultConfirmId);
+  $: deleteVaultTargetName = deleteVaultTarget?.name || deleteVaultConfirmId;
+  $: deleteVaultTargetItems = Number(deleteVaultTarget?.item_count || 0).toLocaleString();
+  $: deleteVaultTargetRoot = deleteVaultTarget?.root || deleteVaultConfirmId;
 
   function deleteVault(id: string) {
     if (!id || vaultBusy) return;
@@ -982,7 +986,13 @@
         <IconAlertTriangle size={14} />
       </span>
       <span class="warning-message">
-        Permanently delete vault directory <code>{deleteVaultConfirmId}</code>? All files, notes, and database entries will be erased.
+        <strong>Permanently delete {deleteVaultTargetName}?</strong>
+        <span class="delete-warning-details">
+          <span>Vault ID: <code>{deleteVaultConfirmId}</code></span>
+          <span>Items: <code>{deleteVaultTargetItems}</code></span>
+          <span>Root: <code>{deleteVaultTargetRoot}</code></span>
+        </span>
+        <span>All files, notes, database entries, caches, review files, and logs under this vault will be erased.</span>
       </span>
     </div>
   </ConfirmationModal>
