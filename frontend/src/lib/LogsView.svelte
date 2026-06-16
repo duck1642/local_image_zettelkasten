@@ -70,7 +70,7 @@
     { title: 'Online ingest', value: 'ingest_online.jsonl' },
     { title: 'Review', value: 'review.jsonl' },
     { title: 'Auth', value: 'auth.jsonl' },
-    { title: 'Audit', value: 'ingestion_audit.jsonl' },
+    { title: 'Ingest audit', value: 'ingestion_audit.jsonl' },
   ];
 
   const consoleFile = { title: 'Console output', value: 'console.log' };
