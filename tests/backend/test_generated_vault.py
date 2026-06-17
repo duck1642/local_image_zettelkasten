@@ -1,5 +1,6 @@
 import importlib
 import importlib.util
+import hashlib
 import json
 import os
 import sqlite3
@@ -110,6 +111,7 @@ def test_generated_vault_smoke_and_isolation(tmp_path, monkeypatch):
     utils = importlib.import_module("utils")
     sqlite_operator = importlib.import_module("db.sqlite_operator")
     thumbnails = importlib.import_module("thumbnails")
+    vaults = importlib.import_module("vaults")
 
     assert utils.DB_PATH == db_path
     assert utils.LOGS_DIR == vault_root / "logs"
@@ -120,6 +122,11 @@ def test_generated_vault_smoke_and_isolation(tmp_path, monkeypatch):
         assert conn.execute("SELECT COUNT(*) FROM items").fetchone()[0] == 100
     finally:
         conn.close()
+
+    health = vaults.audit_vault_health("default")
+    assert health["hash_mismatches"] == []
+    assert health["missing_files"]["wd"] == []
+    assert health["workspace_dictionary_drift"] == {"missing_in_dictionary": 0, "unused_in_vault": 0}
 
 
 def test_generated_vault_rows_notes_and_media_are_consistent(tmp_path):
@@ -160,11 +167,14 @@ def test_generated_vault_rows_notes_and_media_are_consistent(tmp_path):
             shard = item["hash"][:2]
             asset_path = vault_root / "vault" / "assets" / shard / f"{item['storage_id']}{item['extension']}"
             note_path = vault_root / "vault" / "notes" / shard / f"{item['storage_id']}.md"
+            wd_path = vault_root / "wd-tags" / shard / f"{item['storage_id']}.json"
             suffix = "_video" if item["mime_type"].startswith("video/") else ""
             thumb_path = vault_root / "ui_cache" / "thumbnails" / shard / f"{item['storage_id']}{suffix}.jpg"
             assert asset_path.exists()
             assert note_path.exists()
+            assert wd_path.exists()
             assert thumb_path.exists()
+            assert hashlib.sha256(asset_path.read_bytes()).hexdigest() == item["hash"]
 
             frontmatter = yaml.safe_load(note_path.read_text(encoding="utf-8").split("---", 2)[1])
             assert frontmatter["hash"] == item["hash"]
@@ -177,6 +187,9 @@ def test_generated_vault_rows_notes_and_media_are_consistent(tmp_path):
             assert frontmatter["wd_rating"] == item["wd_tags"]["rating"]
             assert frontmatter["wd_character_tags"] == item["wd_tags"]["characters"]
             assert frontmatter["wd_tags"] == item["wd_tags"]["general"]
+            cache = json.loads(wd_path.read_text(encoding="utf-8"))
+            assert cache["hash"] == item["hash"]
+            assert cache["status"] == "ok"
 
         assert conn.execute("SELECT COUNT(*) FROM item_wd_tags").fetchone()[0] == manifest["counts"]["wd_rows_estimated"]
         assert conn.execute("SELECT COUNT(*) FROM metadata_facet_counts").fetchone()[0] == manifest["counts"]["metadata_index_facet_counts"]

@@ -69,6 +69,7 @@
       actionLabel="Prune"
       busyLabel="Pruning..."
       busy={maintenanceBusy.workspacePrune}
+      danger={true}
       onAction={() => onRunMaintenance('workspacePrune')}
     >
       {#snippet actionIcon()}
@@ -82,6 +83,7 @@
       actionLabel="Clean"
       busyLabel="Cleaning..."
       busy={maintenanceBusy.review}
+      danger={true}
       onAction={() => onRunMaintenance('review')}
     >
       {#snippet actionIcon()}

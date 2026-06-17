@@ -5,6 +5,7 @@
 
   export let healthVaultId = '';
   export let healthBusy = false;
+  export let backupResult = '';
   export let importPackagePath = '';
   export let importVaultName = '';
   export let importPreview: any = null;
@@ -14,6 +15,7 @@
   export let onConfirmImportVaultPackage: () => void;
   export let onImportInputChanged: () => void;
   export let onRestoreBackup: (packagePath: string) => void;
+  export let onPackagePickerError: (message: string) => void = () => {};
 
   async function onSelectImportPackage() {
     if (healthBusy) return;
@@ -28,7 +30,7 @@
         onImportInputChanged();
       }
     } catch (error) {
-      console.error('Failed to open package picker:', error);
+      onPackagePickerError(`Package picker failed: ${String(error)}`);
     }
   }
 
@@ -42,7 +44,7 @@
       });
       if (selection) onRestoreBackup(String(selection));
     } catch (error) {
-      console.error('Failed to open backup picker:', error);
+      onPackagePickerError(`Backup picker failed: ${String(error)}`);
     }
   }
 </script>
@@ -126,6 +128,12 @@
     </div>
   </div>
 </div>
+
+{#if backupResult}
+  <div class="settings-inline-status" class:error={backupResult.startsWith('error:')}>
+    {backupResult}
+  </div>
+{/if}
 
 {#if importPreview}
   <div class="import-preview-box" class:stale={!importPreviewCurrent} class:warning={importPreview?.target_exists}>

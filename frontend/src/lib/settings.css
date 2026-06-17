@@ -176,6 +176,18 @@
     font-size: 11px;
   }
 
+  .settings-inline-status {
+    margin-top: 8px;
+    color: var(--text-muted);
+    font-family: 'Consolas', monospace;
+    font-size: 11px;
+    overflow-wrap: anywhere;
+  }
+
+  .settings-inline-status.error {
+    color: var(--accent-danger);
+  }
+
   .settings-small-action,
   .settings-icon-button,
   .settings-bold-button {
@@ -216,6 +228,18 @@
     gap: 6px;
     font-size: 12px;
     font-weight: 600;
+  }
+
+  .settings-action-row-button.danger {
+    border-color: rgba(248, 81, 73, 0.35);
+    color: #ffb4ad;
+    background: rgba(248, 81, 73, 0.06);
+  }
+
+  .settings-action-row-button.danger:hover:not(:disabled) {
+    border-color: rgba(248, 81, 73, 0.6);
+    color: var(--accent-danger);
+    background: rgba(248, 81, 73, 0.1);
   }
 
   .settings-action-row-copy {
@@ -777,6 +801,12 @@
     text-overflow: ellipsis;
     color: var(--text-bright);
     font-size: 12px;
+  }
+
+  .health-truncation-note {
+    margin-top: 8px;
+    color: var(--text-muted);
+    font-size: 11px;
   }
 
   .compact-action {

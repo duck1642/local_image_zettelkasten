@@ -68,6 +68,8 @@
   };
   let metadataRebuildJob: MetadataRebuildJob | null = null;
   let metadataRebuildPollTimer: number | null = null;
+  let metadataStatusChecking = false;
+  let metadataStatusChecked = false;
   let workspaces: any[] = [];
   let workspaceActive = '';
   let workspaceBusy = false;
@@ -89,10 +91,12 @@
   let mergeConfirmOpen = false;
   let mergePreviewKey = '';
   let healthVaultId = '';
+  let selectedHealthVaultName = '';
   let healthBusy = false;
   let healthResult = '';
   let healthReport: any = null;
   let healthDetailsOpen = false;
+  let repairConfirmOpen = false;
   let repairErrors: Array<{ hash: string; storage_id: string; status: string; error: string }> = [];
   let backupResult = '';
   let importPackagePath = '';
@@ -121,6 +125,10 @@
   $: mergePreviewCurrent = Boolean(mergePreview) && mergePreviewKey === currentMergePreviewKey;
   $: currentImportPreviewKey = importRequestKey(importPackagePath, importVaultName);
   $: importPreviewCurrent = Boolean(importPreview) && importPreviewKey === currentImportPreviewKey;
+  $: selectedHealthVaultName = vaults.find((vault) => vault.id === healthVaultId)?.name || healthVaultId;
+  $: if (activeSettingsTab === 'maintenance' && !metadataStatusChecked && !metadataStatusChecking) {
+    void refreshMetadataRebuildStatus();
+  }
 
   function defaultMergedVaultName() {
     return `Merged Vault - ${new Date().toISOString().slice(0, 10)}`;
@@ -167,6 +175,7 @@
     loadConfig();
     loadWorkspaces();
     loadVaults();
+    void refreshMetadataRebuildStatus();
     return () => {
       window.removeEventListener('lmz:refresh', handleGlobalRefresh);
       stopMetadataRebuildPolling();
@@ -516,7 +525,12 @@
 
   async function repairVaultHealth() {
     if (!healthVaultId || healthBusy) return;
-    if (!confirm(`Repair vault "${healthVaultId}"? Orphan assets/notes are quarantined, not deleted.`)) return;
+    repairConfirmOpen = true;
+  }
+
+  async function executeRepairVaultHealth() {
+    if (!healthVaultId || healthBusy) return;
+    repairConfirmOpen = false;
     healthBusy = true;
     healthResult = 'repairing...';
     try {
@@ -587,6 +601,16 @@
     } finally {
       healthBusy = false;
     }
+  }
+
+  function packagePickerError(message: string) {
+    backupResult = `error: ${message}`;
+    toastStore.add({
+      type: 'error',
+      title: 'Package Picker Failed',
+      message
+    });
+    uiLog('ERROR', 'Package picker failed', { error: message });
   }
 
   async function previewImportVaultPackage() {
@@ -736,6 +760,31 @@
     if (metadataRebuildPollTimer !== null) {
       window.clearTimeout(metadataRebuildPollTimer);
       metadataRebuildPollTimer = null;
+    }
+  }
+
+  async function refreshMetadataRebuildStatus() {
+    if (metadataStatusChecking) return;
+    metadataStatusChecking = true;
+    try {
+      const payload = await fetchMetadataIndexStatus();
+      metadataStatusChecked = true;
+      metadataRebuildJob = payload?.maintenance_rebuild || null;
+      if (metadataRebuildJob?.running) {
+        setMaintenanceBusy('metadata', true);
+        setMaintenanceResult('metadata', metadataProgressText(metadataRebuildJob));
+        startMetadataRebuildPolling();
+      } else if (metadataRebuildJob?.status === 'completed') {
+        setMaintenanceBusy('metadata', false);
+        setMaintenanceResult('metadata', 'completed');
+      } else if (metadataRebuildJob?.status === 'error') {
+        setMaintenanceBusy('metadata', false);
+        setMaintenanceResult('metadata', `error: ${metadataRebuildJob.message || 'metadata rebuild failed'}`);
+      }
+    } catch (error) {
+      uiLog('WARNING', 'Initial metadata rebuild status check failed', { error: String(error) });
+    } finally {
+      metadataStatusChecking = false;
     }
   }
 
@@ -942,6 +991,7 @@
         {vaultActive}
         bind:healthVaultId
         {healthBusy}
+        {healthResult}
         {healthReport}
         bind:healthDetailsOpen
         {repairErrors}
@@ -951,6 +1001,7 @@
       <SettingsVaultPackagesPanel
         {healthVaultId}
         {healthBusy}
+        {backupResult}
         bind:importPackagePath
         bind:importVaultName
         {importPreview}
@@ -960,6 +1011,7 @@
         onConfirmImportVaultPackage={confirmImportVaultPackage}
         onImportInputChanged={invalidateImportPreview}
         onRestoreBackup={requestRestoreBackup}
+        onPackagePickerError={packagePickerError}
       />
       <SettingsMaintenancePanel
         {maintenanceBusy}
@@ -993,6 +1045,25 @@
           <span>Root: <code>{deleteVaultTargetRoot}</code></span>
         </span>
         <span>All files, notes, database entries, caches, review files, and logs under this vault will be erased.</span>
+      </span>
+    </div>
+  </ConfirmationModal>
+
+  <ConfirmationModal
+    open={repairConfirmOpen}
+    title="Repair Vault"
+    confirmLabel="Repair"
+    danger={true}
+    busy={healthBusy}
+    on:cancel={() => repairConfirmOpen = false}
+    on:confirm={executeRepairVaultHealth}
+  >
+    <div class="confirm-info-box">
+      <span class="warning-icon">
+        <IconAlertTriangle size={14} />
+      </span>
+      <span class="warning-message">
+        Repair <code>{selectedHealthVaultName}</code>. Orphan files may be moved to quarantine, derived cache may be removed, and repair actions are limited to the active vault.
       </span>
     </div>
   </ConfirmationModal>

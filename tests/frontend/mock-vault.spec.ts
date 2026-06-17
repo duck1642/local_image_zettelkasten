@@ -1371,6 +1371,8 @@ test('settings previews vault merge and runs vault health package actions', asyn
   await page.getByRole('button', { name: 'Audit' }).click();
   await expect(page.getByText('3 issues').first()).toBeVisible();
   await page.getByRole('button', { name: 'Repair' }).click();
+  await expect(page.getByRole('dialog', { name: 'Repair Vault' })).toBeVisible();
+  await page.getByRole('dialog', { name: 'Repair Vault' }).getByRole('button', { name: 'Repair' }).click();
   await expect(page.getByText('Repair Complete')).toBeVisible();
 
   await page.getByRole('button', { name: 'Backup Vault Folder' }).click();
@@ -1418,6 +1420,15 @@ test('settings metadata rebuild shows progress only for maintenance job', async 
       }
     },
     metadataStatusSequence: [
+      {
+        ready: true,
+        repair_running: false,
+        items: 100,
+        indexed: 100,
+        errors: 0,
+        dirty: 0,
+        maintenance_rebuild: { running: false, status: 'idle' }
+      },
       {
         ready: false,
         repair_running: true,

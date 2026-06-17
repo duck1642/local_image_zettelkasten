@@ -4,9 +4,28 @@
   export let healthReport: any;
   export let repairErrors: Array<{ hash: string; storage_id: string; status: string; error: string }> = [];
   export let onClose: () => void;
+  const DETAIL_LIMIT = 100;
 
   function closeOnBackdrop(event: MouseEvent) {
     if (event.target === event.currentTarget) onClose();
+  }
+
+  function exceedsDetailLimit(value: any) {
+    return countValues(value) > DETAIL_LIMIT;
+  }
+
+  function hasTruncatedDetails() {
+    return (
+      exceedsDetailLimit(healthReport.details?.missing_files || healthReport.missing_files)
+      || exceedsDetailLimit(healthReport.orphans)
+      || exceedsDetailLimit(healthReport.stale_index_rows)
+      || (healthReport.facet_drift || []).length > DETAIL_LIMIT
+      || (healthReport.hash_mismatches || []).length > DETAIL_LIMIT
+      || (healthReport.bad_storage_ids || []).length > DETAIL_LIMIT
+      || (healthReport.broken_topic_links || []).length > DETAIL_LIMIT
+      || exceedsDetailLimit(healthReport.review_mismatches)
+      || repairErrors.length > DETAIL_LIMIT
+    );
   }
 </script>
 
@@ -46,25 +65,25 @@
       {/if}
       {#if (healthReport.facet_drift || []).length}
         <div class="health-section-title">Facet Drift</div>
-        {#each healthReport.facet_drift as row}
+        {#each healthReport.facet_drift.slice(0, DETAIL_LIMIT) as row}
           <div class="health-row"><span>Facet</span><code>{row}</code></div>
         {/each}
       {/if}
       {#if (healthReport.hash_mismatches || []).length}
         <div class="health-section-title">Hash Mismatches</div>
-        {#each healthReport.hash_mismatches as row}
+        {#each healthReport.hash_mismatches.slice(0, DETAIL_LIMIT) as row}
           <div class="health-row"><span>Asset</span><code title={row}>{row}</code></div>
         {/each}
       {/if}
       {#if (healthReport.bad_storage_ids || []).length}
         <div class="health-section-title">Bad Storage IDs</div>
-        {#each healthReport.bad_storage_ids as row}
+        {#each healthReport.bad_storage_ids.slice(0, DETAIL_LIMIT) as row}
           <div class="health-row"><span>Item hash</span><code title={row}>{row}</code></div>
         {/each}
       {/if}
       {#if (healthReport.broken_topic_links || []).length}
         <div class="health-section-title">Broken Topic Links</div>
-        {#each healthReport.broken_topic_links as row}
+        {#each healthReport.broken_topic_links.slice(0, DETAIL_LIMIT) as row}
           <div class="health-row"><span>Topic</span><code title={row}>{row}</code></div>
         {/each}
       {/if}
@@ -85,12 +104,15 @@
       {/if}
       {#if repairErrors.length}
         <div class="health-section-title">WD Tagging Errors ({repairErrors.length})</div>
-        {#each repairErrors as err}
+        {#each repairErrors.slice(0, DETAIL_LIMIT) as err}
           <div class="health-row">
             <span>{err.status || 'error'}</span>
             <code title={err.error}>{err.error}</code>
           </div>
         {/each}
+      {/if}
+      {#if hasTruncatedDetails()}
+        <div class="health-truncation-note">Showing first {DETAIL_LIMIT} items.</div>
       {/if}
     </div>
   </div>

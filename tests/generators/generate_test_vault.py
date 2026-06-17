@@ -108,8 +108,8 @@ def _topic_link(note_path: Path, topic_dir: Path, label: str) -> str:
     return f"[{topic_path.stem}]({rel})"
 
 
-def _hash_for(seed: int, index: int) -> str:
-    return hashlib.sha256(f"lmz-test-vault:{seed}:{index}".encode("utf-8")).hexdigest()
+def _content_hash(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
 
 
 def _storage_id(index: int) -> str:
@@ -135,6 +135,46 @@ def _svg_bytes(label: str, width: int, height: int) -> bytes:
         "</svg>"
     )
     return svg.encode("utf-8")
+
+
+def _asset_bytes(storage_id: str, width: int, height: int, is_video: bool) -> bytes:
+    if is_video:
+        return f"lmz synthetic video placeholder:{storage_id}:{width}x{height}".encode("utf-8")
+    return _svg_bytes(storage_id, width, height)
+
+
+def _tag_item(name: str, score: float = 0.9) -> dict:
+    return {
+        "name": name.replace(" ", "_"),
+        "display_name": name,
+        "score": round(float(score), 6),
+    }
+
+
+def _write_wd_cache(path: Path, item_hash: str, storage_id: str, mime_type: str, wd_tags: dict, args: argparse.Namespace):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    rating = None
+    if wd_tags.get("rating"):
+        rating = _tag_item(str(wd_tags["rating"]), 0.99)
+        rating["label"] = str(wd_tags["rating"])
+    payload = {
+        "hash": item_hash,
+        "status": "ok",
+        "model": "generated/test-vault",
+        "threshold": 0.35,
+        "created_at": _timestamp(0),
+        "rating": rating,
+        "character_tags": [_tag_item(tag, 0.95) for tag in wd_tags.get("characters") or []],
+        "tags": [_tag_item(tag, 0.9) for tag in wd_tags.get("general") or []],
+        "provider": "generator",
+        "device": "cpu",
+        "max_tags": max(0, int(args.wd_tags_per_item or 0)),
+        "error": "",
+        "media_type": "video" if str(mime_type or "").startswith("video/") else "image",
+        "sampled_frames": [],
+        "frame_count": 0,
+    }
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
 def _wd_values(index: int, args: argparse.Namespace) -> dict:
@@ -277,6 +317,15 @@ def _rebuild_metadata_index(config_path: Path) -> dict:
         conn.close()
 
 
+def _rebuild_workspace_metadata(config_path: Path) -> dict:
+    os.environ["LMZ_CONFIG_PATH"] = str(config_path)
+    if str(BACKEND) not in sys.path:
+        sys.path.insert(0, str(BACKEND))
+    _reset_backend_modules()
+    workspace_db = importlib.import_module("workspace_db")
+    return workspace_db.rebuild_workspace_metadata()
+
+
 def _insert_rows(db_path: Path, rows: list[dict]):
     conn = sqlite3.connect(db_path)
     conn.executemany(
@@ -385,13 +434,14 @@ def generate_vault(args: argparse.Namespace) -> Path:
 
     for index in range(args.items):
         ordinal = index + 1
-        item_hash = _hash_for(args.seed, ordinal)
         storage_id = _storage_id(ordinal)
         is_video = rng.random() < args.video_ratio
         ext = ".mp4" if is_video else ".jpg"
         mime_type = "video/mp4" if is_video else "image/jpeg"
         width = 640 + (index % 5) * 80
         height = 360 + (index % 7) * 40
+        asset_bytes = _asset_bytes(storage_id, width, height, is_video)
+        item_hash = _content_hash(asset_bytes)
         group_id = index % group_count
         platform = platforms[index % platform_count]
         if index < unknown_artist_count:
@@ -409,7 +459,7 @@ def generate_vault(args: argparse.Namespace) -> Path:
             "original_filename": original_filename,
             "file_extension": ext,
             "mime_type": mime_type,
-            "size_bytes": 24 if is_video else len(_svg_bytes(storage_id, width, height)),
+            "size_bytes": len(asset_bytes),
             "date_added": date_added,
             "source_url": source_url,
             "source_url_norm": source_url.rstrip("/").lower(),
@@ -425,12 +475,14 @@ def generate_vault(args: argparse.Namespace) -> Path:
         asset_path = assets_dir / shard / original_filename
         note_path = notes_dir / shard / f"{storage_id}.md"
         thumb_path = thumbs_dir / shard / f"{storage_id}{'_video' if is_video else ''}.jpg"
+        wd_path = vault_root / "wd-tags" / shard / f"{storage_id}.json"
         asset_path.parent.mkdir(parents=True, exist_ok=True)
         note_path.parent.mkdir(parents=True, exist_ok=True)
         thumb_path.parent.mkdir(parents=True, exist_ok=True)
-        asset_path.write_bytes(b"lmz synthetic video placeholder" if is_video else _svg_bytes(storage_id, width, height))
+        asset_path.write_bytes(asset_bytes)
         linked_topics = [_topic_link(note_path, topics_dir, label) for label in topic_labels]
         note_path.write_text(_frontmatter(row, linked_topics, wd_tags), encoding="utf-8")
+        _write_wd_cache(wd_path, item_hash, storage_id, mime_type, wd_tags, args)
         thumb_path.write_bytes(_svg_bytes(f"thumb-{storage_id}", 320, 240))
 
         items.append({
@@ -454,6 +506,7 @@ def generate_vault(args: argparse.Namespace) -> Path:
 
     _insert_rows(vault_root / "db" / "lmz_main.db", rows)
     metadata_report = _rebuild_metadata_index(config_path)
+    workspace_report = _rebuild_workspace_metadata(config_path)
 
     for index, item in enumerate(items[: max(0, args.review)], start=1):
         _write_review_fixture(output, index, item)
@@ -487,6 +540,7 @@ def generate_vault(args: argparse.Namespace) -> Path:
             "metadata_index_topics": metadata_report["topics"],
             "metadata_index_wd_tags": metadata_report["wd_tags"],
             "metadata_index_facet_counts": metadata_report["facet_counts"],
+            "workspace_wd_tags": workspace_report["after"]["wd_tags"],
         },
         "items": items,
     }
