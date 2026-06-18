@@ -1139,6 +1139,28 @@ def _restore_moved_cleanup_paths(item_hash: str, moved_paths: list[tuple[Path, P
             restore_errors.append({"hash": item_hash, "path": str(original_path), "error": str(exc)})
     return restore_errors
 
+def _sweep_orphan_files_for_storage_id(storage_id: str, ctx: WorkspaceContext | None = None):
+    """Safety net: remove any remaining files for a deleted storage_id across all shard dirs."""
+    vault = (ctx or get_runtime_context()).active_vault
+    sweep_dirs = [
+        vault.assets_dir,
+        vault.notes_dir,
+        vault.wd_tags_dir,
+        Path(vault.root) / "ui_cache" / "thumbnails",
+    ]
+    for base_dir in sweep_dirs:
+        if not base_dir.exists():
+            continue
+        for shard_dir in base_dir.iterdir():
+            if not shard_dir.is_dir():
+                continue
+            for candidate in shard_dir.glob(f"{storage_id}*"):
+                if candidate.is_file():
+                    try:
+                        candidate.unlink()
+                    except OSError:
+                        pass
+
 
 def _stage_cleanup_paths(item_hash: str, cleanup_paths: list[Path], trash_dir: Path) -> tuple[list[tuple[Path, Path]], list[dict]]:
     trash_dir.mkdir(parents=True, exist_ok=True)
@@ -1201,6 +1223,7 @@ def _delete_item_row(cursor, conn, item_hash: str, remove_indexes: bool = True, 
         search_manager.remove_indexes_batch([index_payload])
 
     cleanup_errors = _remove_staged_cleanup_paths(item_hash, moved_paths, "Deleted DB row but staged file cleanup failed")
+    _sweep_orphan_files_for_storage_id(row[2], ctx=ctx)
 
     log_system("INFO", f"Deleted item {item_hash}")
     return {"hash": item_hash, "status": "deleted", "cleanup_errors": cleanup_errors, "index": index_payload, "deleted": True}
@@ -1234,6 +1257,7 @@ def _delete_item_after_replacement(item_hash: str, ctx: WorkspaceContext | None 
             return {"hash": item_hash, "status": "cleanup_failed", "cleanup_errors": cleanup_errors}
 
         cleanup_errors = _remove_staged_cleanup_paths(item_hash, moved_paths, "Review replace staged file cleanup failed", log_context="review")
+        _sweep_orphan_files_for_storage_id(row[2], ctx=ctx)
         return {"hash": item_hash, "status": "deleted", "cleanup_errors": cleanup_errors}
     finally:
         conn.close()

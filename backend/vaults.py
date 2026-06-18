@@ -810,11 +810,29 @@ def _repairable_issue_count(counts: dict) -> int:
     )
 
 
+def _remove_stale_shard_files(base_dir: Path, storage_id: str, expected_shard: str, suffix: str) -> int:
+    """Remove files like {storage_id}{suffix} from any shard dir except *expected_shard*."""
+    removed = 0
+    if not base_dir.exists():
+        return removed
+    for shard_dir in base_dir.iterdir():
+        if not shard_dir.is_dir() or shard_dir.name == expected_shard:
+            continue
+        stale = shard_dir / f"{storage_id}{suffix}"
+        if stale.exists():
+            try:
+                stale.unlink()
+                removed += 1
+            except OSError:
+                pass
+    return removed
+
+
 def _repair_missing_wd_cache(conn: sqlite3.Connection, ctx: WorkspaceContext, limit: int = 100000) -> dict:
     from md_generator import generate_markdown
     from metadata_index import safe_reindex_item_metadata
     from tagging.service import tag_media
-    from utils import asset_path_for, atomic_write_text, get_config, note_path_for, wd_tag_cache_path_for
+    from utils import asset_path_for, atomic_write_text, get_config, note_path_for, storage_shard_for_hash, wd_tag_cache_path_for
 
     checked = 0
     tagged = 0
@@ -849,6 +867,11 @@ def _repair_missing_wd_cache(conn: sqlite3.Connection, ctx: WorkspaceContext, li
             # repair_ctx path differs in any way the file lands in the wrong location.
             # Writing here with cache_path (already computed with ctx) guarantees correctness.
             atomic_write_text(cache_path, json.dumps(result.to_dict(), indent=2, ensure_ascii=False))
+            # Clean up stale WD/thumb files at wrong shard locations for this storage_id
+            expected_shard = storage_shard_for_hash(item_hash)
+            _remove_stale_shard_files(ctx.active_vault.wd_tags_dir, storage_id, expected_shard, ".json")
+            thumb_dir = Path(ctx.active_vault.root) / "ui_cache" / "thumbnails"
+            _remove_stale_shard_files(thumb_dir, storage_id, expected_shard, ".jpg")
             if result.status == "ok":
                 tagged += 1
             else:

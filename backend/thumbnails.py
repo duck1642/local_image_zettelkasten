@@ -166,6 +166,10 @@ def repair_missing_thumbnails(conn, limit: int = 100, ctx: WorkspaceContext | No
                     "UPDATE items SET thumbnail_status = 'ready', thumbnail_error = NULL WHERE hash = ?",
                     (item_hash,)
                 )
+                # Clean up stale thumbnail files at wrong shard locations
+                from vaults import _remove_stale_shard_files
+                expected_shard = storage_shard_for_hash(item_hash)
+                _remove_stale_shard_files(_thumbnail_dir(ctx), storage_id, expected_shard, ".jpg")
                 generated += 1
             else:
                 conn.execute(
