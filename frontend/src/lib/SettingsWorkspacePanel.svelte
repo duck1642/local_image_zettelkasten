@@ -208,31 +208,7 @@
     border-color: rgba(188, 142, 253, 0.15);
   }
 
-  .settings-path-details {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    margin-top: 4px;
-    width: 100%;
-  }
 
-  .settings-path-line {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 11px;
-    width: 100%;
-  }
-
-  .settings-path-label {
-    font-size: 9px;
-    font-weight: 700;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.3px;
-    width: 48px;
-    flex-shrink: 0;
-  }
 
   :global(.settings-workspace-actions) :global(.settings-code) {
     margin: 0;
