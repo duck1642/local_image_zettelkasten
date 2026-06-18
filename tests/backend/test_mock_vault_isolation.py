@@ -201,13 +201,11 @@ def test_pixiv_refresh_token_file_is_canonical(monkeypatch, tmp_path):
     }
 
 
-def test_pixiv_refresh_token_ignores_legacy_for_empty_file(monkeypatch, tmp_path):
+def test_pixiv_refresh_token_empty_file_is_missing(monkeypatch, tmp_path):
     utils, = fresh_backend(monkeypatch, tmp_path, "utils")
     token_path = utils.pixiv_refresh_token_path()
     token_path.parent.mkdir(parents=True, exist_ok=True)
     token_path.write_text("  \n", encoding="utf-8")
-    secrets_path = utils.SECRETS_DIR / ".secrets.yaml"
-    secrets_path.write_text('pixiv_token: "legacy-token"\n', encoding="utf-8")
     utils.invalidate_config_cache()
 
     info = utils.get_pixiv_refresh_token()
@@ -216,16 +214,13 @@ def test_pixiv_refresh_token_ignores_legacy_for_empty_file(monkeypatch, tmp_path
     assert info["status"] == "missing"
     assert info["source"] == "missing"
     assert info["path"] == str(token_path)
-    assert "pixiv_token" not in utils.get_config().get("external_tools", {})
 
 
-def test_pixiv_refresh_token_unreadable_file_does_not_fall_back(monkeypatch, tmp_path):
+def test_pixiv_refresh_token_unreadable_file_returns_unreadable(monkeypatch, tmp_path):
     utils, = fresh_backend(monkeypatch, tmp_path, "utils")
     token_path = utils.pixiv_refresh_token_path()
     token_path.parent.mkdir(parents=True, exist_ok=True)
     token_path.write_text("file-token", encoding="utf-8")
-    secrets_path = utils.SECRETS_DIR / ".secrets.yaml"
-    secrets_path.write_text('pixiv_token: "legacy-token"\n', encoding="utf-8")
     utils.invalidate_config_cache()
     original_read_text = Path.read_text
 
@@ -243,7 +238,7 @@ def test_pixiv_refresh_token_unreadable_file_does_not_fall_back(monkeypatch, tmp
     assert info["source"] == "unreadable"
 
 
-def test_pixiv_refresh_token_missing_without_file_or_legacy(monkeypatch, tmp_path):
+def test_pixiv_refresh_token_missing_when_file_not_exists(monkeypatch, tmp_path):
     utils, = fresh_backend(monkeypatch, tmp_path, "utils")
 
     info = utils.get_pixiv_refresh_token()
