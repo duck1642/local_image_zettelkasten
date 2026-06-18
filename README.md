@@ -1,4 +1,4 @@
-﻿# Local Media Zettelkasten
+# Local Media Zettelkasten
 
 Local media ingestion, duplicate detection, vault generation, local WD tagging, and Tauri/Svelte management UI.
 
@@ -11,4 +11,8 @@ Local media ingestion, duplicate detection, vault generation, local WD tagging, 
 - `cd frontend; npm run build` builds the frontend.
 - `cd frontend; npm run build:sidecar` builds the Tauri production sidecar binary.
 
-Runtime data lives under `data/`, logs under `logs/`, and credentials under `secrets/`.
+Runtime data lives under `data/` and logs under `logs/`.
+
+## Authentication & Credentials
+
+External downloaders (such as `gallery-dl` and `yt-dlp`) require credentials stored under the global `secrets/auth/` directory. For a complete guide on extracting cookies and setting up Pixiv OAuth, see the [Downloader Authentication Guide](docs/auth_guide.md).

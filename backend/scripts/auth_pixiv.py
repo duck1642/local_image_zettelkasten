@@ -1,4 +1,4 @@
-﻿
+import sys
 import base64
 import hashlib
 import os
@@ -7,7 +7,10 @@ import urllib.request
 import urllib.parse
 import json
 from pathlib import Path
-from utils import SECRETS_DIR
+
+# Add backend directory to sys.path so utils can be imported
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from utils import app_auth_root
 
 CLIENT_ID = "MOBrBDS8blbauoSck0ZfDbtuzpyT"
 CLIENT_SECRET = "lsACyCD94FhDUtGTXi3QzcFE2uU1hqtDaKeqrdwj"
@@ -79,7 +82,7 @@ def run_auth():
 
             if refresh_token:
                 save_token(refresh_token)
-                print("[OK] Your Pixiv Refresh Token has been securely saved to .secrets.yaml.")
+                print("[OK] Your Pixiv Refresh Token has been securely saved.")
                 print("   LMZ will now automatically authenticate and download from Pixiv.")
             else:
                 print("\n[ERROR] Failed to extract refresh_token from response.")
@@ -90,27 +93,11 @@ def run_auth():
         print(f"\n[ERROR] An unexpected error occurred: {e}")
 
 def save_token(token):
-
-    secrets_path = SECRETS_DIR / ".secrets.yaml"
-
-    if secrets_path.exists():
-        with open(secrets_path, 'r', encoding='utf-8') as f:
-            content = f.read()
-
-
-        new_content = re.sub(r'pixiv_token:\s*".*"', f'pixiv_token: "{token}"', content)
-        if new_content == content:
-            new_content = re.sub(r'pixiv_token:\s*.*', f'pixiv_token: "{token}"', content)
-    else:
-
-        new_content = (
-            "# LMZ Secrets  Sensitive credentials\n"
-            "# This file contains sensitive credentials. Do not share it.\n\n"
-            f'pixiv_token: "{token}"\n'
-        )
-
-    with open(secrets_path, 'w', encoding='utf-8') as f:
-        f.write(new_content)
+    token_dir = app_auth_root() / "pixiv"
+    token_dir.mkdir(parents=True, exist_ok=True)
+    token_path = token_dir / "refresh_token.txt"
+    token_path.write_text(token, encoding="utf-8")
+    print(f"[OK] Saved token to: {token_path}")
 
 if __name__ == '__main__':
     run_auth()
