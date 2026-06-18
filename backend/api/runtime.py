@@ -459,6 +459,42 @@ def _create_workspace_sync(body: dict):
 
 
 
+
+@router.delete("/api/workspaces/{workspace_id}")
+async def delete_workspace(workspace_id: str, delete_files: bool = Query(False)):
+    blocked = await asyncio.to_thread(_runtime_switch_blocker)
+    if blocked:
+        return blocked
+    return await asyncio.to_thread(_delete_workspace_sync, workspace_id, delete_files)
+
+
+def _delete_workspace_sync(workspace_id: str, delete_files: bool = False):
+    from workspaces import delete_workspace, load_workspace_registry, workspace_list
+    from fastapi import HTTPException
+
+    registry_before = load_workspace_registry()
+    was_active = workspace_id == registry_before["active"]
+
+    try:
+        res_registry = delete_workspace(workspace_id, delete_files=delete_files)
+    except (ValueError, KeyError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    if was_active:
+        from runtime_context import clear_runtime_context, reload_runtime_context
+        clear_runtime_context()
+        try:
+            reload_runtime_context()
+        except Exception:
+            pass
+
+    return {
+        "status": "success",
+        "active": res_registry["active"],
+        "items": workspace_list(),
+    }
+
+
 @router.get("/api/vaults")
 async def get_vaults():
     require_workspace_context()

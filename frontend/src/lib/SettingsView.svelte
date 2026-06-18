@@ -33,7 +33,7 @@
     pruneWorkspaceMetadata,
     rebuildWorkspaceMetadata,
     restoreBackupPackageApi,
-    createWorkspace as createWorkspaceApi,
+    createWorkspace as createWorkspaceApi, deleteWorkspaceApi,
     removeVault,
     repairVaultHealthApi,
     scanAuth,
@@ -210,6 +210,33 @@
       workspaces = Array.isArray(payload?.items) ? payload.items : [];
     } catch (error) {
       workspaceResult = `error: ${String(error)}`;
+    }
+  }
+
+  async function deleteWorkspace(id: string, deleteFiles: boolean) {
+    if (!id || workspaceBusy) return;
+    workspaceBusy = true;
+    workspaceResult = '';
+    try {
+      const payload = await deleteWorkspaceApi(id, deleteFiles);
+      workspaces = Array.isArray(payload?.items) ? payload.items : workspaces;
+      workspaceActive = String(payload?.active || workspaceActive);
+      toastStore.add({
+        type: 'success',
+        title: 'Workspace Deleted',
+        message: `Workspace "${id}" was deleted successfully.`
+      });
+      await loadWorkspaces();
+    } catch (error) {
+      const errMsg = String(error);
+      workspaceResult = `error: ${errMsg}`;
+      toastStore.add({
+        type: 'error',
+        title: 'Workspace Deletion Failed',
+        message: errMsg
+      });
+    } finally {
+      workspaceBusy = false;
     }
   }
 
@@ -971,6 +998,7 @@
           bind:workspaceName
           onSetActiveWorkspace={setActiveWorkspace}
           onCreateWorkspace={createWorkspace}
+          onDeleteWorkspace={deleteWorkspace}
         />
       </div>
     {:else if activeSettingsTab === 'vaults'}

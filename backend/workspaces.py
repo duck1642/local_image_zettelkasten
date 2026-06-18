@@ -114,3 +114,34 @@ def register_workspace(name: str, config_path: str | Path, workspace_id: str | N
         registry["active"] = workspace_id
     save_workspace_registry(registry)
     return registry
+
+
+def delete_workspace(workspace_id: str, delete_files: bool = False) -> dict:
+    registry = load_workspace_registry()
+    workspace_id = str(workspace_id or "").strip()
+    if workspace_id == DEFAULT_WORKSPACE_ID:
+        raise ValueError("Cannot delete the default workspace")
+    if workspace_id not in registry["workspaces"]:
+        raise KeyError(f"Workspace not found: {workspace_id}")
+
+    entry = registry["workspaces"][workspace_id]
+    config_path = _resolve(entry.get("config_path") or "")
+
+    is_active = workspace_id == registry["active"]
+    if is_active:
+        registry["active"] = DEFAULT_WORKSPACE_ID
+
+    if delete_files and config_path.exists():
+        try:
+            is_core_config = config_path.parent == PROJECT_ROOT / "config"
+            if not is_core_config:
+                config_path.unlink()
+                db_file = config_path.parent / "data" / "workspace.db"
+                if db_file.exists():
+                    db_file.unlink()
+        except Exception:
+            pass
+
+    del registry["workspaces"][workspace_id]
+    save_workspace_registry(registry)
+    return registry

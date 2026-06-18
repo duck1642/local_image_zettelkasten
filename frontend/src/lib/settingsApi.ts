@@ -26,6 +26,12 @@ export async function createWorkspace(path: string, name: string) {
   }));
 }
 
+export async function deleteWorkspaceApi(id: string, deleteFiles: boolean) {
+  return readJson(await apiFetch(`/api/workspaces/${encodeURIComponent(id)}?delete_files=${deleteFiles}`, {
+    method: 'DELETE'
+  }));
+}
+
 export async function fetchVaults() {
   return readJson(await apiFetch('/api/vaults'));
 }
