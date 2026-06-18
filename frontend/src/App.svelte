@@ -14,7 +14,7 @@
   import { queueStats, reviewCount, reviewStats, startSharedStatsPolling } from './lib/statsStore';
   import { apiFetch } from './lib/api';
   import { privacyBlur } from './lib/privacyStore';
-  import { applyMainWindowLayout, applyLauncherWindowLayout } from './lib/windowLayout';
+  import { applyMainWindowLayout, applyLauncherWindowLayout, safeConfirm } from './lib/windowLayout';
   import {
     IconFolder,
     IconDownload,
@@ -310,7 +310,7 @@
               return;
             }
 
-            const shouldStop = await confirm('Ingestion is running.\n\nStop after current item and exit?');
+            const shouldStop = await safeConfirm('Ingestion is running.\n\nStop after current item and exit?');
             if (!shouldStop) return;
 
             closeFlowRunning = true;

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, tick, onDestroy } from 'svelte';
+  import { safeConfirm as confirm } from './windowLayout';
   import { log as uiLog } from './logger';
   import { apiFetch, apiUrl } from './api';
   import { queueStats, refreshQueueStats, setQueueStats } from './statsStore';

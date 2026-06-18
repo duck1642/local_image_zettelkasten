@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { safeConfirm } from './windowLayout';
   import { apiFetch, apiUrl } from './api';
   import { log as uiLog } from './logger';
   import { refreshReviewCount } from './statsStore';
@@ -190,7 +191,7 @@
         return;
       }
       const message = `Replace target copy ${targetHash.slice(0, 12)}... with ${displayName(current)}?`;
-      if (!await confirm(message)) {
+      if (!await safeConfirm(message)) {
         acting = false;
         return;
       }

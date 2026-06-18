@@ -29,3 +29,12 @@ export function applyLauncherWindowLayout() {
 export function applyMainWindowLayout() {
   return applyWindowLayout({ width: 1280, height: 800, resizable: true });
 }
+
+export async function safeConfirm(message: string): Promise<boolean> {
+  try {
+    const { confirm } = await import('@tauri-apps/plugin-dialog');
+    return await confirm(message);
+  } catch {
+    return window.confirm(message);
+  }
+}

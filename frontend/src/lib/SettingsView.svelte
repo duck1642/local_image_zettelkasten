@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { safeConfirm } from './windowLayout';
   import ConfirmationModal from './ConfirmationModal.svelte';
   import { config, configDirty, configLoading, loadConfig } from './configStore';
   import { log as uiLog } from './logger';
@@ -77,6 +78,9 @@
   let workspaceParentPath = '';
   let workspaceName = 'LMZ Workspace';
   let workspaceRestartRequired = false;
+  let deleteWorkspaceConfirmOpen = false;
+  let deleteWorkspaceTarget: any = null;
+  let deleteWorkspaceFiles = false;
   let vaults: any[] = [];
   let vaultActive = '';
   let vaultBusy = false;
@@ -186,7 +190,7 @@
   async function handleGlobalRefresh(event: Event) {
     const detail = (event as CustomEvent).detail || {};
     if (detail.tab !== 'settings') return;
-    if ($configDirty && !await confirm('You have unsaved settings. Discard them and refresh?')) return;
+    if ($configDirty && !await safeConfirm('You have unsaved settings. Discard them and refresh?')) return;
     uiLog('INFO', 'Settings view refresh requested');
     loadConfig();
   }
@@ -238,6 +242,19 @@
     } finally {
       workspaceBusy = false;
     }
+  }
+
+  function requestDeleteWorkspace(workspace: any) {
+    deleteWorkspaceTarget = workspace;
+    deleteWorkspaceFiles = false;
+    deleteWorkspaceConfirmOpen = true;
+  }
+
+  async function confirmDeleteWorkspace() {
+    if (!deleteWorkspaceTarget || workspaceBusy) return;
+    const id = deleteWorkspaceTarget.id;
+    deleteWorkspaceConfirmOpen = false;
+    await deleteWorkspace(id, deleteWorkspaceFiles);
   }
 
   async function setActiveWorkspace(id: string) {
@@ -998,7 +1015,7 @@
           bind:workspaceName
           onSetActiveWorkspace={setActiveWorkspace}
           onCreateWorkspace={createWorkspace}
-          onDeleteWorkspace={deleteWorkspace}
+          onDeleteWorkspace={requestDeleteWorkspace}
         />
       </div>
     {:else if activeSettingsTab === 'vaults'}
@@ -1197,5 +1214,32 @@
         Source vaults will not be changed.
       </span>
     </div>
+  </ConfirmationModal>
+
+  <ConfirmationModal
+    open={deleteWorkspaceConfirmOpen}
+    title="Delete Workspace"
+    confirmLabel="Delete"
+    danger={true}
+    busy={workspaceBusy}
+    on:cancel={() => deleteWorkspaceConfirmOpen = false}
+    on:confirm={confirmDeleteWorkspace}
+  >
+    <div class="delete-warning-box">
+      <span class="warning-icon">
+        <IconAlertTriangle size={14} />
+      </span>
+      <span class="warning-message">
+        <strong>Permanently delete workspace "{deleteWorkspaceTarget?.name}"?</strong>
+        <span class="delete-warning-details">
+          <span>Config Path: <code>{deleteWorkspaceTarget?.config_path}</code></span>
+        </span>
+        <span>This will deregister it from the list. Vault files will not be deleted.</span>
+      </span>
+    </div>
+    <label class="settings-modal-checkbox" style="margin-top: 15px;">
+      <input type="checkbox" bind:checked={deleteWorkspaceFiles} disabled={workspaceBusy} />
+      <span>Delete configuration (config.yaml) and database files associated with this workspace from disk.</span>
+    </label>
   </ConfirmationModal>
 </div>

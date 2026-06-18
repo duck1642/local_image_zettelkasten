@@ -10,18 +10,11 @@
   export let workspaceName = 'LMZ Workspace';
   export let onSetActiveWorkspace: (id: string) => void;
   export let onCreateWorkspace: () => void;
-  export let onDeleteWorkspace: (id: string, deleteFiles: boolean) => void;
+  export let onDeleteWorkspace: (workspace: any) => void;
 
-  async function handleDeleteWorkspace(workspace: any) {
+  function handleDeleteWorkspace(workspace: any) {
     if (workspaceBusy) return;
-    const name = workspace.name;
-    const confirmed = await confirm(`Are you sure you want to delete the workspace "${name}"?\nThis will deregister it from the list.`);
-    if (!confirmed) {
-      return;
-    }
-    const deleteFiles = await confirm(`Do you also want to delete the configuration (config.yaml) and database files associated with "${name}" from disk?\n\nWARNING: This will permanently delete the config and workspace database. Vault files will not be deleted.`);
-    
-    onDeleteWorkspace(workspace.id, deleteFiles);
+    onDeleteWorkspace(workspace);
   }
 
   $: isValidWorkspace = workspaceParentPath.trim() !== '';

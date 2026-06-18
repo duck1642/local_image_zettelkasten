@@ -131,17 +131,60 @@ def delete_workspace(workspace_id: str, delete_files: bool = False) -> dict:
     if is_active:
         registry["active"] = DEFAULT_WORKSPACE_ID
 
-    if delete_files and config_path.exists():
+    if delete_files:
         try:
-            is_core_config = config_path.parent == PROJECT_ROOT / "config"
-            if not is_core_config:
-                config_path.unlink()
-                db_file = config_path.parent / "data" / "workspace.db"
-                if db_file.exists():
-                    db_file.unlink()
+            workspace_dir = config_path.parent
+            is_core_config = workspace_dir == PROJECT_ROOT / "config"
+            try:
+                is_project_parent = PROJECT_ROOT.is_relative_to(workspace_dir)
+            except Exception:
+                is_project_parent = False
+
+            if not is_core_config and not is_project_parent:
+                try:
+                    if config_path.exists():
+                        config_path.unlink()
+                except Exception:
+                    pass
+                if workspace_dir.exists():
+                    _cleanup_app_files(workspace_dir)
+                    _remove_empty_dirs(workspace_dir, workspace_dir)
         except Exception:
             pass
 
     del registry["workspaces"][workspace_id]
     save_workspace_registry(registry)
     return registry
+
+
+def _cleanup_app_files(workspace_dir: Path):
+    import os
+    for root, dirs, files in os.walk(workspace_dir, topdown=False):
+        root_path = Path(root)
+        parts = root_path.parts
+        is_user_vault_data = False
+        for i in range(len(parts) - 1):
+            if parts[i] == "vault" and parts[i+1] in ("notes", "assets"):
+                is_user_vault_data = True
+                break
+        if is_user_vault_data:
+            continue
+        for file in files:
+            file_path = root_path / file
+            try:
+                file_path.unlink()
+            except Exception:
+                pass
+
+
+def _remove_empty_dirs(path: Path, root: Path):
+    if not path.exists() or not path.is_dir():
+        return
+    for child in list(path.iterdir()):
+        if child.is_dir():
+            _remove_empty_dirs(child, root)
+    try:
+        if not any(path.iterdir()):
+            path.rmdir()
+    except Exception:
+        pass
