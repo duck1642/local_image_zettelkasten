@@ -411,39 +411,7 @@
     }
   }
 
-  async function deleteWorkspacePrompt(workspace: WorkspaceItem, event: Event) {
-    event.stopPropagation();
-    if (actionBusy) return;
 
-    const name = workspace.name;
-    const confirmed = await confirm(`Are you sure you want to delete the workspace "${name}"?\nThis will deregister it from the list.`);
-    if (!confirmed) {
-      return;
-    }
-
-    const deleteFiles = await confirm(`Do you also want to delete the configuration (config.yaml) and database files associated with "${name}" from disk?\n\nWARNING: This will permanently delete the config and workspace database. Vault files will not be deleted.`);
-
-    try {
-      actionBusy = true;
-      errorMessage = '';
-      statusMessage = `Deleting workspace ${name}...`;
-      const res = await apiFetch(`/api/workspaces/${workspace.id}?delete_files=${deleteFiles}`, {
-        method: 'DELETE'
-      });
-      if (!res.ok) {
-        const payload = await res.json().catch(() => ({}));
-        throw new Error(payload?.detail || `HTTP ${res.status}`);
-      }
-      statusMessage = 'Workspace deleted successfully.';
-      await fetchWorkspaces();
-    } catch (e) {
-      uiLog('ERROR', 'Failed to delete workspace', { workspace_id: workspace.id, error: String(e) });
-      errorMessage = `Failed to delete workspace: ${String(e)}`;
-      statusMessage = '';
-    } finally {
-      actionBusy = false;
-    }
-  }
 
   onMount(() => {
     void applyLauncherWindowLayout();
@@ -552,18 +520,7 @@
                                 ? "Runs inside the application directory. All vaults and database files reside inside the app repository."
                                 : "Isolated workspace. All vaults, logs, and database files reside directly inside this workspace folder."}
                             </div>
-                            {#if w.id !== 'default'}
-                              <div class="launcher-expanded-actions">
-                                <button
-                                  class="launcher-row-action-btn danger"
-                                  type="button"
-                                  disabled={actionBusy}
-                                  on:click={(event) => deleteWorkspacePrompt(w, event)}
-                                >
-                                  Delete Workspace
-                                </button>
-                              </div>
-                            {/if}
+
                           </div>
                         {/if}
                       </div>
@@ -606,18 +563,7 @@
                               <span class="path-label">Configuration File</span>
                               <code class="launcher-path-code" title={w.config_path}>{w.config_path}</code>
                             </div>
-                            {#if w.id !== 'default'}
-                              <div class="launcher-expanded-actions">
-                                <button
-                                  class="launcher-row-action-btn danger"
-                                  type="button"
-                                  disabled={actionBusy}
-                                  on:click={(event) => deleteWorkspacePrompt(w, event)}
-                                >
-                                  Delete Workspace
-                                </button>
-                              </div>
-                            {/if}
+
                           </div>
                         {/if}
                       </div>
@@ -1413,36 +1359,5 @@
     line-height: 1.4;
     margin-top: 2px;
   }
-  .launcher-expanded-actions {
-    display: flex;
-    justify-content: flex-end;
-    margin-top: 6px;
-    width: 100%;
-  }
 
-  .launcher-row-action-btn {
-    padding: 4px 10px;
-    font-size: 11px;
-    font-weight: 600;
-    border-radius: 4px;
-    cursor: pointer;
-    border: 1px solid transparent;
-    transition: all 0.15s ease;
-  }
-
-  .launcher-row-action-btn.danger {
-    background: rgba(248, 81, 73, 0.12);
-    color: #f85149;
-    border-color: rgba(248, 81, 73, 0.2);
-  }
-
-  .launcher-row-action-btn.danger:hover:not(:disabled) {
-    background: rgba(248, 81, 73, 0.2);
-    border-color: #f85149;
-  }
-
-  .launcher-row-action-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
 </style>
