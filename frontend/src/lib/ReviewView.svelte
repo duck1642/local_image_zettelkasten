@@ -190,7 +190,7 @@
         return;
       }
       const message = `Replace target copy ${targetHash.slice(0, 12)}... with ${displayName(current)}?`;
-      if (!confirm(message)) {
+      if (!await confirm(message)) {
         acting = false;
         return;
       }

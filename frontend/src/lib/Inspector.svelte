@@ -567,7 +567,7 @@
 
   async function deleteData() {
       if (!item) return;
-      if (!confirm("Are you sure you want to permanently delete this item? This will delete the file, note, and database entry.")) return;
+      if (!await confirm("Are you sure you want to permanently delete this item? This will delete the file, note, and database entry.")) return;
       try {
           const res = await apiFetch(`/api/items/${item.hash}`, { method: 'DELETE' });
           if (res.ok) {

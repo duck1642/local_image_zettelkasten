@@ -280,9 +280,9 @@
     }
   }
 
-  function handleTabChange(name: QueueName) {
+  async function handleTabChange(name: QueueName) {
     if (isDirty) {
-      if (!confirm('You have unsaved changes. Discard them?')) return;
+      if (!await confirm('You have unsaved changes. Discard them?')) return;
     }
     currentQueue = name;
     loadQueue(name);
@@ -317,7 +317,7 @@
         .map((warning) => `Line ${warning.line}: ${warning.message}`)
         .join('\n');
       const extra = queuePreview.warnings.length > 5 ? `\n${queuePreview.warnings.length - 5} more warnings...` : '';
-      if (!confirm(`Queue has ${queuePreview.warnings.length} warning${queuePreview.warnings.length === 1 ? '' : 's'}.\n\n${lines}${extra}\n\nContinue ingestion?`)) {
+      if (!await confirm(`Queue has ${queuePreview.warnings.length} warning${queuePreview.warnings.length === 1 ? '' : 's'}.\n\n${lines}${extra}\n\nContinue ingestion?`)) {
         return;
       }
     }
@@ -638,7 +638,7 @@
 
   async function openExternal() {
     if (isDirty) {
-      if (confirm('Save changes before opening?')) {
+      if (await confirm('Save changes before opening?')) {
         await saveQueue();
       } else {
         return;
@@ -653,7 +653,7 @@
 
   async function retryFailed() {
     if (isDirty) {
-      if (!confirm('Discard unsaved changes before retrying?')) return;
+      if (!await confirm('Discard unsaved changes before retrying?')) return;
     }
     if (counts.failed === 0) {
       alert('No failed URLs found.');
@@ -679,13 +679,13 @@
 
   async function clearFailed() {
     if (isDirty) {
-      if (!confirm('Discard unsaved changes before clearing?')) return;
+      if (!await confirm('Discard unsaved changes before clearing?')) return;
     }
     if (counts.failed === 0) {
       alert('No failed URLs found.');
       return;
     }
-    if (confirm('Clear failed_links.md?')) {
+    if (await confirm('Clear failed_links.md?')) {
       try {
         const res = await apiFetch('/api/queue/actions/clear-failed', { method: 'POST' });
         const data = await res.json();
@@ -697,10 +697,10 @@
     }
   }
 
-  function handleGlobalRefresh(event: Event) {
+  async function handleGlobalRefresh(event: Event) {
     const detail = (event as CustomEvent).detail || {};
     if (detail.tab !== 'ingest') return;
-    if (isDirty && !confirm('You have unsaved queue changes. Discard them and refresh?')) return;
+    if (isDirty && !await confirm('You have unsaved queue changes. Discard them and refresh?')) return;
     uiLog('INFO', 'Ingestion online view refresh requested');
     loadQueue(currentQueue);
     fetchStats();

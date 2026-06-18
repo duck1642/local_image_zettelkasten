@@ -183,10 +183,10 @@
     }).join(', ');
   }
 
-  function handleGlobalRefresh(event: Event) {
+  async function handleGlobalRefresh(event: Event) {
     const detail = (event as CustomEvent).detail || {};
     if (detail.tab !== 'settings') return;
-    if ($configDirty && !confirm('You have unsaved settings. Discard them and refresh?')) return;
+    if ($configDirty && !await confirm('You have unsaved settings. Discard them and refresh?')) return;
     uiLog('INFO', 'Settings view refresh requested');
     loadConfig();
   }

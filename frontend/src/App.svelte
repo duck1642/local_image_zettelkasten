@@ -305,7 +305,7 @@
               return;
             }
 
-            const shouldStop = confirm('Ingestion is running.\n\nStop after current item and exit?');
+            const shouldStop = await confirm('Ingestion is running.\n\nStop after current item and exit?');
             if (!shouldStop) return;
 
             closeFlowRunning = true;
