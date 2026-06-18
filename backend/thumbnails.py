@@ -137,7 +137,12 @@ def repair_missing_thumbnails(conn, limit: int = 100, ctx: WorkspaceContext | No
     failed = 0
     checked = 0
     rows = conn.execute(
-        "SELECT hash, file_extension, mime_type, storage_id FROM items ORDER BY date_added DESC"
+        """
+        SELECT hash, file_extension, mime_type, storage_id
+        FROM items
+        WHERE mime_type LIKE 'image/%' OR mime_type LIKE 'video/%'
+        ORDER BY date_added DESC
+        """
     )
     for item_hash, extension, mime_type, storage_id in rows:
         if checked >= limit:

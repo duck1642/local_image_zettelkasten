@@ -99,7 +99,7 @@
           <div class="health-row"><span>Missing in dict</span><code>{healthReport.workspace_dictionary_drift.missing_in_dictionary} tags</code></div>
         {/if}
         {#if healthReport.workspace_dictionary_drift?.unused_in_vault}
-          <div class="health-row"><span>Unused in vault</span><code>{healthReport.workspace_dictionary_drift.unused_in_vault} tags</code></div>
+          <div class="health-row"><span>Unused in workspace</span><code>{healthReport.workspace_dictionary_drift.unused_in_vault} tags</code></div>
         {/if}
       {/if}
       {#if repairErrors.length}

@@ -65,7 +65,7 @@
 
     <SettingsActionRow
       title="Metadata registry"
-      status={maintenanceResult.workspacePrune || 'Ready to prune unused workspace dictionary entries.'}
+      status={maintenanceResult.workspacePrune || 'Ready to prune dictionary entries not used by any vault in the workspace.'}
       actionLabel="Prune"
       busyLabel="Pruning..."
       busy={maintenanceBusy.workspacePrune}

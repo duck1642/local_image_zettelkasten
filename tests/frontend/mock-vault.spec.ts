@@ -1303,7 +1303,7 @@ test('settings maintenance actions call existing endpoints and show compact stat
   await expect(page.locator('.settings-action-row-status').nth(0)).toContainText('X: available');
   await expect(page.locator('.settings-action-row-status').nth(0)).toContainText('Pixiv: OAuth');
   await expect(page.locator('.settings-action-row-status').nth(0)).toContainText('YouTube: missing');
-  await expect(page.locator('.settings-action-row-status')).toContainText(['X: available, Instagram: missing, Pinterest: available, Pixiv: OAuth, YouTube: missing', 'started', 'Ready to sync workspace dictionaries from vault usage.', 'Ready to prune unused workspace dictionary entries.', 'cleaned 0, failed 0']);
+  await expect(page.locator('.settings-action-row-status')).toContainText(['X: available, Instagram: missing, Pinterest: available, Pixiv: OAuth, YouTube: missing', 'started', 'Ready to sync workspace dictionaries from vault usage.', 'Ready to prune dictionary entries not used by any vault in the workspace.', 'cleaned 0, failed 0']);
   expect(calls).toEqual(['auth', 'metadata', 'review']);
 });
 

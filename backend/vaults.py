@@ -694,13 +694,15 @@ def audit_vault_health(vault_id: str, ctx: WorkspaceContext | None = None) -> di
         finally:
             conn.close()
         try:
-            from workspace_db import connect_workspace_database
+            from workspace_db import connect_workspace_database, _workspace_usage
             workspace_conn = connect_workspace_database(ctx)
             try:
                 dictionary_wd = {row[0] for row in workspace_conn.execute("SELECT tag_norm FROM wd_tag_dictionary").fetchall()}
+                workspace_usage = _workspace_usage(ctx)
+                workspace_used_tags = workspace_usage["wd_tags"]
                 workspace_dictionary_drift = {
                     "missing_in_dictionary": len(used_wd - dictionary_wd),
-                    "unused_in_vault": len(dictionary_wd - used_wd),
+                    "unused_in_vault": len(dictionary_wd - workspace_used_tags),
                 }
             finally:
                 workspace_conn.close()
@@ -737,7 +739,6 @@ def audit_vault_health(vault_id: str, ctx: WorkspaceContext | None = None) -> di
         + len(facet_drift) + len(broken_topic_links)
         + len(review_mismatches["media_without_sidecar"]) + len(review_mismatches["sidecar_without_media"])
         + int(workspace_dictionary_drift.get("missing_in_dictionary", 0))
-        + int(workspace_dictionary_drift.get("unused_in_vault", 0))
     )
     return {
         "status": "success",
@@ -826,6 +827,7 @@ def _repair_missing_wd_cache(conn: sqlite3.Connection, ctx: WorkspaceContext, li
         SELECT hash, file_extension, mime_type, storage_id
         FROM items
         WHERE storage_id IS NOT NULL AND storage_id != ''
+          AND (mime_type LIKE 'image/%' OR mime_type LIKE 'video/%')
         ORDER BY date_added DESC
     """).fetchall()
     for item_hash, extension, mime_type, storage_id in rows:
