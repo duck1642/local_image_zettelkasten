@@ -84,11 +84,7 @@
     event.preventDefault();
     if (event.ctrlKey) {
       uiLog('INFO', 'Ctrl+F5 pressed: reloading full app');
-      try {
-        await applyLauncherWindowLayout();
-      } catch (err) {
-        uiLog('WARNING', 'Failed to resize window to launcher size on reload', { error: String(err) });
-      }
+      await applyLauncherWindowLayout();
       window.location.reload();
       return;
     }
