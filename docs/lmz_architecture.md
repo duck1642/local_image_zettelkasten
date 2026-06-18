@@ -841,21 +841,19 @@ Review actions:
 
 ## External Authentication
 
-External downloader authentication is config-driven but secrets-backed.
+External downloader authentication is global-directory based and platform-specific.
 
 Credential storage:
 
-- workspace `config.yaml`: non-secret defaults, including relative `external_tools.cookies_path`.
-- workspace secrets dir, usually `data/secrets/`: sensitive overrides such as `pixiv_token` and `cookies_path`.
-- workspace cookie jar, usually `data/secrets/cookies.txt`: Netscape cookie jar used by gallery-dl and yt-dlp.
-- `/api/config` returns and saves public config only; secret keys are stripped before UI round-trips can write `config.yaml`.
+- Credential root: `<project_root>/secrets/auth/` (overrideable by setting the `LMZ_AUTH_ROOT` environment variable).
+- Cookie files: stored in Netscape cookie jar format as `<auth_root>/<platform>/cookies.txt` (supported platforms: `x`, `instagram`, `pinterest`, `youtube`, `pixiv`).
+- Pixiv OAuth: refresh token is obtained via the mobile API flow and saved as `<auth_root>/pixiv/refresh_token.txt`.
+- Local backend API key: stored at `secrets/.api_key` for frontend and browser extension client request authentication.
 
 Path handling:
 
-- Relative cookie paths resolve from the active workspace root.
-- LMZ workspace default: `data/secrets/cookies.txt`.
-- Repo/default workspace configs may still use `secrets/cookies.txt`.
-- Secret values are merged into `external_tools` at runtime by `get_config()`.
+- Downloader wrappers (gallery-dl and yt-dlp) query the auth status of the target platform and automatically inject the platform-specific cookie path or refresh token arguments at process execution time.
+- Credential files are not tracked in git and are excluded via `.gitignore` to prevent leaks.
 
 Platform expectations:
 
