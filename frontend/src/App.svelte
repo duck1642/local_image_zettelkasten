@@ -14,6 +14,7 @@
   import { queueStats, reviewCount, reviewStats, startSharedStatsPolling } from './lib/statsStore';
   import { apiFetch } from './lib/api';
   import { privacyBlur } from './lib/privacyStore';
+  import { applyMainWindowLayout } from './lib/windowLayout';
   import {
     IconFolder,
     IconDownload,
@@ -32,19 +33,6 @@
   let stopStats: (() => void) | null = null;
   let stopRam: (() => void) | null = null;
 
-  async function resizeForMainApp() {
-    try {
-      const { getCurrentWindow } = await import('@tauri-apps/api/window');
-      const { LogicalSize } = await import('@tauri-apps/api/dpi');
-      const appWindow = getCurrentWindow();
-      await appWindow.setResizable(true);
-      await appWindow.setSize(new LogicalSize(1280, 800));
-      await appWindow.center();
-    } catch {
-      // Non-tauri context
-    }
-  }
-
   $: if (workspaceLoaded) {
     if (!stopStats) {
       stopStats = startSharedStatsPolling();
@@ -59,7 +47,7 @@
     activeVaultId = event.detail.vault_id || '';
     workspaceLoaded = true;
     uiLog('INFO', `Workspace loaded: ${activeWorkspaceId}, vault: ${activeVaultId}`);
-    void resizeForMainApp();
+    void applyMainWindowLayout();
   }
 
   type DropPoint = { x: number; y: number };

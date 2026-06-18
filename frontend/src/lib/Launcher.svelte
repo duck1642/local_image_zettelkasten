@@ -3,6 +3,7 @@
   import { open as openDialog } from '@tauri-apps/plugin-dialog';
   import { apiFetch } from './api';
   import { log as uiLog } from './logger';
+  import { applyLauncherWindowLayout } from './windowLayout';
   import {
     IconFolder,
     IconPlus,
@@ -396,6 +397,7 @@
   }
 
   onMount(() => {
+    void applyLauncherWindowLayout();
     fetchWorkspaces();
   });
 </script>
@@ -404,7 +406,7 @@
   <div class="launcher-card">
     <header class="header">
       <div class="logo-wrap">
-        <IconServer size={32} className="logo-icon" />
+        <img src="/lmz-icon.svg" alt="" class="logo-icon" />
       </div>
       <h1 class="title">Local Media Zettelkasten</h1>
     </header>
@@ -710,17 +712,15 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 56px;
-    height: 56px;
-    border-radius: 14px;
-    background: rgba(31, 111, 235, 0.12);
-    border: 1px solid rgba(31, 111, 235, 0.35);
+    width: 64px;
+    height: 64px;
     margin-bottom: 12px;
-    box-shadow: 0 0 15px rgba(31, 111, 235, 0.25);
   }
 
-  :global(.logo-icon) {
-    color: var(--accent-primary);
+  .logo-icon {
+    display: block;
+    width: 64px;
+    height: 64px;
   }
 
   .title {
