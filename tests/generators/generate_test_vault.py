@@ -412,6 +412,11 @@ def generate_vault(args: argparse.Namespace) -> Path:
         vault_root / "local_ingest",
         vault_root / "online_ingest",
         data_dir / "secrets",
+        data_dir / "secrets" / "auth" / "x",
+        data_dir / "secrets" / "auth" / "instagram",
+        data_dir / "secrets" / "auth" / "pinterest",
+        data_dir / "secrets" / "auth" / "pixiv",
+        data_dir / "secrets" / "auth" / "youtube",
         vault_root / "wd-tags",
     ]:
         directory.mkdir(parents=True, exist_ok=True)

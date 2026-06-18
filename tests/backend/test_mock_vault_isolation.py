@@ -78,6 +78,11 @@ def load_maintenance_script(name: str):
     return load_maintenance_tool(name)
 
 
+def write_cookie_file(path: Path, domain: str, name: str = "sessionid"):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"{domain}\tTRUE\t/\tTRUE\t0\t{name}\tmock-value\n", encoding="utf-8")
+
+
 def write_compact_note(utils, conn, item_hash: str, text: str):
     storage_id = storage_id_for(conn, item_hash)
     note_path = utils.note_path_for(item_hash, storage_id)
@@ -107,6 +112,68 @@ def test_config_override_resolves_paths_inside_mock_vault(monkeypatch, tmp_path)
     assert utils.TOPICS_DIR == tmp_path / "mock-vault" / "data" / "topics"
     assert utils.get_configured_cookie_path() == tmp_path / "mock-vault" / "secrets" / "cookies.txt"
     assert str(ROOT / "data") not in str(utils.VAULT_DIR)
+
+
+def test_platform_cookie_path_preferred_over_legacy(monkeypatch, tmp_path):
+    utils, = fresh_backend(monkeypatch, tmp_path, "utils")
+    legacy_path = utils.get_configured_cookie_path()
+    platform_path = utils.platform_cookie_path("x")
+    write_cookie_file(legacy_path, ".twitter.com", "auth_token")
+    write_cookie_file(platform_path, ".x.com", "ct0")
+
+    info = utils.get_platform_cookie_path("x")
+    status = utils.get_cookie_auth_status()
+
+    assert info["status"] == "available"
+    assert info["source"] == "platform"
+    assert info["path"] == str(platform_path)
+    assert status["platform_details"]["x"]["source"] == "platform"
+    assert status["legacy_cookies_used"] is False
+
+
+def test_legacy_cookie_path_still_falls_back(monkeypatch, tmp_path):
+    utils, = fresh_backend(monkeypatch, tmp_path, "utils")
+    legacy_path = utils.get_configured_cookie_path()
+    write_cookie_file(legacy_path, ".instagram.com", "sessionid")
+
+    info = utils.get_platform_cookie_path("instagram")
+    status = utils.get_cookie_auth_status()
+
+    assert info["status"] == "available"
+    assert info["source"] == "legacy"
+    assert info["path"] == str(legacy_path)
+    assert status["platform_details"]["instagram"]["source"] == "legacy"
+    assert status["legacy_cookies_used"] is True
+
+
+def test_auth_scan_reports_platform_sources_and_keeps_legacy_fields(monkeypatch, tmp_path):
+    common, utils = fresh_backend(monkeypatch, tmp_path, "api.common", "utils")
+    legacy_path = utils.get_configured_cookie_path()
+    youtube_path = utils.platform_cookie_path("youtube")
+    write_cookie_file(legacy_path, ".twitter.com", "auth_token")
+    write_cookie_file(youtube_path, ".youtube.com", "SID")
+    monkeypatch.setattr(common, "get_config", lambda: {"external_tools": {"pixiv_token": "secret-token"}})
+
+    auth = common._scan_auth_status_sync()
+
+    assert auth["cookies"] == "available"
+    assert auth["cookies_path"] == str(legacy_path)
+    assert auth["legacy_cookies_used"] is True
+    assert auth["platforms"]["X"]["cookie_source"] == "legacy"
+    assert auth["platforms"]["X"]["cookies_path"] == str(legacy_path)
+    assert auth["platforms"]["YouTube"]["cookie_source"] == "platform"
+    assert auth["platforms"]["YouTube"]["cookies_path"] == str(youtube_path)
+    assert auth["platforms"]["Pixiv"]["token"] == "available"
+
+
+def test_missing_platform_and_legacy_cookie_reports_missing(monkeypatch, tmp_path):
+    utils, = fresh_backend(monkeypatch, tmp_path, "utils")
+
+    info = utils.get_platform_cookie_path("pinterest")
+
+    assert info["status"] == "missing"
+    assert info["source"] == "missing"
+    assert info["path"] == ""
 
 
 def test_injected_runtime_context_paths_and_databases(monkeypatch, tmp_path):
@@ -546,6 +613,11 @@ def test_workspace_setup_creates_lmz_layout_and_resolves_paths(monkeypatch, tmp_
         "data/vaults/default/logs/structured",
         "data/vaults/default/review",
         "data/vaults/default/wd-tags",
+        "data/secrets/auth/x",
+        "data/secrets/auth/instagram",
+        "data/secrets/auth/pinterest",
+        "data/secrets/auth/pixiv",
+        "data/secrets/auth/youtube",
     ]:
         assert (workspace_parent / "lmz" / relative).exists()
     assert not (workspace_parent / "lmz" / "data" / "models").exists()
@@ -4572,13 +4644,58 @@ def test_downloader_wrappers_use_configured_timeouts(monkeypatch, tmp_path):
     gallery.download_gallery("https://example.test/item", metadata_info={"platform": "X", "download_url": "https://example.test/item"})
 
     monkeypatch.setattr(yt_dlp, "get_config", lambda: {"external_tools": {"timeouts": {"yt_dlp_metadata": 9, "yt_dlp_download": 10}}})
-    monkeypatch.setattr(yt_dlp, "get_cookie_path", lambda: None)
-    monkeypatch.setattr(yt_dlp, "get_cookie_auth_status", lambda: {})
+    monkeypatch.setattr(yt_dlp, "get_platform_cookie_path", lambda platform: {"status": "missing", "source": "missing", "path": ""})
     monkeypatch.setattr(yt_dlp.subprocess, "run", yt_run)
     yt_dlp.download_video("https://www.youtube.com/watch?v=mock")
 
     assert gallery_timeouts[:2] == [7, 8]
     assert yt_timeouts[:2] == [9, 10]
+
+
+def test_gallery_dl_uses_platform_cookie_before_legacy(monkeypatch, tmp_path):
+    gallery, utils = fresh_backend(monkeypatch, tmp_path, "downloaders.gallery_dl_wrapper", "utils")
+    legacy_path = utils.get_configured_cookie_path()
+    platform_path = utils.platform_cookie_path("x")
+    write_cookie_file(legacy_path, ".twitter.com", "auth_token")
+    write_cookie_file(platform_path, ".x.com", "ct0")
+
+    args = gallery._base_args("https://x.com/mock/status/1")
+
+    assert args[args.index("--cookies") + 1] == str(platform_path)
+
+
+def test_gallery_dl_pixiv_oauth_wins_over_cookie(monkeypatch, tmp_path):
+    gallery, utils = fresh_backend(monkeypatch, tmp_path, "downloaders.gallery_dl_wrapper", "utils")
+    write_cookie_file(utils.platform_cookie_path("pixiv"), ".pixiv.net", "PHPSESSID")
+    monkeypatch.setattr(gallery, "get_config", lambda: {"external_tools": {"pixiv_token": "secret-token"}})
+
+    args = gallery._base_args("https://www.pixiv.net/artworks/1")
+
+    assert "--cookies" not in args
+    assert "extractor.pixiv.refresh-token=secret-token" in args
+
+
+def test_yt_dlp_uses_youtube_platform_cookie(monkeypatch, tmp_path):
+    yt_dlp, utils = fresh_backend(monkeypatch, tmp_path, "downloaders.yt_dlp_wrapper", "utils")
+    youtube_cookie = utils.platform_cookie_path("youtube")
+    write_cookie_file(youtube_cookie, ".youtube.com", "SID")
+    commands = []
+
+    class Result:
+        returncode = 1
+        stdout = ""
+        stderr = "failed"
+
+    def run(command, **kwargs):
+        commands.append(command)
+        return Result()
+
+    monkeypatch.setattr(yt_dlp.subprocess, "run", run)
+    yt_dlp.download_video("https://www.youtube.com/watch?v=mock")
+
+    assert len(commands) >= 2
+    assert commands[0][commands[0].index("--cookies") + 1] == str(youtube_cookie)
+    assert commands[1][commands[1].index("--cookies") + 1] == str(youtube_cookie)
 
 
 def test_downloader_wrapper_timeout_defaults(monkeypatch, tmp_path):

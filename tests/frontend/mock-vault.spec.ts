@@ -760,7 +760,20 @@ async function installMockVaultApi(
   });
   await page.route('**/api/auth/scan', async (route) => {
     await options.onMaintenanceAction?.('auth');
-    return fulfillJson(route, { status: 'ok', auth: { cookies: 'available' } });
+    return fulfillJson(route, {
+      status: 'ok',
+      auth: {
+        cookies: 'available',
+        legacy_cookies_used: true,
+        platforms: {
+          X: { cookies: 'available', cookie_source: 'legacy', cookies_path: 'C:/ObsidianVault/lmz/data/secrets/cookies.txt', legacy_cookies_used: true, token: 'not_required' },
+          Instagram: { cookies: 'missing', cookie_source: 'missing', cookies_path: '', legacy_cookies_used: false, token: 'not_required' },
+          Pinterest: { cookies: 'available', cookie_source: 'platform', cookies_path: 'C:/ObsidianVault/lmz/data/secrets/auth/pinterest/cookies.txt', legacy_cookies_used: false, token: 'not_required' },
+          Pixiv: { cookies: 'available', cookie_source: 'platform', cookies_path: 'C:/ObsidianVault/lmz/data/secrets/auth/pixiv/cookies.txt', legacy_cookies_used: false, token: 'available' },
+          YouTube: { cookies: 'missing', cookie_source: 'missing', cookies_path: '', legacy_cookies_used: false, token: 'not_required' }
+        }
+      }
+    });
   });
   await page.route('**/api/local-ingest/status', async (route) => fulfillJson(route, localStatus));
   await page.route('**/api/local-ingest/start', async (route) => {
@@ -1288,7 +1301,10 @@ test('settings maintenance actions call existing endpoints and show compact stat
   await page.getByRole('button', { name: 'Rebuild' }).click();
   await page.getByRole('button', { name: 'Clean' }).click();
 
-  await expect(page.locator('.settings-action-row-status')).toContainText(['OK (available)', 'started', 'cleaned 0, failed 0']);
+  await expect(page.locator('.settings-action-row-status').nth(0)).toContainText('X: available (legacy)');
+  await expect(page.locator('.settings-action-row-status').nth(0)).toContainText('Pixiv: OAuth');
+  await expect(page.locator('.settings-action-row-status').nth(0)).toContainText('YouTube: missing');
+  await expect(page.locator('.settings-action-row-status')).toContainText(['X: available (legacy), Instagram: missing, Pinterest: available, Pixiv: OAuth, YouTube: missing', 'started', 'Ready to sync workspace dictionaries from vault usage.', 'Ready to prune unused workspace dictionary entries.', 'cleaned 0, failed 0']);
   expect(calls).toEqual(['auth', 'metadata', 'review']);
 });
 

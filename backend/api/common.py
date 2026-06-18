@@ -269,15 +269,29 @@ def _scan_auth_status_sync(reason: str = "manual") -> dict:
     ext_tools = config.get("external_tools", {})
     cookie_status = get_cookie_auth_status()
     pixiv_token = "available" if ext_tools.get("pixiv_token") else "missing"
+    platform_details = cookie_status.get("platform_details") or {}
+
+    def platform_status(platform_id: str, token: str = "not_required") -> dict:
+        detail = platform_details.get(platform_id) or {}
+        return {
+            "cookies": detail.get("status") or cookie_status.get(platform_id, "missing"),
+            "cookies_path": detail.get("path", ""),
+            "cookie_source": detail.get("source", "missing"),
+            "legacy_cookies_used": detail.get("source") == "legacy" and detail.get("status") == "available",
+            "token": token,
+        }
+
     statuses = {
         "cookies": cookie_status.get("cookies"),
         "cookies_path": cookie_status.get("path", ""),
+        "legacy_cookies_path": cookie_status.get("legacy_cookies_path", cookie_status.get("path", "")),
+        "legacy_cookies_used": bool(cookie_status.get("legacy_cookies_used")),
         "platforms": {
-            "X": {"cookies": cookie_status.get("x", "missing"), "token": "not_required"},
-            "Instagram": {"cookies": cookie_status.get("instagram", "missing"), "token": "not_required"},
-            "Pinterest": {"cookies": cookie_status.get("pinterest", "missing"), "token": "not_required"},
-            "YouTube": {"cookies": cookie_status.get("youtube", "missing"), "token": "not_required"},
-            "Pixiv": {"cookies": "not_required", "token": pixiv_token},
+            "X": platform_status("x"),
+            "Instagram": platform_status("instagram"),
+            "Pinterest": platform_status("pinterest"),
+            "YouTube": platform_status("youtube"),
+            "Pixiv": platform_status("pixiv", pixiv_token),
         },
     }
 
@@ -295,6 +309,8 @@ def _scan_auth_status_sync(reason: str = "manual") -> dict:
             reason=reason,
             platform=platform,
             cookies=status["cookies"],
+            cookie_source=status.get("cookie_source", "missing"),
+            cookies_path=status.get("cookies_path", ""),
             token=status["token"],
         )
     return statuses

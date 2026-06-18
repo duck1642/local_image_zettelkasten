@@ -101,6 +101,11 @@ def test_generated_vault_smoke_and_isolation(tmp_path, monkeypatch):
         "data/vaults/default/logs/structured/ingest_online.jsonl",
         "data/vaults/default/logs/structured/ingestion_audit.jsonl",
         "data/vaults/default/logs/raw/console.log",
+        "data/secrets/auth/x",
+        "data/secrets/auth/instagram",
+        "data/secrets/auth/pinterest",
+        "data/secrets/auth/pixiv",
+        "data/secrets/auth/youtube",
     ]:
         assert (output / relative).exists()
 

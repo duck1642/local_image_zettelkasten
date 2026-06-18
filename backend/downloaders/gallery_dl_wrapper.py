@@ -6,7 +6,7 @@ from urllib.parse import urlparse
 
 from downloaders.media_filter import valid_media_files
 from runtime_context import get_runtime_context
-from utils import get_config, get_cookie_auth_status, get_cookie_path
+from utils import get_config, get_platform_cookie_path
 
 
 _AUTH_STATUS_LOGGED = set()
@@ -41,21 +41,20 @@ def _platform_for_url(url: str) -> str:
 def _base_args(url: str) -> list:
     config = get_config()
     ext_tools = config.get('external_tools', {})
-    cookie_path = get_cookie_path()
-    cookie_status = get_cookie_auth_status()
     args = []
     platform = _platform_for_url(url)
+    cookie_info = get_platform_cookie_path(platform)
 
     _log_auth_status(
         platform,
-        cookie_status,
+        cookie_info,
         bool(ext_tools.get('pixiv_token')),
     )
 
-    if cookie_path:
-        args.extend(["--cookies", str(cookie_path)])
     if ext_tools.get('pixiv_token') and "pixiv" in url.lower():
         args.extend(["--option", f"extractor.pixiv.refresh-token={ext_tools['pixiv_token']}"])
+    elif cookie_info.get("status") == "available" and cookie_info.get("path"):
+        args.extend(["--cookies", str(cookie_info["path"])])
     if ext_tools.get('proxy'):
         args.extend(["--proxy", ext_tools['proxy']])
     if ext_tools.get('user_agent'):
@@ -66,15 +65,10 @@ def _base_args(url: str) -> list:
 
 def _log_auth_status(
     platform: str,
-    cookie_status: dict,
+    cookie_info: dict,
     has_pixiv_token: bool,
 ):
-    platform_cookie_key = {
-        "X": "x",
-        "Instagram": "instagram",
-        "Pinterest": "pinterest",
-    }.get(platform)
-    platform_cookie_status = cookie_status.get(platform_cookie_key, "not_required")
+    platform_cookie_status = cookie_info.get("status", "missing")
 
     pixiv_token_status = "not_required"
     if platform == "Pixiv":
@@ -82,7 +76,7 @@ def _log_auth_status(
 
     key = (
         platform,
-        cookie_status.get("cookies"),
+        cookie_info.get("source"),
         platform_cookie_status,
         pixiv_token_status,
     )
@@ -96,9 +90,10 @@ def _log_auth_status(
         "Downloader auth status",
         downloader="gallery-dl",
         platform=platform,
-        cookies=cookie_status.get("cookies"),
+        cookies=platform_cookie_status,
+        cookie_source=cookie_info.get("source", "missing"),
         platform_cookies=platform_cookie_status,
-        cookies_path=cookie_status.get("path", ""),
+        cookies_path=cookie_info.get("path", ""),
         pixiv_token=pixiv_token_status,
     )
 

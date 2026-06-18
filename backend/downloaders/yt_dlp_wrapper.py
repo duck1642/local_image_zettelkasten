@@ -11,7 +11,7 @@ from urllib.request import HTTPCookieProcessor, ProxyHandler, Request, build_ope
 
 from downloaders.media_filter import valid_media_files
 from runtime_context import get_runtime_context
-from utils import get_config, get_cookie_auth_status, get_cookie_path
+from utils import get_config, get_platform_cookie_path
 
 
 _AUTH_STATUS_LOGGED = set()
@@ -44,16 +44,16 @@ def _post_id(url: str) -> str:
 
 def _opener(config: dict):
     handlers = []
-    cookie_path = get_cookie_path()
-    _log_auth_status("YouTube", get_cookie_auth_status())
-    if cookie_path:
+    cookie_info = get_platform_cookie_path("youtube")
+    _log_auth_status("YouTube", cookie_info)
+    if cookie_info.get("status") == "available" and cookie_info.get("path"):
         jar = MozillaCookieJar()
         try:
-            jar.load(str(cookie_path), ignore_discard=True, ignore_expires=True)
+            jar.load(str(cookie_info["path"]), ignore_discard=True, ignore_expires=True)
             handlers.append(HTTPCookieProcessor(jar))
         except Exception as exc:
             from logger import log_ingest_online
-            log_ingest_online("WARNING", "Cookie jar load failed", path=str(cookie_path), error=str(exc))
+            log_ingest_online("WARNING", "Cookie jar load failed", path=str(cookie_info["path"]), error=str(exc))
     proxy = config.get('external_tools', {}).get('proxy')
     if proxy:
         handlers.append(ProxyHandler({'http': proxy, 'https': proxy}))
@@ -62,11 +62,11 @@ def _opener(config: dict):
 
 def _log_auth_status(
     platform: str,
-    cookie_status: dict,
+    cookie_info: dict,
 ):
-    platform_cookie_status = cookie_status.get("youtube", "missing")
+    platform_cookie_status = cookie_info.get("status", "missing")
 
-    key = (platform, cookie_status.get("cookies"), platform_cookie_status)
+    key = (platform, cookie_info.get("source"), platform_cookie_status)
     if key in _AUTH_STATUS_LOGGED:
         return
     _AUTH_STATUS_LOGGED.add(key)
@@ -77,9 +77,10 @@ def _log_auth_status(
         "Downloader auth status",
         downloader="yt-dlp",
         platform=platform,
-        cookies=cookie_status.get("cookies"),
+        cookies=platform_cookie_status,
+        cookie_source=cookie_info.get("source", "missing"),
         platform_cookies=platform_cookie_status,
-        cookies_path=cookie_status.get("path", ""),
+        cookies_path=cookie_info.get("path", ""),
     )
 
 
@@ -325,8 +326,9 @@ def download_video(url: str, metadata_info: dict = None) -> tuple[bool, dict]:
 
     config = get_config()
     ext_tools = config.get('external_tools', {})
-    cookie_path = get_cookie_path()
-    _log_auth_status("YouTube", get_cookie_auth_status())
+    cookie_info = get_platform_cookie_path("youtube")
+    _log_auth_status("YouTube", cookie_info)
+    cookie_path = cookie_info.get("path") if cookie_info.get("status") == "available" else ""
 
     url_hash = hashlib.sha256(url.encode()).hexdigest()[:10]
     session_dir = get_runtime_context().active_vault.online_ingest_dir / url_hash

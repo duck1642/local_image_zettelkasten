@@ -141,6 +141,12 @@ async function main() {
   await openMaintenance(page);
   await shot(page, '02-maintenance-start');
 
+  await page.getByRole('button', { name: 'Scan' }).click();
+  await expect(page.locator('.settings-action-row-status').first()).toContainText('X: missing', { timeout: 10000 });
+  await expect(page.locator('.settings-action-row-status').first()).toContainText('Pixiv: missing');
+  await shot(page, '02-auth-scan');
+  record('auth scan', { ok: true });
+
   await page.getByRole('button', { name: 'Rebuild' }).click();
   const metadataJob = await waitForMetadataRebuild();
   await expect(page.locator('.settings-action-row-status').nth(1)).toContainText('completed', { timeout: 10000 });

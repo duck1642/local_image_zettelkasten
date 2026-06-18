@@ -162,6 +162,29 @@
     return (event.currentTarget as HTMLInputElement).checked;
   }
 
+  function authStatusSummary(auth: any) {
+    const platforms = auth?.platforms || {};
+    const rows = [
+      ['X', 'X'],
+      ['Instagram', 'Instagram'],
+      ['Pinterest', 'Pinterest'],
+      ['Pixiv', 'Pixiv'],
+      ['YouTube', 'YouTube']
+    ];
+    return rows.map(([label, key]) => {
+      const status = platforms[key] || {};
+      const cookies = String(status.cookies || 'missing');
+      const source = status.cookie_source === 'legacy' && cookies === 'available' ? ' (legacy)' : '';
+      if (key === 'Pixiv') {
+        const token = String(status.token || 'missing');
+        if (token === 'available') return `${label}: OAuth`;
+        if (cookies === 'available') return `${label}: cookies${source}`;
+        return `${label}: missing`;
+      }
+      return `${label}: ${cookies}${source}`;
+    }).join(', ');
+  }
+
   function handleGlobalRefresh(event: Event) {
     const detail = (event as CustomEvent).detail || {};
     if (detail.tab !== 'settings') return;
@@ -848,14 +871,14 @@
     try {
       if (action === 'auth') {
         const payload = await scanAuth();
-        const cookies = String(payload?.auth?.cookies || 'unknown');
-        setMaintenanceResult(action, `OK (${cookies})`);
+        const summary = authStatusSummary(payload?.auth);
+        setMaintenanceResult(action, summary || 'auth scan complete');
         toastStore.add({
           type: 'success',
           title: 'Auth Complete',
-          message: `Authenticated successfully. Cookies: ${cookies}.`
+          message: summary || 'Auth scan completed.'
         });
-        uiLog('INFO', 'Maintenance action completed', { action: 'auth_scan', cookies });
+        uiLog('INFO', 'Maintenance action completed', { action: 'auth_scan', auth: payload?.auth || {} });
       } else if (action === 'metadata') {
         const payload = await startMetadataRebuild();
         const status = String(payload?.status || 'started');
