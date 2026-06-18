@@ -507,14 +507,8 @@
                         </div>
                         {#if visibleWorkspacePaths.has(w.id)}
                           <div class="launcher-expanded-details">
-                            <div class="launcher-path-row">
-                              <span class="path-label">Workspace Root</span>
-                              <code class="launcher-path-code" title={details.rootDir}>{details.rootDir}</code>
-                            </div>
-                            <div class="launcher-path-row">
-                              <span class="path-label">Configuration File</span>
-                              <code class="launcher-path-code" title={w.config_path}>{w.config_path}</code>
-                            </div>
+                            <div class="launcher-path-line" title={details.rootDir}>{details.rootDir}</div>
+                            <div class="launcher-path-line" title={w.config_path}>{w.config_path}</div>
                             <div class="launcher-desc-row">
                               {details.isLocal
                                 ? "Runs inside the application directory. All vaults and database files reside inside the app repository."
@@ -555,14 +549,8 @@
                         </div>
                         {#if visibleWorkspacePaths.has(w.id)}
                           <div class="launcher-expanded-details">
-                            <div class="launcher-path-row">
-                              <span class="path-label">Workspace Root</span>
-                              <code class="launcher-path-code" title={details.rootDir}>{details.rootDir}</code>
-                            </div>
-                            <div class="launcher-path-row">
-                              <span class="path-label">Configuration File</span>
-                              <code class="launcher-path-code" title={w.config_path}>{w.config_path}</code>
-                            </div>
+                            <div class="launcher-path-line" title={details.rootDir}>{details.rootDir}</div>
+                            <div class="launcher-path-line" title={w.config_path}>{w.config_path}</div>
 
                           </div>
                         {/if}
@@ -1322,35 +1310,7 @@
     padding: 4px 0 2px 0;
   }
 
-  .launcher-path-row {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    width: 100%;
-  }
 
-  .path-label {
-    font-size: 9px;
-    font-weight: 700;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.3px;
-  }
-
-  .launcher-path-code {
-    font-size: 11px;
-    color: var(--text-muted);
-    font-family: monospace;
-    white-space: normal;
-    word-break: break-all;
-    width: 100%;
-    align-self: flex-start;
-    text-align: left;
-    background: rgba(0, 0, 0, 0.2);
-    padding: 4px 6px;
-    border-radius: 4px;
-    border: 1px solid rgba(255, 255, 255, 0.03);
-  }
 
   .launcher-desc-row {
     font-size: 11px;
