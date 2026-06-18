@@ -8,7 +8,6 @@
   export let vaultActive = '';
   export let healthVaultId = '';
   export let healthBusy = false;
-  export let healthResult = '';
   export let healthReport: any = null;
   export let healthDetailsOpen = false;
   export let repairErrors: Array<{ hash: string; storage_id: string; status: string; error: string }> = [];
@@ -37,12 +36,6 @@
     <button class="primary settings-bold-button" type="button" on:click={onRepairVaultHealth} disabled={healthBusy || !healthVaultId || healthVaultId !== vaultActive}>Repair</button>
   </div>
 </div>
-
-{#if healthResult}
-  <div class="settings-inline-status" class:error={healthResult.startsWith('error:')}>
-    {healthResult}
-  </div>
-{/if}
 
 {#if healthReport}
   <div class="health-scorecard">

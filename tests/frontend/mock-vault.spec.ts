@@ -1390,6 +1390,15 @@ test('settings previews vault merge and runs vault health package actions', asyn
   await page.getByRole('dialog', { name: 'Repair Vault' }).getByRole('button', { name: 'Repair' }).click();
   await expect(page.getByText('Repair Complete')).toBeVisible();
 
+  await page.getByRole('button', { name: 'Notifications', exact: true }).click();
+  const notificationHistory = page.getByRole('region', { name: 'Notification history' });
+  await expect(notificationHistory).toContainText('Repair Complete');
+  await notificationHistory.getByRole('button', { name: 'Mark all notifications as read' }).click();
+  await expect(page.getByLabel(/unread notifications/)).toHaveCount(0);
+  await notificationHistory.getByRole('button', { name: 'Clear notifications' }).click();
+  await expect(notificationHistory).toContainText('No notifications');
+  await page.getByRole('button', { name: 'Notifications', exact: true }).click();
+
   await page.getByRole('button', { name: 'Backup Vault Folder' }).click();
   await page.getByRole('button', { name: 'Backup', exact: true }).click();
   await expect(page.getByText('Backup Successful')).toBeVisible();

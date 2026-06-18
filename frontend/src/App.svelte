@@ -8,6 +8,7 @@
   import StatsView from './lib/StatsView.svelte';
   import VaultView from './lib/VaultView.svelte';
   import Toaster from './lib/Toaster.svelte';
+  import NotificationHistory from './lib/NotificationHistory.svelte';
   import { log as uiLog } from './lib/logger';
   import { ramStats, startRamTracker } from './lib/ramStore';
   import { queueStats, reviewCount, reviewStats, startSharedStatsPolling } from './lib/statsStore';
@@ -455,20 +456,22 @@
     <footer class="bottom-status">
       {#if activeTab === 'vault'}
         <span class="status-left">Total Items: {vaultStatus.totalItems} | View: {vaultStatus.layoutMode} | LMZ Tauri</span>
-        <span class="status-right">
-          {#if $ramStats.enabled}<span class="ram-status">{ramStatusText($ramStats)}</span>{/if}
-          <span>Showing {vaultStatus.groups} groups{vaultStatus.hasMore ? ' (more available)' : ''}</span>
-        </span>
       {:else if activeTab === 'ingest'}
         <span class="status-left">Ingestion | Normal: {$queueStats.normal} | Force: {$queueStats.force} | Failed: {$queueStats.failed}</span>
-        <span class="status-right">{#if $ramStats.enabled}<span class="ram-status">{ramStatusText($ramStats)}</span>{/if}<span>LMZ Tauri</span></span>
       {:else if activeTab === 'review'}
         <span class="status-left">Review | Pending: {$reviewStats.pending} | Cleanup: {$reviewStats.cleanup}</span>
-        <span class="status-right">{#if $ramStats.enabled}<span class="ram-status">{ramStatusText($ramStats)}</span>{/if}<span>LMZ Tauri</span></span>
       {:else}
         <span class="status-left">{activeTab === 'logs' ? 'App Logs' : activeTab === 'stats' ? 'Stats' : 'Settings'}</span>
-        <span class="status-right">{#if $ramStats.enabled}<span class="ram-status">{ramStatusText($ramStats)}</span>{/if}<span>LMZ Tauri</span></span>
       {/if}
+      <span class="status-right">
+        {#if $ramStats.enabled}<span class="ram-status">{ramStatusText($ramStats)}</span>{/if}
+        {#if activeTab === 'vault'}
+          <span>Showing {vaultStatus.groups} groups{vaultStatus.hasMore ? ' (more available)' : ''}</span>
+        {:else}
+          <span>LMZ Tauri</span>
+        {/if}
+        <NotificationHistory />
+      </span>
     </footer>
   </div>
 {/if}
@@ -489,7 +492,7 @@
   .view-shell { flex-grow: 1; display: flex; flex-direction: column; overflow: hidden; }
   .bottom-status { height: 25px; background: #010409; border-top: 1px solid var(--border-dim); padding: 0; display: flex; align-items: center; justify-content: space-between; font-size: 11px; color: var(--text-muted); flex-shrink: 0; z-index: 200; width: 100%; box-sizing: border-box; }
   .status-left { padding-left: 15px; }
-  .status-right { padding-right: 15px; display: flex; align-items: center; gap: 14px; }
+  .status-right { padding-right: 0; display: flex; align-items: center; gap: 14px; }
   .ram-status { color: var(--text-muted); white-space: nowrap; }
   .badge { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: var(--accent-primary); color: white; font-size: 10px; padding: 1px 5px; border-radius: 10px; }
   .badge.warn { background: var(--accent-warning); }

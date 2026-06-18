@@ -1,4 +1,5 @@
 export { default as IconAlertTriangle } from './IconAlertTriangle.svelte';
+export { default as IconBell } from './IconBell.svelte';
 export { default as IconChevronLeft } from './IconChevronLeft.svelte';
 export { default as IconChevronRight } from './IconChevronRight.svelte';
 export { default as IconChevronUp } from './IconChevronUp.svelte';

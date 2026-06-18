@@ -93,7 +93,6 @@
   let healthVaultId = '';
   let selectedHealthVaultName = '';
   let healthBusy = false;
-  let healthResult = '';
   let healthReport: any = null;
   let healthDetailsOpen = false;
   let repairConfirmOpen = false;
@@ -512,13 +511,11 @@
   async function auditVaultHealth() {
     if (!healthVaultId || healthBusy) return;
     healthBusy = true;
-    healthResult = 'auditing...';
     healthReport = null;
     healthDetailsOpen = false;
     try {
       const payload = await fetchVaultHealth(healthVaultId);
       healthReport = payload;
-      healthResult = healthSummary(payload);
       toastStore.add({
         type: 'success',
         title: 'Audit Complete',
@@ -533,7 +530,6 @@
       });
     } catch (error) {
       const errMsg = String(error);
-      healthResult = `error: ${errMsg}`;
       toastStore.add({
         type: 'error',
         title: 'Audit Failed',
@@ -554,12 +550,10 @@
     if (!healthVaultId || healthBusy) return;
     repairConfirmOpen = false;
     healthBusy = true;
-    healthResult = 'repairing...';
     try {
       const payload = await repairVaultHealthApi(healthVaultId, true);
       healthReport = payload.after || null;
       repairErrors = payload.wd_tagging?.errors || [];
-      healthResult = repairSummary(payload);
       toastStore.add({
         type: 'success',
         title: 'Repair Complete',
@@ -576,7 +570,6 @@
       await loadVaults();
     } catch (error) {
       const errMsg = String(error);
-      healthResult = `error: ${errMsg}`;
       toastStore.add({
         type: 'error',
         title: 'Repair Failed',
@@ -1013,7 +1006,6 @@
         {vaultActive}
         bind:healthVaultId
         {healthBusy}
-        {healthResult}
         {healthReport}
         bind:healthDetailsOpen
         {repairErrors}
