@@ -6,7 +6,7 @@ from urllib.parse import urlparse
 
 from downloaders.media_filter import valid_media_files
 from runtime_context import get_runtime_context
-from utils import get_config, get_platform_cookie_path
+from utils import get_config, get_pixiv_refresh_token, get_platform_cookie_path
 
 
 _AUTH_STATUS_LOGGED = set()
@@ -44,15 +44,18 @@ def _base_args(url: str) -> list:
     args = []
     platform = _platform_for_url(url)
     cookie_info = get_platform_cookie_path(platform)
+    pixiv_token_info = get_pixiv_refresh_token() if platform == "Pixiv" else {
+        "token": "", "status": "not_required", "source": "not_required", "path": ""
+    }
 
     _log_auth_status(
         platform,
         cookie_info,
-        bool(ext_tools.get('pixiv_token')),
+        pixiv_token_info,
     )
 
-    if ext_tools.get('pixiv_token') and "pixiv" in url.lower():
-        args.extend(["--option", f"extractor.pixiv.refresh-token={ext_tools['pixiv_token']}"])
+    if pixiv_token_info.get("status") == "available" and pixiv_token_info.get("token"):
+        args.extend(["--option", f"extractor.pixiv.refresh-token={pixiv_token_info['token']}"])
     elif cookie_info.get("status") == "available" and cookie_info.get("path"):
         args.extend(["--cookies", str(cookie_info["path"])])
     if ext_tools.get('proxy'):
@@ -66,19 +69,20 @@ def _base_args(url: str) -> list:
 def _log_auth_status(
     platform: str,
     cookie_info: dict,
-    has_pixiv_token: bool,
+    pixiv_token_info: dict,
 ):
     platform_cookie_status = cookie_info.get("status", "missing")
 
     pixiv_token_status = "not_required"
     if platform == "Pixiv":
-        pixiv_token_status = "available" if has_pixiv_token else "missing"
+        pixiv_token_status = pixiv_token_info.get("status", "missing")
 
     key = (
         platform,
         cookie_info.get("source"),
         platform_cookie_status,
         pixiv_token_status,
+        pixiv_token_info.get("source"),
     )
     if key in _AUTH_STATUS_LOGGED:
         return
@@ -95,6 +99,8 @@ def _log_auth_status(
         platform_cookies=platform_cookie_status,
         cookies_path=cookie_info.get("path", ""),
         pixiv_token=pixiv_token_status,
+        pixiv_token_source=pixiv_token_info.get("source", "not_required"),
+        pixiv_token_path=pixiv_token_info.get("path", ""),
     )
 
 

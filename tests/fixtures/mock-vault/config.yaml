@@ -1,5 +1,5 @@
 external_tools:
-  cookies_path: secrets/cookies.txt
+  proxy: ''
   proxy: ''
   user_agent: LMZ mock vault test agent
 firewall:

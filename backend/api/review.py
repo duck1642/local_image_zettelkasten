@@ -404,8 +404,4 @@ def _cleanup_review_resolved_sync():
         "failed_orphans": failed_orphans,
     }
 
-CONFIG_SECRET_KEYS = {"pixiv_token"}
-
-
-
 __all__ = [name for name in globals() if not name.startswith("__")]

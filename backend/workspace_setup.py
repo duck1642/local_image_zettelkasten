@@ -41,7 +41,6 @@ def _guard_workspace_parent_path(parent_path: Path):
 def lmz_workspace_config() -> dict:
     return {
         "external_tools": {
-            "cookies_path": "data/secrets/cookies.txt",
             "proxy": "",
             "user_agent": "LMZ workspace",
         },

@@ -764,13 +764,12 @@ async function installMockVaultApi(
       status: 'ok',
       auth: {
         cookies: 'available',
-        legacy_cookies_used: true,
         platforms: {
-          X: { cookies: 'available', cookie_source: 'legacy', cookies_path: 'C:/ObsidianVault/lmz/data/secrets/cookies.txt', legacy_cookies_used: true, token: 'not_required' },
-          Instagram: { cookies: 'missing', cookie_source: 'missing', cookies_path: '', legacy_cookies_used: false, token: 'not_required' },
-          Pinterest: { cookies: 'available', cookie_source: 'platform', cookies_path: 'C:/ObsidianVault/lmz/data/secrets/auth/pinterest/cookies.txt', legacy_cookies_used: false, token: 'not_required' },
-          Pixiv: { cookies: 'available', cookie_source: 'platform', cookies_path: 'C:/ObsidianVault/lmz/data/secrets/auth/pixiv/cookies.txt', legacy_cookies_used: false, token: 'available' },
-          YouTube: { cookies: 'missing', cookie_source: 'missing', cookies_path: '', legacy_cookies_used: false, token: 'not_required' }
+          X: { cookies: 'available', cookie_source: 'platform', cookies_path: 'C:/ObsidianVault/lmz/data/secrets/auth/x/cookies.txt', token: 'not_required' },
+          Instagram: { cookies: 'missing', cookie_source: 'missing', cookies_path: '', token: 'not_required' },
+          Pinterest: { cookies: 'available', cookie_source: 'platform', cookies_path: 'C:/ObsidianVault/lmz/data/secrets/auth/pinterest/cookies.txt', token: 'not_required' },
+          Pixiv: { cookies: 'available', cookie_source: 'platform', cookies_path: 'C:/ObsidianVault/lmz/data/secrets/auth/pixiv/cookies.txt', token: 'available', token_source: 'file' },
+          YouTube: { cookies: 'missing', cookie_source: 'missing', cookies_path: '', token: 'not_required' }
         }
       }
     });
@@ -1301,10 +1300,10 @@ test('settings maintenance actions call existing endpoints and show compact stat
   await page.getByRole('button', { name: 'Rebuild' }).click();
   await page.getByRole('button', { name: 'Clean' }).click();
 
-  await expect(page.locator('.settings-action-row-status').nth(0)).toContainText('X: available (legacy)');
+  await expect(page.locator('.settings-action-row-status').nth(0)).toContainText('X: available');
   await expect(page.locator('.settings-action-row-status').nth(0)).toContainText('Pixiv: OAuth');
   await expect(page.locator('.settings-action-row-status').nth(0)).toContainText('YouTube: missing');
-  await expect(page.locator('.settings-action-row-status')).toContainText(['X: available (legacy), Instagram: missing, Pinterest: available, Pixiv: OAuth, YouTube: missing', 'started', 'Ready to sync workspace dictionaries from vault usage.', 'Ready to prune unused workspace dictionary entries.', 'cleaned 0, failed 0']);
+  await expect(page.locator('.settings-action-row-status')).toContainText(['X: available, Instagram: missing, Pinterest: available, Pixiv: OAuth, YouTube: missing', 'started', 'Ready to sync workspace dictionaries from vault usage.', 'Ready to prune unused workspace dictionary entries.', 'cleaned 0, failed 0']);
   expect(calls).toEqual(['auth', 'metadata', 'review']);
 });
 

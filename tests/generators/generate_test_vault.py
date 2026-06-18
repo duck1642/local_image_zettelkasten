@@ -223,7 +223,6 @@ def _frontmatter(item: dict, topics: list[str], wd_tags: dict) -> str:
 def _config() -> dict:
     return {
         "external_tools": {
-            "cookies_path": "data/secrets/cookies.txt",
             "proxy": "",
             "user_agent": "LMZ generated test vault",
         },

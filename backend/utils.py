@@ -206,18 +206,6 @@ def validate_config_schema(config: dict):
     if errors:
         raise ValueError("Configuration Error in config.yaml: " + "; ".join(errors))
 
-def load_secrets(ctx: WorkspaceContext | None = None) -> dict:
-
-    secrets_path = _ctx(ctx).secrets_dir / ".secrets.yaml"
-    if not secrets_path.exists():
-        return {}
-    try:
-        with open(secrets_path, 'r', encoding='utf-8') as f:
-            secrets = yaml.safe_load(f)
-            return secrets if isinstance(secrets, dict) else {}
-    except Exception:
-        return {}
-
 def _default_config(ctx: WorkspaceContext | None = None) -> dict:
     runtime = _ctx(ctx)
     vault = runtime.active_vault
@@ -258,15 +246,10 @@ def _default_config(ctx: WorkspaceContext | None = None) -> dict:
         }
     }
 
-def _secrets_path(ctx: WorkspaceContext | None = None) -> Path:
-    return _ctx(ctx).secrets_dir / ".secrets.yaml"
-
-def _config_mtimes(ctx: WorkspaceContext | None = None) -> tuple[Path, Path, float | None, float | None]:
+def _config_mtimes(ctx: WorkspaceContext | None = None) -> tuple[Path, float | None]:
     runtime = _ctx(ctx)
     config_mtime = runtime.config_path.stat().st_mtime if runtime.config_path.exists() else None
-    secrets_path = _secrets_path(runtime)
-    secrets_mtime = secrets_path.stat().st_mtime if secrets_path.exists() else None
-    return runtime.config_path, secrets_path, config_mtime, secrets_mtime
+    return runtime.config_path, config_mtime
 
 def invalidate_config_cache():
     global _CONFIG_CACHE_DATA, _CONFIG_CACHE_MTIMES
@@ -281,11 +264,6 @@ def _load_config_uncached(ctx: WorkspaceContext | None = None) -> dict:
             config = yaml.safe_load(f)
             validate_config_schema(config)
 
-            secrets = load_secrets(runtime)
-            if secrets:
-                if 'external_tools' not in config:
-                    config['external_tools'] = {}
-                config['external_tools'].update(secrets)
             return config
     except FileNotFoundError:
         return _default_config(runtime)
@@ -419,64 +397,51 @@ def platform_cookie_path(platform: str) -> Path:
     return get_runtime_context().root / "data" / "secrets" / "auth" / platform_id / "cookies.txt"
 
 
-def _cookie_file_readable(path: Path) -> bool:
-    try:
-        path.open("r", encoding="utf-8", errors="ignore").close()
-        return True
-    except OSError:
-        return False
+def pixiv_refresh_token_path() -> Path:
+    return get_runtime_context().root / "data" / "secrets" / "auth" / "pixiv" / "refresh_token.txt"
 
 
-def _cookie_file_has_platform(path: Path, platform: str) -> bool:
-    platform_id = _auth_platform_id(platform)
+def get_pixiv_refresh_token() -> dict:
+    token_path = pixiv_refresh_token_path()
+    file_status = "missing"
+    if token_path.exists():
+        try:
+            token = token_path.read_text(encoding="utf-8").strip()
+            if token:
+                return {
+                    "token": token,
+                    "status": "available",
+                    "source": "file",
+                    "path": str(token_path),
+                }
+        except (OSError, UnicodeError):
+            file_status = "unreadable"
+
+    return {
+        "token": "",
+        "status": file_status,
+        "source": file_status,
+        "path": str(token_path) if token_path.exists() else "",
+    }
+
+
+def _cookie_file_status(path: Path) -> str:
     try:
         lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
     except OSError:
-        return False
-    for line in lines:
-        if not line or line.startswith("#"):
-            continue
-        parts = line.split("\t")
-        if len(parts) < 7:
-            continue
-        domain = parts[0].lower()
-        name = parts[5].lower()
-        if platform_id == "x" and ("twitter.com" in domain or "x.com" in domain) and name in {"auth_token", "ct0"}:
-            return True
-        if platform_id == "instagram" and "instagram.com" in domain and name == "sessionid":
-            return True
-        if platform_id == "pinterest" and "pinterest.com" in domain:
-            return True
-        if platform_id == "youtube" and ("youtube.com" in domain or "google.com" in domain):
-            return True
-        if platform_id == "pixiv" and "pixiv.net" in domain:
-            return True
-    return False
+        return "unreadable"
+    return "available" if any(line.strip() and not line.lstrip().startswith("#") for line in lines) else "missing"
 
 
 def get_platform_cookie_path(platform: str) -> dict:
     platform_id = _auth_platform_id(platform)
     platform_path = platform_cookie_path(platform_id)
     if platform_id in AUTH_COOKIE_PLATFORMS and platform_path.exists():
-        if not _cookie_file_readable(platform_path):
-            return {"platform": platform_id, "status": "unreadable", "source": "unreadable", "path": str(platform_path), "legacy": False}
-        return {"platform": platform_id, "status": "available", "source": "platform", "path": str(platform_path), "legacy": False}
+        status = _cookie_file_status(platform_path)
+        source = "platform" if status == "available" else status
+        return {"platform": platform_id, "status": status, "source": source, "path": str(platform_path)}
 
-    legacy_path = get_configured_cookie_path()
-    # Temporary compatibility path: keep legacy fallback isolated here so it can be removed later.
-    if legacy_path and legacy_path.exists():
-        if not _cookie_file_readable(legacy_path):
-            return {"platform": platform_id, "status": "unreadable", "source": "unreadable", "path": str(legacy_path), "legacy": True}
-        status = "available" if platform_id not in AUTH_COOKIE_PLATFORMS or _cookie_file_has_platform(legacy_path, platform_id) else "missing"
-        return {"platform": platform_id, "status": status, "source": "legacy", "path": str(legacy_path), "legacy": status == "available"}
-
-    return {"platform": platform_id, "status": "missing", "source": "missing", "path": "", "legacy": False}
-
-
-def get_cookie_path() -> Optional[Path]:
-
-    path = get_configured_cookie_path()
-    return path if path and path.exists() else None
+    return {"platform": platform_id, "status": "missing", "source": "missing", "path": ""}
 
 def resolve_project_path(path_str: str) -> Path:
 
@@ -493,90 +458,14 @@ def resolve_config_path(path_str: str) -> Path:
         path = config_root / path
     return path.resolve()
 
-def get_configured_cookie_path() -> Optional[Path]:
-
-    config = get_config()
-    cookie_str = config.get('external_tools', {}).get('cookies_path')
-
-    if not cookie_str:
-        return None
-
-    return resolve_config_path(cookie_str)
-
 def get_cookie_auth_status() -> dict:
-
-    configured_path = get_configured_cookie_path()
     platform_details = {
         platform: get_platform_cookie_path(platform)
         for platform in AUTH_COOKIE_PLATFORMS
     }
-    legacy_used = any(
-        detail.get("source") == "legacy" and detail.get("status") == "available"
-        for detail in platform_details.values()
-    )
-    if not configured_path:
-        return {
-            "cookies": "available" if any(detail["status"] == "available" for detail in platform_details.values()) else "not_configured",
-            "path": "",
-            "legacy_cookies_path": "",
-            "legacy_cookies_used": legacy_used,
-            "platform_details": platform_details,
-            **{platform: platform_details[platform]["status"] for platform in AUTH_COOKIE_PLATFORMS},
-        }
-    if not configured_path.exists():
-        return {
-            "cookies": "available" if any(detail["status"] == "available" for detail in platform_details.values()) else "missing",
-            "path": str(configured_path),
-            "legacy_cookies_path": str(configured_path),
-            "legacy_cookies_used": legacy_used,
-            "platform_details": platform_details,
-            **{platform: platform_details[platform]["status"] for platform in AUTH_COOKIE_PLATFORMS},
-        }
-
-    platforms = {"x": False, "instagram": False, "pinterest": False, "youtube": False}
-    try:
-        for line in configured_path.read_text(encoding="utf-8", errors="ignore").splitlines():
-            if not line or line.startswith("#"):
-                continue
-            parts = line.split("\t")
-            if len(parts) < 7:
-                continue
-            domain = parts[0].lower()
-            name = parts[5].lower()
-            if (
-                ("twitter.com" in domain or "x.com" in domain)
-                and name in {"auth_token", "ct0"}
-            ):
-                platforms["x"] = True
-            if "instagram.com" in domain and name == "sessionid":
-                platforms["instagram"] = True
-            if "pinterest.com" in domain:
-                platforms["pinterest"] = True
-            if "youtube.com" in domain or "google.com" in domain:
-                platforms["youtube"] = True
-    except OSError:
-        return {
-            "cookies": "unreadable",
-            "path": str(configured_path),
-            "legacy_cookies_path": str(configured_path),
-            "legacy_cookies_used": legacy_used,
-            "platform_details": platform_details,
-            "x": "unknown",
-            "instagram": "unknown",
-            "pinterest": "unknown",
-            "youtube": "unknown",
-            "pixiv": platform_details["pixiv"]["status"],
-        }
-
+    statuses = {detail["status"] for detail in platform_details.values()}
+    aggregate = "available" if "available" in statuses else "unreadable" if "unreadable" in statuses else "missing"
     return {
-        "cookies": "available",
-        "path": str(configured_path),
-        "legacy_cookies_path": str(configured_path),
-        "legacy_cookies_used": legacy_used,
+        "cookies": aggregate,
         "platform_details": platform_details,
-        **{
-            platform: platform_details.get(platform, {}).get("status") if platform_details.get(platform, {}).get("source") != "legacy" else "available" if found else "missing"
-            for platform, found in platforms.items()
-        },
-        "pixiv": platform_details["pixiv"]["status"],
     }

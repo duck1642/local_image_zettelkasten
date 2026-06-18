@@ -174,14 +174,13 @@
     return rows.map(([label, key]) => {
       const status = platforms[key] || {};
       const cookies = String(status.cookies || 'missing');
-      const source = status.cookie_source === 'legacy' && cookies === 'available' ? ' (legacy)' : '';
       if (key === 'Pixiv') {
         const token = String(status.token || 'missing');
         if (token === 'available') return `${label}: OAuth`;
-        if (cookies === 'available') return `${label}: cookies${source}`;
+        if (cookies === 'available') return `${label}: cookies`;
         return `${label}: missing`;
       }
-      return `${label}: ${cookies}${source}`;
+      return `${label}: ${cookies}`;
     }).join(', ');
   }
 

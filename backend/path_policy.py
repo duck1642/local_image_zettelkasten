@@ -61,10 +61,6 @@ def validate_workspace_config_paths(config: dict, workspace_root: Path):
         if "secrets" in paths:
             _validate_relative_value(paths["secrets"], workspace_root, "paths.secrets")
 
-    external_tools = config.get("external_tools")
-    if isinstance(external_tools, dict) and external_tools.get("cookies_path"):
-        _validate_relative_value(external_tools["cookies_path"], workspace_root, "external_tools.cookies_path")
-
     vaults = config.get("vaults")
     if isinstance(vaults, dict):
         for vault_id, entry in vaults.items():

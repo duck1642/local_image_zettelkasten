@@ -110,15 +110,13 @@ def test_config_override_resolves_paths_inside_mock_vault(monkeypatch, tmp_path)
     assert utils.ONLINE_INGEST_DIR == tmp_path / "mock-vault" / "data" / "vaults" / "default" / "online_ingest"
     assert utils.THUMBNAILS_DIR == tmp_path / "mock-vault" / "data" / "vaults" / "default" / "ui_cache" / "thumbnails"
     assert utils.TOPICS_DIR == tmp_path / "mock-vault" / "data" / "topics"
-    assert utils.get_configured_cookie_path() == tmp_path / "mock-vault" / "secrets" / "cookies.txt"
+    assert utils.platform_cookie_path("x") == tmp_path / "mock-vault" / "data" / "secrets" / "auth" / "x" / "cookies.txt"
     assert str(ROOT / "data") not in str(utils.VAULT_DIR)
 
 
-def test_platform_cookie_path_preferred_over_legacy(monkeypatch, tmp_path):
+def test_platform_cookie_path_is_canonical(monkeypatch, tmp_path):
     utils, = fresh_backend(monkeypatch, tmp_path, "utils")
-    legacy_path = utils.get_configured_cookie_path()
     platform_path = utils.platform_cookie_path("x")
-    write_cookie_file(legacy_path, ".twitter.com", "auth_token")
     write_cookie_file(platform_path, ".x.com", "ct0")
 
     info = utils.get_platform_cookie_path("x")
@@ -128,45 +126,153 @@ def test_platform_cookie_path_preferred_over_legacy(monkeypatch, tmp_path):
     assert info["source"] == "platform"
     assert info["path"] == str(platform_path)
     assert status["platform_details"]["x"]["source"] == "platform"
-    assert status["legacy_cookies_used"] is False
+    assert "legacy_cookies_used" not in status
 
 
-def test_legacy_cookie_path_still_falls_back(monkeypatch, tmp_path):
+def test_shared_cookie_path_is_ignored(monkeypatch, tmp_path):
     utils, = fresh_backend(monkeypatch, tmp_path, "utils")
-    legacy_path = utils.get_configured_cookie_path()
+    legacy_path = utils.CONFIG_ROOT / "secrets" / "cookies.txt"
     write_cookie_file(legacy_path, ".instagram.com", "sessionid")
+    config = yaml.safe_load(utils.CONFIG_PATH.read_text(encoding="utf-8"))
+    config.setdefault("external_tools", {})["cookies_path"] = "secrets/cookies.txt"
+    utils.CONFIG_PATH.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+    utils.invalidate_config_cache()
 
     info = utils.get_platform_cookie_path("instagram")
     status = utils.get_cookie_auth_status()
 
-    assert info["status"] == "available"
-    assert info["source"] == "legacy"
-    assert info["path"] == str(legacy_path)
-    assert status["platform_details"]["instagram"]["source"] == "legacy"
-    assert status["legacy_cookies_used"] is True
+    assert info == {"platform": "instagram", "status": "missing", "source": "missing", "path": ""}
+    assert status["platform_details"]["instagram"]["source"] == "missing"
 
 
-def test_auth_scan_reports_platform_sources_and_keeps_legacy_fields(monkeypatch, tmp_path):
+def test_empty_platform_cookie_file_reports_missing(monkeypatch, tmp_path):
+    utils, = fresh_backend(monkeypatch, tmp_path, "utils")
+    cookie_path = utils.platform_cookie_path("x")
+    cookie_path.parent.mkdir(parents=True, exist_ok=True)
+    cookie_path.write_text("# Netscape HTTP Cookie File\n", encoding="utf-8")
+
+    info = utils.get_platform_cookie_path("x")
+
+    assert info == {"platform": "x", "status": "missing", "source": "missing", "path": str(cookie_path)}
+
+
+def test_unreadable_platform_cookie_file_reports_unreadable(monkeypatch, tmp_path):
+    utils, = fresh_backend(monkeypatch, tmp_path, "utils")
+    cookie_path = utils.platform_cookie_path("youtube")
+    write_cookie_file(cookie_path, ".youtube.com", "SID")
+    original_read_text = Path.read_text
+
+    def guarded_read_text(path, *args, **kwargs):
+        if path == cookie_path:
+            raise PermissionError("denied")
+        return original_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", guarded_read_text)
+
+    info = utils.get_platform_cookie_path("youtube")
+
+    assert info == {"platform": "youtube", "status": "unreadable", "source": "unreadable", "path": str(cookie_path)}
+
+
+def test_pixiv_refresh_token_file_is_canonical(monkeypatch, tmp_path):
+    utils, = fresh_backend(monkeypatch, tmp_path, "utils")
+    token_path = utils.pixiv_refresh_token_path()
+    token_path.parent.mkdir(parents=True, exist_ok=True)
+    token_path.write_text(" file-token\n", encoding="utf-8")
+    info = utils.get_pixiv_refresh_token()
+
+    assert info == {
+        "token": "file-token",
+        "status": "available",
+        "source": "file",
+        "path": str(token_path),
+    }
+
+
+def test_pixiv_refresh_token_ignores_legacy_for_empty_file(monkeypatch, tmp_path):
+    utils, = fresh_backend(monkeypatch, tmp_path, "utils")
+    token_path = utils.pixiv_refresh_token_path()
+    token_path.parent.mkdir(parents=True, exist_ok=True)
+    token_path.write_text("  \n", encoding="utf-8")
+    secrets_path = utils.SECRETS_DIR / ".secrets.yaml"
+    secrets_path.write_text('pixiv_token: "legacy-token"\n', encoding="utf-8")
+    utils.invalidate_config_cache()
+
+    info = utils.get_pixiv_refresh_token()
+
+    assert info["token"] == ""
+    assert info["status"] == "missing"
+    assert info["source"] == "missing"
+    assert info["path"] == str(token_path)
+    assert "pixiv_token" not in utils.get_config().get("external_tools", {})
+
+
+def test_pixiv_refresh_token_unreadable_file_does_not_fall_back(monkeypatch, tmp_path):
+    utils, = fresh_backend(monkeypatch, tmp_path, "utils")
+    token_path = utils.pixiv_refresh_token_path()
+    token_path.parent.mkdir(parents=True, exist_ok=True)
+    token_path.write_text("file-token", encoding="utf-8")
+    secrets_path = utils.SECRETS_DIR / ".secrets.yaml"
+    secrets_path.write_text('pixiv_token: "legacy-token"\n', encoding="utf-8")
+    utils.invalidate_config_cache()
+    original_read_text = Path.read_text
+
+    def guarded_read_text(path, *args, **kwargs):
+        if path == token_path:
+            raise PermissionError("denied")
+        return original_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", guarded_read_text)
+
+    info = utils.get_pixiv_refresh_token()
+
+    assert info["token"] == ""
+    assert info["status"] == "unreadable"
+    assert info["source"] == "unreadable"
+
+
+def test_pixiv_refresh_token_missing_without_file_or_legacy(monkeypatch, tmp_path):
+    utils, = fresh_backend(monkeypatch, tmp_path, "utils")
+
+    info = utils.get_pixiv_refresh_token()
+
+    assert info["token"] == ""
+    assert info["status"] == "missing"
+    assert info["source"] == "missing"
+
+
+def test_auth_scan_reports_only_canonical_sources(monkeypatch, tmp_path):
     common, utils = fresh_backend(monkeypatch, tmp_path, "api.common", "utils")
-    legacy_path = utils.get_configured_cookie_path()
+    auth_logs = []
+    x_path = utils.platform_cookie_path("x")
     youtube_path = utils.platform_cookie_path("youtube")
-    write_cookie_file(legacy_path, ".twitter.com", "auth_token")
+    write_cookie_file(x_path, ".twitter.com", "auth_token")
     write_cookie_file(youtube_path, ".youtube.com", "SID")
-    monkeypatch.setattr(common, "get_config", lambda: {"external_tools": {"pixiv_token": "secret-token"}})
+    monkeypatch.setattr(common, "get_pixiv_refresh_token", lambda: {
+        "token": "secret-token",
+        "status": "available",
+        "source": "file",
+        "path": "ignored",
+    })
+    monkeypatch.setattr(common, "log_auth", lambda *args, **kwargs: auth_logs.append((args, kwargs)))
 
     auth = common._scan_auth_status_sync()
 
     assert auth["cookies"] == "available"
-    assert auth["cookies_path"] == str(legacy_path)
-    assert auth["legacy_cookies_used"] is True
-    assert auth["platforms"]["X"]["cookie_source"] == "legacy"
-    assert auth["platforms"]["X"]["cookies_path"] == str(legacy_path)
+    assert "cookies_path" not in auth
+    assert "legacy_cookies_path" not in auth
+    assert "legacy_cookies_used" not in auth
+    assert auth["platforms"]["X"]["cookie_source"] == "platform"
+    assert auth["platforms"]["X"]["cookies_path"] == str(x_path)
     assert auth["platforms"]["YouTube"]["cookie_source"] == "platform"
     assert auth["platforms"]["YouTube"]["cookies_path"] == str(youtube_path)
     assert auth["platforms"]["Pixiv"]["token"] == "available"
+    assert auth["platforms"]["Pixiv"]["token_source"] == "file"
+    assert "secret-token" not in str(auth)
+    assert "secret-token" not in str(auth_logs)
 
 
-def test_missing_platform_and_legacy_cookie_reports_missing(monkeypatch, tmp_path):
+def test_missing_platform_cookie_reports_missing(monkeypatch, tmp_path):
     utils, = fresh_backend(monkeypatch, tmp_path, "utils")
 
     info = utils.get_platform_cookie_path("pinterest")
@@ -637,7 +743,7 @@ def test_workspace_setup_creates_lmz_layout_and_resolves_paths(monkeypatch, tmp_
     assert utils.TOPICS_DIR == workspace_parent / "lmz" / "data" / "topics"
     assert utils.VAULT_DIR == workspace_parent / "lmz" / "data" / "vaults" / "default" / "vault"
     assert utils.DB_PATH == workspace_parent / "lmz" / "data" / "vaults" / "default" / "db" / "lmz_main.db"
-    assert utils.get_configured_cookie_path() == workspace_parent / "lmz" / "data" / "secrets" / "cookies.txt"
+    assert "cookies_path" not in utils.get_config().get("external_tools", {})
     utils.validate_config_schema(utils.get_config())
     conn = sqlite_operator.init_database()
     item_hash = "97" * 32
@@ -1305,9 +1411,9 @@ def test_get_config_cache_refreshes_when_config_mtime_changes(monkeypatch, tmp_p
 
 def test_public_config_strip_removes_secret_token(monkeypatch, tmp_path):
     web_api, utils = fresh_backend(monkeypatch, tmp_path, "web_api", "utils")
-    secrets_path = utils.SECRETS_DIR / ".secrets.yaml"
-    secrets_path.parent.mkdir(parents=True, exist_ok=True)
-    secrets_path.write_text('pixiv_token: "secret-token"\ncookies_path: "secrets/cookies.txt"\n', encoding="utf-8")
+    config = yaml.safe_load(utils.CONFIG_PATH.read_text(encoding="utf-8"))
+    config.setdefault("external_tools", {})["pixiv_token"] = "secret-token"
+    utils.CONFIG_PATH.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
     utils.invalidate_config_cache()
 
     payload = web_api._load_public_config_sync()
@@ -4652,11 +4758,9 @@ def test_downloader_wrappers_use_configured_timeouts(monkeypatch, tmp_path):
     assert yt_timeouts[:2] == [9, 10]
 
 
-def test_gallery_dl_uses_platform_cookie_before_legacy(monkeypatch, tmp_path):
+def test_gallery_dl_uses_platform_cookie(monkeypatch, tmp_path):
     gallery, utils = fresh_backend(monkeypatch, tmp_path, "downloaders.gallery_dl_wrapper", "utils")
-    legacy_path = utils.get_configured_cookie_path()
     platform_path = utils.platform_cookie_path("x")
-    write_cookie_file(legacy_path, ".twitter.com", "auth_token")
     write_cookie_file(platform_path, ".x.com", "ct0")
 
     args = gallery._base_args("https://x.com/mock/status/1")
@@ -4667,7 +4771,12 @@ def test_gallery_dl_uses_platform_cookie_before_legacy(monkeypatch, tmp_path):
 def test_gallery_dl_pixiv_oauth_wins_over_cookie(monkeypatch, tmp_path):
     gallery, utils = fresh_backend(monkeypatch, tmp_path, "downloaders.gallery_dl_wrapper", "utils")
     write_cookie_file(utils.platform_cookie_path("pixiv"), ".pixiv.net", "PHPSESSID")
-    monkeypatch.setattr(gallery, "get_config", lambda: {"external_tools": {"pixiv_token": "secret-token"}})
+    monkeypatch.setattr(gallery, "get_pixiv_refresh_token", lambda: {
+        "token": "secret-token",
+        "status": "available",
+        "source": "file",
+        "path": str(utils.pixiv_refresh_token_path()),
+    })
 
     args = gallery._base_args("https://www.pixiv.net/artworks/1")
 

@@ -51,7 +51,7 @@ from tagging import load_tag_cache, tag_media
 from thumbnails import ThumbnailBusyError, get_or_generate_thumbnail, thumbnail_path_for, video_thumbnail_path_for
 from utils import (
     atomic_write_text, get_cookie_auth_status,
-    invalidate_config_cache, utc_now, utc_now_str
+    get_pixiv_refresh_token, invalidate_config_cache, utc_now, utc_now_str
 )
 from ingest_control import local_stop_event, online_stop_event
 from artists import (
@@ -265,33 +265,28 @@ LOCAL_INGEST_STATE = _LocalIngestStateProxy()
 LOCAL_INGEST_LOCK = _LocalIngestLockProxy()
 
 def _scan_auth_status_sync(reason: str = "manual") -> dict:
-    config = get_config()
-    ext_tools = config.get("external_tools", {})
     cookie_status = get_cookie_auth_status()
-    pixiv_token = "available" if ext_tools.get("pixiv_token") else "missing"
+    pixiv_token = get_pixiv_refresh_token()
     platform_details = cookie_status.get("platform_details") or {}
 
-    def platform_status(platform_id: str, token: str = "not_required") -> dict:
+    def platform_status(platform_id: str, token: str = "not_required", token_source: str = "not_required") -> dict:
         detail = platform_details.get(platform_id) or {}
         return {
             "cookies": detail.get("status") or cookie_status.get(platform_id, "missing"),
             "cookies_path": detail.get("path", ""),
             "cookie_source": detail.get("source", "missing"),
-            "legacy_cookies_used": detail.get("source") == "legacy" and detail.get("status") == "available",
             "token": token,
+            "token_source": token_source,
         }
 
     statuses = {
         "cookies": cookie_status.get("cookies"),
-        "cookies_path": cookie_status.get("path", ""),
-        "legacy_cookies_path": cookie_status.get("legacy_cookies_path", cookie_status.get("path", "")),
-        "legacy_cookies_used": bool(cookie_status.get("legacy_cookies_used")),
         "platforms": {
             "X": platform_status("x"),
             "Instagram": platform_status("instagram"),
             "Pinterest": platform_status("pinterest"),
             "YouTube": platform_status("youtube"),
-            "Pixiv": platform_status("pixiv", pixiv_token),
+            "Pixiv": platform_status("pixiv", pixiv_token["status"], pixiv_token["source"]),
         },
     }
 
@@ -300,7 +295,6 @@ def _scan_auth_status_sync(reason: str = "manual") -> dict:
         "Auth scan summary",
         reason=reason,
         cookies=statuses["cookies"],
-        cookies_path=statuses["cookies_path"],
     )
     for platform, status in statuses["platforms"].items():
         log_auth(
@@ -312,6 +306,7 @@ def _scan_auth_status_sync(reason: str = "manual") -> dict:
             cookie_source=status.get("cookie_source", "missing"),
             cookies_path=status.get("cookies_path", ""),
             token=status["token"],
+            token_source=status["token_source"],
         )
     return statuses
 
