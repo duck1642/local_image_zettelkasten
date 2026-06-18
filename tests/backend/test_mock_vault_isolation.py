@@ -38,7 +38,7 @@ def fresh_backend(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *module_names
     if str(BACKEND) not in sys.path:
         sys.path.insert(0, str(BACKEND))
     for name in list(sys.modules):
-        if name in {"api", "utils", "runtime_context", "runtime_activation", "web_api", "queue_service", "md_generator", "metadata_index", "metadata_maintenance", "processor", "external_ingestion", "thumbnails", "fingerprint", "artists", "platforms", "review_cache", "topics", "vaults", "vault_packages", "workspace_db", "ingest_control"} or name.startswith(("api.", "logger", "db.", "tagging", "downloaders")):
+        if name in {"api", "utils", "runtime_context", "runtime_activation", "web_api", "queue_service", "md_generator", "media_lifecycle", "metadata_index", "metadata_maintenance", "processor", "external_ingestion", "thumbnails", "fingerprint", "artists", "platforms", "review_cache", "topics", "vaults", "vault_packages", "workspace_db", "ingest_control"} or name.startswith(("api.", "logger", "db.", "tagging", "downloaders")):
             del sys.modules[name]
     return [importlib.import_module(name) for name in module_names]
 
@@ -938,7 +938,7 @@ def test_vault_repair_wd_tagging_creates_cache_and_reindexes(monkeypatch, tmp_pa
         tags=[{"name": "general one"}],
     )
 
-    def fake_tag_media(media_path, item_hash=None, config=None, storage_id=None):
+    def fake_tag_media(media_path, item_hash=None, config=None, storage_id=None, ctx=None):
         cache_path = utils.wd_tag_cache_path_for(item_hash, storage_id)
         cache_path.parent.mkdir(parents=True, exist_ok=True)
         cache_path.write_text(json.dumps(real_result.to_dict()), encoding="utf-8")
@@ -2163,6 +2163,33 @@ def test_ingest_result_reports_wd_tagging_status(monkeypatch, tmp_path):
     assert idx_data["tagging_status"] == "ok"
     assert idx_data["tagging_tag_count"] == 1
     assert utils.note_path_for(item_hash, storage_id).exists()
+
+
+def test_config_allowed_non_media_ingest_marks_thumbnail_skipped(monkeypatch, tmp_path):
+    utils, sqlite_operator, processor = fresh_backend(monkeypatch, tmp_path, "utils", "db.sqlite_operator", "processor")
+    source = tmp_path / "document.txt"
+    source.write_text("document", encoding="utf-8")
+
+    class TagResult:
+        status = "skipped"
+        error = "unsupported media type"
+        tags = []
+
+    monkeypatch.setattr(processor, "get_mime_type", lambda path: "text/plain")
+    monkeypatch.setattr(processor, "tag_media", lambda *args, **kwargs: TagResult())
+    monkeypatch.setattr(processor, "ensure_thumbnail", lambda *args, **kwargs: pytest.fail("non-media thumbnail generated"))
+
+    ok, message, result = processor.process_file(
+        source,
+        {"firewall": {"allowed_mimes": ["text/plain"], "allowed_extensions": ["txt"]}, "tagging": {}},
+        sync_index=False,
+    )
+
+    assert ok, message
+    conn = sqlite_operator.init_database()
+    row = conn.execute("SELECT thumbnail_status FROM items WHERE hash = ?", (result["file_hash"],)).fetchone()
+    conn.close()
+    assert row == ("skipped",)
 
 
 def test_ingest_index_update_ignores_wd_tagging_status(monkeypatch, tmp_path):
@@ -3566,6 +3593,176 @@ def test_successful_delete_does_not_leave_vault_health_orphans(monkeypatch, tmp_
     assert str(note) not in report["orphans"]["notes"]
 
 
+@pytest.mark.parametrize("delete_mode", ["normal", "replacement"])
+def test_delete_stages_all_storage_owned_files_across_shards(monkeypatch, tmp_path, delete_mode):
+    utils, sqlite_operator, api_library, thumbnails = fresh_backend(
+        monkeypatch,
+        tmp_path,
+        "utils",
+        "db.sqlite_operator",
+        "api.library",
+        "thumbnails",
+    )
+    item_hash = "5b" * 32
+    conn = insert_mock_item(sqlite_operator, item_hash)
+    storage_id = storage_id_for(conn, item_hash)
+    conn.close()
+    vault = api_library.get_runtime_context().active_vault
+    paths = [
+        utils.asset_path_for(item_hash, ".jpg", "image/jpeg", storage_id=storage_id),
+        utils.note_path_for(item_hash, storage_id),
+        utils.wd_tag_cache_path_for(item_hash, storage_id),
+        thumbnails.thumbnail_path_for(item_hash, storage_id),
+        vault.assets_dir / "aa" / f"{storage_id}.png",
+        vault.notes_dir / "bb" / f"{storage_id}.md",
+        vault.wd_tags_dir / "cc" / f"{storage_id}.json",
+        vault.thumbnails_dir / "dd" / f"{storage_id}.jpg",
+        vault.thumbnails_dir / "ee" / f"{storage_id}_video.jpg",
+    ]
+    for path in paths:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"owned")
+    monkeypatch.setattr(api_library.search_manager, "remove_indexes_batch", lambda *args, **kwargs: None)
+
+    if delete_mode == "normal":
+        result = api_library._delete_item_sync(item_hash)
+        assert result["status"] == "success"
+    else:
+        result = api_library._delete_item_after_replacement(item_hash)
+        assert result["status"] == "deleted"
+
+    conn = sqlite_operator.init_database()
+    assert conn.execute("SELECT 1 FROM items WHERE hash = ?", (item_hash,)).fetchone() is None
+    conn.close()
+    assert not any(path.exists() for path in paths)
+
+
+def test_locked_wrong_shard_file_aborts_delete_and_restores_staged_files(monkeypatch, tmp_path):
+    utils, sqlite_operator, api_library = fresh_backend(
+        monkeypatch,
+        tmp_path,
+        "utils",
+        "db.sqlite_operator",
+        "api.library",
+    )
+    item_hash = "5c" * 32
+    conn = insert_mock_item(sqlite_operator, item_hash)
+    storage_id = storage_id_for(conn, item_hash)
+    conn.close()
+    canonical = utils.asset_path_for(item_hash, ".jpg", "image/jpeg", storage_id=storage_id)
+    stale = api_library.get_runtime_context().active_vault.assets_dir / "ff" / f"{storage_id}.png"
+    for path in (canonical, stale):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"asset")
+    real_replace = Path.replace
+
+    def fail_stale_move(self, target):
+        if self == stale:
+            raise OSError("stale asset locked")
+        return real_replace(self, target)
+
+    monkeypatch.setattr(Path, "replace", fail_stale_move)
+    monkeypatch.setattr(api_library.search_manager, "remove_indexes_batch", lambda *args, **kwargs: None)
+
+    result = api_library._delete_item_sync(item_hash)
+
+    conn = sqlite_operator.init_database()
+    row = conn.execute("SELECT 1 FROM items WHERE hash = ?", (item_hash,)).fetchone()
+    conn.close()
+    assert result["status"] == "warning"
+    assert result["deleted"] is False
+    assert row is not None
+    assert canonical.exists()
+    assert stale.exists()
+
+
+def test_delete_waits_for_inflight_thumbnail_and_removes_published_file(monkeypatch, tmp_path):
+    utils, sqlite_operator, api_library, thumbnails = fresh_backend(
+        monkeypatch,
+        tmp_path,
+        "utils",
+        "db.sqlite_operator",
+        "api.library",
+        "thumbnails",
+    )
+    item_hash = "5d" * 32
+    conn = insert_mock_item(sqlite_operator, item_hash)
+    storage_id = storage_id_for(conn, item_hash)
+    conn.close()
+    asset = utils.asset_path_for(item_hash, ".jpg", "image/jpeg", storage_id=storage_id)
+    asset.parent.mkdir(parents=True, exist_ok=True)
+    asset.write_bytes(b"asset")
+    started = threading.Event()
+    release = threading.Event()
+
+    def slow_generate(asset_path, generated_hash, generated_storage_id, ctx=None):
+        started.set()
+        assert release.wait(timeout=3)
+        target = thumbnails.thumbnail_path_for(generated_hash, generated_storage_id, ctx)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b"thumb")
+        return target
+
+    monkeypatch.setattr(thumbnails, "generate_image_thumbnail", slow_generate)
+    monkeypatch.setattr(api_library.search_manager, "remove_indexes_batch", lambda *args, **kwargs: None)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        generate_future = executor.submit(
+            thumbnails.ensure_thumbnail,
+            item_hash,
+            ".jpg",
+            "image/jpeg",
+            True,
+            storage_id,
+        )
+        assert started.wait(timeout=2)
+        delete_future = executor.submit(api_library._delete_item_sync, item_hash)
+        time.sleep(0.1)
+        assert not delete_future.done()
+        release.set()
+        generate_future.result(timeout=3)
+        result = delete_future.result(timeout=3)
+
+    assert result["status"] == "success"
+    assert not asset.exists()
+    assert not thumbnails.thumbnail_path_for(item_hash, storage_id).exists()
+
+
+def test_wd_cache_publication_refuses_deleted_owner(monkeypatch, tmp_path):
+    utils, sqlite_operator, api_library, service = fresh_backend(
+        monkeypatch,
+        tmp_path,
+        "utils",
+        "db.sqlite_operator",
+        "api.library",
+        "tagging.service",
+    )
+    item_hash = "5e" * 32
+    conn = insert_mock_item(sqlite_operator, item_hash)
+    storage_id = storage_id_for(conn, item_hash)
+    conn.close()
+    asset = utils.asset_path_for(item_hash, ".jpg", "image/jpeg", storage_id=storage_id)
+    asset.parent.mkdir(parents=True, exist_ok=True)
+    asset.write_bytes(b"asset")
+    monkeypatch.setattr(api_library.search_manager, "remove_indexes_batch", lambda *args, **kwargs: None)
+    assert api_library._delete_item_sync(item_hash)["status"] == "success"
+    result = service.TagResult(
+        hash=item_hash,
+        status="ok",
+        model="fake",
+        threshold=0.35,
+        created_at="2026-01-01 00:00:00",
+        rating=None,
+        character_tags=[],
+        tags=[],
+    )
+
+    published = service._write_result(result, storage_id, media_path=asset)
+
+    assert published is False
+    assert not utils.wd_tag_cache_path_for(item_hash, storage_id).exists()
+
+
 def test_item_details_include_topic_and_wd_counts(monkeypatch, tmp_path):
     utils, sqlite_operator, metadata_index, web_api = fresh_backend(
         monkeypatch,
@@ -4866,6 +5063,118 @@ def test_thumbnail_repair_uses_shared_helper_and_skips_fresh(monkeypatch, tmp_pa
     conn.close()
 
 
+def test_thumbnail_repair_removes_stale_image_and_video_copies_even_when_fresh(monkeypatch, tmp_path):
+    utils, sqlite_operator, thumbnails = fresh_backend(monkeypatch, tmp_path, "utils", "db.sqlite_operator", "thumbnails")
+    image_hash = "c1" * 32
+    video_hash = "c2" * 32
+    conn = insert_mock_item(sqlite_operator, image_hash)
+    image_storage = storage_id_for(conn, image_hash)
+    video_storage = sqlite_operator.allocate_storage_id(conn)
+    conn.execute(
+        """
+        INSERT INTO items(hash, storage_id, original_filename, file_extension, mime_type, size_bytes, date_added, source_url, source_url_norm, platform, source_artist, phash)
+        VALUES (?, ?, ?, '.mp4', 'video/mp4', 10, '2026-01-04 00:00:00', '', '', 'local', 'DB Artist', '')
+        """,
+        (video_hash, video_storage, f"{video_hash}.mp4"),
+    )
+    conn.commit()
+    for item_hash, storage_id, extension, mime_type in (
+        (image_hash, image_storage, ".jpg", "image/jpeg"),
+        (video_hash, video_storage, ".mp4", "video/mp4"),
+    ):
+        asset = utils.asset_path_for(item_hash, extension, mime_type, storage_id=storage_id)
+        asset.parent.mkdir(parents=True, exist_ok=True)
+        asset.write_bytes(b"asset")
+    image_thumb = thumbnails.thumbnail_path_for(image_hash, image_storage)
+    video_thumb = thumbnails.video_thumbnail_path_for(video_hash, video_storage)
+    stale_image = thumbnails._thumbnail_dir() / "aa" / f"{image_storage}.jpg"
+    stale_video = thumbnails._thumbnail_dir() / "bb" / f"{video_storage}_video.jpg"
+    stale_video_image_variant = thumbnails._thumbnail_dir() / "cc" / f"{video_storage}.jpg"
+    for path in (image_thumb, video_thumb, stale_image, stale_video, stale_video_image_variant):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"thumb")
+    now = time.time() + 10
+    os.utime(image_thumb, (now, now))
+    os.utime(video_thumb, (now, now))
+
+    result = thumbnails.repair_missing_thumbnails(conn, limit=10)
+
+    assert result["generated"] == 0
+    assert result["skipped"] == 2
+    assert result["stale_removed"] == 3
+    assert result["cleanup_errors"] == []
+    assert image_thumb.exists()
+    assert video_thumb.exists()
+    assert not stale_image.exists()
+    assert not stale_video.exists()
+    assert not stale_video_image_variant.exists()
+    conn.close()
+
+
+def test_thumbnail_repair_reports_stale_cleanup_failure(monkeypatch, tmp_path):
+    utils, sqlite_operator, thumbnails = fresh_backend(monkeypatch, tmp_path, "utils", "db.sqlite_operator", "thumbnails")
+    item_hash = "c3" * 32
+    conn = insert_mock_item(sqlite_operator, item_hash)
+    storage_id = storage_id_for(conn, item_hash)
+    asset = utils.asset_path_for(item_hash, ".jpg", "image/jpeg", storage_id=storage_id)
+    canonical = thumbnails.thumbnail_path_for(item_hash, storage_id)
+    stale = thumbnails._thumbnail_dir() / "dd" / f"{storage_id}.jpg"
+    for path in (asset, canonical, stale):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"data")
+    now = time.time() + 10
+    os.utime(canonical, (now, now))
+    real_unlink = Path.unlink
+
+    def fail_stale_unlink(self, *args, **kwargs):
+        if self == stale:
+            raise OSError("stale thumbnail locked")
+        return real_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", fail_stale_unlink)
+
+    result = thumbnails.repair_missing_thumbnails(conn, limit=10)
+
+    assert result["stale_removed"] == 0
+    assert result["cleanup_errors"]
+    assert result["cleanup_errors"][0]["path"] == str(stale)
+    assert stale.exists()
+    conn.close()
+
+
+def test_thumbnail_and_wd_repairs_ignore_non_media_rows(monkeypatch, tmp_path):
+    utils, sqlite_operator, thumbnails, vaults = fresh_backend(
+        monkeypatch,
+        tmp_path,
+        "utils",
+        "db.sqlite_operator",
+        "thumbnails",
+        "vaults",
+    )
+    conn = sqlite_operator.init_database()
+    storage_id = sqlite_operator.allocate_storage_id(conn)
+    item_hash = "c4" * 32
+    conn.execute(
+        """
+        INSERT INTO items(hash, storage_id, original_filename, file_extension, mime_type, size_bytes, date_added, source_url, source_url_norm, platform, source_artist, phash)
+        VALUES (?, ?, ?, '.txt', 'text/plain', 10, '2026-01-04 00:00:00', '', '', 'local', 'DB Artist', '')
+        """,
+        (item_hash, storage_id, f"{item_hash}.txt"),
+    )
+    conn.commit()
+    asset = utils.asset_path_for(item_hash, ".txt", "text/plain", storage_id=storage_id)
+    asset.parent.mkdir(parents=True, exist_ok=True)
+    asset.write_text("text", encoding="utf-8")
+    monkeypatch.setattr(thumbnails, "ensure_thumbnail", lambda *args, **kwargs: pytest.fail("non-media thumbnail generated"))
+
+    thumb_result = thumbnails.repair_missing_thumbnails(conn, limit=10)
+    wd_result = vaults._repair_missing_wd_cache(conn, vaults._ctx_for_vault("default"))
+
+    assert thumb_result["checked"] == 0
+    assert wd_result["checked"] == 0
+    conn.close()
+
+
 def test_thumbnail_api_returns_503_when_generation_is_busy(monkeypatch, tmp_path):
     sqlite_operator, web_api = fresh_backend(monkeypatch, tmp_path, "db.sqlite_operator", "web_api")
     item_hash = "c" * 64
@@ -5280,6 +5589,75 @@ def test_multi_vault_shared_workspace_metadata(monkeypatch, tmp_path):
         assert ws_conn.execute("SELECT 1 FROM artists WHERE name_norm = 'second vault artist'").fetchone() is not None
     finally:
         ws_conn.close()
+
+
+def test_vault_health_dictionary_drift_uses_all_workspace_vaults(monkeypatch, tmp_path):
+    vaults, sqlite_operator, workspace_db = fresh_backend(
+        monkeypatch,
+        tmp_path,
+        "vaults",
+        "db.sqlite_operator",
+        "workspace_db",
+    )
+    vaults.create_vault("Second")
+    vault_items = {item["id"]: item for item in vaults.vault_list()}
+    second_db_path = Path(vault_items["second"]["db_path"])
+    workspace_db.connect_workspace_database().close()
+
+    default_hash = "d2" * 32
+    default_conn = insert_mock_item(sqlite_operator, default_hash)
+    default_conn.execute(
+        "INSERT INTO item_wd_tags(item_hash, tag, tag_norm, tag_type) VALUES (?, 'Active Missing', 'active missing', 'general')",
+        (default_hash,),
+    )
+    default_conn.commit()
+    default_conn.close()
+
+    second_conn = sqlite_operator.init_database(second_db_path)
+    second_storage = sqlite_operator.allocate_storage_id(second_conn)
+    second_hash = "d3" * 32
+    second_conn.execute(
+        """
+        INSERT INTO items(hash, storage_id, original_filename, file_extension, mime_type, size_bytes, date_added, source_url, source_url_norm, platform, source_artist, phash)
+        VALUES (?, ?, ?, '.jpg', 'image/jpeg', 10, '2026-01-01 00:00:00', '', '', 'local', 'Second', '')
+        """,
+        (second_hash, second_storage, f"{second_hash}.jpg"),
+    )
+    second_conn.execute(
+        "INSERT INTO item_wd_tags(item_hash, tag, tag_norm, tag_type) VALUES (?, 'Second Only', 'second only', 'general')",
+        (second_hash,),
+    )
+    second_conn.commit()
+    second_conn.close()
+
+    ws_conn = workspace_db.connect_workspace_database()
+    ws_conn.executemany(
+        "INSERT OR IGNORE INTO wd_tag_dictionary(tag, tag_norm, tag_type, first_seen_at, updated_at) VALUES (?, ?, 'general', '2026-01-01', '2026-01-01')",
+        [("Second Only", "second only"), ("Unused", "unused")],
+    )
+    ws_conn.commit()
+    ws_conn.close()
+
+    initial = vaults.audit_vault_health("default")
+    assert initial["workspace_dictionary_drift"] == {"missing_in_dictionary": 1, "unused_in_vault": 1}
+
+    ws_conn = workspace_db.connect_workspace_database()
+    ws_conn.execute("DELETE FROM wd_tag_dictionary WHERE tag_norm = 'unused'")
+    ws_conn.commit()
+    ws_conn.close()
+    without_unused = vaults.audit_vault_health("default")
+    assert without_unused["workspace_dictionary_drift"] == {"missing_in_dictionary": 1, "unused_in_vault": 0}
+    assert without_unused["issue_count"] == initial["issue_count"]
+
+    ws_conn = workspace_db.connect_workspace_database()
+    ws_conn.execute(
+        "INSERT INTO wd_tag_dictionary(tag, tag_norm, tag_type, first_seen_at, updated_at) VALUES ('Active Missing', 'active missing', 'general', '2026-01-01', '2026-01-01')"
+    )
+    ws_conn.commit()
+    ws_conn.close()
+    complete = vaults.audit_vault_health("default")
+    assert complete["workspace_dictionary_drift"] == {"missing_in_dictionary": 0, "unused_in_vault": 0}
+    assert complete["issue_count"] == without_unused["issue_count"] - 1
 
 
 def test_artist_used_scope_filters_before_limit(monkeypatch, tmp_path):

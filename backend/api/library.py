@@ -1075,14 +1075,18 @@ def _update_item_sync(item_hash: str, update: ItemUpdate):
             row = cursor.execute("SELECT storage_id FROM items WHERE hash = ?", (item_hash,)).fetchone()
             if not row or not row[0]:
                 raise RuntimeError(f"item {item_hash} is missing storage_id")
-            note_path = note_path_for(item_hash, row[0])
-            note_path.parent.mkdir(parents=True, exist_ok=True)
-            atomic_write_text(note_path, md_content)
-            safe_reindex_item_metadata(conn, item_hash, "item_patch", update_workspace_wd=False)
-            current_core_facets = item_core_facet_values(conn, item_hash)
-            refresh_metadata_facet_counts_for_values(conn, previous_core_facets | current_core_facets)
-            workspace_conn.commit()
-            conn.commit()
+            with storage_lifecycle_lock(row[0]):
+                current = cursor.execute("SELECT storage_id FROM items WHERE hash = ?", (item_hash,)).fetchone()
+                if not current or current[0] != row[0]:
+                    raise HTTPException(status_code=404, detail="Item was deleted during update")
+                note_path = note_path_for(item_hash, row[0])
+                note_path.parent.mkdir(parents=True, exist_ok=True)
+                atomic_write_text(note_path, md_content)
+                safe_reindex_item_metadata(conn, item_hash, "item_patch", update_workspace_wd=False)
+                current_core_facets = item_core_facet_values(conn, item_hash)
+                refresh_metadata_facet_counts_for_values(conn, previous_core_facets | current_core_facets)
+                workspace_conn.commit()
+                conn.commit()
             
         row = cursor.execute("SELECT hash, file_extension, mime_type, original_filename, source_url, date_added, platform, source_artist, width, height, storage_id FROM items WHERE hash = ?", (item_hash,)).fetchone()
         return _get_item_details(item_hash, row, conn) if row else {"status": "success"}
@@ -1139,29 +1143,6 @@ def _restore_moved_cleanup_paths(item_hash: str, moved_paths: list[tuple[Path, P
             restore_errors.append({"hash": item_hash, "path": str(original_path), "error": str(exc)})
     return restore_errors
 
-def _sweep_orphan_files_for_storage_id(storage_id: str, ctx: WorkspaceContext | None = None):
-    """Safety net: remove any remaining files for a deleted storage_id across all shard dirs."""
-    vault = (ctx or get_runtime_context()).active_vault
-    sweep_dirs = [
-        vault.assets_dir,
-        vault.notes_dir,
-        vault.wd_tags_dir,
-        Path(vault.root) / "ui_cache" / "thumbnails",
-    ]
-    for base_dir in sweep_dirs:
-        if not base_dir.exists():
-            continue
-        for shard_dir in base_dir.iterdir():
-            if not shard_dir.is_dir():
-                continue
-            for candidate in shard_dir.glob(f"{storage_id}*"):
-                if candidate.is_file():
-                    try:
-                        candidate.unlink()
-                    except OSError:
-                        pass
-
-
 def _stage_cleanup_paths(item_hash: str, cleanup_paths: list[Path], trash_dir: Path) -> tuple[list[tuple[Path, Path]], list[dict]]:
     trash_dir.mkdir(parents=True, exist_ok=True)
     moved_paths: list[tuple[Path, Path]] = []
@@ -1193,17 +1174,24 @@ def _remove_staged_cleanup_paths(item_hash: str, moved_paths: list[tuple[Path, P
     return cleanup_errors
 
 
-def _delete_item_row(cursor, conn, item_hash: str, remove_indexes: bool = True, ctx: WorkspaceContext | None = None):
-    cursor.execute("SELECT file_extension, mime_type, storage_id, source_url FROM items WHERE hash = ?", (item_hash,))
-    row = cursor.fetchone()
-    if not row:
-        return {"hash": item_hash, "status": "missing", "cleanup_errors": []}
-
+def _delete_item_row_locked(
+    cursor,
+    conn,
+    item_hash: str,
+    row,
+    trash_dir: Path,
+    remove_indexes: bool,
+    ctx: WorkspaceContext | None,
+    log_context: str = "system",
+):
     cleanup_paths = _item_file_paths(item_hash, row[0] or "", row[1] or "", row[2], conn, ctx=ctx)
     previous_facet_values = item_facet_values(conn, item_hash)
-    moved_paths, cleanup_errors = _stage_cleanup_paths(item_hash, cleanup_paths, _cleanup_trash_dir(".delete-trash", ctx))
+    moved_paths, cleanup_errors = _stage_cleanup_paths(item_hash, cleanup_paths, trash_dir)
     if cleanup_errors:
-        log_system("WARNING", "Item delete staging failed", hash=item_hash, cleanup_errors=cleanup_errors)
+        if log_context == "review":
+            log_review("WARNING", "Review replace staging failed", target_hash=item_hash, cleanup_errors=cleanup_errors)
+        else:
+            log_system("WARNING", "Item delete staging failed", hash=item_hash, cleanup_errors=cleanup_errors)
         return {"hash": item_hash, "status": "cleanup_failed", "cleanup_errors": cleanup_errors, "deleted": False}
 
     try:
@@ -1215,18 +1203,51 @@ def _delete_item_row(cursor, conn, item_hash: str, remove_indexes: bool = True, 
         conn.rollback()
         cleanup_errors = [{"hash": item_hash, "path": "database", "error": str(exc)}]
         cleanup_errors.extend(_restore_moved_cleanup_paths(item_hash, moved_paths))
-        log_system("WARNING", "Item delete database step failed; restored staged files", hash=item_hash, error=str(exc), cleanup_errors=cleanup_errors)
+        if log_context == "review":
+            log_review("WARNING", "Review replace database step failed; restored staged files", target_hash=item_hash, error=str(exc), cleanup_errors=cleanup_errors)
+        else:
+            log_system("WARNING", "Item delete database step failed; restored staged files", hash=item_hash, error=str(exc), cleanup_errors=cleanup_errors)
         return {"hash": item_hash, "status": "cleanup_failed", "cleanup_errors": cleanup_errors, "deleted": False}
 
     index_payload = {"hash": item_hash, "source_url": row[3] or ""}
     if remove_indexes:
-        search_manager.remove_indexes_batch([index_payload])
+        if ctx is None:
+            search_manager.remove_indexes_batch([index_payload])
+        else:
+            search_manager.remove_indexes_batch([index_payload], ctx=ctx)
 
-    cleanup_errors = _remove_staged_cleanup_paths(item_hash, moved_paths, "Deleted DB row but staged file cleanup failed")
-    _sweep_orphan_files_for_storage_id(row[2], ctx=ctx)
-
-    log_system("INFO", f"Deleted item {item_hash}")
+    cleanup_errors = _remove_staged_cleanup_paths(
+        item_hash,
+        moved_paths,
+        "Review replace staged file cleanup failed" if log_context == "review" else "Deleted DB row but staged file cleanup failed",
+        log_context=log_context,
+    )
     return {"hash": item_hash, "status": "deleted", "cleanup_errors": cleanup_errors, "index": index_payload, "deleted": True}
+
+
+def _delete_item_row(cursor, conn, item_hash: str, remove_indexes: bool = True, ctx: WorkspaceContext | None = None):
+    cursor.execute("SELECT file_extension, mime_type, storage_id, source_url FROM items WHERE hash = ?", (item_hash,))
+    row = cursor.fetchone()
+    if not row:
+        return {"hash": item_hash, "status": "missing", "cleanup_errors": []}
+    with storage_lifecycle_lock(row[2], ctx=ctx):
+        cursor.execute("SELECT file_extension, mime_type, storage_id, source_url FROM items WHERE hash = ?", (item_hash,))
+        row = cursor.fetchone()
+        if not row:
+            return {"hash": item_hash, "status": "missing", "cleanup_errors": []}
+        result = _delete_item_row_locked(
+            cursor,
+            conn,
+            item_hash,
+            row,
+            _cleanup_trash_dir(".delete-trash", ctx),
+            remove_indexes,
+            ctx,
+        )
+
+    if result["status"] == "deleted":
+        log_system("INFO", f"Deleted item {item_hash}")
+    return result
 
 def _delete_item_after_replacement(item_hash: str, ctx: WorkspaceContext | None = None):
     conn = init_database(ctx=ctx)
@@ -1236,29 +1257,21 @@ def _delete_item_after_replacement(item_hash: str, ctx: WorkspaceContext | None 
         row = cursor.fetchone()
         if not row:
             return {"hash": item_hash, "status": "missing", "cleanup_errors": []}
-
-        cleanup_paths = _item_file_paths(item_hash, row[0] or "", row[1] or "", row[2], conn, ctx=ctx)
-        previous_facet_values = item_facet_values(conn, item_hash)
-        trash_dir = _review_dir(ctx) / ".replace-trash"
-        moved_paths, cleanup_errors = _stage_cleanup_paths(item_hash, cleanup_paths, trash_dir)
-        if cleanup_errors:
-            return {"hash": item_hash, "status": "cleanup_failed", "cleanup_errors": cleanup_errors}
-
-        try:
-            cursor.execute("DELETE FROM items WHERE hash = ?", (item_hash,))
-            refresh_metadata_facet_counts_for_values(conn, previous_facet_values)
-            refresh_metadata_index_counters(conn)
-            conn.commit()
-            search_manager.remove_indexes_batch([{"hash": item_hash, "source_url": row[3] or ""}], ctx=ctx)
-        except Exception as exc:
-            conn.rollback()
-            cleanup_errors = [{"hash": item_hash, "path": "database", "error": str(exc)}]
-            cleanup_errors.extend(_restore_moved_cleanup_paths(item_hash, moved_paths))
-            return {"hash": item_hash, "status": "cleanup_failed", "cleanup_errors": cleanup_errors}
-
-        cleanup_errors = _remove_staged_cleanup_paths(item_hash, moved_paths, "Review replace staged file cleanup failed", log_context="review")
-        _sweep_orphan_files_for_storage_id(row[2], ctx=ctx)
-        return {"hash": item_hash, "status": "deleted", "cleanup_errors": cleanup_errors}
+        with storage_lifecycle_lock(row[2], ctx=ctx):
+            cursor.execute("SELECT file_extension, mime_type, storage_id, source_url FROM items WHERE hash = ?", (item_hash,))
+            row = cursor.fetchone()
+            if not row:
+                return {"hash": item_hash, "status": "missing", "cleanup_errors": []}
+            return _delete_item_row_locked(
+                cursor,
+                conn,
+                item_hash,
+                row,
+                _review_dir(ctx) / ".replace-trash",
+                True,
+                ctx,
+                log_context="review",
+            )
     finally:
         conn.close()
 
@@ -1335,16 +1348,20 @@ async def trigger_tagging(item_hash: str):
             if not asset_path.exists():
                 raise HTTPException(status_code=404, detail="Asset missing")
 
-            log_system("INFO", f"Triggering AI tagging for {item_hash}")
-            tag_media(asset_path, item_hash=item_hash, config=get_config(), storage_id=row[2])
-            
-            md_content = generate_markdown(conn, item_hash, force_wd_from_cache=True)
-            if md_content:
-                note_path = note_path_for(item_hash, storage_id=row[2])
-                note_path.parent.mkdir(parents=True, exist_ok=True)
-                atomic_write_text(note_path, md_content)
-                safe_reindex_item_metadata(conn, item_hash, "manual_tag")
-                conn.commit()
+            with storage_lifecycle_lock(row[2]):
+                current = cursor.execute("SELECT file_extension, mime_type, storage_id FROM items WHERE hash = ?", (item_hash,)).fetchone()
+                if not current or current[2] != row[2] or not asset_path.exists():
+                    raise HTTPException(status_code=404, detail="Item was deleted before tagging")
+                log_system("INFO", f"Triggering AI tagging for {item_hash}")
+                tag_media(asset_path, item_hash=item_hash, config=get_config(), storage_id=row[2])
+
+                md_content = generate_markdown(conn, item_hash, force_wd_from_cache=True)
+                if md_content:
+                    note_path = note_path_for(item_hash, storage_id=row[2])
+                    note_path.parent.mkdir(parents=True, exist_ok=True)
+                    atomic_write_text(note_path, md_content)
+                    safe_reindex_item_metadata(conn, item_hash, "manual_tag")
+                    conn.commit()
             
             cursor.execute("SELECT hash, file_extension, mime_type, original_filename, source_url, date_added, platform, source_artist, width, height, storage_id FROM items WHERE hash = ?", (item_hash,))
             updated_row = cursor.fetchone()

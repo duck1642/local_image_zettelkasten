@@ -10,7 +10,8 @@ from PIL import Image
 
 from fingerprint import extract_sampled_video_frames
 from logger import log_system
-from runtime_context import get_runtime_context
+from media_lifecycle import storage_lifecycle_lock
+from runtime_context import WorkspaceContext, get_runtime_context
 from utils import atomic_write_text, calculate_file_hash, get_config, utc_now_str, wd_tag_cache_path_for
 from validators import get_mime_type
 
@@ -57,7 +58,7 @@ class TagResult:
         return asdict(self)
 
 
-def tag_media(media_path: str | Path, item_hash: str = None, config: dict = None, storage_id: str = None) -> TagResult:
+def tag_media(media_path: str | Path, item_hash: str = None, config: dict = None, storage_id: str = None, ctx: WorkspaceContext | None = None) -> TagResult:
     config = config or get_config()
     tag_config = config.get("tagging", {})
     media_path = Path(media_path)
@@ -76,27 +77,27 @@ def tag_media(media_path: str | Path, item_hash: str = None, config: dict = None
 
         if not tag_config.get("enabled", True):
             result = _result(item_hash, media_path, model_repo, device, "", threshold, max_tags, "skipped", error="tagging disabled")
-            _write_result(result, storage_id)
+            _write_result(result, storage_id, media_path, ctx)
             return result
 
         if not media_path.exists():
             result = _result(item_hash, media_path, model_repo, device, "", threshold, max_tags, "failed", error="media path does not exist")
-            _write_result(result, storage_id)
+            _write_result(result, storage_id, media_path, ctx)
             return result
     except Exception as exc:
         result = _result(item_hash or "", media_path, model_repo, device, "", threshold, max_tags, "failed", error=str(exc))
-        _write_result(result, storage_id)
+        _write_result(result, storage_id, media_path, ctx)
         return result
 
     mime_type = get_mime_type(media_path) or ""
     media_type = "video" if mime_type.startswith("video/") else "image" if mime_type.startswith("image/") else "unknown"
     if media_type == "video" and not video_config.get("enabled", True):
         result = _result(item_hash, media_path, model_repo, device, "", threshold, max_tags, "skipped", error="video tagging disabled", media_type="video")
-        _write_result(result, storage_id)
+        _write_result(result, storage_id, media_path, ctx)
         return result
     if media_type == "unknown":
         result = _result(item_hash, media_path, model_repo, device, "", threshold, max_tags, "skipped", error=f"unsupported media type: {mime_type or 'unknown'}", media_type="unknown")
-        _write_result(result, storage_id)
+        _write_result(result, storage_id, media_path, ctx)
         return result
 
     try:
@@ -114,7 +115,7 @@ def tag_media(media_path: str | Path, item_hash: str = None, config: dict = None
             samples = extract_sampled_video_frames(media_path, video_frame_count)
             if not samples:
                 result = _result(item_hash, media_path, model_repo, device, provider, threshold, max_tags, "failed", error="could not extract video frames", media_type="video")
-                _write_result(result, storage_id)
+                _write_result(result, storage_id, media_path, ctx)
                 return result
             sampled_frames = []
             for timestamp, image in samples:
@@ -127,7 +128,7 @@ def tag_media(media_path: str | Path, item_hash: str = None, config: dict = None
                 })
             rating, character_tags, tags = _merge_frame_tags(sampled_frames, max_tags, merge_min_frames, merge_high_confidence)
             result = _result(item_hash, media_path, model_repo, device, provider, threshold, max_tags, "ok", rating, character_tags, tags, provider_warning, "video", sampled_frames, len(sampled_frames))
-            _write_result(result, storage_id)
+            _write_result(result, storage_id, media_path, ctx)
             log_system("INFO", "WD video tagger completed", hash=item_hash, path=str(media_path), frame_count=len(sampled_frames), tag_count=len(tags), provider=provider)
             return result
         image = Image.open(media_path)
@@ -136,12 +137,12 @@ def tag_media(media_path: str | Path, item_hash: str = None, config: dict = None
         status = "ok"
         error = provider_warning
         result = _result(item_hash, media_path, model_repo, device, provider, threshold, max_tags, status, rating, character_tags, tags, error, "image")
-        _write_result(result, storage_id)
+        _write_result(result, storage_id, media_path, ctx)
         log_system("INFO", "WD tagger completed", hash=item_hash, path=str(media_path), tag_count=len(tags), provider=provider)
         return result
     except Exception as exc:
         result = _result(item_hash, media_path, model_repo, device, "", threshold, max_tags, "failed", error=str(exc), media_type=media_type)
-        _write_result(result, storage_id)
+        _write_result(result, storage_id, media_path, ctx)
         log_system("WARNING", "WD tagger failed", hash=item_hash, path=str(media_path), error=str(exc))
         return result
 
@@ -166,11 +167,21 @@ def _result(item_hash: str, media_path: Path, model_repo: str, device: str, prov
     )
 
 
-def _write_result(result: TagResult, storage_id: str = None):
+def _write_result(
+    result: TagResult,
+    storage_id: str = None,
+    media_path: str | Path | None = None,
+    ctx: WorkspaceContext | None = None,
+) -> bool:
     if not result.hash or not storage_id:
-        return
-    target = wd_tag_cache_path_for(result.hash, storage_id=storage_id)
-    atomic_write_text(target, json.dumps(result.to_dict(), indent=2, ensure_ascii=False))
+        return False
+    source = Path(media_path) if media_path is not None else None
+    with storage_lifecycle_lock(storage_id, ctx=ctx):
+        if source is not None and not source.exists():
+            return False
+        target = wd_tag_cache_path_for(result.hash, storage_id=storage_id, ctx=ctx)
+        atomic_write_text(target, json.dumps(result.to_dict(), indent=2, ensure_ascii=False))
+        return True
 
 
 def _cached_model_state(model_repo: str, device: str, ort, hf_hub_download) -> _ModelState:

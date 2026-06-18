@@ -37,12 +37,11 @@ Last updated: 2026-06-18
 
 ## Logs Findings
 
-- Logs panel is functional but dense.
-- Toolbar has too many equally weighted controls.
-- Source/file labels are verbose.
-- `Clear Logs` still uses browser `confirm()`.
-- `Clear Logs` should move to reusable `ConfirmationModal`.
-- Log output readability is acceptable; toolbar is the main issue.
+- Logs toolbar is split into compact control and filter rows.
+- Sources are separated into Startup logs, Vault logs, and Console.
+- `Clear` uses the reusable `ConfirmationModal` and names its target.
+- Stream state, CRITICAL/OTHER levels, and loaded-row search are implemented.
+- Real local/online ingest log smoke remains useful before release.
 
 ## API / Safety Notes
 
@@ -66,7 +65,6 @@ Done and moved to `docs/phase8_status.md` or completed:
 Still open:
 
 1. Standardize Settings content widths.
-2. Polish Logs toolbar after Settings width cleanup.
 
 ## Screenshot References
 

@@ -28,6 +28,7 @@ from utils import (
     asset_path_for, calculate_file_hash, asset_url_for, wd_tag_cache_path_for
 )
 from runtime_context import RuntimeNotLoadedError, WorkspaceContext, get_runtime_context
+from media_lifecycle import discover_owned_paths, storage_lifecycle_lock
 from processor import process_file
 from logger import log_auth, log_ingest_audit, log_ingest_local, log_review, log_svelte, log_system, log_dirs, startup_log_dirs
 from md_generator import MANUAL_FRONTMATTER_FIELDS, load_note_frontmatter, load_note_topics, load_note_wd_tags, generate_markdown, normalize_topic_list
@@ -660,12 +661,16 @@ def _apply_manual_frontmatter_to_item(item_hash: str, manual_fields: dict, ident
         row = conn.execute("SELECT storage_id FROM items WHERE hash = ?", (item_hash,)).fetchone()
         if not row or not row[0]:
             raise RuntimeError(f"item {item_hash} is missing storage_id")
-        note_path = note_path_for(item_hash, row[0], ctx=ctx)
-        note_path.parent.mkdir(parents=True, exist_ok=True)
-        atomic_write_text(note_path, md_content)
-        safe_reindex_item_metadata(conn, item_hash, "review_replace_preserve", update_workspace_wd=False)
-        workspace_conn.commit()
-        conn.commit()
+        with storage_lifecycle_lock(row[0], ctx=ctx):
+            current = conn.execute("SELECT storage_id FROM items WHERE hash = ?", (item_hash,)).fetchone()
+            if not current or current[0] != row[0]:
+                raise RuntimeError(f"item {item_hash} changed during replacement metadata update")
+            note_path = note_path_for(item_hash, row[0], ctx=ctx)
+            note_path.parent.mkdir(parents=True, exist_ok=True)
+            atomic_write_text(note_path, md_content)
+            safe_reindex_item_metadata(conn, item_hash, "review_replace_preserve", update_workspace_wd=False)
+            workspace_conn.commit()
+            conn.commit()
     except Exception:
         workspace_conn.rollback()
         conn.rollback()
@@ -684,7 +689,8 @@ def _item_file_paths(item_hash: str, extension: str, mime_type: str, storage_id:
     ]
     paths.append(thumbnail_path_for(item_hash, storage_id, ctx=ctx))
     paths.append(video_thumbnail_path_for(item_hash, storage_id, ctx=ctx))
-    return paths
+    paths.extend(discover_owned_paths(storage_id, ctx=ctx))
+    return list(dict.fromkeys(paths))
 
 def _tail_lines(path: Path, count: int = 150) -> list[str]:
     if not path.exists():

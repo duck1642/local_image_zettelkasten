@@ -6,6 +6,7 @@ from typing import Callable, Iterable
 import yaml
 
 from db.sqlite_operator import init_database
+from media_lifecycle import storage_lifecycle_lock
 from md_generator import generate_markdown, normalize_topic_list
 from metadata_index import (
     ensure_metadata_schema,
@@ -131,10 +132,19 @@ def write_note_frontmatter_preserving_body(note_path: Path, frontmatter: dict, b
     atomic_write_text(note_path, f"---\n{fm_text}---\n{body}")
 
 
-def _restore_note_snapshots(snapshots: dict[Path, str], result: MetadataMaintenanceResult, vault_id: str):
+def _restore_note_snapshots(
+    snapshots: dict[Path, str],
+    result: MetadataMaintenanceResult,
+    vault_id: str,
+    conn: sqlite3.Connection,
+    vault_root: Path,
+):
     for note_path, original_text in snapshots.items():
         try:
-            atomic_write_text(note_path, original_text)
+            storage_id = note_path.stem
+            with storage_lifecycle_lock(storage_id, vault_root=vault_root):
+                if conn.execute("SELECT 1 FROM items WHERE storage_id = ?", (storage_id,)).fetchone():
+                    atomic_write_text(note_path, original_text)
         except Exception as exc:
             result.errors.append({
                 "vault": vault_id,
@@ -157,12 +167,16 @@ def rewrite_metadata_notes_for_hashes(conn: sqlite3.Connection, item_hashes: Ite
         row = conn.execute("SELECT storage_id FROM items WHERE hash = ?", (item_hash,)).fetchone()
         if not row or not row[0]:
             continue
-        note_path = note_path_for(item_hash, row[0], ctx=ctx)
-        note_path.parent.mkdir(parents=True, exist_ok=True)
-        atomic_write_text(note_path, md_content)
-        safe_reindex_item_metadata(conn, item_hash, reason)
-        result.notes_rewritten += 1
-        result.items_reindexed += 1
+        with storage_lifecycle_lock(row[0], ctx=ctx):
+            current = conn.execute("SELECT storage_id FROM items WHERE hash = ?", (item_hash,)).fetchone()
+            if not current or current[0] != row[0]:
+                continue
+            note_path = note_path_for(item_hash, row[0], ctx=ctx)
+            note_path.parent.mkdir(parents=True, exist_ok=True)
+            atomic_write_text(note_path, md_content)
+            safe_reindex_item_metadata(conn, item_hash, reason)
+            result.notes_rewritten += 1
+            result.items_reindexed += 1
     return result
 
 
@@ -284,19 +298,23 @@ def rewrite_topic_refs_across_workspace(old_label: str, new_label: str | None, c
                 if not storage_id:
                     continue
                 note_path = _vault_note_path(Path(vault["root"]), item_hash, storage_id)
-                if not note_path.exists():
-                    result.errors.append({"vault": vault["id"], "hash": item_hash, "error": "note missing"})
-                    continue
                 try:
-                    note_snapshots.setdefault(note_path, note_path.read_text(encoding="utf-8"))
-                    changed, legacy_count, formatted_topics = _replace_note_topics(note_path, old_slug, old_norms, new_label)
-                    if not changed:
-                        continue
-                    _refresh_item_topic_rows(conn, item_hash, storage_id, note_path, formatted_topics)
-                    result.notes_rewritten += 1
-                    result.items_reindexed += 1
-                    result.legacy_plain_refs_rewritten += legacy_count
-                    touched_this_vault = True
+                    with storage_lifecycle_lock(storage_id, vault_root=Path(vault["root"])):
+                        current = conn.execute("SELECT storage_id FROM items WHERE hash = ?", (item_hash,)).fetchone()
+                        if not current or current[0] != storage_id:
+                            continue
+                        if not note_path.exists():
+                            result.errors.append({"vault": vault["id"], "hash": item_hash, "error": "note missing"})
+                            continue
+                        note_snapshots.setdefault(note_path, note_path.read_text(encoding="utf-8"))
+                        changed, legacy_count, formatted_topics = _replace_note_topics(note_path, old_slug, old_norms, new_label)
+                        if not changed:
+                            continue
+                        _refresh_item_topic_rows(conn, item_hash, storage_id, note_path, formatted_topics)
+                        result.notes_rewritten += 1
+                        result.items_reindexed += 1
+                        result.legacy_plain_refs_rewritten += legacy_count
+                        touched_this_vault = True
                 except Exception as exc:
                     result.errors.append({"vault": vault["id"], "hash": item_hash, "error": str(exc)})
             if touched_this_vault:
@@ -309,7 +327,7 @@ def rewrite_topic_refs_across_workspace(old_label: str, new_label: str | None, c
                 conn.rollback()
             except Exception as rollback_err:
                 result.errors.append({"vault": vault["id"], "error": f"Database rollback failed: {rollback_err}"})
-            _restore_note_snapshots(note_snapshots, result, str(vault["id"]))
+            _restore_note_snapshots(note_snapshots, result, str(vault["id"]), conn, Path(vault["root"]))
             result.errors.append({"vault": vault["id"], "error": str(exc)})
         finally:
             conn.close()
@@ -512,21 +530,25 @@ def rewrite_wd_tags_across_workspace(tag: str, transform: Callable[[str], str | 
                 if not storage_id:
                     continue
                 note_path = _vault_note_path(Path(vault["root"]), item_hash, storage_id)
-                if not note_path.exists():
-                    result.errors.append({"vault": vault["id"], "hash": item_hash, "error": "note missing"})
-                    continue
                 try:
-                    note_snapshots.setdefault(note_path, note_path.read_text(encoding="utf-8"))
-                    frontmatter, body = load_note_frontmatter_preserving_body(note_path)
-                    changed, item_changed_norms = _transform_wd_frontmatter(frontmatter, clean_type, lambda value: transform(value) if _topic_norm(value) == tag_norm else value)
-                    if not changed:
-                        continue
-                    write_note_frontmatter_preserving_body(note_path, frontmatter, body)
-                    _refresh_item_wd_rows(conn, item_hash, storage_id, note_path, frontmatter)
-                    changed_norms.update(item_changed_norms)
-                    result.notes_rewritten += 1
-                    result.items_reindexed += 1
-                    touched_this_vault = True
+                    with storage_lifecycle_lock(storage_id, vault_root=Path(vault["root"])):
+                        current = conn.execute("SELECT storage_id FROM items WHERE hash = ?", (item_hash,)).fetchone()
+                        if not current or current[0] != storage_id:
+                            continue
+                        if not note_path.exists():
+                            result.errors.append({"vault": vault["id"], "hash": item_hash, "error": "note missing"})
+                            continue
+                        note_snapshots.setdefault(note_path, note_path.read_text(encoding="utf-8"))
+                        frontmatter, body = load_note_frontmatter_preserving_body(note_path)
+                        changed, item_changed_norms = _transform_wd_frontmatter(frontmatter, clean_type, lambda value: transform(value) if _topic_norm(value) == tag_norm else value)
+                        if not changed:
+                            continue
+                        write_note_frontmatter_preserving_body(note_path, frontmatter, body)
+                        _refresh_item_wd_rows(conn, item_hash, storage_id, note_path, frontmatter)
+                        changed_norms.update(item_changed_norms)
+                        result.notes_rewritten += 1
+                        result.items_reindexed += 1
+                        touched_this_vault = True
                 except Exception as exc:
                     result.errors.append({"vault": vault["id"], "hash": item_hash, "error": str(exc)})
             if touched_this_vault:
@@ -539,7 +561,7 @@ def rewrite_wd_tags_across_workspace(tag: str, transform: Callable[[str], str | 
                 conn.rollback()
             except Exception as rollback_err:
                 result.errors.append({"vault": vault["id"], "error": f"Database rollback failed: {rollback_err}"})
-            _restore_note_snapshots(note_snapshots, result, str(vault["id"]))
+            _restore_note_snapshots(note_snapshots, result, str(vault["id"]), conn, Path(vault["root"]))
             result.errors.append({"vault": vault["id"], "error": str(exc)})
         finally:
             conn.close()

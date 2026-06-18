@@ -472,7 +472,7 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
         }
 
         try:
-            tag_result = tag_media(vault_path, item_hash=file_hash, config=config, storage_id=storage_id)
+            tag_result = tag_media(vault_path, item_hash=file_hash, config=config, storage_id=storage_id, ctx=ctx)
             index_data["tagging_status"] = tag_result.status
             index_data["tagging_error"] = tag_result.error or ""
             index_data["tagging_tag_count"] = len(tag_result.tags or [])
@@ -495,10 +495,15 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
 
         safe_reindex_item_metadata(conn, file_hash, "ingest")
 
-        conn.commit()
-
         mime = str(mime_type or "").lower()
         is_media = mime.startswith("image/") or mime.startswith("video/")
+        if not is_media:
+            conn.execute(
+                "UPDATE items SET thumbnail_status = 'skipped', thumbnail_error = NULL WHERE hash = ?",
+                (file_hash,)
+            )
+        conn.commit()
+
         if is_media:
             try:
                 ensure_thumbnail(file_hash, target_ext, mime_type, wait=True, storage_id=storage_id, ctx=ctx)
@@ -517,13 +522,6 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
                     conn.commit()
                 except Exception as db_exc:
                     log_system("ERROR", "Failed to update thumbnail error status in DB", hash=file_hash, error=str(db_exc))
-        else:
-            conn.execute(
-                "UPDATE items SET thumbnail_status = 'skipped', thumbnail_error = NULL WHERE hash = ?",
-                (file_hash,)
-            )
-            conn.commit()
-
         if sync_index:
             search_index_data = {
                 "file_hash": index_data["file_hash"],

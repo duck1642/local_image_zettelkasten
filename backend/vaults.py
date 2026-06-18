@@ -9,6 +9,7 @@ from pathlib import Path
 import yaml
 
 from db.sqlite_operator import allocate_storage_id, init_database
+from media_lifecycle import remove_stale_derived_files, storage_lifecycle_lock
 from path_policy import vault_root_is_inside_workspace, vault_root_is_usable
 from runtime_context import VaultContext, WorkspaceContext, get_runtime_context
 from utils import atomic_write_text
@@ -810,29 +811,11 @@ def _repairable_issue_count(counts: dict) -> int:
     )
 
 
-def _remove_stale_shard_files(base_dir: Path, storage_id: str, expected_shard: str, suffix: str) -> int:
-    """Remove files like {storage_id}{suffix} from any shard dir except *expected_shard*."""
-    removed = 0
-    if not base_dir.exists():
-        return removed
-    for shard_dir in base_dir.iterdir():
-        if not shard_dir.is_dir() or shard_dir.name == expected_shard:
-            continue
-        stale = shard_dir / f"{storage_id}{suffix}"
-        if stale.exists():
-            try:
-                stale.unlink()
-                removed += 1
-            except OSError:
-                pass
-    return removed
-
-
 def _repair_missing_wd_cache(conn: sqlite3.Connection, ctx: WorkspaceContext, limit: int = 100000) -> dict:
     from md_generator import generate_markdown
     from metadata_index import safe_reindex_item_metadata
     from tagging.service import tag_media
-    from utils import asset_path_for, atomic_write_text, get_config, note_path_for, storage_shard_for_hash, wd_tag_cache_path_for
+    from utils import asset_path_for, atomic_write_text, get_config, note_path_for, wd_tag_cache_path_for
 
     checked = 0
     tagged = 0
@@ -840,6 +823,8 @@ def _repair_missing_wd_cache(conn: sqlite3.Connection, ctx: WorkspaceContext, li
     skipped_missing_asset = 0
     skipped_status = 0
     failed = 0
+    stale_removed = 0
+    cleanup_errors = []
     errors = []
     rows = conn.execute("""
         SELECT hash, file_extension, mime_type, storage_id
@@ -852,49 +837,49 @@ def _repair_missing_wd_cache(conn: sqlite3.Connection, ctx: WorkspaceContext, li
         if checked >= limit:
             break
         checked += 1
-        cache_path = wd_tag_cache_path_for(item_hash, storage_id=storage_id, ctx=ctx)
-        if cache_path.exists():
-            skipped_existing += 1
-            continue
-        asset_path = asset_path_for(item_hash, extension or "", mime_type or "", storage_id=storage_id, ctx=ctx)
-        if not asset_path.exists():
-            skipped_missing_asset += 1
-            continue
-        try:
-            result = tag_media(asset_path, item_hash=item_hash, config=get_config(), storage_id=storage_id)
-            # Explicitly write to the ctx-aware path. tag_media calls _write_result internally
-            # which has no ctx parameter and falls back to get_runtime_context(), so if the
-            # repair_ctx path differs in any way the file lands in the wrong location.
-            # Writing here with cache_path (already computed with ctx) guarantees correctness.
-            atomic_write_text(cache_path, json.dumps(result.to_dict(), indent=2, ensure_ascii=False))
-            # Clean up stale WD/thumb files at wrong shard locations for this storage_id
-            expected_shard = storage_shard_for_hash(item_hash)
-            _remove_stale_shard_files(ctx.active_vault.wd_tags_dir, storage_id, expected_shard, ".json")
-            thumb_dir = Path(ctx.active_vault.root) / "ui_cache" / "thumbnails"
-            _remove_stale_shard_files(thumb_dir, storage_id, expected_shard, ".jpg")
-            if result.status == "ok":
-                tagged += 1
-            else:
-                skipped_status += 1
+        with storage_lifecycle_lock(storage_id, ctx=ctx):
+            cache_path = wd_tag_cache_path_for(item_hash, storage_id=storage_id, ctx=ctx)
+            removed, stale_errors = remove_stale_derived_files(
+                ctx.active_vault.wd_tags_dir,
+                storage_id,
+                cache_path,
+                {f"{storage_id}.json"},
+            )
+            stale_removed += removed
+            cleanup_errors.extend(stale_errors)
+            if cache_path.exists():
+                skipped_existing += 1
+                continue
+            asset_path = asset_path_for(item_hash, extension or "", mime_type or "", storage_id=storage_id, ctx=ctx)
+            if not asset_path.exists():
+                skipped_missing_asset += 1
+                continue
+            try:
+                result = tag_media(asset_path, item_hash=item_hash, config=get_config(), storage_id=storage_id, ctx=ctx)
+                atomic_write_text(cache_path, json.dumps(result.to_dict(), indent=2, ensure_ascii=False))
+                if result.status == "ok":
+                    tagged += 1
+                else:
+                    skipped_status += 1
+                    if len(errors) < 10:
+                        errors.append({
+                            "hash": item_hash,
+                            "storage_id": storage_id,
+                            "status": result.status,
+                            "error": result.error or f"tagging returned status={result.status!r}",
+                        })
+                md_content = generate_markdown(conn, item_hash, force_wd_from_cache=True)
+                if md_content:
+                    note_path = note_path_for(item_hash, storage_id=storage_id, ctx=ctx)
+                    note_path.parent.mkdir(parents=True, exist_ok=True)
+                    atomic_write_text(note_path, md_content)
+                    safe_reindex_item_metadata(conn, item_hash, "vault_repair_wd_tagging")
+                    conn.commit()
+            except Exception as exc:
+                failed += 1
+                conn.rollback()
                 if len(errors) < 10:
-                    errors.append({
-                        "hash": item_hash,
-                        "storage_id": storage_id,
-                        "status": result.status,
-                        "error": result.error or f"tagging returned status={result.status!r}",
-                    })
-            md_content = generate_markdown(conn, item_hash, force_wd_from_cache=True)
-            if md_content:
-                note_path = note_path_for(item_hash, storage_id=storage_id, ctx=ctx)
-                note_path.parent.mkdir(parents=True, exist_ok=True)
-                atomic_write_text(note_path, md_content)
-                safe_reindex_item_metadata(conn, item_hash, "vault_repair_wd_tagging")
-                conn.commit()
-        except Exception as exc:
-            failed += 1
-            conn.rollback()
-            if len(errors) < 10:
-                errors.append({"hash": item_hash, "storage_id": storage_id, "status": "exception", "error": str(exc)})
+                    errors.append({"hash": item_hash, "storage_id": storage_id, "status": "exception", "error": str(exc)})
     try:
         from logger import log_system
         log_system(
@@ -906,6 +891,8 @@ def _repair_missing_wd_cache(conn: sqlite3.Connection, ctx: WorkspaceContext, li
             skipped_missing_asset=skipped_missing_asset,
             skipped_status=skipped_status,
             failed=failed,
+            stale_removed=stale_removed,
+            cleanup_errors=len(cleanup_errors),
         )
     except Exception:
         pass
@@ -916,6 +903,8 @@ def _repair_missing_wd_cache(conn: sqlite3.Connection, ctx: WorkspaceContext, li
         "skipped_missing_asset": skipped_missing_asset,
         "skipped_status": skipped_status,
         "failed": failed,
+        "stale_removed": stale_removed,
+        "cleanup_errors": cleanup_errors,
         "errors": errors,
     }
 
