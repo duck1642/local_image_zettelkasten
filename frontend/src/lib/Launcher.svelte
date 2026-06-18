@@ -54,6 +54,21 @@
   let visibleWorkspacePaths = new Set<string>();
   let visibleVaultPaths = new Set<string>();
 
+  function getWorkspaceDetails(configPath: string) {
+    const normalized = configPath.replace(/\\/g, '/');
+    const isLocal = normalized.toLowerCase().endsWith('config/config.yaml');
+    let rootDir = '';
+    if (isLocal) {
+      const suffix = 'config/config.yaml';
+      rootDir = configPath.substring(0, configPath.length - suffix.length).replace(/[/\\]+$/, '');
+      if (!rootDir) rootDir = '.';
+    } else {
+      const suffix = 'config.yaml';
+      rootDir = configPath.substring(0, configPath.length - suffix.length).replace(/[/\\]+$/, '');
+    }
+    return { isLocal, rootDir };
+  }
+
   // Relocation state
   let relocateState: {
     type: 'workspace' | 'vault' | null;
@@ -464,6 +479,7 @@
               <div class="launcher-workspace-list sleek-scrollbar">
                 {#each workspaces as w}
                   {#if w.exists}
+                    {@const details = getWorkspaceDetails(w.config_path)}
                     <button
                       class="launcher-workspace-row"
                       class:active={w.active}
@@ -474,13 +490,30 @@
                         <div class="launcher-name-line">
                           <IconServer size={14} className="workspace-icon" />
                           <span class="workspace-name">{w.name}</span>
+                          <span class="launcher-type-badge" class:local-badge={details.isLocal} class:external-badge={!details.isLocal}>
+                            {details.isLocal ? 'In-App' : 'External'}
+                          </span>
                           <span class="launcher-status-badge launcher-found">
                             <span class="dot"></span>
                             Found
                           </span>
                         </div>
                         {#if visibleWorkspacePaths.has(w.id)}
-                          <div class="launcher-path-line" title={w.config_path}>{w.config_path}</div>
+                          <div class="launcher-expanded-details">
+                            <div class="launcher-path-row">
+                              <span class="path-label">Workspace Root</span>
+                              <code class="launcher-path-code" title={details.rootDir}>{details.rootDir}</code>
+                            </div>
+                            <div class="launcher-path-row">
+                              <span class="path-label">Configuration File</span>
+                              <code class="launcher-path-code" title={w.config_path}>{w.config_path}</code>
+                            </div>
+                            <div class="launcher-desc-row">
+                              {details.isLocal
+                                ? "Runs inside the application directory. All vaults and database files reside inside the app repository."
+                                : "Isolated workspace. All vaults, logs, and database files reside directly inside this workspace folder."}
+                            </div>
+                          </div>
                         {/if}
                       </div>
                       <span
@@ -498,18 +531,31 @@
                       </span>
                     </button>
                   {:else}
+                    {@const details = getWorkspaceDetails(w.config_path)}
                     <div class="launcher-workspace-row missing">
                       <div class="launcher-row-info">
                         <div class="launcher-name-line">
                           <IconServer size={14} className="workspace-icon" />
                           <span class="workspace-name">{w.name}</span>
+                          <span class="launcher-type-badge" class:local-badge={details.isLocal} class:external-badge={!details.isLocal}>
+                            {details.isLocal ? 'In-App' : 'External'}
+                          </span>
                           <span class="launcher-status-badge launcher-missing">
                             <span class="dot"></span>
                             Missing
                           </span>
                         </div>
                         {#if visibleWorkspacePaths.has(w.id)}
-                          <div class="launcher-path-line" title={w.config_path}>{w.config_path}</div>
+                          <div class="launcher-expanded-details">
+                            <div class="launcher-path-row">
+                              <span class="path-label">Workspace Root</span>
+                              <code class="launcher-path-code" title={details.rootDir}>{details.rootDir}</code>
+                            </div>
+                            <div class="launcher-path-row">
+                              <span class="path-label">Configuration File</span>
+                              <code class="launcher-path-code" title={w.config_path}>{w.config_path}</code>
+                            </div>
+                          </div>
                         {/if}
                       </div>
                       <div class="launcher-row-actions">
@@ -849,7 +895,7 @@
     display: flex;
     flex-direction: column;
     gap: 8px;
-    max-height: 200px;
+    max-height: 320px;
     overflow-y: auto;
     width: 100%;
   }
@@ -1224,5 +1270,74 @@
   @keyframes pulse {
     0%, 100% { opacity: 0.5; }
     50% { opacity: 1; }
+  }
+
+  .launcher-type-badge {
+    display: inline-flex;
+    align-items: center;
+    font-size: 9px;
+    font-weight: 600;
+    padding: 1px 5px;
+    border-radius: 4px;
+    line-height: 1;
+    border: 1px solid transparent;
+  }
+
+  .launcher-type-badge.local-badge {
+    background: rgba(56, 139, 253, 0.1);
+    color: #58a6ff;
+    border-color: rgba(56, 139, 253, 0.15);
+  }
+
+  .launcher-type-badge.external-badge {
+    background: rgba(188, 142, 253, 0.1);
+    color: #bc8cff;
+    border-color: rgba(188, 142, 253, 0.15);
+  }
+
+  .launcher-expanded-details {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    width: 100%;
+    padding: 4px 0 2px 0;
+  }
+
+  .launcher-path-row {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    width: 100%;
+  }
+
+  .path-label {
+    font-size: 9px;
+    font-weight: 700;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+  }
+
+  .launcher-path-code {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-family: monospace;
+    white-space: normal;
+    word-break: break-all;
+    width: 100%;
+    align-self: flex-start;
+    text-align: left;
+    background: rgba(0, 0, 0, 0.2);
+    padding: 4px 6px;
+    border-radius: 4px;
+    border: 1px solid rgba(255, 255, 255, 0.03);
+  }
+
+  .launcher-desc-row {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-style: italic;
+    line-height: 1.4;
+    margin-top: 2px;
   }
 </style>

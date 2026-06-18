@@ -36,6 +36,21 @@
       console.error('Failed to open folder picker:', e);
     }
   }
+
+  function getWorkspaceDetails(configPath: string) {
+    const normalized = configPath.replace(/\\/g, '/');
+    const isLocal = normalized.toLowerCase().endsWith('config/config.yaml');
+    let rootDir = '';
+    if (isLocal) {
+      const suffix = 'config/config.yaml';
+      rootDir = configPath.substring(0, configPath.length - suffix.length).replace(/[/\\]+$/, '');
+      if (!rootDir) rootDir = '.';
+    } else {
+      const suffix = 'config.yaml';
+      rootDir = configPath.substring(0, configPath.length - suffix.length).replace(/[/\\]+$/, '');
+    }
+    return { isLocal, rootDir };
+  }
 </script>
 
 <div class="workspace-actions settings-workspace-actions">
@@ -55,10 +70,14 @@
   
   <div class="workspace-list settings-list-spacing">
     {#each workspaces as workspace}
+      {@const details = getWorkspaceDetails(workspace.config_path)}
       <div class="workspace-row settings-row-compact">
         <div class="settings-row-main">
           <div class="settings-row-title">
             <strong class="settings-row-name">{workspace.name}</strong>
+            <span class="settings-type-badge" class:local-badge={details.isLocal} class:external-badge={!details.isLocal}>
+              {details.isLocal ? 'In-App' : 'External'}
+            </span>
             {#if workspace.id === workspaceActive}
               <span class="active-badge">Active</span>
             {/if}
@@ -66,7 +85,16 @@
               <span class="missing-badge">Missing Config</span>
             {/if}
           </div>
-          <code class="settings-code" title={workspace.config_path}>{workspace.config_path}</code>
+          <div class="settings-path-details">
+            <div class="settings-path-line">
+              <span class="settings-path-label">Root:</span>
+              <code class="settings-code" title={details.rootDir}>{details.rootDir}</code>
+            </div>
+            <div class="settings-path-line">
+              <span class="settings-path-label">Config:</span>
+              <code class="settings-code" title={workspace.config_path}>{workspace.config_path}</code>
+            </div>
+          </div>
         </div>
         <button
           class="settings-small-action"
@@ -128,3 +156,64 @@
     </div>
   </div>
 </div>
+
+<style>
+  .settings-type-badge {
+    display: inline-flex;
+    align-items: center;
+    font-size: 9px;
+    font-weight: 600;
+    padding: 1px 5px;
+    border-radius: 4px;
+    line-height: 1;
+    border: 1px solid transparent;
+    margin-left: 6px;
+  }
+
+  .settings-type-badge.local-badge {
+    background: rgba(56, 139, 253, 0.1);
+    color: #58a6ff;
+    border-color: rgba(56, 139, 253, 0.15);
+  }
+
+  .settings-type-badge.external-badge {
+    background: rgba(188, 142, 253, 0.1);
+    color: #bc8cff;
+    border-color: rgba(188, 142, 253, 0.15);
+  }
+
+  .settings-path-details {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 4px;
+    width: 100%;
+  }
+
+  .settings-path-line {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    width: 100%;
+  }
+
+  .settings-path-label {
+    font-size: 9px;
+    font-weight: 700;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    width: 48px;
+    flex-shrink: 0;
+  }
+
+  :global(.settings-workspace-actions) :global(.settings-code) {
+    margin: 0;
+    flex-grow: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: calc(100% - 54px);
+  }
+</style>
