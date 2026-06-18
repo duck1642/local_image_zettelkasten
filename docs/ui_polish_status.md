@@ -2,7 +2,7 @@
 
 Temporary working notes for Settings and Logs polish.
 
-Last updated: 2026-06-15
+Last updated: 2026-06-18
 
 ## Current Focus
 
@@ -14,9 +14,9 @@ Last updated: 2026-06-15
 
 ## Inspection Notes
 
-- Graphify update was attempted with `graphify . --update --no-viz`.
-- Update failed because semantic extraction needs an LLM API key.
-- Existing graph is usable but stale from 2026-06-14.
+- Graphify update has been fully completed using `graphify update . --force`.
+- Code graph is fresh as of today with 5,329 nodes, 9,735 edges, and 411 communities.
+- Standalone HTML (`graph.html`) and collapsible D3 tree (`GRAPH_TREE.html`) visualizations have been successfully generated under `graphify-out/` (with interactive zoom/pan mechanics added to the tree).
 - Backend Settings routes mostly live in `backend/api/runtime.py`.
 - Logs routes live in `backend/api/logs.py`.
 - Frontend Settings API wrappers live in `frontend/src/lib/settingsApi.ts`.
@@ -53,7 +53,7 @@ Last updated: 2026-06-15
 
 ## First Polish Batch
 
-Done and moved to `docs/phase8_status.md`:
+Done and moved to `docs/phase8_status.md` or completed:
 
 - Clean the Maintenance tab.
 - Extract small reusable Settings UI pieces where repetition is obvious.
@@ -61,12 +61,12 @@ Done and moved to `docs/phase8_status.md`:
 - Normalize action buttons with icons, short labels, and titles.
 - Add frontend-only Privacy blur.
 - Move Privacy blur into General -> Vault Display Settings.
+- Move Logs `Clear Logs` to `ConfirmationModal`.
 
 Still open:
 
 1. Standardize Settings content widths.
-2. Move Logs `Clear Logs` to `ConfirmationModal`.
-3. Polish Logs toolbar after Settings width cleanup.
+2. Polish Logs toolbar after Settings width cleanup.
 
 ## Screenshot References
 
