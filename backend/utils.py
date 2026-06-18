@@ -147,10 +147,11 @@ DEFAULT_ALLOWED_MIMES = {
 
 
 def setup_directories(ctx: WorkspaceContext | None = None):
+    import sys
     runtime = _ctx(ctx)
     vault = runtime.active_vault
 
-    for directory in [
+    dirs_to_create = [
         vault.input_dir,
         vault.review_dir,
         vault.local_ingest_dir,
@@ -166,8 +167,12 @@ def setup_directories(ctx: WorkspaceContext | None = None):
         vault.notes_dir,
         vault.db_path.parent,
         vault.logs_dir,
-        runtime.secrets_dir,
-    ]:
+    ]
+
+    if runtime.root == PROJECT_ROOT or "pytest" in sys.modules:
+        dirs_to_create.append(runtime.secrets_dir)
+
+    for directory in dirs_to_create:
         directory.mkdir(parents=True, exist_ok=True)
     for platform in AUTH_COOKIE_PLATFORMS:
         (app_auth_root() / platform).mkdir(parents=True, exist_ok=True)
