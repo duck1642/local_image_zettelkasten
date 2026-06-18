@@ -14,7 +14,7 @@
   import { queueStats, reviewCount, reviewStats, startSharedStatsPolling } from './lib/statsStore';
   import { apiFetch } from './lib/api';
   import { privacyBlur } from './lib/privacyStore';
-  import { applyMainWindowLayout } from './lib/windowLayout';
+  import { applyMainWindowLayout, applyLauncherWindowLayout } from './lib/windowLayout';
   import {
     IconFolder,
     IconDownload,
@@ -79,11 +79,16 @@
     vaultStatus = event.detail;
   }
 
-  function handleGlobalKeydown(event: KeyboardEvent) {
+  async function handleGlobalKeydown(event: KeyboardEvent) {
     if (event.key !== 'F5') return;
     event.preventDefault();
     if (event.ctrlKey) {
       uiLog('INFO', 'Ctrl+F5 pressed: reloading full app');
+      try {
+        await applyLauncherWindowLayout();
+      } catch (err) {
+        uiLog('WARNING', 'Failed to resize window to launcher size on reload', { error: String(err) });
+      }
       window.location.reload();
       return;
     }
