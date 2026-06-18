@@ -32,6 +32,7 @@ def fresh_backend(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *module_names
     work = tmp_path / "mock-vault"
     shutil.copytree(FIXTURE, work)
     monkeypatch.setenv("LMZ_CONFIG_PATH", str(work / "config.yaml"))
+    monkeypatch.setenv("LMZ_AUTH_ROOT", str(tmp_path / "app-auth"))
     if str(ROOT) not in sys.path:
         sys.path.insert(0, str(ROOT))
     if str(BACKEND) not in sys.path:
@@ -110,8 +111,12 @@ def test_config_override_resolves_paths_inside_mock_vault(monkeypatch, tmp_path)
     assert utils.ONLINE_INGEST_DIR == tmp_path / "mock-vault" / "data" / "vaults" / "default" / "online_ingest"
     assert utils.THUMBNAILS_DIR == tmp_path / "mock-vault" / "data" / "vaults" / "default" / "ui_cache" / "thumbnails"
     assert utils.TOPICS_DIR == tmp_path / "mock-vault" / "data" / "topics"
-    assert utils.platform_cookie_path("x") == tmp_path / "mock-vault" / "data" / "secrets" / "auth" / "x" / "cookies.txt"
+    assert utils.platform_cookie_path("x") == tmp_path / "app-auth" / "x" / "cookies.txt"
     assert str(ROOT / "data") not in str(utils.VAULT_DIR)
+
+    utils.setup_directories()
+    for platform in utils.AUTH_COOKIE_PLATFORMS:
+        assert (tmp_path / "app-auth" / platform).is_dir()
 
 
 def test_platform_cookie_path_is_canonical(monkeypatch, tmp_path):
@@ -127,6 +132,13 @@ def test_platform_cookie_path_is_canonical(monkeypatch, tmp_path):
     assert info["path"] == str(platform_path)
     assert status["platform_details"]["x"]["source"] == "platform"
     assert "legacy_cookies_used" not in status
+
+
+def test_app_auth_root_defaults_to_project_secrets(monkeypatch, tmp_path):
+    utils, = fresh_backend(monkeypatch, tmp_path, "utils")
+    monkeypatch.delenv("LMZ_AUTH_ROOT")
+
+    assert utils.app_auth_root() == ROOT / "secrets" / "auth"
 
 
 def test_shared_cookie_path_is_ignored(monkeypatch, tmp_path):
@@ -719,13 +731,9 @@ def test_workspace_setup_creates_lmz_layout_and_resolves_paths(monkeypatch, tmp_
         "data/vaults/default/logs/structured",
         "data/vaults/default/review",
         "data/vaults/default/wd-tags",
-        "data/secrets/auth/x",
-        "data/secrets/auth/instagram",
-        "data/secrets/auth/pinterest",
-        "data/secrets/auth/pixiv",
-        "data/secrets/auth/youtube",
     ]:
         assert (workspace_parent / "lmz" / relative).exists()
+    assert not (workspace_parent / "lmz" / "data" / "secrets" / "auth").exists()
     assert not (workspace_parent / "lmz" / "data" / "models").exists()
 
     monkeypatch.setenv("LMZ_CONFIG_PATH", str(config_path))

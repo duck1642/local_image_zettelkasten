@@ -16,6 +16,7 @@ BACKEND = ROOT / "backend"
 
 def fresh_api(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     monkeypatch.delenv("LMZ_CONFIG_PATH", raising=False)
+    monkeypatch.setenv("LMZ_AUTH_ROOT", str(tmp_path / "app-auth"))
     if str(ROOT) not in sys.path:
         sys.path.insert(0, str(ROOT))
     if str(BACKEND) not in sys.path:

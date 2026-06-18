@@ -15,6 +15,15 @@ from runtime_context import WorkspaceContext, get_runtime_context, try_get_runti
 
 SRC_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SRC_DIR.parent
+AUTH_COOKIE_PLATFORMS = ("x", "instagram", "pinterest", "pixiv", "youtube")
+
+
+def app_auth_root() -> Path:
+    override = os.environ.get("LMZ_AUTH_ROOT")
+    if override:
+        path = Path(override).expanduser()
+        return path.resolve() if path.is_absolute() else (PROJECT_ROOT / path).resolve()
+    return (PROJECT_ROOT / "secrets" / "auth").resolve()
 
 def _early_load_config() -> dict:
     ctx = try_get_runtime_context()
@@ -160,6 +169,8 @@ def setup_directories(ctx: WorkspaceContext | None = None):
         runtime.secrets_dir,
     ]:
         directory.mkdir(parents=True, exist_ok=True)
+    for platform in AUTH_COOKIE_PLATFORMS:
+        (app_auth_root() / platform).mkdir(parents=True, exist_ok=True)
 
 def note_path_for(file_hash: str, storage_id: str, ctx: WorkspaceContext | None = None) -> Path:
 
@@ -375,9 +386,6 @@ def calculate_phash(filepath: Path) -> Optional[str]:
         log_system("WARNING", "Image perceptual hash failed", file=str(filepath), exc_info=True)
         return None
 
-AUTH_COOKIE_PLATFORMS = ("x", "instagram", "pinterest", "pixiv", "youtube")
-
-
 def _auth_platform_id(platform: str) -> str:
     clean = str(platform or "").strip().casefold()
     aliases = {
@@ -394,11 +402,11 @@ def _auth_platform_id(platform: str) -> str:
 
 def platform_cookie_path(platform: str) -> Path:
     platform_id = _auth_platform_id(platform)
-    return get_runtime_context().root / "data" / "secrets" / "auth" / platform_id / "cookies.txt"
+    return app_auth_root() / platform_id / "cookies.txt"
 
 
 def pixiv_refresh_token_path() -> Path:
-    return get_runtime_context().root / "data" / "secrets" / "auth" / "pixiv" / "refresh_token.txt"
+    return app_auth_root() / "pixiv" / "refresh_token.txt"
 
 
 def get_pixiv_refresh_token() -> dict:

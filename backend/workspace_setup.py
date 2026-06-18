@@ -110,11 +110,6 @@ def setup_lmz_workspace(parent_path: str | Path, overwrite_config: bool = False)
         workspace / "data" / "vaults" / "default" / "local_ingest",
         workspace / "data" / "vaults" / "default" / "online_ingest",
         workspace / "data" / "secrets",
-        workspace / "data" / "secrets" / "auth" / "x",
-        workspace / "data" / "secrets" / "auth" / "instagram",
-        workspace / "data" / "secrets" / "auth" / "pinterest",
-        workspace / "data" / "secrets" / "auth" / "pixiv",
-        workspace / "data" / "secrets" / "auth" / "youtube",
     ]
     for directory in directories:
         directory.mkdir(parents=True, exist_ok=True)

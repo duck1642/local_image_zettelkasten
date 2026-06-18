@@ -14,6 +14,7 @@ def fresh_backend(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *module_names
     work = tmp_path / "mock-vault"
     shutil.copytree(FIXTURE, work)
     monkeypatch.setenv("LMZ_CONFIG_PATH", str(work / "config.yaml"))
+    monkeypatch.setenv("LMZ_AUTH_ROOT", str(tmp_path / "app-auth"))
     if str(ROOT) not in sys.path:
         sys.path.insert(0, str(ROOT))
     if str(BACKEND) not in sys.path:
@@ -151,6 +152,7 @@ def test_dynamic_workspace_switching(monkeypatch, tmp_path):
     # Assert initial states
     assert runtime_context.get_runtime_context().config_path == ws1_config
     assert utils.DB_PATH == ws1_dir / "data" / "vaults" / "default" / "db" / "lmz_main.db"
+    workspace_1_auth_path = utils.platform_cookie_path("x")
 
     # Switch workspace to Workspace 2 dynamically
     res = runtime_api._set_workspace_active_sync({"id": "ws2"})
@@ -163,6 +165,7 @@ def test_dynamic_workspace_switching(monkeypatch, tmp_path):
     # Assert runtime context and utils updated dynamically to Workspace 2!
     assert runtime_context.get_runtime_context().config_path == ws2_config
     assert utils.DB_PATH == ws2_dir / "data" / "vaults" / "default" / "db" / "lmz_main.db"
+    assert utils.platform_cookie_path("x") == workspace_1_auth_path == tmp_path / "app-auth" / "x" / "cookies.txt"
 
 
 def test_vault_list_uses_current_runtime_workspace_after_switch(monkeypatch, tmp_path):

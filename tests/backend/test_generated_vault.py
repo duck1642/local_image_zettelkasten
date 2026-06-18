@@ -101,15 +101,12 @@ def test_generated_vault_smoke_and_isolation(tmp_path, monkeypatch):
         "data/vaults/default/logs/structured/ingest_online.jsonl",
         "data/vaults/default/logs/structured/ingestion_audit.jsonl",
         "data/vaults/default/logs/raw/console.log",
-        "data/secrets/auth/x",
-        "data/secrets/auth/instagram",
-        "data/secrets/auth/pinterest",
-        "data/secrets/auth/pixiv",
-        "data/secrets/auth/youtube",
     ]:
         assert (output / relative).exists()
+    assert not (output / "data" / "secrets" / "auth").exists()
 
     monkeypatch.setenv("LMZ_CONFIG_PATH", str(config_path))
+    monkeypatch.setenv("LMZ_AUTH_ROOT", str(tmp_path / "app-auth"))
     if str(BACKEND) not in sys.path:
         sys.path.insert(0, str(BACKEND))
     reset_backend_modules()
@@ -134,7 +131,7 @@ def test_generated_vault_smoke_and_isolation(tmp_path, monkeypatch):
     assert health["workspace_dictionary_drift"] == {"missing_in_dictionary": 0, "unused_in_vault": 0}
 
 
-def test_generated_vault_rows_notes_and_media_are_consistent(tmp_path):
+def test_generated_vault_rows_notes_and_media_are_consistent(tmp_path, monkeypatch):
     generator = load_generator()
     generated_root = tmp_path / "generated"
     output = generated_root / "001-consistency"
@@ -203,7 +200,8 @@ def test_generated_vault_rows_notes_and_media_are_consistent(tmp_path):
         conn.close()
 
     sample_wd_tag = manifest["items"][0]["wd_tags"]["general"][0]
-    os.environ["LMZ_CONFIG_PATH"] = str(output / "config.yaml")
+    monkeypatch.setenv("LMZ_CONFIG_PATH", str(output / "config.yaml"))
+    monkeypatch.setenv("LMZ_AUTH_ROOT", str(tmp_path / "app-auth"))
     if str(BACKEND) not in sys.path:
         sys.path.insert(0, str(BACKEND))
     reset_backend_modules()

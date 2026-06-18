@@ -42,7 +42,7 @@ async function ensureBackend() {
     const err = fs.openSync(path.join(workspace, 'backend-smoke.err.log'), 'a');
     backendProc = spawn(process.platform === 'win32' ? 'python' : 'python3', ['web_api.py'], {
       cwd: path.join(root, 'backend'),
-      env: { ...process.env, LMZ_CONFIG_PATH: path.join(workspace, 'config.yaml'), LMZ_DISABLE_RELOAD: '1' },
+      env: { ...process.env, LMZ_CONFIG_PATH: path.join(workspace, 'config.yaml'), LMZ_AUTH_ROOT: path.join(workspace, 'app-auth'), LMZ_DISABLE_RELOAD: '1' },
       stdio: ['ignore', out, err],
       windowsHide: true
     });
