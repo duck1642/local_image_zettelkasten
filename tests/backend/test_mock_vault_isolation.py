@@ -2314,7 +2314,19 @@ def test_manual_metadata_migration_dry_run_and_apply(monkeypatch, tmp_path):
     assert applied["changed"] == 1
     assert data["artist"] == "DB Artist"
     assert data["date_added"] == "2022-02-02 02:02:02"
-    assert Path(applied["backup"]).exists()
+    backup_path = Path(applied["backup"])
+    assert backup_path.exists()
+    assert backup_path.parent == utils.get_runtime_context().root / "backups"
+
+
+def test_topic_normalize_backup_uses_workspace_root(monkeypatch, tmp_path):
+    utils, = fresh_backend(monkeypatch, tmp_path, "utils")
+    normalize_topics = load_maintenance_tool("normalize_topics")
+
+    backup_path = normalize_topics.backup_notes()
+
+    assert backup_path.exists()
+    assert backup_path.parent == utils.get_runtime_context().root / "backups"
 
 
 def test_review_replace_preserves_old_sqlite_identity_and_manual_indexed_metadata(monkeypatch, tmp_path):

@@ -12,7 +12,7 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 from md_generator import normalize_topic_list
-from utils import PROJECT_ROOT as LMZ_ROOT
+from runtime_context import get_runtime_context, has_runtime_context
 import utils
 
 
@@ -26,7 +26,7 @@ def split_frontmatter(text: str):
 
 
 def backup_notes() -> Path:
-    backup_root = LMZ_ROOT / "backups"
+    backup_root = get_runtime_context().root / "backups"
     backup_root.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     backup_path = backup_root / f"notes_before_topic_normalize_{stamp}"
@@ -87,7 +87,6 @@ def main():
     parser.add_argument("--apply", action="store_true")
     args = parser.parse_args()
 
-    from runtime_context import has_runtime_context
     if not has_runtime_context():
         from scripts.workspace_select import select_runtime_context
         select_runtime_context("normalize_topics")
