@@ -230,6 +230,7 @@ graphify-out.*/
 # Runtime/generated artifacts inside otherwise tracked fixture trees
 capture_staging/
 tests/fixtures/**/capture_staging/
+tests/fixtures/**/data/secrets/
 tests/fixtures/**/logs/raw/*.log
 tests/fixtures/**/logs/structured/*.jsonl
 
