@@ -3,7 +3,6 @@
   import { open as openDialog } from '@tauri-apps/plugin-dialog';
   import { apiFetch } from './api';
   import { log as uiLog } from './logger';
-  import { applyLauncherWindowLayout } from './windowLayout';
   import {
     IconFolder,
     IconPlus,
@@ -414,12 +413,7 @@
 
 
   onMount(() => {
-    // Apply launcher size immediately, then retry after a short delay
-    // to handle cases where the Tauri bridge isn't ready after a page reload
-    void applyLauncherWindowLayout();
-    const retryTimer = setTimeout(() => void applyLauncherWindowLayout(), 100);
     fetchWorkspaces();
-    return () => clearTimeout(retryTimer);
   });
 </script>
 

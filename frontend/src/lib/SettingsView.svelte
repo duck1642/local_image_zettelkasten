@@ -34,7 +34,7 @@
     pruneWorkspaceMetadata,
     rebuildWorkspaceMetadata,
     restoreBackupPackageApi,
-    createWorkspace as createWorkspaceApi, deleteWorkspaceApi,
+    createWorkspace as createWorkspaceApi, deleteWorkspaceApi, type WorkspaceDeleteMode,
     removeVault,
     repairVaultHealthApi,
     scanAuth,
@@ -80,7 +80,8 @@
   let workspaceRestartRequired = false;
   let deleteWorkspaceConfirmOpen = false;
   let deleteWorkspaceTarget: any = null;
-  let deleteWorkspaceFiles = false;
+  let deleteWorkspaceMode: WorkspaceDeleteMode = 'unregister';
+  let deleteWorkspaceNameConfirm = '';
   let vaults: any[] = [];
   let vaultActive = '';
   let vaultBusy = false;
@@ -217,19 +218,31 @@
     }
   }
 
-  async function deleteWorkspace(id: string, deleteFiles: boolean) {
+  async function deleteWorkspace(workspace: any, mode: WorkspaceDeleteMode) {
+    const id = String(workspace?.id || '');
     if (!id || workspaceBusy) return;
     workspaceBusy = true;
     workspaceResult = '';
     try {
-      const payload = await deleteWorkspaceApi(id, deleteFiles);
+      const payload = await deleteWorkspaceApi(id, mode);
       workspaces = Array.isArray(payload?.items) ? payload.items : workspaces;
       workspaceActive = String(payload?.active || workspaceActive);
-      toastStore.add({
-        type: 'success',
-        title: 'Workspace Deleted',
-        message: `Workspace "${id}" was deleted successfully.`
-      });
+      if (payload?.cleanup_status === 'pending') {
+        toastStore.add({
+          type: 'warning',
+          title: 'Cleanup Pending',
+          message: `Workspace was removed from LMZ. Recoverable staged files remain at ${String(payload?.cleanup_path || 'the cleanup directory')}.`,
+          duration: 8000
+        });
+      } else {
+        toastStore.add({
+          type: 'success',
+          title: mode === 'unregister' ? 'Workspace Removed' : 'Workspace Deleted',
+          message: mode === 'unregister'
+            ? `Workspace "${workspace?.name || id}" was removed from LMZ. Files were not changed.`
+            : `Workspace "${workspace?.name || id}" was deleted successfully.`
+        });
+      }
       await loadWorkspaces();
     } catch (error) {
       const errMsg = String(error);
@@ -246,15 +259,17 @@
 
   function requestDeleteWorkspace(workspace: any) {
     deleteWorkspaceTarget = workspace;
-    deleteWorkspaceFiles = false;
+    deleteWorkspaceMode = 'unregister';
+    deleteWorkspaceNameConfirm = '';
     deleteWorkspaceConfirmOpen = true;
   }
 
   async function confirmDeleteWorkspace() {
     if (!deleteWorkspaceTarget || workspaceBusy) return;
-    const id = deleteWorkspaceTarget.id;
+    if (deleteWorkspaceMode === 'all' && deleteWorkspaceNameConfirm !== deleteWorkspaceTarget.name) return;
+    const target = deleteWorkspaceTarget;
     deleteWorkspaceConfirmOpen = false;
-    await deleteWorkspace(id, deleteWorkspaceFiles);
+    await deleteWorkspace(target, deleteWorkspaceMode);
   }
 
   async function setActiveWorkspace(id: string) {
@@ -1219,9 +1234,10 @@
   <ConfirmationModal
     open={deleteWorkspaceConfirmOpen}
     title="Delete Workspace"
-    confirmLabel="Delete"
+    confirmLabel={deleteWorkspaceMode === 'generated' ? 'Delete LMZ data' : deleteWorkspaceMode === 'all' ? 'Delete entire workspace' : 'Remove from LMZ'}
     danger={true}
     busy={workspaceBusy}
+    confirmDisabled={deleteWorkspaceMode === 'all' && deleteWorkspaceNameConfirm !== String(deleteWorkspaceTarget?.name || '')}
     on:cancel={() => deleteWorkspaceConfirmOpen = false}
     on:confirm={confirmDeleteWorkspace}
   >
@@ -1230,16 +1246,48 @@
         <IconAlertTriangle size={14} />
       </span>
       <span class="warning-message">
-        <strong>Permanently delete workspace "{deleteWorkspaceTarget?.name}"?</strong>
+        <strong>Choose how to remove "{deleteWorkspaceTarget?.name}".</strong>
         <span class="delete-warning-details">
           <span>Config Path: <code>{deleteWorkspaceTarget?.config_path}</code></span>
         </span>
-        <span>This will deregister it from the list. Vault files will not be deleted.</span>
+        <span>The active workspace cannot be removed.</span>
       </span>
     </div>
-    <label class="settings-modal-checkbox" style="margin-top: 15px;">
-      <input type="checkbox" bind:checked={deleteWorkspaceFiles} disabled={workspaceBusy} />
-      <span>Delete configuration (config.yaml) and database files associated with this workspace from disk.</span>
-    </label>
+    <fieldset class="workspace-delete-options">
+      <legend class="sr-only">Workspace deletion mode</legend>
+      <label class="workspace-delete-option">
+        <input type="radio" name="workspace-delete-mode" value="unregister" bind:group={deleteWorkspaceMode} disabled={workspaceBusy} />
+        <span>
+          <strong>Remove from LMZ</strong>
+          <small>Unregisters this workspace. Files remain untouched.</small>
+        </span>
+      </label>
+      <label class="workspace-delete-option">
+        <input type="radio" name="workspace-delete-mode" value="generated" bind:group={deleteWorkspaceMode} disabled={workspaceBusy || !deleteWorkspaceTarget?.exists} />
+        <span>
+          <strong>Delete LMZ data</strong>
+          <small>Removes config, databases, logs, queues, metadata, and caches. Keeps vault assets, notes, pending media, and recovery files.</small>
+        </span>
+      </label>
+      <label class="workspace-delete-option" class:disabled={!deleteWorkspaceTarget?.can_delete_all}>
+        <input type="radio" name="workspace-delete-mode" value="all" bind:group={deleteWorkspaceMode} disabled={workspaceBusy || !deleteWorkspaceTarget?.can_delete_all} />
+        <span>
+          <strong>Delete entire workspace</strong>
+          <small>{deleteWorkspaceTarget?.can_delete_all ? 'Recursively deletes every file in the owned workspace folder.' : 'Unavailable: this workspace has no LMZ ownership marker.'}</small>
+        </span>
+      </label>
+    </fieldset>
+    {#if deleteWorkspaceMode === 'all'}
+      <label class="workspace-delete-name-confirm">
+        <span>Type <strong>{deleteWorkspaceTarget?.name}</strong> to confirm</span>
+        <input
+          type="text"
+          aria-label="Type workspace name to confirm"
+          bind:value={deleteWorkspaceNameConfirm}
+          autocomplete="off"
+          disabled={workspaceBusy}
+        />
+      </label>
+    {/if}
   </ConfirmationModal>
 </div>

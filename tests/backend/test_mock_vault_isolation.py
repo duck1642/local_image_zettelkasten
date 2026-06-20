@@ -729,7 +729,10 @@ def test_workspace_setup_creates_lmz_layout_and_resolves_paths(monkeypatch, tmp_
     ]:
         assert (workspace_parent / "lmz" / relative).exists()
     assert not (workspace_parent / "lmz" / "data" / "secrets" / "auth").exists()
+    assert not (workspace_parent / "lmz" / "data" / "secrets").exists()
     assert not (workspace_parent / "lmz" / "data" / "models").exists()
+    assert Path(payload["marker_path"]).exists()
+    assert payload["managed"] is True
 
     monkeypatch.setenv("LMZ_CONFIG_PATH", str(config_path))
     if str(BACKEND) not in sys.path:
@@ -769,6 +772,20 @@ def test_workspace_setup_creates_lmz_layout_and_resolves_paths(monkeypatch, tmp_
     assert runtime["workspace_mode"] == "lmz"
     assert runtime["active_vault"] == "default"
     shutil.rmtree(workspace_parent, ignore_errors=True)
+
+
+def test_workspace_setup_does_not_claim_preexisting_unmarked_folder(tmp_path):
+    setup_tool = load_maintenance_script("setup_workspace")
+    parent = tmp_path / "existing-parent"
+    workspace = parent / "lmz"
+    workspace.mkdir(parents=True)
+    (workspace / "personal.txt").write_text("mine", encoding="utf-8")
+
+    payload = setup_tool.setup_lmz_workspace(parent)
+
+    assert payload["managed"] is False
+    assert not Path(payload["marker_path"]).exists()
+    assert (workspace / "personal.txt").read_text(encoding="utf-8") == "mine"
 
 
 def test_workspace_config_rejects_legacy_models_path(monkeypatch, tmp_path):
@@ -1433,9 +1450,6 @@ def test_update_app_config_invalidates_config_cache(monkeypatch, tmp_path):
     web_api._update_app_config_sync({
         "active_vault": "default",
         "vaults": {"default": {"name": "Default", "root": "data/vaults/default"}},
-        "paths": {
-            "secrets": "data/secrets",
-        },
         "firewall": {"allowed_extensions": [".jpg"], "allowed_mimes": ["image/jpeg"]},
         "hash_algorithm": "sha256",
     })

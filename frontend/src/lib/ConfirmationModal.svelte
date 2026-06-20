@@ -9,6 +9,7 @@
   export let cancelLabel = 'Cancel';
   export let danger = false;
   export let busy = false;
+  export let confirmDisabled = false;
 
   const dispatch = createEventDispatcher<{
     confirm: void;
@@ -67,7 +68,7 @@
           class:danger
           class:primary={!danger}
           on:click={handleConfirm}
-          disabled={busy}
+          disabled={busy || confirmDisabled}
         >
           {confirmLabel}
         </button>

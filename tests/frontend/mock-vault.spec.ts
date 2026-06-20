@@ -112,7 +112,8 @@ async function installMockVaultApi(
     onItemPatch?: (payload: any) => Promise<void> | void;
     metadataRebuildResponse?: unknown;
     metadataStatusSequence?: unknown[];
-    onWorkspaceAction?: (action: 'add' | 'active', payload?: any) => Promise<void> | void;
+    onWorkspaceAction?: (action: 'add' | 'active' | 'delete', payload?: any) => Promise<void> | void;
+    workspaceDeleteCleanupStatus?: 'complete' | 'pending';
     onVaultAction?: (action: 'merge-preview' | 'merge' | 'delete' | 'health' | 'repair' | 'backup' | 'export' | 'import-preview' | 'import' | 'restore-preview' | 'restore', payload?: any) => Promise<void> | void;
     logClearFails?: boolean;
     onLogStream?: (url: URL) => Promise<void> | void;
@@ -172,14 +173,27 @@ async function installMockVaultApi(
       name: 'Default',
       config_path: 'C:/Repo/config/config.yaml',
       active: true,
-      exists: true
+      exists: true,
+      managed: false,
+      can_delete_all: false
     },
     {
       id: 'obsidian-main',
       name: 'Obsidian Main',
       config_path: 'C:/ObsidianVault/lmz/config.yaml',
       active: false,
-      exists: true
+      exists: true,
+      managed: true,
+      can_delete_all: true
+    },
+    {
+      id: 'legacy-workspace',
+      name: 'Legacy Workspace',
+      config_path: 'C:/Legacy/lmz/config.yaml',
+      active: false,
+      exists: true,
+      managed: false,
+      can_delete_all: false
     }
   ];
   let vaultActive = 'default';
@@ -291,10 +305,28 @@ async function installMockVaultApi(
           name: payload.name || 'LMZ Workspace',
           config_path: `${payload.path}/lmz/config.yaml`,
           active: false,
-          exists: true
+          exists: true,
+          managed: true,
+          can_delete_all: true
         }
       ];
       return fulfillJson(route, { status: 'success', active: workspaceActive, restart_required: false, items: workspaceItems });
+    }
+    const deleteMatch = url.pathname.match(/\/api\/workspaces\/([^/]+)$/);
+    if (deleteMatch && request.method() === 'DELETE') {
+      const id = decodeURIComponent(deleteMatch[1]);
+      const mode = url.searchParams.get('mode') || 'unregister';
+      await options.onWorkspaceAction?.('delete', { id, mode });
+      workspaceItems = workspaceItems.filter((item) => item.id !== id);
+      const cleanupStatus = options.workspaceDeleteCleanupStatus || (mode === 'unregister' ? 'not_requested' : 'complete');
+      return fulfillJson(route, {
+        status: 'success',
+        active: workspaceActive,
+        mode,
+        cleanup_status: cleanupStatus,
+        cleanup_path: cleanupStatus === 'pending' ? 'C:/ObsidianVault/.lmz-delete-pending' : '',
+        items: workspaceItems
+      });
     }
     return fulfillJson(route, { detail: 'not found' }, 404);
   });
@@ -765,10 +797,10 @@ async function installMockVaultApi(
       auth: {
         cookies: 'available',
         platforms: {
-          X: { cookies: 'available', cookie_source: 'platform', cookies_path: 'C:/ObsidianVault/lmz/data/secrets/auth/x/cookies.txt', token: 'not_required' },
+          X: { cookies: 'available', cookie_source: 'platform', cookies_path: 'C:/LMZ/secrets/auth/x/cookies.txt', token: 'not_required' },
           Instagram: { cookies: 'missing', cookie_source: 'missing', cookies_path: '', token: 'not_required' },
-          Pinterest: { cookies: 'available', cookie_source: 'platform', cookies_path: 'C:/ObsidianVault/lmz/data/secrets/auth/pinterest/cookies.txt', token: 'not_required' },
-          Pixiv: { cookies: 'available', cookie_source: 'platform', cookies_path: 'C:/ObsidianVault/lmz/data/secrets/auth/pixiv/cookies.txt', token: 'available', token_source: 'file' },
+          Pinterest: { cookies: 'available', cookie_source: 'platform', cookies_path: 'C:/LMZ/secrets/auth/pinterest/cookies.txt', token: 'not_required' },
+          Pixiv: { cookies: 'available', cookie_source: 'platform', cookies_path: 'C:/LMZ/secrets/auth/pixiv/cookies.txt', token: 'available', token_source: 'file' },
           YouTube: { cookies: 'missing', cookie_source: 'missing', cookies_path: '', token: 'not_required' }
         }
       }
@@ -1338,6 +1370,70 @@ test('settings registers and activates workspaces for next restart', async ({ pa
     { action: 'active', payload: { id: 'obsidian-main' } },
     { action: 'add', payload: { path: 'F:/Archive/Main', name: 'Main Vault' } }
   ]);
+});
+
+test('workspace deletion offers explicit modes and sends generated cleanup', async ({ page }) => {
+  const actions: Array<{ action: string; payload: any }> = [];
+  await openMockVault(page, {
+    onWorkspaceAction: (action, payload) => actions.push({ action, payload })
+  });
+  await page.getByRole('button', { name: /Settings/ }).click();
+  await page.getByRole('button', { name: 'Workspace' }).click();
+
+  const row = page.locator('.workspace-row').filter({ hasText: 'Obsidian Main' });
+  await row.getByRole('button', { name: 'Delete' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Delete Workspace' });
+
+  await expect(dialog.getByRole('radio', { name: /Remove from LMZ/ })).toBeChecked();
+  await expect(dialog).toContainText('Files remain untouched');
+  await dialog.getByRole('radio', { name: /Delete LMZ data/ }).check();
+  await expect(dialog).toContainText('Keeps vault assets, notes, pending media, and recovery files');
+  await dialog.getByRole('button', { name: 'Delete LMZ data' }).click();
+
+  expect(actions).toContainEqual({ action: 'delete', payload: { id: 'obsidian-main', mode: 'generated' } });
+  await expect(page.getByText('Obsidian Main', { exact: true })).toHaveCount(0);
+});
+
+test('full workspace deletion requires ownership and exact name confirmation', async ({ page }) => {
+  const actions: Array<{ action: string; payload: any }> = [];
+  await openMockVault(page, {
+    onWorkspaceAction: (action, payload) => actions.push({ action, payload })
+  });
+  await page.getByRole('button', { name: /Settings/ }).click();
+  await page.getByRole('button', { name: 'Workspace' }).click();
+
+  const legacyRow = page.locator('.workspace-row').filter({ hasText: 'Legacy Workspace' });
+  await legacyRow.getByRole('button', { name: 'Delete' }).click();
+  let dialog = page.getByRole('dialog', { name: 'Delete Workspace' });
+  await expect(dialog.getByRole('radio', { name: /Delete entire workspace/ })).toBeDisabled();
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+
+  const managedRow = page.locator('.workspace-row').filter({ hasText: 'Obsidian Main' });
+  await managedRow.getByRole('button', { name: 'Delete' }).click();
+  dialog = page.getByRole('dialog', { name: 'Delete Workspace' });
+  await dialog.getByRole('radio', { name: /Delete entire workspace/ }).check();
+  const confirmButton = dialog.getByRole('button', { name: 'Delete entire workspace' });
+  await expect(confirmButton).toBeDisabled();
+  await dialog.getByLabel('Type workspace name to confirm').fill('Obsidian Main');
+  await expect(confirmButton).toBeEnabled();
+  await confirmButton.click();
+
+  expect(actions).toContainEqual({ action: 'delete', payload: { id: 'obsidian-main', mode: 'all' } });
+});
+
+test('workspace deletion reports recoverable cleanup pending state', async ({ page }) => {
+  await openMockVault(page, { workspaceDeleteCleanupStatus: 'pending' });
+  await page.getByRole('button', { name: /Settings/ }).click();
+  await page.getByRole('button', { name: 'Workspace' }).click();
+
+  const row = page.locator('.workspace-row').filter({ hasText: 'Obsidian Main' });
+  await row.getByRole('button', { name: 'Delete' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Delete Workspace' });
+  await dialog.getByRole('radio', { name: /Delete LMZ data/ }).check();
+  await dialog.getByRole('button', { name: 'Delete LMZ data' }).click();
+
+  await expect(page.getByText('Cleanup Pending', { exact: true })).toBeVisible();
+  await expect(page.getByText(/\.lmz-delete-pending/)).toBeVisible();
 });
 
 test('settings vault delete confirmation names target before confirm=true', async ({ page }) => {

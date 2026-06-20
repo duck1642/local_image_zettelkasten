@@ -5,6 +5,8 @@ from pathlib import Path
 
 import yaml
 
+from config_migrations import migrate_workspace_config
+
 
 SRC_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SRC_DIR.parent
@@ -35,7 +37,6 @@ class WorkspaceContext:
     config_path: Path
     root: Path
     topics_dir: Path
-    secrets_dir: Path
     models_dir: Path
     workspace_db_path: Path
     active_vault: VaultContext
@@ -121,6 +122,7 @@ def _vault_context(root: Path, vault_id: str, entry: dict) -> VaultContext:
 def build_runtime_context(config_path: str | Path | None = None, active_vault_id: str | None = None) -> WorkspaceContext:
     resolved_config_path = _resolve_config_path(config_path)
     root = _config_root_for(resolved_config_path)
+    migrate_workspace_config(resolved_config_path)
     config = _load_config(resolved_config_path)
     paths = config.get("paths", {}) if isinstance(config.get("paths"), dict) else {}
     if "models" in paths:
@@ -138,7 +140,6 @@ def build_runtime_context(config_path: str | Path | None = None, active_vault_id
         config_path=resolved_config_path,
         root=root,
         topics_dir=(root / "data" / "topics").resolve(),
-        secrets_dir=_resolve_from_root(root, paths.get("secrets") or "secrets"),
         models_dir=(PROJECT_ROOT / "data" / "models").resolve(),
         workspace_db_path=root / "data" / "workspace.db",
         active_vault=active_vault,

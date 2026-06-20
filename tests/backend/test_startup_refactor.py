@@ -158,13 +158,53 @@ def test_launcher_mode_creates_lmz_workspace(monkeypatch, tmp_path):
         assert Path(payload["workspace"]["config_path"]) == config_path
         saved_config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
         assert saved_config["vaults"]["default"]["root"] == "data/vaults/default"
-        assert "models" not in saved_config["paths"]
-        assert saved_config["paths"]["secrets"] == "data/secrets"
+        assert "paths" not in saved_config
         assert "cookies_path" not in saved_config["external_tools"]
+        assert Path(payload["workspace"]["marker_path"]).exists()
+        assert payload["workspace"]["managed"] is True
         assert not (parent / "lmz" / "data" / "models").exists()
+        assert not (parent / "lmz" / "data" / "secrets").exists()
         load = client.post("/api/workspaces/api-workspace/load", headers={"X-LMZ-API-KEY": key})
         assert load.status_code == 200
         assert load.json()["status"] == "success"
+    finally:
+        shutil.rmtree(parent, ignore_errors=True)
+
+
+def test_workspace_delete_api_uses_explicit_full_mode(monkeypatch, tmp_path):
+    app_module = fresh_api(monkeypatch, tmp_path)
+    workspaces = importlib.import_module("workspaces")
+    registry_path = tmp_path / "workspaces.yaml"
+    write_registry(
+        registry_path,
+        "default",
+        {"default": {"name": "Default", "config_path": "config/config.yaml"}},
+    )
+    monkeypatch.setattr(workspaces, "REGISTRY_PATH", registry_path)
+    client = TestClient(app_module.app)
+    key = api_key(client)
+    parent = (Path(tempfile.gettempdir()) / f"lmz-api-delete-{time.time_ns()}").resolve()
+
+    try:
+        loaded = client.post("/api/workspaces/default/load", headers={"X-LMZ-API-KEY": key})
+        assert loaded.status_code == 200
+        created = client.post(
+            "/api/workspaces",
+            json={"path": str(parent), "name": "Delete Me"},
+            headers={"X-LMZ-API-KEY": key},
+        )
+        assert created.status_code == 200
+        workspace_id = next(item["id"] for item in created.json()["items"] if item["name"] == "Delete Me")
+
+        deleted = client.delete(
+            f"/api/workspaces/{workspace_id}?mode=all",
+            headers={"X-LMZ-API-KEY": key},
+        )
+
+        assert deleted.status_code == 200
+        assert deleted.json()["mode"] == "all"
+        assert deleted.json()["cleanup_status"] == "complete"
+        assert not (parent / "lmz").exists()
     finally:
         shutil.rmtree(parent, ignore_errors=True)
 

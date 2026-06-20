@@ -1,3 +1,5 @@
+from typing import Literal
+
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
@@ -10,6 +12,7 @@ from runtime_context import (
     try_get_runtime_context,
 )
 from path_policy import validate_workspace_config_paths, workspace_relative_path
+from utils import validate_config_schema
 from runtime_activation import activate_runtime_context, active_vault_is_usable
 from api.guards import (
     require_workspace_context,
@@ -355,10 +358,11 @@ async def update_app_config(new_config: dict):
     return await asyncio.to_thread(_update_app_config_sync, new_config)
 
 def _update_app_config_sync(new_config: dict):
-    safe_config = _strip_config_secrets(new_config)
+    safe_config = copy.deepcopy(new_config or {})
     safe_config.pop("_runtime", None)
     try:
         validate_workspace_config_paths(safe_config, get_runtime_context().root)
+        validate_config_schema(safe_config)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     atomic_write_text(get_runtime_context().config_path, yaml.dump(safe_config, default_flow_style=False, allow_unicode=True))
@@ -461,36 +465,33 @@ def _create_workspace_sync(body: dict):
 
 
 @router.delete("/api/workspaces/{workspace_id}")
-async def delete_workspace(workspace_id: str, delete_files: bool = Query(False)):
+async def delete_workspace(
+    workspace_id: str,
+    mode: Literal["unregister", "generated", "all"] = Query("unregister"),
+):
     blocked = await asyncio.to_thread(_runtime_switch_blocker)
     if blocked:
         return blocked
-    return await asyncio.to_thread(_delete_workspace_sync, workspace_id, delete_files)
+    return await asyncio.to_thread(_delete_workspace_sync, workspace_id, mode)
 
 
-def _delete_workspace_sync(workspace_id: str, delete_files: bool = False):
-    from workspaces import delete_workspace, load_workspace_registry, workspace_list
+def _delete_workspace_sync(workspace_id: str, mode: str = "unregister"):
+    from workspaces import WorkspaceDeletionError, delete_workspace, workspace_list
     from fastapi import HTTPException
 
-    registry_before = load_workspace_registry()
-    was_active = workspace_id == registry_before["active"]
-
     try:
-        res_registry = delete_workspace(workspace_id, delete_files=delete_files)
+        result = delete_workspace(workspace_id, mode=mode)
     except (ValueError, KeyError) as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-
-    if was_active:
-        from runtime_context import clear_runtime_context, reload_runtime_context
-        clear_runtime_context()
-        try:
-            reload_runtime_context()
-        except Exception:
-            pass
+    except WorkspaceDeletionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
 
     return {
         "status": "success",
-        "active": res_registry["active"],
+        "active": result["active"],
+        "mode": result["mode"],
+        "cleanup_status": result["cleanup_status"],
+        "cleanup_path": result["cleanup_path"],
         "items": workspace_list(),
     }
 

@@ -59,7 +59,7 @@ def validate_workspace_config_paths(config: dict, workspace_root: Path):
         if "models" in paths:
             raise ValueError("paths.models is no longer supported; models are stored in app data/models")
         if "secrets" in paths:
-            _validate_relative_value(paths["secrets"], workspace_root, "paths.secrets")
+            raise ValueError("paths.secrets is no longer supported; authentication is app-scoped")
 
     vaults = config.get("vaults")
     if isinstance(vaults, dict):

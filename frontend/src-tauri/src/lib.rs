@@ -27,6 +27,22 @@ pub fn run() {
   }
 
   tauri::Builder::default()
+    .on_page_load(|webview, payload| {
+      if matches!(payload.event(), tauri::webview::PageLoadEvent::Started) {
+        let window = webview.window();
+        let reset_layout = || -> tauri::Result<()> {
+          window.set_fullscreen(false)?;
+          window.unmaximize()?;
+          window.set_size(tauri::LogicalSize::new(580.0, 580.0))?;
+          window.set_resizable(false)?;
+          window.center()?;
+          Ok(())
+        };
+        if let Err(error) = reset_layout() {
+          eprintln!("Failed to restore launcher window layout: {error}");
+        }
+      }
+    })
     .invoke_handler(tauri::generate_handler![copy_file_to_clipboard])
     .plugin(tauri_plugin_dialog::init())
     .plugin(tauri_plugin_shell::init())

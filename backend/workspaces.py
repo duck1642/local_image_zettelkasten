@@ -1,3 +1,8 @@
+import json
+import os
+import shutil
+import tempfile
+import uuid
 from pathlib import Path
 
 import yaml
@@ -7,6 +12,14 @@ SRC_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SRC_DIR.parent
 REGISTRY_PATH = PROJECT_ROOT / "config" / "workspaces.yaml"
 DEFAULT_WORKSPACE_ID = "default"
+WORKSPACE_MARKER_NAME = ".lmz-workspace"
+WORKSPACE_MARKER_PAYLOAD = {"type": "lmz-workspace", "version": 1}
+DELETE_MODES = {"unregister", "generated", "all"}
+GENERATED_VAULT_DIRS = ("db", "logs", "queues", "batches", "wd-tags", "ui_cache")
+
+
+class WorkspaceDeletionError(RuntimeError):
+    pass
 
 
 def _resolve(path: str | Path, base: Path = PROJECT_ROOT) -> Path:
@@ -48,7 +61,33 @@ def load_workspace_registry() -> dict:
 
 def save_workspace_registry(registry: dict):
     REGISTRY_PATH.parent.mkdir(parents=True, exist_ok=True)
-    REGISTRY_PATH.write_text(yaml.safe_dump(registry, sort_keys=False, allow_unicode=True), encoding="utf-8")
+    payload = yaml.safe_dump(registry, sort_keys=False, allow_unicode=True)
+    temp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=REGISTRY_PATH.parent,
+            prefix=f".{REGISTRY_PATH.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+            temp_path = Path(handle.name)
+        os.replace(temp_path, REGISTRY_PATH)
+    finally:
+        if temp_path and temp_path.exists():
+            temp_path.unlink(missing_ok=True)
+
+
+def _has_valid_marker(workspace_root: Path) -> bool:
+    marker = workspace_root / WORKSPACE_MARKER_NAME
+    try:
+        return json.loads(marker.read_text(encoding="utf-8")) == WORKSPACE_MARKER_PAYLOAD
+    except (OSError, ValueError, TypeError):
+        return False
 
 
 def workspace_list() -> list[dict]:
@@ -57,12 +96,15 @@ def workspace_list() -> list[dict]:
     items = []
     for workspace_id, entry in sorted(registry["workspaces"].items()):
         config_path = _resolve(entry.get("config_path") or "")
+        managed = workspace_id != DEFAULT_WORKSPACE_ID and _has_valid_marker(config_path.parent)
         items.append({
             "id": workspace_id,
             "name": str(entry.get("name") or workspace_id),
             "config_path": str(config_path),
             "active": workspace_id == active,
             "exists": config_path.exists(),
+            "managed": managed,
+            "can_delete_all": managed and workspace_id != active,
         })
     return items
 
@@ -92,10 +134,13 @@ def _slug_workspace_id(name: str) -> str:
 
 
 def register_workspace(name: str, config_path: str | Path, workspace_id: str | None = None, set_active: bool = False) -> dict:
+    from config_migrations import migrate_workspace_config
+
     registry = load_workspace_registry()
     resolved = _resolve(config_path)
     if not resolved.exists():
         raise ValueError(f"workspace config does not exist: {resolved}")
+    migrate_workspace_config(resolved)
     workspace_id = _slug_workspace_id(workspace_id or name or resolved.parent.name)
     stored_path = str(resolved)
     try:
@@ -116,75 +161,167 @@ def register_workspace(name: str, config_path: str | Path, workspace_id: str | N
     return registry
 
 
-def delete_workspace(workspace_id: str, delete_files: bool = False) -> dict:
+def _validate_workspace_root(workspace_root: Path):
+    root = workspace_root.resolve()
+    project = PROJECT_ROOT.resolve()
+    if root == project or root.is_relative_to(project) or project.is_relative_to(root):
+        raise ValueError(f"refusing deletion for unsafe workspace root: {root}")
+
+
+def _validate_owned_path(path: Path, workspace_root: Path) -> Path:
+    root = workspace_root.resolve()
+    resolved = path.resolve()
+    if resolved == root or not resolved.is_relative_to(root):
+        raise ValueError(f"workspace-owned path escapes workspace root: {path}")
+    return path
+
+
+def _generated_paths(config_path: Path, workspace_root: Path) -> list[Path]:
+    if not config_path.exists():
+        raise ValueError("workspace config is required to delete LMZ-generated data")
+    try:
+        config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError) as exc:
+        raise ValueError(f"workspace config could not be read: {exc}") from exc
+    vaults = config.get("vaults") if isinstance(config, dict) else None
+    if not isinstance(vaults, dict) or not vaults:
+        raise ValueError("workspace config must define vaults before generated data can be deleted")
+
+    candidates = [
+        config_path,
+        workspace_root / "data" / "workspace.db",
+        workspace_root / "data" / "topics",
+    ]
+    marker = workspace_root / WORKSPACE_MARKER_NAME
+    if _has_valid_marker(workspace_root):
+        candidates.append(marker)
+
+    for entry in vaults.values():
+        if not isinstance(entry, dict):
+            raise ValueError("workspace vault entries must be dictionaries")
+        root_value = Path(str(entry.get("root") or "data/vaults/default"))
+        vault_root = root_value.resolve() if root_value.is_absolute() else (workspace_root / root_value).resolve()
+        if vault_root == workspace_root or not vault_root.is_relative_to(workspace_root):
+            raise ValueError(f"vault root escapes workspace root: {vault_root}")
+        candidates.extend(vault_root / relative for relative in GENERATED_VAULT_DIRS)
+
+    unique: list[Path] = []
+    seen: set[Path] = set()
+    for candidate in candidates:
+        safe = _validate_owned_path(candidate, workspace_root)
+        if safe not in seen:
+            seen.add(safe)
+            unique.append(safe)
+    return unique
+
+
+def _move_path(source: Path, destination: Path):
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    os.replace(source, destination)
+
+
+def _purge_staging_dir(path: Path):
+    shutil.rmtree(path)
+
+
+def _restore_staged_paths(moved: list[tuple[Path, Path]]) -> list[str]:
+    errors = []
+    for source, destination in reversed(moved):
+        if not destination.exists():
+            continue
+        try:
+            _move_path(destination, source)
+        except OSError as exc:
+            errors.append(f"{source}: {exc}")
+    return errors
+
+
+def _discard_empty_staging(staging_root: Path, restore_errors: list[str]):
+    if restore_errors or not staging_root.exists():
+        return
+    try:
+        _purge_staging_dir(staging_root)
+    except OSError:
+        pass
+
+
+def _stage_paths(paths: list[Path], workspace_root: Path, staging_root: Path) -> list[tuple[Path, Path]]:
+    moved: list[tuple[Path, Path]] = []
+    try:
+        for source in paths:
+            if not source.exists():
+                continue
+            relative = source.relative_to(workspace_root)
+            destination = staging_root / relative
+            _move_path(source, destination)
+            moved.append((source, destination))
+    except OSError as exc:
+        restore_errors = _restore_staged_paths(moved)
+        _discard_empty_staging(staging_root, restore_errors)
+        detail = f"workspace deletion staging failed: {exc}"
+        if restore_errors:
+            detail += f"; rollback errors: {'; '.join(restore_errors)}"
+        raise WorkspaceDeletionError(detail) from exc
+    return moved
+
+
+def delete_workspace(workspace_id: str, mode: str = "unregister") -> dict:
     registry = load_workspace_registry()
     workspace_id = str(workspace_id or "").strip()
+    mode = str(mode or "unregister").strip().casefold()
+    if mode not in DELETE_MODES:
+        raise ValueError(f"unknown workspace deletion mode: {mode}")
     if workspace_id == DEFAULT_WORKSPACE_ID:
         raise ValueError("Cannot delete the default workspace")
     if workspace_id not in registry["workspaces"]:
         raise KeyError(f"Workspace not found: {workspace_id}")
+    if workspace_id == registry["active"]:
+        raise ValueError("Cannot delete the active workspace")
 
     entry = registry["workspaces"][workspace_id]
     config_path = _resolve(entry.get("config_path") or "")
+    workspace_root = config_path.parent.resolve()
+    _validate_workspace_root(workspace_root)
 
-    is_active = workspace_id == registry["active"]
-    if is_active:
-        registry["active"] = DEFAULT_WORKSPACE_ID
+    if mode == "all" and not _has_valid_marker(workspace_root):
+        raise ValueError("Full deletion requires a valid LMZ workspace ownership marker")
 
-    if delete_files:
-        try:
-            workspace_dir = config_path.parent
-            is_core_config = workspace_dir == PROJECT_ROOT / "config"
-            try:
-                is_project_parent = PROJECT_ROOT.is_relative_to(workspace_dir)
-            except Exception:
-                is_project_parent = False
+    if mode == "unregister":
+        del registry["workspaces"][workspace_id]
+        save_workspace_registry(registry)
+        return {**registry, "mode": mode, "cleanup_status": "not_requested", "cleanup_path": ""}
 
-            if not is_core_config and not is_project_parent:
-                try:
-                    if config_path.exists():
-                        config_path.unlink()
-                except Exception:
-                    pass
-                if workspace_dir.exists():
-                    _cleanup_app_files(workspace_dir)
-                    _remove_empty_dirs(workspace_dir, workspace_dir)
-        except Exception:
-            pass
-
-    del registry["workspaces"][workspace_id]
-    save_workspace_registry(registry)
-    return registry
-
-
-def _cleanup_app_files(workspace_dir: Path):
-    import os
-    for root, dirs, files in os.walk(workspace_dir, topdown=False):
-        root_path = Path(root)
-        parts = root_path.parts
-        is_user_vault_data = False
-        for i in range(len(parts) - 1):
-            if parts[i] == "vault" and parts[i+1] in ("notes", "assets"):
-                is_user_vault_data = True
-                break
-        if is_user_vault_data:
-            continue
-        for file in files:
-            file_path = root_path / file
-            try:
-                file_path.unlink()
-            except Exception:
-                pass
-
-
-def _remove_empty_dirs(path: Path, root: Path):
-    if not path.exists() or not path.is_dir():
-        return
-    for child in list(path.iterdir()):
-        if child.is_dir():
-            _remove_empty_dirs(child, root)
+    staging_root = workspace_root.parent / f".lmz-delete-{uuid.uuid4().hex}"
+    paths = [workspace_root] if mode == "all" else _generated_paths(config_path, workspace_root)
+    moved: list[tuple[Path, Path]] = []
     try:
-        if not any(path.iterdir()):
-            path.rmdir()
-    except Exception:
-        pass
+        if mode == "all":
+            staging_root.mkdir(parents=True, exist_ok=False)
+            destination = staging_root / workspace_root.name
+            _move_path(workspace_root, destination)
+            moved.append((workspace_root, destination))
+        else:
+            moved = _stage_paths(paths, workspace_root, staging_root)
+
+        del registry["workspaces"][workspace_id]
+        save_workspace_registry(registry)
+    except WorkspaceDeletionError:
+        raise
+    except (OSError, ValueError) as exc:
+        restore_errors = _restore_staged_paths(moved)
+        _discard_empty_staging(staging_root, restore_errors)
+        detail = f"workspace deletion failed: {exc}"
+        if restore_errors:
+            detail += f"; rollback errors: {'; '.join(restore_errors)}"
+        raise WorkspaceDeletionError(detail) from exc
+
+    if not staging_root.exists():
+        return {**registry, "mode": mode, "cleanup_status": "complete", "cleanup_path": ""}
+    try:
+        _purge_staging_dir(staging_root)
+        cleanup_status = "complete"
+        cleanup_path = ""
+    except OSError:
+        cleanup_status = "pending"
+        cleanup_path = str(staging_root)
+    return {**registry, "mode": mode, "cleanup_status": cleanup_status, "cleanup_path": cleanup_path}

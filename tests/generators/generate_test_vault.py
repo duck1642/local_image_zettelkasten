@@ -243,9 +243,6 @@ def _config() -> dict:
             "platforms": {"default": {"workers": 1, "jitter_range": [0, 0]}},
         },
         "log_level": "INFO",
-        "paths": {
-            "secrets": "data/secrets",
-        },
         "processing": {
             "background_preset": "white",
             "custom_color": [255, 255, 255],
@@ -410,7 +407,6 @@ def generate_vault(args: argparse.Namespace) -> Path:
         vault_root / "input",
         vault_root / "local_ingest",
         vault_root / "online_ingest",
-        data_dir / "secrets",
         vault_root / "wd-tags",
     ]:
         directory.mkdir(parents=True, exist_ok=True)

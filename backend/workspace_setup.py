@@ -1,9 +1,13 @@
 import argparse
 import json
+import os
 import sys
+import tempfile
 from pathlib import Path
 
 import yaml
+
+from workspaces import WORKSPACE_MARKER_NAME, WORKSPACE_MARKER_PAYLOAD
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -56,9 +60,6 @@ def lmz_workspace_config() -> dict:
                 "root": "data/vaults/default",
             },
         },
-        "paths": {
-            "secrets": "data/secrets",
-        },
         "processing": {
             "background_preset": "white",
             "custom_color": [255, 255, 255],
@@ -93,6 +94,7 @@ def setup_lmz_workspace(parent_path: str | Path, overwrite_config: bool = False)
     workspace_parent = _resolve(parent_path)
     _guard_workspace_parent_path(workspace_parent)
     workspace = workspace_parent / "lmz"
+    workspace_preexisted = workspace.exists()
     config_path = workspace / "config.yaml"
     directories = [
         workspace / "data" / "topics",
@@ -109,7 +111,6 @@ def setup_lmz_workspace(parent_path: str | Path, overwrite_config: bool = False)
         workspace / "data" / "vaults" / "default" / "input",
         workspace / "data" / "vaults" / "default" / "local_ingest",
         workspace / "data" / "vaults" / "default" / "online_ingest",
-        workspace / "data" / "secrets",
     ]
     for directory in directories:
         directory.mkdir(parents=True, exist_ok=True)
@@ -117,11 +118,33 @@ def setup_lmz_workspace(parent_path: str | Path, overwrite_config: bool = False)
     if overwrite_config or not config_path.exists():
         config_path.write_text(yaml.safe_dump(lmz_workspace_config(), sort_keys=False, allow_unicode=True), encoding="utf-8")
         wrote_config = True
+    marker_path = workspace / WORKSPACE_MARKER_NAME
+    if not workspace_preexisted:
+        temp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=workspace,
+                prefix=f".{WORKSPACE_MARKER_NAME}.",
+                suffix=".tmp",
+                delete=False,
+            ) as handle:
+                json.dump(WORKSPACE_MARKER_PAYLOAD, handle)
+                handle.flush()
+                os.fsync(handle.fileno())
+                temp_path = Path(handle.name)
+            os.replace(temp_path, marker_path)
+        finally:
+            if temp_path and temp_path.exists():
+                temp_path.unlink(missing_ok=True)
     return {
         "workspace_parent": str(workspace_parent),
         "workspace": str(workspace),
         "config_path": str(config_path),
         "wrote_config": wrote_config,
+        "marker_path": str(marker_path),
+        "managed": marker_path.exists(),
         "directories": [str(path) for path in directories],
     }
 

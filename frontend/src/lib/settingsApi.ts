@@ -26,8 +26,10 @@ export async function createWorkspace(path: string, name: string) {
   }));
 }
 
-export async function deleteWorkspaceApi(id: string, deleteFiles: boolean) {
-  return readJson(await apiFetch(`/api/workspaces/${encodeURIComponent(id)}?delete_files=${deleteFiles}`, {
+export type WorkspaceDeleteMode = 'unregister' | 'generated' | 'all';
+
+export async function deleteWorkspaceApi(id: string, mode: WorkspaceDeleteMode) {
+  return readJson(await apiFetch(`/api/workspaces/${encodeURIComponent(id)}?mode=${encodeURIComponent(mode)}`, {
     method: 'DELETE'
   }));
 }

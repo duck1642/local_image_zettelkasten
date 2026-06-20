@@ -145,7 +145,6 @@ def _ctx_for_vault(vault_id: str, ctx: WorkspaceContext | None = None) -> Worksp
         config_path=runtime.config_path,
         root=runtime.root,
         topics_dir=runtime.topics_dir,
-        secrets_dir=runtime.secrets_dir,
         models_dir=runtime.models_dir,
         workspace_db_path=runtime.workspace_db_path,
         active_vault=vault_context,

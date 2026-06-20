@@ -1,98 +1,229 @@
-import pytest
-from pathlib import Path
-import yaml
 import importlib
+import json
 import sys
+from pathlib import Path
 
-# Setup sys.path so backend modules are importable
+import pytest
+import yaml
+
+
 ROOT = Path(__file__).resolve().parents[2]
 BACKEND = ROOT / "backend"
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
 if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
 
-def test_delete_workspace_cleanup_files(monkeypatch, tmp_path):
+
+@pytest.fixture
+def workspace_case(monkeypatch, tmp_path):
     workspaces = importlib.import_module("workspaces")
-    
     registry_path = tmp_path / "workspaces.yaml"
     monkeypatch.setattr(workspaces, "REGISTRY_PATH", registry_path)
-    
-    # Setup workspace paths
-    ws_root = tmp_path / "test-workspace-cleanup"
-    ws_root.mkdir()
-    config_path = ws_root / "config.yaml"
-    
-    # Write registry
+
+    workspace_root = tmp_path / "external" / "lmz"
+    workspace_root.mkdir(parents=True)
+    config_path = workspace_root / "config.yaml"
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "active_vault": "default",
+                "vaults": {
+                    "default": {"name": "Default", "root": "data/vaults/default"},
+                    "archive": {"name": "Archive", "root": "data/vaults/archive"},
+                },
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
     registry = {
-        "active": "test-ws",
+        "active": "default",
         "workspaces": {
             "default": {"name": "Default", "config_path": "config/config.yaml"},
-            "test-ws": {"name": "Test Workspace", "config_path": str(config_path)},
-        }
+            "external": {"name": "External", "config_path": str(config_path)},
+        },
     }
-    registry_path.write_text(yaml.safe_dump(registry), encoding="utf-8")
-    
-    # Create configuration file
-    config_path.write_text(yaml.safe_dump({"vaults": {}}), encoding="utf-8")
-    
-    # Create dummy app files
-    db_file = ws_root / "data" / "vaults" / "default" / "db" / "lmz_main.db"
-    db_file.parent.mkdir(parents=True, exist_ok=True)
-    db_file.write_text("dummy db content")
-    
-    log_file = ws_root / "data" / "vaults" / "default" / "logs" / "raw" / "terminal.log"
-    log_file.parent.mkdir(parents=True, exist_ok=True)
-    log_file.write_text("dummy log content")
-    
-    incomplete_file = ws_root / "data" / "models" / "wd-vit-tagger-v3" / ".cache" / "huggingface" / "download" / "file.incomplete"
-    incomplete_file.parent.mkdir(parents=True, exist_ok=True)
-    incomplete_file.write_text("dummy incomplete")
-    
-    gitignore_file = ws_root / "data" / "models" / "wd-vit-tagger-v3" / ".cache" / "huggingface" / ".gitignore"
-    gitignore_file.parent.mkdir(parents=True, exist_ok=True)
-    gitignore_file.write_text("dummy gitignore")
-    
-    # Create user vault notes/assets
-    note_file = ws_root / "data" / "vaults" / "default" / "vault" / "notes" / "04" / "note.md"
-    note_file.parent.mkdir(parents=True, exist_ok=True)
-    note_file.write_text("important user note")
-    
-    asset_file = ws_root / "data" / "vaults" / "default" / "vault" / "assets" / "04" / "image.png"
-    asset_file.parent.mkdir(parents=True, exist_ok=True)
-    asset_file.write_text("important user image")
-    
-    # Assert everything exists before delete
+    registry_path.write_text(yaml.safe_dump(registry, sort_keys=False), encoding="utf-8")
+    return workspaces, registry_path, workspace_root, config_path
+
+
+def write_file(path: Path, value: str = "data") -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(value, encoding="utf-8")
+    return path
+
+
+def read_registry(path: Path) -> dict:
+    return yaml.safe_load(path.read_text(encoding="utf-8"))
+
+
+def add_marker(workspaces, workspace_root: Path) -> Path:
+    marker = workspace_root / workspaces.WORKSPACE_MARKER_NAME
+    marker.write_text(json.dumps(workspaces.WORKSPACE_MARKER_PAYLOAD), encoding="utf-8")
+    return marker
+
+
+def test_unregister_leaves_workspace_files_untouched(workspace_case):
+    workspaces, registry_path, workspace_root, config_path = workspace_case
+    unknown = write_file(workspace_root / "personal-document.txt")
+
+    result = workspaces.delete_workspace("external", mode="unregister")
+
+    assert result["cleanup_status"] == "not_requested"
+    assert "external" not in read_registry(registry_path)["workspaces"]
     assert config_path.exists()
-    assert db_file.exists()
-    assert log_file.exists()
-    assert incomplete_file.exists()
-    assert gitignore_file.exists()
-    assert note_file.exists()
-    assert asset_file.exists()
-    
-    # Perform deletion with delete_files=True
-    workspaces.delete_workspace("test-ws", delete_files=True)
-    
-    # Verify workspaces registry
-    updated_registry = yaml.safe_load(registry_path.read_text(encoding="utf-8"))
-    assert "test-ws" not in updated_registry["workspaces"]
-    assert updated_registry["active"] == "default"
-    
-    # Verify file deletion and retention
+    assert unknown.exists()
+
+
+def test_generated_cleanup_deletes_only_owned_metadata_and_caches(workspace_case):
+    workspaces, registry_path, workspace_root, config_path = workspace_case
+    marker = add_marker(workspaces, workspace_root)
+    generated = [
+        write_file(workspace_root / "data" / "workspace.db"),
+        write_file(workspace_root / "data" / "topics" / "topic.md"),
+    ]
+    for vault_id in ("default", "archive"):
+        vault_root = workspace_root / "data" / "vaults" / vault_id
+        generated.extend(
+            [
+                write_file(vault_root / "db" / "lmz_main.db"),
+                write_file(vault_root / "logs" / "structured" / "backend.jsonl"),
+                write_file(vault_root / "queues" / "queue.json"),
+                write_file(vault_root / "batches" / "batch.json"),
+                write_file(vault_root / "wd-tags" / "aa" / "tag.json"),
+                write_file(vault_root / "ui_cache" / "thumbnails" / "aa" / "thumb.jpg"),
+            ]
+        )
+
+    preserved = [
+        write_file(workspace_root / "data" / "secrets" / "cookies.txt", "legacy secret"),
+        write_file(workspace_root / "personal-document.txt"),
+        write_file(workspace_root / "data" / "models" / "legacy.bin"),
+        write_file(workspace_root / "data" / "vaults" / "default" / "vault" / "assets" / "aa" / "image.jpg"),
+        write_file(workspace_root / "data" / "vaults" / "default" / "vault" / "notes" / "aa" / "note.md"),
+        write_file(workspace_root / "data" / "vaults" / "default" / "input" / "source.jpg"),
+        write_file(workspace_root / "data" / "vaults" / "default" / "review" / "pending.jpg"),
+        write_file(workspace_root / "data" / "vaults" / "default" / "local_ingest" / "run" / "source.jpg"),
+        write_file(workspace_root / "data" / "vaults" / "default" / "online_ingest" / "run" / "source.jpg"),
+        write_file(workspace_root / "data" / "vaults" / "default" / "quarantine" / "recovery.jpg"),
+    ]
+
+    result = workspaces.delete_workspace("external", mode="generated")
+
+    assert result["cleanup_status"] == "complete"
+    assert "external" not in read_registry(registry_path)["workspaces"]
     assert not config_path.exists()
-    assert not db_file.exists()
-    assert not log_file.exists()
-    assert not incomplete_file.exists()
-    assert not gitignore_file.exists()
-    
-    # Vault files must be protected
-    assert note_file.exists()
-    assert asset_file.exists()
-    
-    # Non-empty directories must remain, but empty ones should be deleted
-    assert not (ws_root / "data" / "models").exists()
-    assert not (ws_root / "data" / "vaults" / "default" / "db").exists()
-    assert not (ws_root / "data" / "vaults" / "default" / "logs").exists()
-    assert (ws_root / "data" / "vaults" / "default" / "vault" / "notes" / "04").exists()
-    assert (ws_root / "data" / "vaults" / "default" / "vault" / "assets" / "04").exists()
+    assert not marker.exists()
+    assert all(not path.exists() for path in generated)
+    assert all(path.exists() for path in preserved)
+
+
+def test_full_cleanup_requires_valid_ownership_marker(workspace_case):
+    workspaces, registry_path, workspace_root, _ = workspace_case
+    preserved = write_file(workspace_root / "personal-document.txt")
+
+    with pytest.raises(ValueError, match="ownership marker"):
+        workspaces.delete_workspace("external", mode="all")
+
+    assert "external" in read_registry(registry_path)["workspaces"]
+    assert preserved.exists()
+
+
+def test_full_cleanup_removes_owned_workspace_root(workspace_case):
+    workspaces, registry_path, workspace_root, _ = workspace_case
+    add_marker(workspaces, workspace_root)
+    write_file(workspace_root / "personal-document.txt")
+
+    result = workspaces.delete_workspace("external", mode="all")
+
+    assert result["cleanup_status"] == "complete"
+    assert "external" not in read_registry(registry_path)["workspaces"]
+    assert not workspace_root.exists()
+
+
+def test_staging_failure_restores_files_and_preserves_registration(workspace_case, monkeypatch):
+    workspaces, registry_path, workspace_root, config_path = workspace_case
+    marker = add_marker(workspaces, workspace_root)
+    database = write_file(workspace_root / "data" / "workspace.db")
+    real_move = workspaces._move_path
+    calls = 0
+
+    def fail_second_move(source, destination):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise OSError("locked path")
+        return real_move(source, destination)
+
+    monkeypatch.setattr(workspaces, "_move_path", fail_second_move)
+
+    with pytest.raises(workspaces.WorkspaceDeletionError, match="locked path"):
+        workspaces.delete_workspace("external", mode="generated")
+
+    assert "external" in read_registry(registry_path)["workspaces"]
+    assert config_path.exists()
+    assert marker.exists()
+    assert database.exists()
+
+
+def test_registry_failure_restores_staged_files(workspace_case, monkeypatch):
+    workspaces, registry_path, workspace_root, config_path = workspace_case
+    marker = add_marker(workspaces, workspace_root)
+    database = write_file(workspace_root / "data" / "workspace.db")
+
+    def fail_registry_write(_registry):
+        raise OSError("registry unavailable")
+
+    monkeypatch.setattr(workspaces, "save_workspace_registry", fail_registry_write)
+
+    with pytest.raises(workspaces.WorkspaceDeletionError, match="registry unavailable"):
+        workspaces.delete_workspace("external", mode="generated")
+
+    assert "external" in read_registry(registry_path)["workspaces"]
+    assert config_path.exists()
+    assert marker.exists()
+    assert database.exists()
+
+
+def test_purge_failure_returns_recoverable_cleanup_path(workspace_case, monkeypatch):
+    workspaces, registry_path, workspace_root, config_path = workspace_case
+    add_marker(workspaces, workspace_root)
+    write_file(workspace_root / "data" / "workspace.db")
+
+    def fail_purge(_path):
+        raise OSError("antivirus lock")
+
+    monkeypatch.setattr(workspaces, "_purge_staging_dir", fail_purge)
+
+    result = workspaces.delete_workspace("external", mode="generated")
+
+    assert result["cleanup_status"] == "pending"
+    cleanup_path = Path(result["cleanup_path"])
+    assert cleanup_path.exists()
+    assert "external" not in read_registry(registry_path)["workspaces"]
+    assert not config_path.exists()
+
+
+def test_active_workspace_cannot_be_deleted(workspace_case):
+    workspaces, registry_path, _, _ = workspace_case
+    registry = read_registry(registry_path)
+    registry["active"] = "external"
+    registry_path.write_text(yaml.safe_dump(registry, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="active workspace"):
+        workspaces.delete_workspace("external", mode="unregister")
+
+    assert "external" in read_registry(registry_path)["workspaces"]
+
+
+def test_generated_cleanup_rejects_vault_root_outside_workspace(workspace_case, tmp_path):
+    workspaces, registry_path, _, config_path = workspace_case
+    outside = tmp_path / "outside-vault"
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["vaults"]["default"]["root"] = str(outside)
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="escapes workspace root"):
+        workspaces.delete_workspace("external", mode="generated")
+
+    assert "external" in read_registry(registry_path)["workspaces"]
+    assert config_path.exists()

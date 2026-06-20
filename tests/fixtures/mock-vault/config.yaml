@@ -34,8 +34,6 @@ ingestion_concurrency:
       workers: 1
       jitter_range: [0, 0]
 log_level: INFO
-paths:
-  secrets: data/secrets
 processing:
   background_preset: white
   custom_color: [255, 255, 255]

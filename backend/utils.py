@@ -71,7 +71,6 @@ _DYNAMIC_CONSTANTS = {
     "ONLINE_INGEST_DIR": lambda: get_runtime_context().active_vault.online_ingest_dir,
     "QUEUES_DIR": lambda: get_runtime_context().active_vault.queues_dir,
     "BATCHES_DIR": lambda: get_runtime_context().active_vault.batches_dir,
-    "SECRETS_DIR": lambda: get_runtime_context().secrets_dir,
     "MODELS_DIR": lambda: get_runtime_context().models_dir,
     "WD_TAGS_DIR": lambda: get_runtime_context().active_vault.wd_tags_dir,
     "THUMBNAILS_DIR": lambda: get_runtime_context().active_vault.thumbnails_dir,
@@ -147,7 +146,6 @@ DEFAULT_ALLOWED_MIMES = {
 
 
 def setup_directories(ctx: WorkspaceContext | None = None):
-    import sys
     runtime = _ctx(ctx)
     vault = runtime.active_vault
 
@@ -168,9 +166,6 @@ def setup_directories(ctx: WorkspaceContext | None = None):
         vault.db_path.parent,
         vault.logs_dir,
     ]
-
-    if runtime.root == PROJECT_ROOT or "pytest" in sys.modules:
-        dirs_to_create.append(runtime.secrets_dir)
 
     for directory in dirs_to_create:
         directory.mkdir(parents=True, exist_ok=True)
@@ -200,8 +195,14 @@ def validate_config_schema(config: dict):
         else:
             if 'models' in config['paths']:
                 errors.append("Key 'paths.models' is no longer supported; models are stored in app data/models")
-            if 'secrets' in config['paths'] and not isinstance(config['paths']['secrets'], str):
-                errors.append("Key 'paths.secrets' must be a string")
+            if 'secrets' in config['paths']:
+                errors.append("Key 'paths.secrets' is no longer supported; authentication is app-scoped")
+
+    external_tools = config.get('external_tools')
+    if isinstance(external_tools, dict):
+        for key in ('cookies_path', 'pixiv_token'):
+            if key in external_tools:
+                errors.append(f"Key 'external_tools.{key}' is no longer supported; authentication is app-scoped")
 
     if 'firewall' not in config:
         errors.append("Missing mandatory section: 'firewall'")
@@ -226,9 +227,6 @@ def _default_config(ctx: WorkspaceContext | None = None) -> dict:
     runtime = _ctx(ctx)
     vault = runtime.active_vault
     return {
-        'paths': {
-            'secrets': 'secrets',
-        },
         'active_vault': vault.id or 'default',
         'vaults': {
             vault.id or 'default': {
