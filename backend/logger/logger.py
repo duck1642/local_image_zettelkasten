@@ -7,7 +7,11 @@ from pathlib import Path
 from runtime_context import WorkspaceContext, get_runtime_context, try_get_runtime_context
 from utils import utc_now_str
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+import sys
+if getattr(sys, "frozen", False):
+    PROJECT_ROOT = Path(sys.executable).parent
+else:
+    PROJECT_ROOT = Path(__file__).resolve().parents[2]
 STARTUP_LOGS_DIR = PROJECT_ROOT / "logs" / "startup"
 RAW_LOGS_DIR = STARTUP_LOGS_DIR / "raw"
 STRUCTURED_LOGS_DIR = STARTUP_LOGS_DIR / "structured"

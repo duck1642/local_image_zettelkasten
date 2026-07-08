@@ -231,8 +231,7 @@ graphify-out.*/
 capture_staging/
 tests/fixtures/**/capture_staging/
 tests/fixtures/**/data/secrets/
-tests/fixtures/**/logs/raw/*.log
-tests/fixtures/**/logs/structured/*.jsonl
+tests/fixtures/**/logs/
 
 # Browser extension local/package artifacts
 tools/browser_extension/**/*.crx

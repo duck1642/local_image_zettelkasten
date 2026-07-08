@@ -145,5 +145,12 @@ def _review_action_sync(filename: str, action: str, target_hash: str = None):
 
 
 if __name__ == "__main__":
+    import sys
+    import multiprocessing
+    multiprocessing.freeze_support()
+
     import uvicorn
-    uvicorn.run("web_api:app", host="127.0.0.1", port=8000, reload=os.getenv("LMZ_DISABLE_RELOAD") != "1")
+    if getattr(sys, "frozen", False):
+        uvicorn.run(app, host="127.0.0.1", port=8000)
+    else:
+        uvicorn.run("web_api:app", host="127.0.0.1", port=8000, reload=os.getenv("LMZ_DISABLE_RELOAD") != "1")

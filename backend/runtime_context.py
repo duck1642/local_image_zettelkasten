@@ -8,8 +8,13 @@ import yaml
 from config_migrations import migrate_workspace_config
 
 
+import sys
+
 SRC_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = SRC_DIR.parent
+if getattr(sys, "frozen", False):
+    PROJECT_ROOT = Path(sys.executable).parent
+else:
+    PROJECT_ROOT = SRC_DIR.parent
 
 
 @dataclass(frozen=True)

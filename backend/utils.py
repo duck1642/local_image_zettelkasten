@@ -14,7 +14,10 @@ from typing import Optional
 from runtime_context import WorkspaceContext, get_runtime_context, try_get_runtime_context
 
 SRC_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = SRC_DIR.parent
+if getattr(sys, "frozen", False):
+    PROJECT_ROOT = Path(sys.executable).parent
+else:
+    PROJECT_ROOT = SRC_DIR.parent
 AUTH_COOKIE_PLATFORMS = ("x", "instagram", "pinterest", "pixiv", "youtube")
 
 

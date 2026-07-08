@@ -8,8 +8,13 @@ from pathlib import Path
 import yaml
 
 
+import sys
+
 SRC_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = SRC_DIR.parent
+if getattr(sys, "frozen", False):
+    PROJECT_ROOT = Path(sys.executable).parent
+else:
+    PROJECT_ROOT = SRC_DIR.parent
 REGISTRY_PATH = PROJECT_ROOT / "config" / "workspaces.yaml"
 DEFAULT_WORKSPACE_ID = "default"
 WORKSPACE_MARKER_NAME = ".lmz-workspace"
@@ -89,8 +94,22 @@ def _has_valid_marker(workspace_root: Path) -> bool:
     except (OSError, ValueError, TypeError):
         return False
 
+def _ensure_default_workspace_config():
+    """Auto-create the default workspace config when it doesn't exist (first run after install)."""
+    default_config = PROJECT_ROOT / "config" / "config.yaml"
+    if default_config.exists():
+        return
+    try:
+        from workspace_setup import lmz_workspace_config
+        default_config.parent.mkdir(parents=True, exist_ok=True)
+        payload = yaml.safe_dump(lmz_workspace_config(), sort_keys=False, allow_unicode=True)
+        default_config.write_text(payload, encoding="utf-8")
+    except Exception:
+        pass
+
 
 def workspace_list() -> list[dict]:
+    _ensure_default_workspace_config()
     registry = load_workspace_registry()
     active = registry["active"]
     items = []

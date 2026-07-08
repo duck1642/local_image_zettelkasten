@@ -717,7 +717,7 @@ async def load_workspace(workspace_id: str):
     return await asyncio.to_thread(_load_workspace_sync, workspace_id)
 
 def _load_workspace_sync(workspace_id: str):
-    from workspaces import load_workspace_registry, set_active_workspace, _resolve
+    from workspaces import DEFAULT_WORKSPACE_ID, load_workspace_registry, set_active_workspace, _resolve
     
     registry = load_workspace_registry()
     if workspace_id not in registry["workspaces"]:
@@ -737,6 +737,12 @@ def _load_workspace_sync(workspace_id: str):
         import os
         os.environ.pop("LMZ_CONFIG_PATH", None)
         new_ctx = build_runtime_context(config_path)
+
+        vaults_root = new_ctx.root / "data" / "vaults"
+        if workspace_id == DEFAULT_WORKSPACE_ID and not new_ctx.active_vault.root.exists() and not vaults_root.exists():
+            from utils import setup_directories
+
+            setup_directories(new_ctx)
         
         active_vault = new_ctx.active_vault
         if active_vault and active_vault.root and not active_vault_is_usable(new_ctx):

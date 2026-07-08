@@ -10,7 +10,10 @@ import yaml
 from workspaces import WORKSPACE_MARKER_NAME, WORKSPACE_MARKER_PAYLOAD
 
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if getattr(sys, "frozen", False):
+    PROJECT_ROOT = Path(sys.executable).parent
+else:
+    PROJECT_ROOT = Path(__file__).resolve().parent.parent
 FORBIDDEN = {
     PROJECT_ROOT,
     PROJECT_ROOT / "data",

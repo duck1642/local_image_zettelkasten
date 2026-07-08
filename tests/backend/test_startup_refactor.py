@@ -271,6 +271,37 @@ def test_missing_vault_root_load_enables_vault_relocation(monkeypatch, tmp_path)
     assert workspaces.load_workspace_registry()["active"] == "default"
 
 
+def test_fresh_clone_default_workspace_initializes_missing_data(monkeypatch, tmp_path):
+    app_module = fresh_api(monkeypatch, tmp_path)
+    runtime_context = importlib.import_module("runtime_context")
+    workspaces = importlib.import_module("workspaces")
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    config_path = config_dir / "config.yaml"
+    workspace_config(config_path)
+    registry_path = config_dir / "workspaces.yaml"
+    write_registry(
+        registry_path,
+        "default",
+        {"default": {"name": "Default", "config_path": str(config_path)}},
+    )
+    monkeypatch.setattr(workspaces, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(workspaces, "REGISTRY_PATH", registry_path)
+    monkeypatch.setattr(runtime_context, "PROJECT_ROOT", tmp_path)
+    patch_runtime_services(monkeypatch)
+
+    client = TestClient(app_module.app)
+    response = client.post(
+        "/api/workspaces/default/load",
+        headers={"X-LMZ-API-KEY": api_key(client)},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "success"
+    assert (tmp_path / "data" / "vaults" / "default" / "vault" / "assets").is_dir()
+    assert (tmp_path / "data" / "vaults" / "default" / "db" / "lmz_main.db").is_file()
+
+
 def test_valid_workspace_load_persists_active_after_services_start(monkeypatch, tmp_path):
     app_module = fresh_api(monkeypatch, tmp_path)
     workspaces = importlib.import_module("workspaces")
