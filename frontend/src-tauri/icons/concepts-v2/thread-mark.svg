@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title id="title">LMZ concept: Thread Mark</title>
+  <path fill="#121b2b" d="M106 96h84v130h132v-84h84v120c0 26-21 47-47 47H237v107h-84V286c0-33 27-60 60-60h109V96z"/>
+  <path fill="#f6a51b" d="M322 96h84v84h-84z"/>
+  <path fill="#d7e0ec" d="M106 96h84v84h-84zm47 190h84v84h-84z"/>
+</svg>

@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title id="title">LMZ icon concept: Zettel Orbit</title>
+  <defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#1c293b"/><stop offset="1" stop-color="#0b111c"/></linearGradient><linearGradient id="tile" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#75879f"/><stop offset="1" stop-color="#3a4b61"/></linearGradient></defs>
+  <rect width="512" height="512" rx="108" fill="url(#bg)"/>
+  <circle cx="256" cy="256" r="151" fill="none" stroke="#6f8197" stroke-width="14" stroke-linecap="round" stroke-dasharray="188 36" transform="rotate(-30 256 256)"/>
+  <rect x="174" y="174" width="164" height="164" rx="26" fill="url(#tile)" stroke="#a7b7c9" stroke-width="9"/>
+  <circle cx="214" cy="218" r="15" fill="#d3dce7"/>
+  <path d="m190 304 39-48 32 33 27-37 34 52H190Z" fill="#d3dce7"/>
+  <g fill="#42556c" stroke="#a7b7c9" stroke-width="8">
+    <rect x="222" y="69" width="68" height="58" rx="16"/>
+    <rect x="72" y="321" width="72" height="58" rx="16"/>
+    <rect x="368" y="321" width="72" height="58" rx="16"/>
+  </g>
+  <path d="M249 87h29m-184 264h29m269 0 0-24 23 15-23 15Z" fill="none" stroke="#d3dce7" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="256" cy="103" r="13" fill="#21d5f4"/>
+  <circle cx="130" cy="350" r="13" fill="#21d5f4"/>
+  <circle cx="382" cy="350" r="13" fill="#21d5f4"/>
+</svg>

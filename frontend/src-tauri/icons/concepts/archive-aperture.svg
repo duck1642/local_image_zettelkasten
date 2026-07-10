@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title id="title">LMZ icon concept: Archive Aperture</title>
+  <defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#1c293b"/><stop offset="1" stop-color="#0b111c"/></linearGradient><linearGradient id="blade" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#8294aa"/><stop offset="1" stop-color="#3b4c62"/></linearGradient></defs>
+  <rect width="512" height="512" rx="108" fill="url(#bg)"/>
+  <g fill="url(#blade)" stroke="#a6b6c9" stroke-width="7" stroke-linejoin="round">
+    <path d="m258 72 123 71-62 36-61-35z"/>
+    <path d="m381 143v143l-62-36v-71z"/>
+    <path d="m381 286-123 71v-72l61-35z"/>
+    <path d="m258 357-123-71 62-36 61 35z"/>
+    <path d="M135 286V143l62 36v71z"/>
+    <path d="m135 143 123-71v72l-61 35z"/>
+  </g>
+  <path d="M210 221h92v70h-92z" fill="#0b1420" stroke="#7c91a8" stroke-width="8" stroke-linejoin="round"/>
+  <path d="M221 231h70v23h-70zm0 34h70v15h-70z" fill="#536880"/>
+  <path d="M232 231h48l13 23h-74z" fill="#21d5f4"/>
+</svg>

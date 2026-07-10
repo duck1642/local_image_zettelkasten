@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title id="title">LMZ concept: Three Frames</title>
+  <path fill="#121b2b" d="M94 111c0-24 19-43 43-43h149v74H168v193h176v-56h74v74c0 50-41 91-91 91H137c-24 0-43-19-43-43zm132-43h149c24 0 43 19 43 43v109h-74v-78H226z"/>
+  <path fill="#f6a51b" d="M270 196h148c0 0 0 96-74 96s-74-96-74-96Z"/>
+  <path fill="#d7e0ec" d="M168 335h176v74H168z"/>
+</svg>

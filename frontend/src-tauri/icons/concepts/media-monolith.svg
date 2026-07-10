@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title id="title">LMZ icon concept: Media Monolith</title>
+  <defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#1c293b"/><stop offset="1" stop-color="#0b111c"/></linearGradient><linearGradient id="panel" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#71829a"/><stop offset="1" stop-color="#35455b"/></linearGradient></defs>
+  <rect width="512" height="512" rx="108" fill="url(#bg)"/>
+  <g fill="url(#panel)" stroke="#a1b0c2" stroke-width="9" stroke-linejoin="round">
+    <path d="M87 150 175 105v220l-88 45z"/>
+    <path d="M212 116 300 71v220l-88 45z"/>
+    <path d="m337 150 88-45v220l-88 45z"/>
+  </g>
+  <path d="m104 281 27-31 23 24 32-43 22 50H104Z" fill="#d0d9e5"/>
+  <circle cx="139" cy="190" r="14" fill="#d0d9e5"/>
+  <path d="m242 148 0 101 74-51z" fill="#d0d9e5"/>
+  <path d="M365 184v82m0-82 38-17v70m-38 29 38 17m-38-17-24 13v-59l24-16" fill="none" stroke="#d0d9e5" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M131 391v25c0 14 11 25 25 25h200c14 0 25-11 25-25v-25M256 383v49" fill="none" stroke="#647890" stroke-width="14" stroke-linecap="round"/>
+  <circle cx="256" cy="390" r="29" fill="#21d5f4" stroke="#9ff4ff" stroke-width="7"/>
+</svg>

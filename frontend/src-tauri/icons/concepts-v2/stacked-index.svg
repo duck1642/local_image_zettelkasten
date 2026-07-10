@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title id="title">LMZ concept: Stacked Index</title>
+  <path fill="#121b2b" d="M89 117c0-22 18-40 40-40h254c22 0 40 18 40 40v47c0 22-18 40-40 40H129c-22 0-40-18-40-40zm0 132c0-22 18-40 40-40h254c22 0 40 18 40 40v47c0 22-18 40-40 40H129c-22 0-40-18-40-40zm0 132c0-22 18-40 40-40h254c22 0 40 18 40 40v14c0 22-18 40-40 40H129c-22 0-40-18-40-40z"/>
+  <path fill="#f6a51b" d="M121 117h66v87h-66zm0 132h66v87h-66zm0 132h66v54h-66z"/>
+  <circle cx="344" cy="161" r="23" fill="#d7e0ec"/>
+  <circle cx="344" cy="293" r="23" fill="#d7e0ec"/>
+  <circle cx="344" cy="410" r="23" fill="#d7e0ec"/>
+</svg>

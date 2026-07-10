@@ -1,0 +1,10 @@
+<svg width="140" height="140" viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">LMZ masonry icon — user geometry draft</title>
+  <desc id="desc">A blue active tile with three outlined light-slate tiles.</desc>
+  <g transform="translate(70 70) scale(1.44) translate(-45.65 -46)">
+    <rect x="4" y="4" width="38" height="40.5" rx="8.5" fill="none" stroke="#8b949e" stroke-width="3.5"/>
+    <rect x="48" y="2" width="39.3" height="56.3" rx="8.5" fill="#1f6feb"/>
+    <rect x="4" y="54.5" width="38" height="35.5" rx="8.5" fill="none" stroke="#8b949e" stroke-width="3.5"/>
+    <rect x="50" y="68.3" width="34.3" height="21.5" rx="8.5" fill="none" stroke="#8b949e" stroke-width="3.5"/>
+  </g>
+</svg>

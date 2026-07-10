@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title id="title">LMZ concept: Index Window</title>
+  <path fill="#121b2b" d="M86 86h154v56H142v98H86zm186 0h154v154h-56v-98h-98zM86 272h56v98h98v56H86zm284 0h56v154H272v-56h98z"/>
+  <path fill="#f6a51b" d="m256 153 103 103-103 103-103-103z"/>
+  <path fill="#fff3d1" d="m256 207 49 49-49 49-49-49z"/>
+</svg>

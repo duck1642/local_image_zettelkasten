@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">LMZ masonry icon — balanced outline draft</title>
+  <desc id="desc">A balanced masonry media grid with one active blue tile and light outlined tiles.</desc>
+  <g transform="translate(256 256) scale(1.5) translate(-256 -256)" stroke="#d8e1ec" stroke-width="18" stroke-linejoin="round">
+    <rect x="106" y="106" width="128" height="128" rx="12" fill="#3478f6" stroke="none"/>
+    <rect x="250" y="106" width="156" height="128" rx="12" fill="none"/>
+    <rect x="106" y="250" width="128" height="156" rx="12" fill="none"/>
+    <rect x="250" y="250" width="156" height="156" rx="12" fill="none"/>
+  </g>
+</svg>
