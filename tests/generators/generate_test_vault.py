@@ -15,6 +15,12 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 BACKEND = ROOT / "backend"
+if str(BACKEND) not in sys.path:
+    sys.path.insert(0, str(BACKEND))
+
+from config_schema import WorkspaceConfig
+
+
 DEFAULT_ROOT = ROOT / "tests" / "generated"
 FORBIDDEN_OUTPUTS = {
     ROOT / "data",
@@ -221,16 +227,10 @@ def _frontmatter(item: dict, topics: list[str], wd_tags: dict) -> str:
 
 
 def _config() -> dict:
-    return {
-        "schema_version": 1,
-        "active_vault": "default",
-        "vaults": {
-            "default": {
-                "name": "Default",
-                "root": "data/vaults/default",
-            },
-        },
-    }
+    return WorkspaceConfig(
+        active_vault="default",
+        vaults={"default": {"name": "Default", "root": "data/vaults/default"}},
+    ).model_dump(mode="json")
 
 
 def _reset_backend_modules():

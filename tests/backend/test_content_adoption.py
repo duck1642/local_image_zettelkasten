@@ -38,6 +38,13 @@ def _legacy_source(root: Path) -> Path:
     connection.execute("INSERT INTO sample VALUES ('preserved')")
     connection.commit()
     connection.close()
+    workspace_database = root / "data" / "workspace.db"
+    workspace_database.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(workspace_database)
+    connection.execute("CREATE TABLE sample (value TEXT)")
+    connection.execute("INSERT INTO sample VALUES ('workspace-preserved')")
+    connection.commit()
+    connection.close()
     (root / "data" / "topics").mkdir(parents=True)
     (root / "data" / "topics" / "topic.md").write_text("legacy topic", encoding="utf-8")
     (root / "secrets").mkdir()
@@ -125,3 +132,52 @@ def test_legacy_detection_is_read_only_and_requires_the_expected_topology(tmp_pa
     assert detect_legacy_source([tmp_path / "missing", source]) == source.resolve()
     assert marker.read_text(encoding="utf-8") == original
     assert detect_legacy_source([tmp_path]) is None
+
+
+def test_existing_target_adoption_preserves_app_state_and_secrets(monkeypatch, tmp_path: Path):
+    source = _legacy_source(tmp_path / "legacy")
+    target = tmp_path / ".lmz"
+    monkeypatch.setenv("LMZ_DATA_ROOT", str(target))
+
+    from app_paths import get_app_paths
+    from config_repository import bootstrap_data_home
+    from content_adoption import adopt_legacy_content_into_existing
+
+    paths = get_app_paths()
+    bootstrap_data_home(paths)
+    settings_before = paths.settings_path.read_bytes()
+    (paths.secrets_dir / "keep.txt").write_text("do not touch", encoding="utf-8")
+
+    receipt = adopt_legacy_content_into_existing(source, paths)
+
+    assert paths.settings_path.read_bytes() == settings_before
+    assert (paths.secrets_dir / "keep.txt").read_text(encoding="utf-8") == "do not touch"
+    assert not (paths.secrets_dir / "token.txt").exists()
+    assert (paths.default_workspace_dir / "data" / "vaults" / "default" / "vault" / "assets" / "item.jpg").read_bytes() == b"legacy-media"
+    assert (paths.models_dir / "model-a" / "weights.bin").read_bytes() == b"model"
+    workspace_db = sqlite3.connect(paths.default_workspace_dir / "data" / "workspace.db")
+    try:
+        assert workspace_db.execute("SELECT value FROM sample").fetchone()[0] == "workspace-preserved"
+    finally:
+        workspace_db.close()
+    assert receipt["legacy_secrets_touched"] is False
+    assert receipt["target_settings_preserved"] is True
+    assert Path(receipt["rollback_backup"]).is_dir()
+    assert source.is_dir()
+
+
+def test_external_legacy_workspace_config_conversion_keeps_backup(tmp_path: Path):
+    source = _legacy_source(tmp_path / "external")
+
+    from config_repository import WorkspaceConfigRepository
+    from content_adoption import convert_legacy_workspace_config
+
+    config_path = source / "config" / "config.yaml"
+    original = config_path.read_bytes()
+    result = convert_legacy_workspace_config(config_path)
+
+    converted = WorkspaceConfigRepository(config_path).read().value
+    assert converted.vaults["default"].name == "Legacy Default"
+    assert converted.vaults["default"].root == "data/vaults/default"
+    assert Path(result["legacy_backup"]).read_bytes() == original
+    assert result["vault_count"] == 1

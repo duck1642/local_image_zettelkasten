@@ -14,7 +14,7 @@ from pathlib import Path
 import yaml
 
 from app_paths import AppPaths, get_app_paths
-from config_repository import bootstrap_data_home
+from config_repository import WorkspaceConfigRepository, bootstrap_data_home
 from config_schema import VaultEntry, WorkspaceConfig
 
 
@@ -87,8 +87,7 @@ def _copy_tree(source: Path, destination: Path) -> None:
             _copy_file(item, target)
 
 
-def _legacy_topology(source_root: Path) -> tuple[WorkspaceConfig, dict[str, Path]]:
-    config_path = source_root / "config" / "config.yaml"
+def _legacy_topology_from_config(config_path: Path, source_root: Path) -> tuple[WorkspaceConfig, dict[str, Path]]:
     if not config_path.is_file():
         raise ContentAdoptionError(f"legacy workspace config not found: {config_path}")
     try:
@@ -118,6 +117,37 @@ def _legacy_topology(source_root: Path) -> tuple[WorkspaceConfig, dict[str, Path
     if active not in vaults:
         raise ContentAdoptionError(f"legacy active vault is not defined: {active}")
     return WorkspaceConfig(active_vault=active, vaults=vaults), source_vaults
+
+
+def _legacy_topology(source_root: Path) -> tuple[WorkspaceConfig, dict[str, Path]]:
+    return _legacy_topology_from_config(source_root / "config" / "config.yaml", source_root)
+
+
+def convert_legacy_workspace_config(config_path: str | Path) -> dict:
+    """Convert one external legacy workspace config, preserving a byte backup."""
+    path = Path(config_path).expanduser().resolve()
+    if not path.is_file():
+        raise ContentAdoptionError(f"legacy workspace config not found: {path}")
+    topology, _ = _legacy_topology_from_config(path, path.parent)
+    legacy_payload = path.read_bytes()
+    backup = path.with_name(f"{path.name}.legacy-{uuid.uuid4().hex}")
+    temp = path.with_name(f".{path.name}.migrating-{uuid.uuid4().hex}.tmp")
+    shutil.copy2(path, backup)
+    payload = yaml.safe_dump(
+        topology.model_dump(mode="json"), sort_keys=False, allow_unicode=True
+    ).encode("utf-8")
+    try:
+        with temp.open("wb") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp, path)
+        WorkspaceConfigRepository(path).read()
+    except Exception:
+        temp.unlink(missing_ok=True)
+        path.write_bytes(legacy_payload)
+        raise
+    return {"config_path": str(path), "legacy_backup": str(backup), "vault_count": len(topology.vaults)}
 
 
 def _manifest(root: Path) -> list[dict]:
@@ -151,6 +181,9 @@ def adopt_legacy_content(source_root: str | Path, paths: AppPaths | None = None)
         raise ContentAdoptionError("legacy source and target data root cannot contain one another")
 
     topology, source_vaults = _legacy_topology(source)
+    legacy_workspace_db = source / "data" / "workspace.db"
+    if not legacy_workspace_db.is_file():
+        raise ContentAdoptionError(f"legacy workspace database not found: {legacy_workspace_db}")
     stage = target.parent / f"{target.name}-migrating-{uuid.uuid4().hex}"
     ambiguous = []
     try:
@@ -213,11 +246,139 @@ def adopt_legacy_content(source_root: str | Path, paths: AppPaths | None = None)
         raise
 
 
+def adopt_legacy_content_into_existing(source_root: str | Path, paths: AppPaths | None = None) -> dict:
+    """Adopt project-root content into an already bootstrapped data home.
+
+    This mode intentionally does not read or copy the legacy ``secrets`` tree,
+    and leaves the target app settings, registry, logs, and cache untouched.
+    Only the default workspace payload and downloaded models are staged and
+    swapped. The previous target payload is retained in a sibling backup root.
+    """
+    paths = paths or get_app_paths()
+    source = Path(source_root).expanduser().resolve()
+    target = paths.data_root.resolve()
+    if not source.is_dir():
+        raise ContentAdoptionError(f"legacy source does not exist: {source}")
+    if not target.is_dir():
+        raise ContentAdoptionError(f"existing target data root does not exist: {target}")
+    if target == source or target.is_relative_to(source) or source.is_relative_to(target):
+        raise ContentAdoptionError("legacy source and target data root cannot contain one another")
+
+    # Validate the already-created target without replacing any app-owned files.
+    bootstrap_data_home(paths)
+    topology, source_vaults = _legacy_topology(source)
+    legacy_workspace_db = source / "data" / "workspace.db"
+    if not legacy_workspace_db.is_file():
+        raise ContentAdoptionError(f"legacy workspace database not found: {legacy_workspace_db}")
+    migration_id = uuid.uuid4().hex
+    stage = target.parent / f"{target.name}-content-migrating-{migration_id}"
+    backup = target.parent / f"{target.name}-migration-backup-{migration_id}"
+    stage_default = stage / "default"
+    stage_models = stage / "app" / "models"
+    manifest_path = target / "app" / "migration-manifest.json"
+    receipt_path = target / "app" / "migration-receipt.json"
+    old_manifest = manifest_path.read_bytes() if manifest_path.exists() else None
+    old_receipt = receipt_path.read_bytes() if receipt_path.exists() else None
+    moved_default = False
+    installed_default = False
+    moved_models = False
+    installed_models = False
+    ambiguous = []
+    try:
+        stage_default.mkdir(parents=True, exist_ok=True)
+        WorkspaceConfigRepository(stage_default / "config.yaml").create(topology)
+        _copy_tree(legacy_workspace_db, stage_default / "data" / "workspace.db")
+        _copy_tree(source / "data" / "topics", stage_default / "data" / "topics")
+        for vault_id, source_vault in source_vaults.items():
+            _copy_tree(source_vault, stage_default / "data" / "vaults" / vault_id)
+        _copy_tree(source / "backups", stage_default / "backups")
+        _copy_tree(source / "exports", stage_default / "exports")
+
+        source_models = source / "data" / "models"
+        has_models = source_models.exists()
+        if has_models:
+            stage_models.mkdir(parents=True, exist_ok=True)
+            _copy_tree(source_models, stage_models)
+
+        ambiguous_root = source / "config" / "data"
+        if ambiguous_root.exists():
+            ambiguous.append(str(ambiguous_root))
+
+        entries = _manifest(stage)
+        _verify_manifest(stage, entries)
+        backup.mkdir(parents=True, exist_ok=False)
+
+        backup_default = backup / "default"
+        backup_models = backup / "app" / "models"
+        if (target / "default").exists():
+            backup_default.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(target / "default", backup_default)
+            moved_default = True
+        os.replace(stage_default, target / "default")
+        installed_default = True
+
+        if has_models:
+            if paths.models_dir.exists():
+                backup_models.parent.mkdir(parents=True, exist_ok=True)
+                os.replace(paths.models_dir, backup_models)
+                moved_models = True
+            os.replace(stage_models, paths.models_dir)
+            installed_models = True
+
+        manifest_path.write_text(
+            json.dumps({"algorithm": "sha256", "files": entries}, indent=2),
+            encoding="utf-8",
+        )
+        receipt = {
+            "version": 2,
+            "completed_at": datetime.now(timezone.utc).isoformat(),
+            "source": str(source),
+            "target": str(target),
+            "file_count": len(entries),
+            "manifest_sha256": _sha256(manifest_path),
+            "ambiguous_paths": ambiguous,
+            "source_deleted": False,
+            "legacy_secrets_touched": False,
+            "target_settings_preserved": True,
+            "target_registry_preserved": True,
+            "reindex": "not-run",
+            "rollback_backup": str(backup),
+        }
+        receipt_path.write_text(json.dumps(receipt, indent=2), encoding="utf-8")
+        return receipt
+    except Exception:
+        if installed_models and paths.models_dir.exists():
+            shutil.rmtree(paths.models_dir, ignore_errors=True)
+        if moved_models and (backup / "app" / "models").exists():
+            os.replace(backup / "app" / "models", paths.models_dir)
+        if installed_default and (target / "default").exists():
+            shutil.rmtree(target / "default", ignore_errors=True)
+        if moved_default and (backup / "default").exists():
+            os.replace(backup / "default", target / "default")
+        if old_manifest is None:
+            manifest_path.unlink(missing_ok=True)
+        else:
+            manifest_path.write_bytes(old_manifest)
+        if old_receipt is None:
+            receipt_path.unlink(missing_ok=True)
+        else:
+            receipt_path.write_bytes(old_receipt)
+        raise
+    finally:
+        if stage.exists():
+            shutil.rmtree(stage, ignore_errors=True)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Adopt durable content into a new LMZ data home")
     parser.add_argument("source", nargs="?", help="Legacy LMZ project root (auto-detects the current directory)")
     parser.add_argument("--target", help="New data root (defaults to LMZ_DATA_ROOT or ~/.lmz)")
     parser.add_argument("--yes", action="store_true", help="Confirm the explicit content-only adoption")
+    parser.add_argument(
+        "--into-existing",
+        action="store_true",
+        help="Adopt into an existing .lmz root while preserving app settings, registry, logs, cache, and secrets",
+    )
     args = parser.parse_args()
     if args.target:
         os.environ["LMZ_DATA_ROOT"] = str(Path(args.target).expanduser().resolve())
@@ -229,11 +390,14 @@ def main() -> int:
     if not args.yes:
         print(f"Legacy LMZ content detected: {source}")
         print(f"Proposed new data home: {target}")
-        print("This creates fresh configs, copies durable content, and never deletes the source.")
+        if args.into_existing:
+            print("This replaces only the default workspace and app models, preserves app settings/registry/secrets, and never deletes the source.")
+        else:
+            print("This creates fresh configs, copies durable content, and never deletes the source.")
         if not sys.stdin.isatty() or input("Proceed with content-only adoption? [y/N] ").strip().casefold() not in {"y", "yes"}:
             print("No changes made. Re-run with --yes to confirm non-interactively.")
             return 2
-    receipt = adopt_legacy_content(source)
+    receipt = adopt_legacy_content_into_existing(source) if args.into_existing else adopt_legacy_content(source)
     print(json.dumps(receipt, indent=2))
     return 0
 

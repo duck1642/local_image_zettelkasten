@@ -84,6 +84,7 @@ Dependency: do not persist these controls through the former workspace-scoped
 - [ ] Add a direct regression test for WD repair: remove a stale wrong-shard cache, retain the canonical cache, and report a locked stale-cache cleanup failure.
 - [x] Run the full backend suite: 270 passed, 1 skipped on 2026-07-11.
 - [ ] Run a real-vault Windows smoke test covering locked files, staged-trash cleanup, and thumbnail/delete coordination.
+- [x] Remove stale generated vault artifacts with the scoped performance cleanup utility; the synthetic-vault generator now validates its output through the strict `WorkspaceConfig` schema.
 - [ ] Decide whether LMZ must prevent multiple backend processes. If it does, enforce a singleton or add inter-process lifecycle coordination; the current lock pool protects one process only.
 
 ## 5. Release bootstrap validation
@@ -282,6 +283,11 @@ Vault roots remain workspace-relative and cannot escape the workspace.
 - [x] Atomically promote the staged root only after every validation passes.
 - [x] Write a migration receipt under `app/` without secret values.
 - [x] On failure, remove only the staging target; never modify or delete the source tree.
+- [x] Add an existing-target adoption mode that preserves app settings, workspace registry, app logs/cache, and secrets while swapping only staged workspace/models payloads.
+- [x] Migrate the real project-root `data/` payload into `%USERPROFILE%\\.lmz` with a sibling rollback backup; leave the source tree untouched.
+- [x] Validate the migrated default vault: 166 items, zero missing required files, zero hash mismatches, zero stale index rows, and zero review mismatches.
+- [x] Convert the real external `obsidian-main` workspace config in place with a legacy backup and register it without moving its vault data or touching secrets.
+- [x] Keep generated `test-workspace` unregistered until it is explicitly identified as user-owned.
 
 ### Bootstrap and importer acceptance checks
 
@@ -422,3 +428,5 @@ Source: `F:\ARCHIVE\main\software\python\snippets\media_similarity_checker`
 | 2026-07-11 | The strict `.lmz` data/config boundary is implemented. | done | Backend suite: 270 passed, 1 skipped; frontend check/build and all 51 Playwright tests pass. |
 | 2026-07-11 | Webview controls use app-wide settings. | done | Devtools and context menu default off; Ctrl+Shift+I/F12 are gated; browser print/navigation shortcuts are suppressed; the final debug package starts cleanly with safe defaults. |
 | 2026-07-11 | Clean packaged `.lmz` first launch and restart pass. | done | Final debug desktop validation created the canonical data home in an isolated user-profile root, opened the default workspace twice, preserved data, and left the binary directory unchanged. |
+| 2026-07-12 | Real legacy project data is adopted into the existing `.lmz` home. | done | `data/` content and models were staged into `.lmz`; app settings, registry, logs/cache, and secrets were preserved; source deletion was false; the receipt records the rollback backup and `config/data` as ambiguous/ignored. |
+| 2026-07-12 | External `obsidian-main` remains external under the new registry. | done | Its config now contains topology only; the legacy YAML has a sibling backup; both external vault databases pass integrity checks (164 and 28 items); the workspace remains inactive. |
