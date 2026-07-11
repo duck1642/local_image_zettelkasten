@@ -1,11 +1,12 @@
 import json
 import os
 import shutil
-import tempfile
 import uuid
 from pathlib import Path
 
-import yaml
+from app_paths import get_app_paths
+from config_repository import WorkspaceConfigRepository, WorkspaceRegistryRepository
+from config_schema import WorkspaceRegistry, default_workspace_registry
 
 
 import sys
@@ -15,7 +16,7 @@ if getattr(sys, "frozen", False):
     PROJECT_ROOT = Path(sys.executable).parent
 else:
     PROJECT_ROOT = SRC_DIR.parent
-REGISTRY_PATH = PROJECT_ROOT / "config" / "workspaces.yaml"
+REGISTRY_PATH = get_app_paths().registry_path
 DEFAULT_WORKSPACE_ID = "default"
 WORKSPACE_MARKER_NAME = ".lmz-workspace"
 WORKSPACE_MARKER_PAYLOAD = {"type": "lmz-workspace", "version": 1}
@@ -28,63 +29,28 @@ class WorkspaceDeletionError(RuntimeError):
 
 
 def _resolve(path: str | Path, base: Path = PROJECT_ROOT) -> Path:
+    if base == PROJECT_ROOT:
+        base = get_app_paths().data_root
     value = Path(path).expanduser()
     return value.resolve() if value.is_absolute() else (base / value).resolve()
 
 
 def _default_registry() -> dict:
-    return {
-        "active": DEFAULT_WORKSPACE_ID,
-        "workspaces": {
-            DEFAULT_WORKSPACE_ID: {
-                "name": "Default",
-                "config_path": "config/config.yaml",
-            }
-        },
-    }
+    return default_workspace_registry().model_dump(mode="json")
 
 
 def load_workspace_registry() -> dict:
-    if not REGISTRY_PATH.exists():
-        return _default_registry()
-    try:
-        data = yaml.safe_load(REGISTRY_PATH.read_text(encoding="utf-8")) or {}
-    except yaml.YAMLError:
-        return _default_registry()
-    if not isinstance(data, dict):
-        return _default_registry()
-    workspaces = data.get("workspaces")
-    if not isinstance(workspaces, dict):
-        workspaces = {}
-    if DEFAULT_WORKSPACE_ID not in workspaces:
-        workspaces[DEFAULT_WORKSPACE_ID] = _default_registry()["workspaces"][DEFAULT_WORKSPACE_ID]
-    active = str(data.get("active") or DEFAULT_WORKSPACE_ID)
-    if active not in workspaces:
-        active = DEFAULT_WORKSPACE_ID
-    return {"active": active, "workspaces": workspaces}
+    return WorkspaceRegistryRepository(REGISTRY_PATH).read().value.model_dump(mode="json")
 
 
 def save_workspace_registry(registry: dict):
-    REGISTRY_PATH.parent.mkdir(parents=True, exist_ok=True)
-    payload = yaml.safe_dump(registry, sort_keys=False, allow_unicode=True)
-    temp_path: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            dir=REGISTRY_PATH.parent,
-            prefix=f".{REGISTRY_PATH.name}.",
-            suffix=".tmp",
-            delete=False,
-        ) as handle:
-            handle.write(payload)
-            handle.flush()
-            os.fsync(handle.fileno())
-            temp_path = Path(handle.name)
-        os.replace(temp_path, REGISTRY_PATH)
-    finally:
-        if temp_path and temp_path.exists():
-            temp_path.unlink(missing_ok=True)
+    value = WorkspaceRegistry.model_validate(registry)
+    repository = WorkspaceRegistryRepository(REGISTRY_PATH)
+    if not REGISTRY_PATH.exists():
+        repository.create(value)
+        return
+    current = repository.read()
+    repository.replace(value, expected_etag=current.etag)
 
 
 def _has_valid_marker(workspace_root: Path) -> bool:
@@ -94,24 +60,9 @@ def _has_valid_marker(workspace_root: Path) -> bool:
     except (OSError, ValueError, TypeError):
         return False
 
-def _ensure_default_workspace_config():
-    """Auto-create the default workspace config when it doesn't exist (first run after install)."""
-    default_config = PROJECT_ROOT / "config" / "config.yaml"
-    if default_config.exists():
-        return
-    try:
-        from workspace_setup import lmz_workspace_config
-        default_config.parent.mkdir(parents=True, exist_ok=True)
-        payload = yaml.safe_dump(lmz_workspace_config(), sort_keys=False, allow_unicode=True)
-        default_config.write_text(payload, encoding="utf-8")
-    except Exception:
-        pass
-
-
 def workspace_list() -> list[dict]:
-    _ensure_default_workspace_config()
     registry = load_workspace_registry()
-    active = registry["active"]
+    active = registry["active_workspace"]
     items = []
     for workspace_id, entry in sorted(registry["workspaces"].items()):
         config_path = _resolve(entry.get("config_path") or "")
@@ -130,8 +81,8 @@ def workspace_list() -> list[dict]:
 
 def active_workspace_config_path() -> Path:
     registry = load_workspace_registry()
-    entry = registry["workspaces"].get(registry["active"]) or registry["workspaces"][DEFAULT_WORKSPACE_ID]
-    return _resolve(entry.get("config_path") or "config/config.yaml")
+    entry = registry["workspaces"][registry["active_workspace"]]
+    return _resolve(entry["config_path"])
 
 
 def set_active_workspace(workspace_id: str) -> dict:
@@ -142,7 +93,7 @@ def set_active_workspace(workspace_id: str) -> dict:
     config_path = _resolve(registry["workspaces"][workspace_id].get("config_path") or "")
     if not config_path.exists():
         raise ValueError(f"workspace config does not exist: {config_path}")
-    registry["active"] = workspace_id
+    registry["active_workspace"] = workspace_id
     save_workspace_registry(registry)
     return registry
 
@@ -153,20 +104,18 @@ def _slug_workspace_id(name: str) -> str:
 
 
 def register_workspace(name: str, config_path: str | Path, workspace_id: str | None = None, set_active: bool = False) -> dict:
-    from config_migrations import migrate_workspace_config
-
     registry = load_workspace_registry()
     resolved = _resolve(config_path)
     if not resolved.exists():
         raise ValueError(f"workspace config does not exist: {resolved}")
-    migrate_workspace_config(resolved)
+    WorkspaceConfigRepository(resolved).read()
     workspace_id = _slug_workspace_id(workspace_id or name or resolved.parent.name)
     stored_path = str(resolved)
     try:
         resolved_abs = resolved.resolve()
-        project_root_abs = PROJECT_ROOT.resolve()
-        if resolved_abs.is_relative_to(project_root_abs):
-            stored_path = str(resolved_abs.relative_to(project_root_abs)).replace("\\", "/")
+        data_root = get_app_paths().data_root
+        if resolved_abs.is_relative_to(data_root):
+            stored_path = str(resolved_abs.relative_to(data_root)).replace("\\", "/")
     except Exception:
         pass
 
@@ -175,7 +124,7 @@ def register_workspace(name: str, config_path: str | Path, workspace_id: str | N
         "config_path": stored_path,
     }
     if set_active:
-        registry["active"] = workspace_id
+        registry["active_workspace"] = workspace_id
     save_workspace_registry(registry)
     return registry
 
@@ -198,13 +147,7 @@ def _validate_owned_path(path: Path, workspace_root: Path) -> Path:
 def _generated_paths(config_path: Path, workspace_root: Path) -> list[Path]:
     if not config_path.exists():
         raise ValueError("workspace config is required to delete LMZ-generated data")
-    try:
-        config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
-    except (OSError, yaml.YAMLError) as exc:
-        raise ValueError(f"workspace config could not be read: {exc}") from exc
-    vaults = config.get("vaults") if isinstance(config, dict) else None
-    if not isinstance(vaults, dict) or not vaults:
-        raise ValueError("workspace config must define vaults before generated data can be deleted")
+    config = WorkspaceConfigRepository(config_path).read().value
 
     candidates = [
         config_path,
@@ -215,10 +158,8 @@ def _generated_paths(config_path: Path, workspace_root: Path) -> list[Path]:
     if _has_valid_marker(workspace_root):
         candidates.append(marker)
 
-    for entry in vaults.values():
-        if not isinstance(entry, dict):
-            raise ValueError("workspace vault entries must be dictionaries")
-        root_value = Path(str(entry.get("root") or "data/vaults/default"))
+    for entry in config.vaults.values():
+        root_value = Path(entry.root)
         vault_root = root_value.resolve() if root_value.is_absolute() else (workspace_root / root_value).resolve()
         if vault_root == workspace_root or not vault_root.is_relative_to(workspace_root):
             raise ValueError(f"vault root escapes workspace root: {vault_root}")
@@ -294,7 +235,7 @@ def delete_workspace(workspace_id: str, mode: str = "unregister") -> dict:
         raise ValueError("Cannot delete the default workspace")
     if workspace_id not in registry["workspaces"]:
         raise KeyError(f"Workspace not found: {workspace_id}")
-    if workspace_id == registry["active"]:
+    if workspace_id == registry["active_workspace"]:
         raise ValueError("Cannot delete the active workspace")
 
     entry = registry["workspaces"][workspace_id]

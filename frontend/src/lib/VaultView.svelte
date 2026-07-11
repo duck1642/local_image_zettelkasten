@@ -3,16 +3,16 @@
   import type { SearchFilters, VaultGroup, VaultItem } from './types';
   import { apiFetch } from './api';
   import {
-    config,
-    loadConfig,
-    saveCurrentConfig,
-    updateConfig,
+    appSettings,
+    loadAppSettings,
+    saveCurrentAppSettings,
+    updateAppSettings,
     setVaultLayoutMode,
     setVaultTileMinWidthLocal,
     setInspectorWidth,
     normalizeInspectorWidth,
     DEFAULT_INSPECTOR_WIDTH
-  } from './configStore';
+  } from './appSettingsStore';
   import { log as uiLog } from './logger';
   import type { VaultLayoutMode } from './layout';
   import { DEFAULT_TILE_MIN_WIDTH, normalizeLayoutMode, normalizeTileMinWidth } from './layout';
@@ -80,16 +80,16 @@
     isDirty = false;
     refreshFromTop();
   }
-  $: if ($config) {
-    const nextMode = normalizeLayoutMode($config);
-    const nextWidth = normalizeTileMinWidth($config?.ui?.vault_tile_min_width);
+  $: if ($appSettings) {
+    const nextMode = normalizeLayoutMode($appSettings);
+    const nextWidth = normalizeTileMinWidth($appSettings?.ui?.vault_tile_min_width);
     if (currentLayoutMode !== nextMode) {
       currentLayoutMode = nextMode;
     }
     if (tileMinWidth !== nextWidth) {
       tileMinWidth = nextWidth;
     }
-    const nextInspectorWidth = normalizeInspectorWidth($config?.ui?.inspector_width);
+    const nextInspectorWidth = normalizeInspectorWidth($appSettings?.ui?.inspector_width);
     if (!isResizingInspector && inspectorWidth !== nextInspectorWidth) {
       inspectorWidth = nextInspectorWidth;
     }
@@ -178,7 +178,7 @@
 
   async function fetchConfig() {
     try {
-      const loaded = await loadConfig();
+      const loaded = await loadAppSettings();
       currentLayoutMode = normalizeLayoutMode(loaded);
       tileMinWidth = normalizeTileMinWidth(loaded?.ui?.vault_tile_min_width);
       inspectorVisible = loaded?.ui?.inspector_visible !== false;
@@ -202,7 +202,7 @@
     tileSizeSaveTimer = window.setTimeout(async () => {
       tileSizeSaveTimer = null;
       try {
-        await saveCurrentConfig();
+        await saveCurrentAppSettings();
       } catch (error) {
         uiLog('ERROR', 'Failed to save vault zoom', { error });
       }
@@ -457,7 +457,7 @@
   }
 
   function handleGlobalKeydown(event: KeyboardEvent) {
-    const target = event.target as HTMLElement | null;
+    const target = event.target instanceof Element ? event.target : null;
     const editing = target?.closest('input, textarea, select, [contenteditable="true"]');
     if (!editing && (event.code === 'NumpadAdd' || event.key === '+')) {
       event.preventDefault();
@@ -478,8 +478,7 @@
 
   function toggleInspector() {
     inspectorVisible = !inspectorVisible;
-    updateConfig((draft) => {
-      if (!draft.ui) draft.ui = {};
+    updateAppSettings((draft) => {
       draft.ui.inspector_visible = inspectorVisible;
     }, true);
   }

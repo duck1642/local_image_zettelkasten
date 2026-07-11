@@ -8,7 +8,7 @@ import shutil
 import re
 
 from utils import (
-    get_config, asset_path_for, note_path_for, utc_now_str, wd_tag_cache_path_for
+    get_app_settings, asset_path_for, note_path_for, utc_now_str, wd_tag_cache_path_for
 )
 from runtime_context import WorkspaceContext, get_runtime_context
 from db.sqlite_operator import connect_database, normalize_source_url
@@ -45,14 +45,14 @@ class ExternalIngestor:
     def __init__(self, links_file: str, skip_validation: bool = False, ctx: WorkspaceContext | None = None):
         self.ctx = ctx or get_runtime_context()
         self.links_file = Path(links_file)
-        self.config = get_config(self.ctx)
+        self.config = get_app_settings()
         self.stop_event = online_stop_event(self.ctx)
         self.fail_log_lock = threading.Lock()
         self.skip_validation = skip_validation
 
 
         global GLOBAL_WORKER_LIMIT
-        max_global = self.config.get("ingestion_concurrency", {}).get("global_max_workers", 10)
+        max_global = self.config.get("ingestion", {}).get("concurrency", {}).get("global_max_workers", 10)
         if GLOBAL_WORKER_LIMIT is None or GLOBAL_WORKER_LIMIT._value != max_global:
             GLOBAL_WORKER_LIMIT = threading.Semaphore(max_global)
             log_ingest_online("INFO", f"Global Ingestion Semaphore initialized with {max_global} slots.")
@@ -152,8 +152,11 @@ class ExternalIngestor:
 
     def _manage_platform_queue(self, platform: str, urls: List[QueueEntry]) -> Tuple[dict, List[QueueEntry], List[dict]]:
 
-        plat_config = self.config.get("ingestion_concurrency", {}).get("platforms", {}).get(platform,
-                      self.config.get("ingestion_concurrency", {}).get("platforms", {}).get("default", {}))
+        concurrency = self.config.get("ingestion", {}).get("concurrency", {})
+        plat_config = concurrency.get("platforms", {}).get(
+            platform,
+            concurrency.get("platforms", {}).get("default", {}),
+        )
 
         num_workers = plat_config.get("workers", 1)
         jitter = plat_config.get("jitter_range", [2.0, 4.0])

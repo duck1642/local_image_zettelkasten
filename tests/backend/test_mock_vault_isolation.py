@@ -31,7 +31,20 @@ FIXTURE = ROOT / "tests" / "fixtures" / "mock-vault"
 def fresh_backend(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *module_names: str):
     work = tmp_path / "mock-vault"
     shutil.copytree(FIXTURE, work)
+    legacy = yaml.safe_load((work / "config.yaml").read_text(encoding="utf-8"))
+    (work / "config.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "schema_version": 1,
+                "active_vault": legacy.get("active_vault", "default"),
+                "vaults": legacy["vaults"],
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
     monkeypatch.setenv("LMZ_CONFIG_PATH", str(work / "config.yaml"))
+    monkeypatch.setenv("LMZ_DATA_ROOT", str(tmp_path / ".lmz"))
     monkeypatch.setenv("LMZ_AUTH_ROOT", str(tmp_path / "app-auth"))
     if str(ROOT) not in sys.path:
         sys.path.insert(0, str(ROOT))
@@ -40,6 +53,24 @@ def fresh_backend(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *module_names
     for name in list(sys.modules):
         if name in {"api", "utils", "runtime_context", "runtime_activation", "web_api", "queue_service", "md_generator", "media_lifecycle", "metadata_index", "metadata_maintenance", "processor", "external_ingestion", "thumbnails", "fingerprint", "artists", "platforms", "review_cache", "topics", "vaults", "vault_packages", "workspace_db", "ingest_control"} or name.startswith(("api.", "logger", "db.", "tagging", "downloaders")):
             del sys.modules[name]
+    from app_paths import get_app_paths
+    from config_repository import SettingsRepository, bootstrap_data_home
+
+    paths = get_app_paths()
+    bootstrap_data_home(paths)
+    repository = SettingsRepository(paths.settings_path)
+    current = repository.read()
+    settings = current.value
+    firewall = legacy.get("firewall", {})
+    settings.ingestion.accepted_media.extensions = list(firewall.get("allowed_extensions") or settings.ingestion.accepted_media.extensions)
+    settings.ingestion.accepted_media.mime_types = list(firewall.get("allowed_mimes") or settings.ingestion.accepted_media.mime_types)
+    if isinstance(legacy.get("processing"), dict):
+        settings.ingestion.processing = settings.ingestion.processing.model_validate(legacy["processing"])
+    if isinstance(legacy.get("tagging"), dict):
+        settings.tagging = settings.tagging.model_validate(legacy["tagging"])
+    if isinstance(legacy.get("ingestion_concurrency"), dict):
+        settings.ingestion.concurrency = settings.ingestion.concurrency.model_validate(legacy["ingestion_concurrency"])
+    repository.replace(settings, expected_etag=current.etag)
     return [importlib.import_module(name) for name in module_names]
 
 
@@ -61,6 +92,16 @@ def storage_id_for(conn, item_hash: str) -> str:
     row = conn.execute("SELECT storage_id FROM items WHERE hash = ?", (item_hash,)).fetchone()
     assert row and row[0]
     return row[0]
+
+
+def app_settings_config(mime_types: list[str], extensions: list[str], tagging: dict | None = None) -> dict:
+    return {
+        "ingestion": {
+            "accepted_media": {"mime_types": mime_types, "extensions": extensions},
+            "processing": {},
+        },
+        "tagging": tagging or {},
+    }
 
 
 def frontmatter_from_markdown(text: str) -> dict:
@@ -99,8 +140,8 @@ def test_config_override_resolves_paths_inside_mock_vault(monkeypatch, tmp_path)
     assert utils.CONFIG_PATH == tmp_path / "mock-vault" / "config.yaml"
     assert ctx.config_path == utils.CONFIG_PATH
     assert ctx.root == utils.CONFIG_ROOT
-    assert ctx.models_dir == ROOT / "data" / "models"
-    assert utils.MODELS_DIR == ROOT / "data" / "models"
+    assert ctx.models_dir == tmp_path / ".lmz" / "app" / "models"
+    assert utils.MODELS_DIR == tmp_path / ".lmz" / "app" / "models"
     assert ctx.active_vault.id == utils.ACTIVE_VAULT_ID
     assert ctx.active_vault.root == utils.ACTIVE_VAULT_ROOT
     assert ctx.active_vault.db_path == utils.DB_PATH
@@ -134,22 +175,17 @@ def test_platform_cookie_path_is_canonical(monkeypatch, tmp_path):
     assert "legacy_cookies_used" not in status
 
 
-def test_app_auth_root_defaults_to_project_secrets(monkeypatch, tmp_path):
+def test_app_auth_root_defaults_to_lmz_app_secrets(monkeypatch, tmp_path):
     utils, = fresh_backend(monkeypatch, tmp_path, "utils")
     monkeypatch.delenv("LMZ_AUTH_ROOT")
 
-    assert utils.app_auth_root() == ROOT / "secrets" / "auth"
+    assert utils.app_auth_root() == tmp_path / ".lmz" / "app" / "secrets" / "auth"
 
 
 def test_shared_cookie_path_is_ignored(monkeypatch, tmp_path):
     utils, = fresh_backend(monkeypatch, tmp_path, "utils")
     legacy_path = utils.CONFIG_ROOT / "secrets" / "cookies.txt"
     write_cookie_file(legacy_path, ".instagram.com", "sessionid")
-    config = yaml.safe_load(utils.CONFIG_PATH.read_text(encoding="utf-8"))
-    config.setdefault("external_tools", {})["cookies_path"] = "secrets/cookies.txt"
-    utils.CONFIG_PATH.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
-    utils.invalidate_config_cache()
-
     info = utils.get_platform_cookie_path("instagram")
     status = utils.get_cookie_auth_status()
 
@@ -206,7 +242,6 @@ def test_pixiv_refresh_token_empty_file_is_missing(monkeypatch, tmp_path):
     token_path = utils.pixiv_refresh_token_path()
     token_path.parent.mkdir(parents=True, exist_ok=True)
     token_path.write_text("  \n", encoding="utf-8")
-    utils.invalidate_config_cache()
 
     info = utils.get_pixiv_refresh_token()
 
@@ -221,7 +256,6 @@ def test_pixiv_refresh_token_unreadable_file_returns_unreadable(monkeypatch, tmp
     token_path = utils.pixiv_refresh_token_path()
     token_path.parent.mkdir(parents=True, exist_ok=True)
     token_path.write_text("file-token", encoding="utf-8")
-    utils.invalidate_config_cache()
     original_read_text = Path.read_text
 
     def guarded_read_text(path, *args, **kwargs):
@@ -684,12 +718,20 @@ def test_workspace_registry_resolves_active_and_env_override(monkeypatch, tmp_pa
     custom_root = tmp_path / "custom-workspace"
     custom_root.mkdir()
     custom_config = custom_root / "config.yaml"
-    shutil.copy2(FIXTURE / "config.yaml", custom_config)
+    topology = {
+        "schema_version": 1,
+        "active_vault": "default",
+        "vaults": {"default": {"name": "Default", "root": "data/vaults/default"}},
+    }
+    custom_config.write_text(yaml.safe_dump(topology), encoding="utf-8")
+    override_config = tmp_path / "override.yaml"
+    override_config.write_text(yaml.safe_dump(topology), encoding="utf-8")
     monkeypatch.setattr(workspaces, "REGISTRY_PATH", registry_path)
     workspaces.save_workspace_registry({
-        "active": "custom",
+        "schema_version": 1,
+        "active_workspace": "custom",
         "workspaces": {
-            "default": {"name": "Default", "config_path": str(FIXTURE / "config.yaml")},
+            "default": {"name": "Default", "config_path": str(override_config)},
             "custom": {"name": "Custom", "config_path": str(custom_config)},
         },
     })
@@ -700,13 +742,13 @@ def test_workspace_registry_resolves_active_and_env_override(monkeypatch, tmp_pa
     assert utils.CONFIG_PATH == custom_config
     assert utils.CONFIG_ROOT == custom_root
 
-    monkeypatch.setenv("LMZ_CONFIG_PATH", str(FIXTURE / "config.yaml"))
+    monkeypatch.setenv("LMZ_CONFIG_PATH", str(override_config))
     sys.modules.pop("utils", None)
     sys.modules.pop("runtime_context", None)
     utils = importlib.import_module("utils")
     runtime_context = importlib.import_module("runtime_context")
     runtime_context.reload_runtime_context()
-    assert utils.CONFIG_PATH == FIXTURE / "config.yaml"
+    assert utils.CONFIG_PATH == override_config
 
 
 def test_workspace_setup_creates_lmz_layout_and_resolves_paths(monkeypatch, tmp_path):
@@ -735,22 +777,26 @@ def test_workspace_setup_creates_lmz_layout_and_resolves_paths(monkeypatch, tmp_
     assert payload["managed"] is True
 
     monkeypatch.setenv("LMZ_CONFIG_PATH", str(config_path))
+    monkeypatch.setenv("LMZ_DATA_ROOT", str(tmp_path / ".lmz"))
     if str(BACKEND) not in sys.path:
         sys.path.insert(0, str(BACKEND))
     for name in list(sys.modules):
         if name in {"utils", "runtime_context", "db.sqlite_operator", "web_api", "topics", "vaults", "metadata_index", "md_generator", "artists", "platforms", "workspace_db", "review_cache"} or name.startswith(("logger", "db.", "tagging")):
             del sys.modules[name]
     utils = importlib.import_module("utils")
+    from app_paths import get_app_paths
+    from config_repository import bootstrap_data_home
+    bootstrap_data_home(get_app_paths())
     sqlite_operator = importlib.import_module("db.sqlite_operator")
     web_api = importlib.import_module("web_api")
 
     assert utils.CONFIG_ROOT == workspace_parent / "lmz"
-    assert utils.MODELS_DIR == ROOT / "data" / "models"
+    assert utils.MODELS_DIR == tmp_path / ".lmz" / "app" / "models"
     assert utils.TOPICS_DIR == workspace_parent / "lmz" / "data" / "topics"
     assert utils.VAULT_DIR == workspace_parent / "lmz" / "data" / "vaults" / "default" / "vault"
     assert utils.DB_PATH == workspace_parent / "lmz" / "data" / "vaults" / "default" / "db" / "lmz_main.db"
-    assert "cookies_path" not in utils.get_config().get("external_tools", {})
-    utils.validate_config_schema(utils.get_config())
+    assert "external_tools" not in utils.get_app_settings()
+    assert set(utils.get_workspace_config()) == {"schema_version", "active_vault", "vaults"}
     conn = sqlite_operator.init_database()
     item_hash = "97" * 32
     storage_id = sqlite_operator.allocate_storage_id(conn)
@@ -768,37 +814,41 @@ def test_workspace_setup_creates_lmz_layout_and_resolves_paths(monkeypatch, tmp_
     assert detail["topics"] == ["obsidian_topic"]
     assert (workspace_parent / "lmz" / "data" / "topics" / "obsidian_topic.md").exists()
     assert utils.note_path_for(item_hash, storage_id).exists()
-    runtime = web_api._load_public_config_sync()["_runtime"]
-    assert runtime["workspace_mode"] == "lmz"
-    assert runtime["active_vault"] == "default"
+    runtime = utils.get_runtime_context()
+    assert runtime.root == workspace_parent / "lmz"
+    assert runtime.active_vault.id == "default"
     shutil.rmtree(workspace_parent, ignore_errors=True)
 
 
 def test_workspace_setup_does_not_claim_preexisting_unmarked_folder(tmp_path):
     setup_tool = load_maintenance_script("setup_workspace")
-    parent = tmp_path / "existing-parent"
+    parent = Path(tempfile.gettempdir()) / f"lmz-existing-parent-{time.time_ns()}"
     workspace = parent / "lmz"
     workspace.mkdir(parents=True)
     (workspace / "personal.txt").write_text("mine", encoding="utf-8")
 
-    payload = setup_tool.setup_lmz_workspace(parent)
-
-    assert payload["managed"] is False
-    assert not Path(payload["marker_path"]).exists()
-    assert (workspace / "personal.txt").read_text(encoding="utf-8") == "mine"
+    try:
+        payload = setup_tool.setup_lmz_workspace(parent)
+        assert payload["managed"] is False
+        assert not Path(payload["marker_path"]).exists()
+        assert (workspace / "personal.txt").read_text(encoding="utf-8") == "mine"
+    finally:
+        shutil.rmtree(parent, ignore_errors=True)
 
 
 def test_workspace_config_rejects_legacy_models_path(monkeypatch, tmp_path):
     utils, = fresh_backend(monkeypatch, tmp_path, "utils")
-    config = utils.get_config()
-    config.setdefault("paths", {})["models"] = "data/models"
+    from config_schema import WorkspaceConfig
+    config = utils.get_workspace_config()
+    config["paths"] = {"models": "data/models"}
 
-    with pytest.raises(ValueError, match="paths.models"):
-        utils.validate_config_schema(config)
+    with pytest.raises(ValueError, match="paths"):
+        WorkspaceConfig.model_validate(config)
 
 
 def test_runtime_context_rejects_legacy_models_path(monkeypatch, tmp_path):
     runtime_context, = fresh_backend(monkeypatch, tmp_path, "runtime_context")
+    from config_repository import ConfigReadError
     workspace_root = tmp_path / "bad-workspace"
     workspace_root.mkdir()
     config_path = workspace_root / "config.yaml"
@@ -814,7 +864,7 @@ def test_runtime_context_rejects_legacy_models_path(monkeypatch, tmp_path):
         encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match="paths.models"):
+    with pytest.raises(ConfigReadError, match="paths"):
         runtime_context.build_runtime_context(config_path)
 
 
@@ -848,6 +898,13 @@ def test_workspace_api_lists_registers_and_sets_active(monkeypatch, tmp_path):
     web_api, workspaces = fresh_backend(monkeypatch, tmp_path, "web_api", "workspaces")
     registry_path = tmp_path / "workspaces.yaml"
     monkeypatch.setattr(workspaces, "REGISTRY_PATH", registry_path)
+    workspaces.save_workspace_registry({
+        "schema_version": 1,
+        "active_workspace": "default",
+        "workspaces": {
+            "default": {"name": "Default", "config_path": str(tmp_path / "mock-vault" / "config.yaml")},
+        },
+    })
     workspace_parent = (Path(tempfile.gettempdir()) / f"lmz-api-test-{time.time_ns()}").resolve()
     try:
         initial = web_api._get_workspaces_sync()
@@ -1237,6 +1294,13 @@ def test_active_workspace_and_vault_switches_are_preflight_guarded(monkeypatch, 
     web_api, vaults, workspaces = fresh_backend(monkeypatch, tmp_path, "web_api", "vaults", "workspaces")
     registry_path = tmp_path / "workspaces.yaml"
     monkeypatch.setattr(workspaces, "REGISTRY_PATH", registry_path)
+    workspaces.save_workspace_registry({
+        "schema_version": 1,
+        "active_workspace": "default",
+        "workspaces": {
+            "default": {"name": "Default", "config_path": str(tmp_path / "mock-vault" / "config.yaml")},
+        },
+    })
     workspace_parent = (Path(tempfile.gettempdir()) / f"lmz-switch-guard-test-{time.time_ns()}").resolve()
     try:
         created = web_api._create_vault_sync({"name": "Guard Target"})
@@ -1389,72 +1453,16 @@ def test_create_merged_vault_rolls_back_new_vault_on_copy_failure(monkeypatch, t
     assert "merged-failure" not in current
 
 
-def test_get_config_cache_hits_and_returns_defensive_copy(monkeypatch, tmp_path):
+def test_app_settings_accessor_returns_fresh_secret_free_documents(monkeypatch, tmp_path):
     (utils,) = fresh_backend(monkeypatch, tmp_path, "utils")
-    calls = []
-    original_loader = utils._load_config_uncached
-
-    def wrapped_loader():
-        calls.append("load")
-        return original_loader()
-
-    monkeypatch.setattr(utils, "_load_config_uncached", wrapped_loader)
-    utils.invalidate_config_cache()
-
-    first = utils.get_config()
+    first = utils.get_app_settings()
     first["ui"]["vault_layout_mode"] = "grid"
-    second = utils.get_config()
+    second = utils.get_app_settings()
 
-    assert len(calls) == 1
-    assert second["ui"]["vault_layout_mode"] != "grid"
-
-
-def test_get_config_cache_refreshes_when_config_mtime_changes(monkeypatch, tmp_path):
-    (utils,) = fresh_backend(monkeypatch, tmp_path, "utils")
-    calls = []
-    original_loader = utils._load_config_uncached
-
-    def wrapped_loader():
-        calls.append("load")
-        return original_loader()
-
-    monkeypatch.setattr(utils, "_load_config_uncached", wrapped_loader)
-    utils.invalidate_config_cache()
-    utils.get_config()
-    assert len(calls) == 1
-
-    current = utils.CONFIG_PATH.stat().st_mtime
-    os.utime(utils.CONFIG_PATH, (current + 3, current + 3))
-    utils.get_config()
-    assert len(calls) == 2
-
-
-def test_public_config_strip_removes_secret_token(monkeypatch, tmp_path):
-    web_api, utils = fresh_backend(monkeypatch, tmp_path, "web_api", "utils")
-    config = yaml.safe_load(utils.CONFIG_PATH.read_text(encoding="utf-8"))
-    config.setdefault("external_tools", {})["pixiv_token"] = "secret-token"
-    utils.CONFIG_PATH.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
-    utils.invalidate_config_cache()
-
-    payload = web_api._load_public_config_sync()
-
-    ext = payload.get("external_tools", {})
-    assert "pixiv_token" not in ext
-
-
-def test_update_app_config_invalidates_config_cache(monkeypatch, tmp_path):
-    web_api, utils = fresh_backend(monkeypatch, tmp_path, "web_api", "utils")
-    called = []
-
-    monkeypatch.setattr(web_api, "invalidate_config_cache", lambda: called.append("invalidated"))
-    web_api._update_app_config_sync({
-        "active_vault": "default",
-        "vaults": {"default": {"name": "Default", "root": "data/vaults/default"}},
-        "firewall": {"allowed_extensions": [".jpg"], "allowed_mimes": ["image/jpeg"]},
-        "hash_algorithm": "sha256",
-    })
-
-    assert called == ["invalidated"]
+    assert second["ui"]["vault_layout_mode"] == "masonry"
+    assert "external_tools" not in second
+    assert "secrets" not in second
+    assert "models_dir" not in second
 
 
 def test_queue_service_uses_mock_vault_queues(monkeypatch, tmp_path):
@@ -1714,7 +1722,11 @@ def test_local_worker_reports_wd_tagging_status_for_started_paths(monkeypatch, t
         }
 
     monkeypatch.setattr(web_api, "process_file", fake_process_file)
-    monkeypatch.setattr(web_api, "get_config", lambda: {"firewall": {"allowed_extensions": ["jpg"]}})
+    monkeypatch.setattr(
+        web_api,
+        "get_app_settings",
+        lambda: {"ingestion": {"accepted_media": {"extensions": ["jpg"]}}},
+    )
 
     web_api._prepare_local_ingest_run("run-tags", {}, False, 1)
     web_api._run_local_ingest_worker([str(source)], {}, False, "run-tags")
@@ -2004,7 +2016,7 @@ def test_processor_skips_file_already_pending_review(monkeypatch, tmp_path):
 
     ok, message, idx_data = processor.process_file(
         source,
-        {"firewall": {"allowed_mimes": ["image/webp"], "allowed_extensions": ["webp"]}},
+        app_settings_config(["image/webp"], ["webp"]),
     )
 
     assert not ok
@@ -2030,7 +2042,7 @@ def test_processor_can_bypass_pending_review_guard_for_review_action(monkeypatch
 
     ok, message, idx_data = processor.process_file(
         source,
-        {"firewall": {"allowed_mimes": ["image/webp"], "allowed_extensions": ["webp"]}},
+        app_settings_config(["image/webp"], ["webp"]),
         allow_pending_review=True,
     )
 
@@ -2089,7 +2101,7 @@ def test_pending_review_guard_blocks_reingest_after_restart(monkeypatch, tmp_pat
 
     ok, message, _ = processor.process_file(
         reingest_source,
-        {"firewall": {"allowed_mimes": ["image/webp"], "allowed_extensions": ["webp"]}},
+        app_settings_config(["image/webp"], ["webp"]),
     )
 
     conn = sqlite_operator.init_database()
@@ -2120,7 +2132,7 @@ def test_ingest_seeds_markdown_artist_from_metadata_and_reindexes(monkeypatch, t
 
     ok, _, idx_data = processor.process_file(
         source,
-        {"firewall": {"allowed_mimes": ["image/jpeg"], "allowed_extensions": ["jpg"]}, "tagging": {}},
+        app_settings_config(["image/jpeg"], ["jpg"]),
         metadata={"artist": "Ingest Artist", "platform": "pixiv", "source_url": "https://example.test/item"},
         sync_index=False,
     )
@@ -2159,7 +2171,7 @@ def test_ingest_result_reports_wd_tagging_status(monkeypatch, tmp_path):
 
     ok, _, idx_data = processor.process_file(
         source,
-        {"firewall": {"allowed_mimes": ["image/jpeg"], "allowed_extensions": ["jpg"]}, "tagging": {}},
+        app_settings_config(["image/jpeg"], ["jpg"]),
         metadata={"artist": "Ingest Artist", "platform": "local", "source_url": ""},
         sync_index=False,
     )
@@ -2190,7 +2202,7 @@ def test_config_allowed_non_media_ingest_marks_thumbnail_skipped(monkeypatch, tm
 
     ok, message, result = processor.process_file(
         source,
-        {"firewall": {"allowed_mimes": ["text/plain"], "allowed_extensions": ["txt"]}, "tagging": {}},
+        app_settings_config(["text/plain"], ["txt"]),
         sync_index=False,
     )
 
@@ -2223,7 +2235,7 @@ def test_ingest_index_update_ignores_wd_tagging_status(monkeypatch, tmp_path):
 
     ok, _, idx_data = processor.process_file(
         source,
-        {"firewall": {"allowed_mimes": ["image/jpeg"], "allowed_extensions": ["jpg"]}, "tagging": {}},
+        app_settings_config(["image/jpeg"], ["jpg"]),
         metadata={"artist": "Ingest Artist", "platform": "local", "source_url": ""},
     )
 
@@ -2281,7 +2293,7 @@ def test_manage_review_uses_quarantine_sidecar_for_artist(monkeypatch, tmp_path)
             file_path.unlink()
         return True, "ok", {}
 
-    monkeypatch.setattr(manage_review, "get_config", lambda: {})
+    monkeypatch.setattr(manage_review, "get_app_settings", lambda: {})
     monkeypatch.setattr(manage_review, "process_file", fake_process_file)
 
     manage_review.approve_file("queued.jpg")
@@ -4951,7 +4963,7 @@ def test_online_worker_passes_explicit_queue_metadata_to_processor(monkeypatch, 
     }
 
 
-def test_downloader_wrappers_use_configured_timeouts(monkeypatch, tmp_path):
+def test_downloader_wrappers_use_bounded_default_timeouts(monkeypatch, tmp_path):
     gallery, yt_dlp = fresh_backend(monkeypatch, tmp_path, "downloaders.gallery_dl_wrapper", "downloaders.yt_dlp_wrapper")
     gallery_timeouts = []
     yt_timeouts = []
@@ -4969,19 +4981,17 @@ def test_downloader_wrappers_use_configured_timeouts(monkeypatch, tmp_path):
         yt_timeouts.append(kwargs.get("timeout"))
         return Result()
 
-    monkeypatch.setattr(gallery, "get_config", lambda: {"external_tools": {"timeouts": {"gallery_metadata": 7, "gallery_download": 8}}})
     monkeypatch.setattr(gallery, "_base_args", lambda url: [])
     monkeypatch.setattr(gallery.subprocess, "run", gallery_run)
     gallery.inspect_gallery("https://example.test/item")
     gallery.download_gallery("https://example.test/item", metadata_info={"platform": "X", "download_url": "https://example.test/item"})
 
-    monkeypatch.setattr(yt_dlp, "get_config", lambda: {"external_tools": {"timeouts": {"yt_dlp_metadata": 9, "yt_dlp_download": 10}}})
     monkeypatch.setattr(yt_dlp, "get_platform_cookie_path", lambda platform: {"status": "missing", "source": "missing", "path": ""})
     monkeypatch.setattr(yt_dlp.subprocess, "run", yt_run)
     yt_dlp.download_video("https://www.youtube.com/watch?v=mock")
 
-    assert gallery_timeouts[:2] == [7, 8]
-    assert yt_timeouts[:2] == [9, 10]
+    assert gallery_timeouts[:2] == [120, 300]
+    assert yt_timeouts[:2] == [120, 600]
 
 
 def test_gallery_dl_uses_platform_cookie(monkeypatch, tmp_path):
@@ -5035,9 +5045,6 @@ def test_yt_dlp_uses_youtube_platform_cookie(monkeypatch, tmp_path):
 
 def test_downloader_wrapper_timeout_defaults(monkeypatch, tmp_path):
     gallery, yt_dlp = fresh_backend(monkeypatch, tmp_path, "downloaders.gallery_dl_wrapper", "downloaders.yt_dlp_wrapper")
-
-    monkeypatch.setattr(gallery, "get_config", lambda: {})
-    monkeypatch.setattr(yt_dlp, "get_config", lambda: {})
 
     assert gallery._timeout("gallery_metadata", 120) == 120
     assert gallery._timeout("gallery_download", 300) == 300

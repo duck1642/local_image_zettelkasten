@@ -5,8 +5,8 @@ import sys
 import tempfile
 from pathlib import Path
 
-import yaml
-
+from config_repository import WorkspaceConfigRepository
+from config_schema import default_workspace_config
 from workspaces import WORKSPACE_MARKER_NAME, WORKSPACE_MARKER_PAYLOAD
 
 
@@ -46,51 +46,7 @@ def _guard_workspace_parent_path(parent_path: Path):
 
 
 def lmz_workspace_config() -> dict:
-    return {
-        "external_tools": {
-            "proxy": "",
-            "user_agent": "LMZ workspace",
-        },
-        "firewall": {
-            "allowed_extensions": [".jpg", ".jpeg", ".png", ".gif", ".webp", ".jfif", ".mp4", ".webm", ".ogv"],
-            "allowed_mimes": ["image/jpeg", "image/png", "image/gif", "image/webp", "video/mp4", "video/webm", "video/ogg"],
-        },
-        "hash_algorithm": "sha256",
-        "active_vault": "default",
-        "vaults": {
-            "default": {
-                "name": "Default",
-                "root": "data/vaults/default",
-            },
-        },
-        "processing": {
-            "background_preset": "white",
-            "custom_color": [255, 255, 255],
-            "flatten_transparency": True,
-        },
-        "tagging": {
-            "enabled": True,
-            "model_repo": "SmilingWolf/wd-vit-tagger-v3",
-            "device": "auto",
-            "display_source": "yaml",
-            "threshold": 0.35,
-            "max_tags": 30,
-            "fail_ingestion_on_error": False,
-            "video": {
-                "enabled": True,
-                "frame_count": 5,
-                "merge_min_frames": 2,
-                "merge_high_confidence": 0.75,
-            },
-        },
-        "ui": {
-            "vault_layout_mode": "masonry",
-            "vault_tile_min_width": 190,
-            "inspector_width": 400,
-            "inspector_visible": True,
-            "ram_track_enabled": False,
-        },
-    }
+    return default_workspace_config().model_dump(mode="json")
 
 
 def setup_lmz_workspace(parent_path: str | Path, overwrite_config: bool = False) -> dict:
@@ -118,9 +74,16 @@ def setup_lmz_workspace(parent_path: str | Path, overwrite_config: bool = False)
     for directory in directories:
         directory.mkdir(parents=True, exist_ok=True)
     wrote_config = False
-    if overwrite_config or not config_path.exists():
-        config_path.write_text(yaml.safe_dump(lmz_workspace_config(), sort_keys=False, allow_unicode=True), encoding="utf-8")
+    repository = WorkspaceConfigRepository(config_path)
+    if overwrite_config and config_path.exists():
+        current = repository.read()
+        repository.replace(default_workspace_config(), expected_etag=current.etag)
         wrote_config = True
+    elif not config_path.exists():
+        repository.create(default_workspace_config())
+        wrote_config = True
+    else:
+        repository.read()
     marker_path = workspace / WORKSPACE_MARKER_NAME
     if not workspace_preexisted:
         temp_path = None

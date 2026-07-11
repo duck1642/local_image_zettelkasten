@@ -2,10 +2,10 @@
   import { onMount } from 'svelte';
   import { safeConfirm } from './windowLayout';
   import ConfirmationModal from './ConfirmationModal.svelte';
-  import { config, configDirty, configLoading, loadConfig } from './configStore';
+  import { appSettings, appSettingsDirty, appSettingsLoading, loadAppSettings } from './appSettingsStore';
   import { log as uiLog } from './logger';
   import { toastStore } from './toastStore';
-  import { handleRuntimeSwitch } from './runtimeStore';
+  import { handleRuntimeSwitch, refreshRuntimeSession, runtimeSession } from './runtimeStore';
   import SettingsCoreConfigPanel from './SettingsCoreConfigPanel.svelte';
   import SettingsMaintenancePanel from './SettingsMaintenancePanel.svelte';
   import SettingsRuntimePanel from './SettingsRuntimePanel.svelte';
@@ -191,14 +191,16 @@
   async function handleGlobalRefresh(event: Event) {
     const detail = (event as CustomEvent).detail || {};
     if (detail.tab !== 'settings') return;
-    if ($configDirty && !await safeConfirm('You have unsaved settings. Discard them and refresh?')) return;
+    if ($appSettingsDirty && !await safeConfirm('You have unsaved settings. Discard them and refresh?')) return;
     uiLog('INFO', 'Settings view refresh requested');
-    loadConfig();
+    void loadAppSettings(true).catch(() => {});
+    void refreshRuntimeSession().catch((error) => uiLog('WARNING', 'Settings runtime refresh failed', { error: String(error) }));
   }
 
   onMount(() => {
     window.addEventListener('lmz:refresh', handleGlobalRefresh);
-    loadConfig();
+    void loadAppSettings().catch(() => {});
+    void refreshRuntimeSession().catch((error) => uiLog('WARNING', 'Settings runtime load failed', { error: String(error) }));
     loadWorkspaces();
     loadVaults();
     void refreshMetadataRebuildStatus();
@@ -990,7 +992,7 @@
 </script>
 
 <div class="settings-container">
-  {#if $configLoading || !$config}
+  {#if $appSettingsLoading || !$appSettings}
     <div class="centered">Loading...</div>
   {:else}
     <div class="header-row">
@@ -1000,7 +1002,7 @@
         </span>
         System Settings
       </h3>
-      {#if $configDirty}
+      {#if $appSettingsDirty}
         <span class="status-label unsaved">Unsaved Changes</span>
       {/if}
       <div class="settings-tabs">
@@ -1018,8 +1020,8 @@
 
     {#if activeSettingsTab === 'general'}
       <SettingsCoreConfigPanel />
-    {:else if activeSettingsTab === 'workspace' && $config._runtime}
-      <SettingsRuntimePanel runtime={$config._runtime} />
+    {:else if activeSettingsTab === 'workspace'}
+      <SettingsRuntimePanel runtime={$runtimeSession} />
       <div class="workspace-panel">
         <SettingsWorkspacePanel
           {workspaces}

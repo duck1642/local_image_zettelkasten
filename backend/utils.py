@@ -2,16 +2,16 @@
 import sys
 import copy
 import hashlib
-import yaml
 import os
 import shutil
 import tempfile
-import threading
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Optional
 
 from runtime_context import WorkspaceContext, get_runtime_context, try_get_runtime_context
+from app_paths import get_app_paths
+from config_repository import SettingsRepository, WorkspaceConfigRepository
 
 SRC_DIR = Path(__file__).resolve().parent
 if getattr(sys, "frozen", False):
@@ -26,33 +26,7 @@ def app_auth_root() -> Path:
     if override:
         path = Path(override).expanduser()
         return path.resolve() if path.is_absolute() else (PROJECT_ROOT / path).resolve()
-    return (PROJECT_ROOT / "secrets" / "auth").resolve()
-
-def _early_load_config() -> dict:
-    ctx = try_get_runtime_context()
-    if ctx is None:
-        return {}
-    config_path = ctx.config_path
-
-    if config_path.exists():
-        try:
-            with open(config_path, 'r', encoding='utf-8') as f:
-                return yaml.safe_load(f) or {}
-        except Exception:
-            return {}
-    return {}
-
-_config = _early_load_config()
-
-
-
-def _resolve_path(key: str, default: str) -> Path:
-
-    config_root = get_runtime_context().root
-    paths = _config.get('paths', {}) if isinstance(_config.get('paths'), dict) else {}
-    path_str = paths.get(key) or default
-    p = Path(path_str)
-    return p.resolve() if p.is_absolute() else (config_root / p).resolve()
+    return get_app_paths().secrets_dir / "auth"
 
 def _resolve_config_relative(path_str: str) -> Path:
     config_root = get_runtime_context().root
@@ -95,10 +69,6 @@ def __getattr__(name: str):
 
 def __dir__():
     return sorted(list(globals().keys()) + list(_DYNAMIC_CONSTANTS.keys()))
-
-_CONFIG_CACHE_LOCK = threading.Lock()
-_CONFIG_CACHE_DATA: dict | None = None
-_CONFIG_CACHE_MTIMES: tuple[Path, Path, float | None, float | None] | None = None
 
 EXT_MAP = {
     "image/jpeg": ".jpg",
@@ -185,120 +155,13 @@ def wd_tag_cache_path_for(file_hash: str, storage_id: str, ctx: WorkspaceContext
     storage_id = require_storage_id(storage_id)
     return _ctx(ctx).active_vault.wd_tags_dir / storage_shard_for_hash(file_hash) / f"{storage_id}.json"
 
-def validate_config_schema(config: dict):
+def get_app_settings() -> dict:
+    return SettingsRepository(get_app_paths().settings_path).read().value.model_dump(mode="json")
 
-    errors = []
 
-    if not isinstance(config, dict):
-        raise ValueError("config.yaml must be a dictionary")
-
-    if 'paths' in config:
-        if not isinstance(config['paths'], dict):
-            errors.append("Key 'paths' must be a dictionary")
-        else:
-            if 'models' in config['paths']:
-                errors.append("Key 'paths.models' is no longer supported; models are stored in app data/models")
-            if 'secrets' in config['paths']:
-                errors.append("Key 'paths.secrets' is no longer supported; authentication is app-scoped")
-
-    external_tools = config.get('external_tools')
-    if isinstance(external_tools, dict):
-        for key in ('cookies_path', 'pixiv_token'):
-            if key in external_tools:
-                errors.append(f"Key 'external_tools.{key}' is no longer supported; authentication is app-scoped")
-
-    if 'firewall' not in config:
-        errors.append("Missing mandatory section: 'firewall'")
-    else:
-        for key in ['allowed_extensions', 'allowed_mimes']:
-            if key not in config['firewall']:
-                errors.append(f"Missing mandatory key in 'firewall': '{key}'")
-            elif not isinstance(config['firewall'][key], list):
-                errors.append(f"Key 'firewall.{key}' must be a list")
-
-    if 'hash_algorithm' not in config:
-        errors.append("Missing mandatory key: 'hash_algorithm'")
-    if not isinstance(config.get('vaults'), dict) or not config.get('vaults'):
-        errors.append("Missing mandatory section: 'vaults'")
-    if not isinstance(config.get('active_vault'), str) or not config.get('active_vault').strip():
-        errors.append("Missing mandatory key: 'active_vault'")
-
-    if errors:
-        raise ValueError("Configuration Error in config.yaml: " + "; ".join(errors))
-
-def _default_config(ctx: WorkspaceContext | None = None) -> dict:
+def get_workspace_config(ctx: WorkspaceContext | None = None) -> dict:
     runtime = _ctx(ctx)
-    vault = runtime.active_vault
-    return {
-        'active_vault': vault.id or 'default',
-        'vaults': {
-            vault.id or 'default': {
-                'name': vault.name or 'Default',
-                'root': 'data/vaults/default',
-            }
-        },
-        'ui': {
-            'vault_layout_mode': 'masonry',
-            'vault_tile_min_width': 190,
-        },
-        'firewall': {
-            'allowed_extensions': ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.jfif', '.mp4', '.webm', '.ogv'],
-            'allowed_mimes': list(DEFAULT_ALLOWED_MIMES)
-        },
-        'hash_algorithm': 'sha256',
-        'tagging': {
-            'enabled': True,
-            'model_repo': 'SmilingWolf/wd-vit-tagger-v3',
-            'device': 'auto',
-            'display_source': 'yaml',
-            'threshold': 0.35,
-            'max_tags': 30,
-            'fail_ingestion_on_error': False,
-            'video': {
-                'enabled': True,
-                'frame_count': 5,
-                'merge_min_frames': 2,
-                'merge_high_confidence': 0.75
-            }
-        }
-    }
-
-def _config_mtimes(ctx: WorkspaceContext | None = None) -> tuple[Path, float | None]:
-    runtime = _ctx(ctx)
-    config_mtime = runtime.config_path.stat().st_mtime if runtime.config_path.exists() else None
-    return runtime.config_path, config_mtime
-
-def invalidate_config_cache():
-    global _CONFIG_CACHE_DATA, _CONFIG_CACHE_MTIMES
-    with _CONFIG_CACHE_LOCK:
-        _CONFIG_CACHE_DATA = None
-        _CONFIG_CACHE_MTIMES = None
-
-def _load_config_uncached(ctx: WorkspaceContext | None = None) -> dict:
-    runtime = _ctx(ctx)
-    try:
-        with open(runtime.config_path, 'r', encoding='utf-8') as f:
-            config = yaml.safe_load(f)
-            validate_config_schema(config)
-
-            return config
-    except FileNotFoundError:
-        return _default_config(runtime)
-
-def get_config(ctx: WorkspaceContext | None = None) -> dict:
-    global _CONFIG_CACHE_DATA, _CONFIG_CACHE_MTIMES
-    runtime = _ctx(ctx)
-    mtimes = _config_mtimes(runtime)
-    with _CONFIG_CACHE_LOCK:
-        if _CONFIG_CACHE_DATA is not None and _CONFIG_CACHE_MTIMES == mtimes:
-            return copy.deepcopy(_CONFIG_CACHE_DATA)
-
-    config = _load_config_uncached() if ctx is None else _load_config_uncached(runtime)
-    refreshed_mtimes = _config_mtimes(runtime)
-    with _CONFIG_CACHE_LOCK:
-        _CONFIG_CACHE_DATA = config
-        _CONFIG_CACHE_MTIMES = refreshed_mtimes
-    return copy.deepcopy(config)
+    return WorkspaceConfigRepository(runtime.config_path).read().value.model_dump(mode="json")
 
 def utc_now() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
@@ -329,9 +192,9 @@ def atomic_write_text(path: Path, text: str, encoding: str = "utf-8"):
             pass
         raise
 
-def calculate_file_hash(filepath: Path, algorithm: str = 'sha256') -> str:
+def calculate_file_hash(filepath: Path) -> str:
 
-    hasher = hashlib.new(algorithm)
+    hasher = hashlib.sha256()
 
     with open(filepath, 'rb') as f:
         while chunk := f.read(8192):
@@ -374,8 +237,8 @@ def calculate_phash(filepath: Path) -> Optional[str]:
         from PIL import Image
         import imagehash
 
-        config = get_config()
-        proc_config = config.get('processing', {})
+        settings = get_app_settings()
+        proc_config = settings.get('ingestion', {}).get('processing', {})
         do_flatten = proc_config.get('flatten_transparency', False)
         bg_color = get_normalization_color(proc_config)
 

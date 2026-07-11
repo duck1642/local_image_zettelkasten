@@ -1,5 +1,6 @@
 import { expect, test, type Page, type Route } from '@playwright/test';
 import manifestData from '../generated/001-playwright-scale/manifest.json';
+import { installAppStateRoutes, makeAppSettings } from './app-state-fixture';
 
 type GeneratedItem = {
   hash: string;
@@ -79,18 +80,9 @@ async function installGeneratedApi(page: Page) {
       next_cursor: end < source.length ? String(end) : null
     });
   });
-  await page.route('**/api/config', async (route) => {
-    if (route.request().method() === 'POST') return fulfillJson(route, { status: 'success' });
-    return fulfillJson(route, {
-      ui: {
-        vault_layout_mode: 'masonry',
-        vault_tile_min_width: 190,
-        inspector_width: 380,
-        inspector_visible: true,
-        ram_track_enabled: false
-      }
-    });
-  });
+  const settings = makeAppSettings('masonry');
+  settings.ui.inspector_width = 380;
+  await installAppStateRoutes(page, settings);
   await page.route('**/api/stats', async (route) => fulfillJson(route, { total_items: items.length }));
   await page.route('**/api/session-key', async (route) => fulfillJson(route, { key: 'generated-key' }));
   await page.route('**/api/queue-stats', async (route) => fulfillJson(route, { normal: 0, force: 0, failed: 0 }));

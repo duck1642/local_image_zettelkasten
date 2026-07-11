@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from '@playwright/test';
+import { installAppStateRoutes, makeAppSettings } from './app-state-fixture';
 
 type LayoutMode = 'masonry' | 'grid';
 type Scenario = 'single' | 'grouped';
@@ -60,24 +61,7 @@ async function installMockApi(page: Page, options: { total: number; layout: Layo
     });
   });
 
-  await page.route('**/api/config', async (route) => {
-    if (route.request().method() === 'POST') {
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ status: 'success' }) });
-      return;
-    }
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        ui: {
-          vault_layout_mode: options.layout,
-          vault_tile_min_width: 190,
-          inspector_width: 400,
-          ram_track_enabled: false
-        }
-      })
-    });
-  });
+  await installAppStateRoutes(page, makeAppSettings(options.layout));
 
   await page.route('**/api/session-key', async (route) => {
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ key: 'test-key' }) });

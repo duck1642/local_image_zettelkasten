@@ -1,4 +1,5 @@
 ﻿import argparse
+import importlib.util
 import platform
 import subprocess
 import sys
@@ -14,6 +15,26 @@ def default_triple() -> str:
     if system == "darwin":
         return f"{arch}-apple-darwin"
     return f"{arch}-unknown-linux-gnu"
+
+
+def pyinstaller_python(root: Path) -> str:
+    candidates = [
+        root / ".venv" / "Scripts" / "python.exe",
+        root / ".venv" / "bin" / "python",
+    ]
+    for candidate in candidates:
+        if not candidate.is_file():
+            continue
+        probe = subprocess.run(
+            [str(candidate), "-c", "import PyInstaller, fastapi"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        if probe.returncode == 0:
+            return str(candidate)
+    if importlib.util.find_spec("PyInstaller") is not None:
+        return sys.executable
+    raise RuntimeError("PyInstaller is unavailable; install the project with the 'tauri' extra")
 
 
 def main() -> int:
@@ -35,8 +56,14 @@ def main() -> int:
     bin_dir.mkdir(parents=True, exist_ok=True)
     work_dir.mkdir(parents=True, exist_ok=True)
 
+    try:
+        builder_python = pyinstaller_python(root)
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
     cmd = [
-        sys.executable,
+        builder_python,
         "-m",
         "PyInstaller",
         "--onefile",

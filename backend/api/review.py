@@ -34,7 +34,7 @@ def _resolve_review_entries() -> list[dict]:
     files = _iter_review_media_files()
     allowed = {
         f".{ext.lstrip('.').lower()}"
-        for ext in get_config().get("firewall", {}).get("allowed_extensions", [])
+        for ext in get_app_settings().get("ingestion", {}).get("accepted_media", {}).get("extensions", [])
     }
     entries: list[dict] = []
     for media_path in files:
@@ -59,7 +59,7 @@ def _resolve_review_entries() -> list[dict]:
         validation_warning = ""
         ext = media_path.suffix.lower()
         if allowed and ext not in allowed:
-            validation_warning = f"File extension '{ext}' violates firewall allowed extensions."
+            validation_warning = f"File extension '{ext}' violates the accepted-media policy."
 
         entries.append(
             {
@@ -178,7 +178,7 @@ async def review_action(filename: str, action: str, target_hash: str = None):
 
 def _review_action_sync(filename: str, action: str, target_hash: str = None):
     ctx = get_runtime_context()
-    cfg = get_config(ctx)
+    cfg = get_app_settings()
     if action not in {"delete", "variant", "replace"}:
         raise HTTPException(status_code=400, detail="Invalid review action")
     file_path = _review_path(filename)

@@ -11,8 +11,8 @@ from runtime_context import (
     has_runtime_context,
     try_get_runtime_context,
 )
-from path_policy import validate_workspace_config_paths, workspace_relative_path
-from utils import validate_config_schema
+from path_policy import workspace_relative_path
+from config_repository import ConfigReadError
 from runtime_activation import activate_runtime_context, active_vault_is_usable
 from api.guards import (
     require_workspace_context,
@@ -27,6 +27,28 @@ router = APIRouter()
 async def get_session_key(request: Request):
     _validate_origin(request.headers.get("origin"))
     return {"key": _api_key()}
+
+
+@router.get("/api/runtime/session")
+async def get_runtime_session():
+    ctx = try_get_runtime_context()
+    if ctx is None:
+        return {"loaded": False}
+    vault = ctx.active_vault
+    return {
+        "loaded": True,
+        "workspace": {
+            "root": str(ctx.root),
+            "topics_root": str(ctx.topics_dir),
+        },
+        "vault": {
+            "id": vault.id,
+            "name": vault.name,
+            "root": str(vault.root),
+            "database": str(vault.db_path),
+        },
+        "env_override": bool(os.environ.get("LMZ_CONFIG_PATH")),
+    }
 
 
 @router.get("/api/metadata-index/status")
@@ -300,76 +322,6 @@ def _get_process_memory_mb_fallback():
     return value / divisor
 
 
-CONFIG_SECRET_KEYS = {"pixiv_token"}
-
-
-def _strip_config_secrets(config: dict) -> dict:
-    safe_config = copy.deepcopy(config or {})
-    external_tools = safe_config.get("external_tools")
-    if isinstance(external_tools, dict):
-        for key in CONFIG_SECRET_KEYS:
-            external_tools.pop(key, None)
-    return safe_config
-
-
-def _config_runtime_info() -> dict:
-    from workspaces import REGISTRY_PATH
-
-    ctx = get_runtime_context()
-    active_vault = ctx.active_vault
-    mode = "lmz" if ctx.root.name.casefold() == "lmz" and ctx.root.parent != ctx.root else "default"
-    return {
-        "config_path": str(ctx.config_path),
-        "config_root": str(ctx.root),
-        "topic_root": str(ctx.topics_dir),
-        "workspace_mode": mode,
-        "workspace_label": "LMZ workspace" if mode == "lmz" else "Default workspace",
-        "workspace_registry": str(REGISTRY_PATH),
-        "active_vault": active_vault.id,
-        "active_vault_name": active_vault.name,
-        "active_vault_root": str(active_vault.root) if active_vault.root else "",
-        "vaults_configured": bool(ctx.vaults_configured),
-        "db_path": str(active_vault.db_path),
-        "env_override": bool(os.environ.get("LMZ_CONFIG_PATH")),
-    }
-
-
-def _load_public_config_sync() -> dict:
-    config_path = get_runtime_context().config_path
-    if not config_path.exists():
-        config = _strip_config_secrets(get_config())
-        config["_runtime"] = _config_runtime_info()
-        return config
-    with open(config_path, "r", encoding="utf-8") as handle:
-        config = yaml.safe_load(handle) or {}
-    config = _strip_config_secrets(config)
-    config["_runtime"] = _config_runtime_info()
-    return config
-
-
-@router.get("/api/config")
-async def get_app_config():
-    require_workspace_context()
-    return await asyncio.to_thread(_load_public_config_sync)
-
-@router.post("/api/config")
-async def update_app_config(new_config: dict):
-    require_workspace_context()
-    return await asyncio.to_thread(_update_app_config_sync, new_config)
-
-def _update_app_config_sync(new_config: dict):
-    safe_config = copy.deepcopy(new_config or {})
-    safe_config.pop("_runtime", None)
-    try:
-        validate_workspace_config_paths(safe_config, get_runtime_context().root)
-        validate_config_schema(safe_config)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    atomic_write_text(get_runtime_context().config_path, yaml.dump(safe_config, default_flow_style=False, allow_unicode=True))
-    invalidate_config_cache()
-    return {"status": "success"}
-
-
 @router.get("/api/workspaces")
 async def get_workspaces():
     return await asyncio.to_thread(_get_workspaces_sync)
@@ -378,7 +330,7 @@ async def get_workspaces():
 def _get_workspaces_sync():
     from workspaces import load_workspace_registry, workspace_list
 
-    return {"active": load_workspace_registry()["active"], "items": workspace_list()}
+    return {"active": load_workspace_registry()["active_workspace"], "items": workspace_list()}
 
 
 @router.post("/api/workspaces/active")
@@ -428,7 +380,7 @@ def _set_workspace_active_sync(body: dict):
 
     return {
         "status": "success",
-        "active": load_workspace_registry()["active"],
+        "active": load_workspace_registry()["active_workspace"],
         "restart_required": False,
         "items": workspace_list(),
     }
@@ -456,7 +408,7 @@ def _create_workspace_sync(body: dict):
     return {
         "status": "success",
         "workspace": payload,
-        "active": registry["active"],
+        "active": registry["active_workspace"],
         "restart_required": set_active,
         "items": workspace_list(),
     }
@@ -488,7 +440,7 @@ def _delete_workspace_sync(workspace_id: str, mode: str = "unregister"):
 
     return {
         "status": "success",
-        "active": result["active"],
+        "active": result["active_workspace"],
         "mode": result["mode"],
         "cleanup_status": result["cleanup_status"],
         "cleanup_path": result["cleanup_path"],
@@ -767,6 +719,19 @@ def _load_workspace_sync(workspace_id: str):
             "active_workspace": workspace_id,
             "active_vault": active_vault.id if active_vault else None
         }
+    except ConfigReadError as e:
+        if previous_ctx is not None:
+            activate_runtime_context(previous_ctx, hydrate=False)
+            configure_terminal_logging()
+        else:
+            clear_runtime_context()
+            from logger import reconfigure_logging
+            reconfigure_logging(None)
+            configure_terminal_logging()
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "unsupported_workspace_config", "message": str(e)},
+        )
     except ValueError as e:
         if previous_ctx is not None:
             activate_runtime_context(previous_ctx, hydrate=False)
@@ -794,7 +759,7 @@ async def relocate_workspace(body: RelocateWorkspaceRequest):
     return await asyncio.to_thread(_relocate_workspace_sync, body.workspace_id, body.new_config_path)
 
 def _relocate_workspace_sync(workspace_id: str, new_config_path: str):
-    from workspaces import load_workspace_registry, save_workspace_registry, _resolve, PROJECT_ROOT
+    from workspaces import load_workspace_registry, save_workspace_registry, _resolve
     registry = load_workspace_registry()
     if workspace_id not in registry["workspaces"]:
         raise HTTPException(status_code=404, detail="Workspace not found")
@@ -806,9 +771,10 @@ def _relocate_workspace_sync(workspace_id: str, new_config_path: str):
     stored_path = str(resolved)
     try:
         resolved_abs = resolved.resolve()
-        project_root_abs = PROJECT_ROOT.resolve()
-        if resolved_abs.is_relative_to(project_root_abs):
-            stored_path = str(resolved_abs.relative_to(project_root_abs)).replace("\\", "/")
+        from app_paths import get_app_paths
+        data_root = get_app_paths().data_root
+        if resolved_abs.is_relative_to(data_root):
+            stored_path = str(resolved_abs.relative_to(data_root)).replace("\\", "/")
     except Exception:
         pass
         

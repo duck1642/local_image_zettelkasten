@@ -282,7 +282,10 @@ class LocalIngestDropIntakeRequest(BaseModel):
     paths: list[str]
 
 def _iter_local_ingest_paths(paths: list[str], stop_event: threading.Event | None = None):
-    allowed_exts = {ext.lstrip(".").lower() for ext in get_config().get("firewall", {}).get("allowed_extensions", [])}
+    allowed_exts = {
+        ext.lstrip(".").lower()
+        for ext in get_app_settings().get("ingestion", {}).get("accepted_media", {}).get("extensions", [])
+    }
     seen = set()
     for raw in paths or []:
         if stop_event and stop_event.is_set():
@@ -324,7 +327,10 @@ def _local_drop_intake_sync(body: LocalIngestDropIntakeRequest):
         raise HTTPException(status_code=409, detail="Ingestion is already running")
 
     raw_paths = [str(path or "").strip() for path in (body.paths or []) if str(path or "").strip()]
-    allowed_exts = {ext.lstrip(".").lower() for ext in get_config().get("firewall", {}).get("allowed_extensions", [])}
+    allowed_exts = {
+        ext.lstrip(".").lower()
+        for ext in get_app_settings().get("ingestion", {}).get("accepted_media", {}).get("extensions", [])
+    }
     accepted: list[str] = []
     skipped: list[dict] = []
     seen: set[str] = set()
@@ -436,11 +442,8 @@ def _local_run_id() -> str:
     return f"{utc_now().strftime('%Y%m%d_%H%M%S')}_{secrets.token_hex(4)}"
 
 
-def _get_config_for_ctx(ctx: WorkspaceContext | None = None) -> dict:
-    try:
-        return get_config(ctx)
-    except TypeError:
-        return get_config()
+def _get_app_settings_for_ctx(ctx: WorkspaceContext | None = None) -> dict:
+    return get_app_settings()
 
 
 def _submit_local_ingest_worker(loop, raw_paths: list[str], defaults: dict, skip_similarity: bool, run_id: str, ctx: WorkspaceContext):
@@ -511,7 +514,7 @@ def _cleanup_local_run_dir(run_dir: Path):
 
 def _run_local_ingest_worker(raw_paths: list[str], defaults: dict, skip_similarity: bool, run_id: str, ctx: WorkspaceContext | None = None):
     ctx = ctx or get_runtime_context()
-    cfg = _get_config_for_ctx(ctx)
+    cfg = _get_app_settings_for_ctx(ctx)
     run_dir = ctx.active_vault.local_ingest_dir / run_id
     lock = local_ingest_lock(ctx)
     state = local_ingest_state(ctx)

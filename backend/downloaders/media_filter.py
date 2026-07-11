@@ -4,10 +4,9 @@ from validators import get_mime_type, is_allowed_mime
 
 
 def valid_media_files(session_dir: Path, config: dict) -> list[Path]:
-
-    firewall_config = config.get('firewall', {})
-    allowed_exts = {ext.lstrip('.').lower() for ext in firewall_config.get('allowed_extensions', [])}
-    allowed_mimes = firewall_config.get('allowed_mimes', [])
+    accepted_media = config.get('ingestion', {}).get('accepted_media', {})
+    allowed_exts = {str(ext).lstrip('.').lower() for ext in accepted_media.get('extensions', [])}
+    allowed_mimes = accepted_media.get('mime_types', [])
     excluded_exts = {'.part', '.zip', '.json', '.txt', '.yml', '.yaml'}
     actual_files = []
 

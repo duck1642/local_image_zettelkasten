@@ -190,10 +190,10 @@ def _stage_capture_sync(file: UploadFile, source_url: str = "", media_url: str =
             pass
 
     mime_type = get_mime_type(stored_path) or str(file.content_type or "").split(";", 1)[0].strip().lower()
-    cfg = get_config(ctx)
-    firewall = cfg.get("firewall", {})
-    allowed_mimes = firewall.get("allowed_mimes", [])
-    allowed_exts = {str(ext).lstrip(".").casefold() for ext in firewall.get("allowed_extensions", [])}
+    cfg = get_app_settings()
+    accepted_media = cfg.get("ingestion", {}).get("accepted_media", {})
+    allowed_mimes = accepted_media.get("mime_types", [])
+    allowed_exts = {str(ext).lstrip(".").casefold() for ext in accepted_media.get("extensions", [])}
     ext = stored_path.suffix.lstrip(".").casefold()
     if (allowed_mimes and not is_allowed_mime(mime_type, allowed_mimes)) or (allowed_exts and ext not in allowed_exts):
         try:
@@ -290,7 +290,7 @@ def _commit_capture_locked(body: CaptureCommitRequest, staged_id: str, ctx: Work
         "ingest_type": "capture",
         "run_id": staged_id,
     }
-    cfg = get_config(ctx)
+    cfg = get_app_settings()
     ok, message, index_data = process_file(
         staged_path,
         cfg,

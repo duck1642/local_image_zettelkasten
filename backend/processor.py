@@ -99,10 +99,10 @@ def calculate_tiles(filepath: Path, ratio_threshold: float = 3.0) -> list:
     try:
         from PIL import Image
         import imagehash
-        from utils import get_config
+        from utils import get_app_settings
 
-        config = get_config()
-        proc_config = config.get('processing', {})
+        config = get_app_settings()
+        proc_config = config.get('ingestion', {}).get('processing', {})
         do_flatten = proc_config.get('flatten_transparency', False)
         bg_color = get_normalization_color(proc_config)
 
@@ -271,8 +271,8 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
     metadata = metadata or {}
     index_data = None
 
-    firewall_config = config.get('firewall', {})
-    allowed_mimes = firewall_config.get('allowed_mimes', [])
+    accepted_media = config.get('ingestion', {}).get('accepted_media', {})
+    allowed_mimes = accepted_media.get('mime_types', [])
 
 
     mime_type = get_mime_type(filepath) or "unknown"
@@ -281,7 +281,7 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
         return False, f"Invalid MIME: {mime_type}", None
 
 
-    allowed_exts_config = firewall_config.get('allowed_extensions', [])
+    allowed_exts_config = accepted_media.get('extensions', [])
     allowed_exts = {ext.lstrip('.').lower() for ext in allowed_exts_config}
 
     if filepath.suffix.lstrip('.').lower() not in allowed_exts:

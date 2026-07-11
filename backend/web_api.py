@@ -34,9 +34,8 @@ def _sync_legacy_patches():
         for name in (
             "init_database",
             "search_manager",
-            "invalidate_config_cache",
             "process_file",
-            "get_config",
+            "get_app_settings",
             "log_ingest_local",
             "log_ingest_audit",
             "atomic_write_text",
@@ -67,16 +66,6 @@ async def startup_metadata_index():
 async def startup_auth_scan():
     _sync_legacy_patches()
     return await _api_app.startup_auth_scan()
-
-
-def _load_public_config_sync():
-    _sync_legacy_patches()
-    return _api_runtime._load_public_config_sync()
-
-
-def _update_app_config_sync(new_config: dict):
-    _sync_legacy_patches()
-    return _api_runtime._update_app_config_sync(new_config)
 
 
 async def rebuild_metadata_index():

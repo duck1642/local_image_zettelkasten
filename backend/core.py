@@ -1,18 +1,21 @@
 
 from logger import log_ingest_local, log_ingest_online
-from utils import setup_directories, get_config
+from utils import setup_directories, get_app_settings
 from runtime_context import reload_runtime_context
 from processor import process_file
 from external_ingestion import ExternalIngestor
 from db.sqlite_operator import init_database
 from db.search_manager import search_manager
 from queue_service import queue_path
+from app_paths import get_app_paths
+from config_repository import bootstrap_data_home
 
 def main():
 
+    bootstrap_data_home(get_app_paths())
     ctx = reload_runtime_context()
     setup_directories()
-    config = get_config(ctx)
+    config = get_app_settings()
 
 
     conn = init_database(ctx=ctx)

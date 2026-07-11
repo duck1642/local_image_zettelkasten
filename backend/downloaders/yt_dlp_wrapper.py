@@ -11,7 +11,7 @@ from urllib.request import HTTPCookieProcessor, ProxyHandler, Request, build_ope
 
 from downloaders.media_filter import valid_media_files
 from runtime_context import get_runtime_context
-from utils import get_config, get_platform_cookie_path
+from utils import get_app_settings, get_platform_cookie_path
 
 
 _AUTH_STATUS_LOGGED = set()
@@ -19,8 +19,7 @@ _AUTH_STATUS_LOGGED = set()
 
 def _timeout(name: str, default: int) -> int:
     try:
-        value = get_config().get("external_tools", {}).get("timeouts", {}).get(name, default)
-        return max(1, int(value))
+        return max(1, int(default))
     except (TypeError, ValueError):
         return default
 
@@ -54,7 +53,7 @@ def _opener(config: dict):
         except Exception as exc:
             from logger import log_ingest_online
             log_ingest_online("WARNING", "Cookie jar load failed", path=str(cookie_info["path"]), error=str(exc))
-    proxy = config.get('external_tools', {}).get('proxy')
+    proxy = config.get('network', {}).get('proxy')
     if proxy:
         handlers.append(ProxyHandler({'http': proxy, 'https': proxy}))
     return build_opener(*handlers)
@@ -85,7 +84,7 @@ def _log_auth_status(
 
 
 def _fetch_text(url: str, config: dict) -> tuple[bool, str]:
-    user_agent = config.get('external_tools', {}).get('user_agent') or "Mozilla/5.0"
+    user_agent = config.get('network', {}).get('user_agent') or "Mozilla/5.0"
     request = Request(url, headers={"User-Agent": user_agent, "Accept-Language": "en-US,en;q=0.9"})
     try:
         with _opener(config).open(request, timeout=30) as response:
@@ -226,7 +225,7 @@ def inspect_youtube_community(url: str) -> tuple[bool, dict]:
     if not _is_community_url(url):
         return False, {"error": "Not a YouTube community post URL"}
 
-    config = get_config()
+    config = get_app_settings()
     fetch_success, page_text = _fetch_text(url, config)
     if not fetch_success:
         return False, {"error": f"YouTube community metadata failed: {page_text}"}
@@ -258,7 +257,7 @@ def inspect_youtube_community(url: str) -> tuple[bool, dict]:
 
 
 def _download_community_post(url: str, metadata_info: dict = None) -> tuple[bool, dict]:
-    config = get_config()
+    config = get_app_settings()
     url_hash = hashlib.sha256(url.encode()).hexdigest()[:10]
     session_dir = get_runtime_context().active_vault.online_ingest_dir / url_hash
     session_dir.mkdir(parents=True, exist_ok=True)
@@ -270,7 +269,7 @@ def _download_community_post(url: str, metadata_info: dict = None) -> tuple[bool
                 shutil.rmtree(session_dir, ignore_errors=True)
                 return False, metadata_info
 
-        user_agent = config.get('external_tools', {}).get('user_agent') or "Mozilla/5.0"
+        user_agent = config.get('network', {}).get('user_agent') or "Mozilla/5.0"
         opener = _opener(config)
         expected_sizes = {}
 
@@ -324,8 +323,8 @@ def download_video(url: str, metadata_info: dict = None) -> tuple[bool, dict]:
     if _is_community_url(url):
         return _download_community_post(url, metadata_info=metadata_info)
 
-    config = get_config()
-    ext_tools = config.get('external_tools', {})
+    config = get_app_settings()
+    ext_tools = config.get('network', {})
     cookie_info = get_platform_cookie_path("youtube")
     _log_auth_status("YouTube", cookie_info)
     cookie_path = cookie_info.get("path") if cookie_info.get("status") == "available" else ""

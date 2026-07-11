@@ -43,18 +43,11 @@
     }
   }
 
-  function getWorkspaceDetails(configPath: string) {
-    const normalized = configPath.replace(/\\/g, '/');
-    const isLocal = normalized.toLowerCase().endsWith('config/config.yaml');
-    let rootDir = '';
-    if (isLocal) {
-      const suffix = 'config/config.yaml';
-      rootDir = configPath.substring(0, configPath.length - suffix.length).replace(/[/\\]+$/, '');
-      if (!rootDir) rootDir = '.';
-    } else {
-      const suffix = 'config.yaml';
-      rootDir = configPath.substring(0, configPath.length - suffix.length).replace(/[/\\]+$/, '');
-    }
+  function getWorkspaceDetails(configPath: string, workspaceId = '') {
+    const isLocal = workspaceId === 'default';
+    const suffix = 'config.yaml';
+    let rootDir = configPath.substring(0, configPath.length - suffix.length).replace(/[/\\]+$/, '');
+    if (!rootDir) rootDir = '.';
     return { isLocal, rootDir };
   }
 </script>
@@ -76,7 +69,7 @@
   
   <div class="workspace-list settings-list-spacing">
     {#each workspaces as workspace}
-      {@const details = getWorkspaceDetails(workspace.config_path)}
+      {@const details = getWorkspaceDetails(workspace.config_path, workspace.id)}
       <div class="workspace-row settings-row-compact">
         <div class="settings-row-main">
           <div class="settings-row-title">

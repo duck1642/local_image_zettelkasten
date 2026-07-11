@@ -10,7 +10,7 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 import utils
-from utils import get_config
+from utils import get_app_settings
 from processor import process_file
 
 def review_sidecar_path(path: Path) -> Path:
@@ -133,7 +133,7 @@ def approve_file(filename):
         except Exception:
             pass
 
-    config = get_config()
+    config = get_app_settings()
     success, message, _ = process_file(file_path, config, metadata=metadata, delete_source=True, skip_similarity=True)
 
     if success:

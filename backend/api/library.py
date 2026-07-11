@@ -1353,7 +1353,7 @@ async def trigger_tagging(item_hash: str):
                 if not current or current[2] != row[2] or not asset_path.exists():
                     raise HTTPException(status_code=404, detail="Item was deleted before tagging")
                 log_system("INFO", f"Triggering AI tagging for {item_hash}")
-                tag_media(asset_path, item_hash=item_hash, config=get_config(), storage_id=row[2])
+                tag_media(asset_path, item_hash=item_hash, config=get_app_settings(), storage_id=row[2])
 
                 md_content = generate_markdown(conn, item_hash, force_wd_from_cache=True)
                 if md_content:

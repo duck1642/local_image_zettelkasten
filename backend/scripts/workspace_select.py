@@ -1,8 +1,3 @@
-from pathlib import Path
-
-import yaml
-
-
 def _choose(label: str, choices: list[tuple[str, str]], default_id: str | None = None) -> str:
     print(f"\n{label}:")
     for index, (choice_id, description) in enumerate(choices, start=1):
@@ -25,7 +20,10 @@ def select_runtime_context(action: str = "maintenance", *, hydrate: bool = False
     from runtime_activation import activate_runtime_context
     from runtime_context import build_runtime_context
     from workspaces import _resolve, load_workspace_registry
+    from app_paths import get_app_paths
+    from config_repository import WorkspaceConfigRepository, bootstrap_data_home
 
+    bootstrap_data_home(get_app_paths())
     registry = load_workspace_registry()
     workspaces = registry.get("workspaces") or {}
     if not workspaces:
@@ -35,21 +33,21 @@ def select_runtime_context(action: str = "maintenance", *, hydrate: bool = False
         (workspace_id, f"{entry.get('name') or workspace_id} ({_resolve(entry.get('config_path') or '')})")
         for workspace_id, entry in sorted(workspaces.items())
     ]
-    workspace_id = _choose("Workspace", workspace_choices, registry.get("active"))
+    workspace_id = _choose("Workspace", workspace_choices, registry.get("active_workspace"))
     config_path = _resolve(workspaces[workspace_id].get("config_path") or "")
     if not config_path.exists():
         raise SystemExit(f"Workspace config not found: {config_path}")
 
-    config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
-    vaults = config.get("vaults") if isinstance(config.get("vaults"), dict) else {}
+    config = WorkspaceConfigRepository(config_path).read().value
+    vaults = config.vaults
     if not vaults:
         raise SystemExit(f"No vaults configured in {config_path}")
 
     vault_choices = [
-        (vault_id, f"{entry.get('name') or vault_id} ({entry.get('root') or f'data/vaults/{vault_id}'})")
+        (vault_id, f"{entry.name or vault_id} ({entry.root})")
         for vault_id, entry in sorted(vaults.items())
     ]
-    vault_id = _choose("Vault", vault_choices, config.get("active_vault") or "default")
+    vault_id = _choose("Vault", vault_choices, config.active_vault)
     ctx = build_runtime_context(config_path, active_vault_id=vault_id)
     print(f"\nSelected workspace: {workspace_id}")
     print(f"Selected vault: {ctx.active_vault.id}")

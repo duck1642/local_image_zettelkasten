@@ -14,6 +14,7 @@ export default defineConfig({
   timeout: 60_000,
   expect: { timeout: 10_000 },
   fullyParallel: false,
+  workers: process.platform === 'win32' ? 1 : undefined,
   reporter: [['list']],
   use: {
     baseURL: 'http://127.0.0.1:5173',

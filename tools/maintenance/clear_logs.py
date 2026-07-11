@@ -1,12 +1,17 @@
 from pathlib import Path
 import shutil
+import sys
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+BACKEND_DIR = PROJECT_ROOT / "backend"
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
+
+from app_paths import get_app_paths
 
 LOG_DIRS_TO_CLEAN = [
-    PROJECT_ROOT / "logs",
-    PROJECT_ROOT / "frontend" / "logs",
+    get_app_paths().logs_dir,
 ]
 
 LOG_GLOBS_TO_CLEAN = [
@@ -33,14 +38,14 @@ def main():
             try:
                 if item.is_file() or item.is_symlink():
                     item.unlink()
-                    print(f"removed: {item.relative_to(PROJECT_ROOT)}")
+                    print(f"removed: {item}")
                 elif item.is_dir():
                     shutil.rmtree(item)
-                    print(f"removed directory: {item.relative_to(PROJECT_ROOT)}")
+                    print(f"removed directory: {item}")
                 removed_items += 1
             except OSError as exc:
                 failed.append((item, exc))
-                print(f"failed to remove: {item.relative_to(PROJECT_ROOT)} - {exc}")
+                print(f"failed to remove: {item} - {exc}")
 
     # 2. Clean standalone log files
     for glob_iter in LOG_GLOBS_TO_CLEAN:

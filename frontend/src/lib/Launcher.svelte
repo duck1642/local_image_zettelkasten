@@ -53,18 +53,11 @@
   let visibleWorkspacePaths = new Set<string>();
   let visibleVaultPaths = new Set<string>();
 
-  function getWorkspaceDetails(configPath: string) {
-    const normalized = configPath.replace(/\\/g, '/');
-    const isLocal = normalized.toLowerCase().endsWith('config/config.yaml');
-    let rootDir = '';
-    if (isLocal) {
-      const suffix = 'config/config.yaml';
-      rootDir = configPath.substring(0, configPath.length - suffix.length).replace(/[/\\]+$/, '');
-      if (!rootDir) rootDir = '.';
-    } else {
-      const suffix = 'config.yaml';
-      rootDir = configPath.substring(0, configPath.length - suffix.length).replace(/[/\\]+$/, '');
-    }
+  function getWorkspaceDetails(configPath: string, workspaceId = '') {
+    const isLocal = workspaceId === 'default';
+    const suffix = 'config.yaml';
+    let rootDir = configPath.substring(0, configPath.length - suffix.length).replace(/[/\\]+$/, '');
+    if (!rootDir) rootDir = '.';
     return { isLocal, rootDir };
   }
 
@@ -164,7 +157,16 @@
     statusMessage = `Loading workspace ${workspace.name}...`;
     try {
       const res = await apiFetch(`/api/workspaces/${workspace.id}/load`, { method: 'POST' });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) {
+        const payload = await res.json().catch(() => ({}));
+        if (payload?.detail?.code === 'unsupported_workspace_config') {
+          errorMessage = `Unsupported legacy workspace config. Use explicit content adoption or select a schema_version: 1 workspace. ${payload.detail.message || ''}`.trim();
+          statusMessage = '';
+          return;
+        }
+        const detail = typeof payload?.detail === 'string' ? payload.detail : `HTTP ${res.status}`;
+        throw new Error(detail);
+      }
       const data = await res.json();
 
       if (data.status === 'relocate_workspace') {
@@ -479,7 +481,7 @@
               <div class="launcher-workspace-list sleek-scrollbar">
                 {#each workspaces as w}
                   {#if w.exists}
-                    {@const details = getWorkspaceDetails(w.config_path)}
+                    {@const details = getWorkspaceDetails(w.config_path, w.id)}
                     <div
                       class="launcher-workspace-row"
                       class:active={w.active}
@@ -509,7 +511,7 @@
                             <div class="launcher-path-line" title={w.config_path}>{w.config_path}</div>
                             <div class="launcher-desc-row">
                               {details.isLocal
-                                ? "Runs inside the application directory. All vaults and database files reside inside the app repository."
+                                ? "Built-in workspace under the LMZ data home. It remains separate from the installed application."
                                 : "Isolated workspace. All vaults, logs, and database files reside directly inside this workspace folder."}
                             </div>
 
@@ -531,7 +533,7 @@
                       </span>
                     </div>
                   {:else}
-                    {@const details = getWorkspaceDetails(w.config_path)}
+                    {@const details = getWorkspaceDetails(w.config_path, w.id)}
                     <div class="launcher-workspace-row missing">
                       <div class="launcher-row-info">
                         <div class="launcher-name-line">

@@ -1,11 +1,10 @@
 <script lang="ts">
   import { TILE_MIN_WIDTH_CEILING, TILE_MIN_WIDTH_FLOOR } from './layout';
-  import { config, configDirty, configSaving, saveCurrentConfig, updateConfig } from './configStore';
-  import { privacyBlur } from './privacyStore';
+  import { appSettings, appSettingsDirty, appSettingsError, appSettingsSaving, saveCurrentAppSettings, updateAppSettings } from './appSettingsStore';
   import { IconSparkles, IconCheckCircle, IconAlertTriangle } from './icons';
 
   function setConfig(mutator: (draft: any) => void) {
-    updateConfig(mutator, false);
+    updateAppSettings(mutator, false);
   }
 
   function textValue(event: Event) {
@@ -19,8 +18,17 @@
   function checkedValue(event: Event) {
     return (event.currentTarget as HTMLInputElement).checked;
   }
+
+  async function saveSettings() {
+    try {
+      await saveCurrentAppSettings();
+    } catch {
+      // The store keeps the draft dirty and exposes the actionable API error below.
+    }
+  }
 </script>
 
+{#if $appSettings}
 <div class="section-card">
   <h4 class="settings-section-title">Vault Display Settings</h4>
   <div class="form-grid">
@@ -28,7 +36,7 @@
       Vault Layout Mode
       <div class="micro-desc">Choose between standard grid alignment or staggered masonry.</div>
     </label>
-    <select id="settings-layout-mode" value={$config.ui.vault_layout_mode} on:change={(event) => setConfig((draft) => draft.ui.vault_layout_mode = textValue(event))}>
+    <select id="settings-layout-mode" value={$appSettings.ui.vault_layout_mode} on:change={(event) => setConfig((draft) => draft.ui.vault_layout_mode = textValue(event))}>
       <option value="masonry">Masonry</option>
       <option value="grid">Grid</option>
     </select>
@@ -44,10 +52,10 @@
         min={TILE_MIN_WIDTH_FLOOR}
         max={TILE_MIN_WIDTH_CEILING}
         step="10"
-        value={$config.ui.vault_tile_min_width}
+        value={$appSettings.ui.vault_tile_min_width}
         on:input={(event) => setConfig((draft) => draft.ui.vault_tile_min_width = numberValue(event))}
       />
-      <span class="slider-value">{$config.ui.vault_tile_min_width}px</span>
+      <span class="slider-value">{$appSettings.ui.vault_tile_min_width}px</span>
     </div>
 
     <label for="settings-privacy-blur">
@@ -56,8 +64,30 @@
     </label>
     <div class="checkbox-group">
       <label class="check-label" id="settings-privacy-blur">
-        <input type="checkbox" bind:checked={$privacyBlur} />
+        <input type="checkbox" checked={$appSettings.ui.privacy_blur} on:change={(event) => setConfig((draft) => draft.ui.privacy_blur = checkedValue(event))} />
         Blur media previews
+      </label>
+    </div>
+
+    <label for="settings-devtools-enabled">
+      Developer tools
+      <div class="micro-desc">Allow Ctrl+Shift+I or F12 to toggle the native web inspector.</div>
+    </label>
+    <div class="checkbox-group">
+      <label class="check-label" id="settings-devtools-enabled">
+        <input type="checkbox" checked={$appSettings.webview.devtools_enabled} on:change={(event) => setConfig((draft) => draft.webview.devtools_enabled = checkedValue(event))} />
+        Enable developer tools
+      </label>
+    </div>
+
+    <label for="settings-context-menu-enabled">
+      Webview context menu
+      <div class="micro-desc">Allow the browser-style right-click menu inside the app.</div>
+    </label>
+    <div class="checkbox-group">
+      <label class="check-label" id="settings-context-menu-enabled">
+        <input type="checkbox" checked={$appSettings.webview.context_menu_enabled} on:change={(event) => setConfig((draft) => draft.webview.context_menu_enabled = checkedValue(event))} />
+        Enable right-click context menu
       </label>
     </div>
   </div>
@@ -77,7 +107,7 @@
     </label>
     <div class="checkbox-group">
       <label class="check-label" id="settings-flatten-transparency">
-        <input type="checkbox" checked={$config.processing.flatten_transparency} on:change={(event) => setConfig((draft) => draft.processing.flatten_transparency = checkedValue(event))} />
+        <input type="checkbox" checked={$appSettings.ingestion.processing.flatten_transparency} on:change={(event) => setConfig((draft) => draft.ingestion.processing.flatten_transparency = checkedValue(event))} />
         Flatten Transparency
       </label>
     </div>
@@ -88,7 +118,7 @@
     </label>
     <div class="checkbox-group">
       <label class="check-label" id="settings-enable-tagging">
-        <input type="checkbox" checked={$config.tagging.enabled} on:change={(event) => setConfig((draft) => draft.tagging.enabled = checkedValue(event))} />
+        <input type="checkbox" checked={$appSettings.tagging.enabled} on:change={(event) => setConfig((draft) => draft.tagging.enabled = checkedValue(event))} />
         Enable WD Tagging
       </label>
     </div>
@@ -97,13 +127,13 @@
       Tag Model Repo
       <div class="micro-desc">HuggingFace repository ID for the tagging model weights.</div>
     </label>
-    <input id="settings-model-repo" type="text" value={$config.tagging.model_repo} on:input={(event) => setConfig((draft) => draft.tagging.model_repo = textValue(event))} />
+    <input id="settings-model-repo" type="text" value={$appSettings.tagging.model_repo} on:input={(event) => setConfig((draft) => draft.tagging.model_repo = textValue(event))} />
 
     <label for="settings-tag-device">
       Tag Device
       <div class="micro-desc">Hardware accelerator device to bind for AI inference.</div>
     </label>
-    <select id="settings-tag-device" value={$config.tagging.device} on:change={(event) => setConfig((draft) => draft.tagging.device = textValue(event))}>
+    <select id="settings-tag-device" value={$appSettings.tagging.device} on:change={(event) => setConfig((draft) => draft.tagging.device = textValue(event))}>
       <option value="cpu">cpu</option>
       <option value="cuda">cuda</option>
       <option value="auto">auto</option>
@@ -120,23 +150,23 @@
         min="0.05"
         max="1.0"
         step="0.05"
-        value={$config.tagging.threshold}
+        value={$appSettings.tagging.threshold}
         on:input={(event) => setConfig((draft) => draft.tagging.threshold = numberValue(event))}
       />
-      <span class="slider-value">{Number($config.tagging.threshold).toFixed(2)}</span>
+      <span class="slider-value">{Number($appSettings.tagging.threshold).toFixed(2)}</span>
     </div>
 
     <label for="settings-max-tags">
       Max Ingest Tags
       <div class="micro-desc">Maximum number of suggestions to associate per media file.</div>
     </label>
-    <input id="settings-max-tags" type="number" value={$config.tagging.max_tags} on:input={(event) => setConfig((draft) => draft.tagging.max_tags = numberValue(event))} />
+    <input id="settings-max-tags" type="number" value={$appSettings.tagging.max_tags} on:input={(event) => setConfig((draft) => draft.tagging.max_tags = numberValue(event))} />
   </div>
 </div>
 
-<div class="save-bar" class:dirty={$configDirty}>
+<div class="save-bar" class:dirty={$appSettingsDirty}>
   <div class="save-info settings-title-inline">
-    {#if $configDirty}
+    {#if $appSettingsDirty}
       <span class="settings-status-icon warning">
         <IconAlertTriangle size={13} />
       </span>
@@ -148,7 +178,11 @@
       <span class="micro-desc">All system configurations are up-to-date.</span>
     {/if}
   </div>
-  <button class="primary" on:click={saveCurrentConfig} disabled={!$configDirty || $configSaving}>
-    {$configSaving ? 'Saving...' : 'Save Settings'}
+  {#if $appSettingsError}
+    <span class="status-label unsaved" role="alert">{$appSettingsError}</span>
+  {/if}
+  <button class="primary" on:click={saveSettings} disabled={!$appSettingsDirty || $appSettingsSaving}>
+    {$appSettingsSaving ? 'Saving...' : 'Save Settings'}
   </button>
 </div>
+{/if}

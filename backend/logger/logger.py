@@ -5,14 +5,15 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from runtime_context import WorkspaceContext, get_runtime_context, try_get_runtime_context
-from utils import utc_now_str
+from utils import get_app_settings, utc_now_str
+from app_paths import get_app_paths
 
 import sys
 if getattr(sys, "frozen", False):
     PROJECT_ROOT = Path(sys.executable).parent
 else:
     PROJECT_ROOT = Path(__file__).resolve().parents[2]
-STARTUP_LOGS_DIR = PROJECT_ROOT / "logs" / "startup"
+STARTUP_LOGS_DIR = get_app_paths().logs_dir / "startup"
 RAW_LOGS_DIR = STARTUP_LOGS_DIR / "raw"
 STRUCTURED_LOGS_DIR = STARTUP_LOGS_DIR / "structured"
 
@@ -100,8 +101,9 @@ def configure_logging(ctx: WorkspaceContext | None = None, force: bool = False):
 
     formatter = JSONFormatter()
     runtime = ctx or try_get_runtime_context()
+    level = getattr(logging, get_app_settings()["logging"]["level"])
     for logger, (filename, max_bytes, backup_count) in _LOGGER_SPECS.items():
-        logger.setLevel(logging.INFO)
+        logger.setLevel(level)
         if force:
             _remove_owned_handlers(logger)
         if any(getattr(handler, "_lmz_owned", False) for handler in logger.handlers):
@@ -124,9 +126,6 @@ def configure_logging(ctx: WorkspaceContext | None = None, force: bool = False):
 
 def reconfigure_logging(ctx: WorkspaceContext | None = None):
     configure_logging(ctx, force=True)
-
-
-configure_logging()
 
 
 def _log(logger, level, message, **kwargs):

@@ -1,7 +1,7 @@
 const DEFAULT_API_BASE = 'http://localhost:8000';
 const configuredApiBase = import.meta.env.VITE_API_BASE;
 const API_BASE = import.meta.env.DEV && configuredApiBase === undefined ? '' : (configuredApiBase || DEFAULT_API_BASE);
-const STARTUP_RETRY_MS = 15000;
+const STARTUP_RETRY_MS = 60000;
 const STARTUP_RETRY_INITIAL_DELAY_MS = 250;
 const STARTUP_RETRY_MAX_DELAY_MS = 1000;
 
@@ -72,7 +72,7 @@ async function getApiKey() {
 export async function apiFetch(path: string, init: RequestInit = {}) {
   const method = (init.method || 'GET').toUpperCase();
   const headers = new Headers(init.headers || {});
-  if (['POST', 'PATCH', 'DELETE'].includes(method)) {
+  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
     headers.set('X-LMZ-API-KEY', await getApiKey());
   }
   return fetchWithStartupRetry(path, { ...init, headers });

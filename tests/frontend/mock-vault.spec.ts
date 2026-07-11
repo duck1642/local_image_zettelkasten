@@ -1,5 +1,6 @@
 import { expect, test, type Page, type Route } from '@playwright/test';
 import manifestData from '../fixtures/mock-vault/manifest.json';
+import { installAppStateRoutes, makeAppSettings } from './app-state-fixture';
 
 type MockItem = {
   hash: string;
@@ -118,6 +119,8 @@ async function installMockVaultApi(
     logClearFails?: boolean;
     onLogStream?: (url: URL) => Promise<void> | void;
     logEntriesForStream?: (url: URL) => MockLogEntry[];
+    appSettingsPutStatus?: number;
+    workspaceLoadLegacy?: boolean;
   } = {}
 ) {
   let items = cloneItems();
@@ -171,7 +174,7 @@ async function installMockVaultApi(
     {
       id: 'default',
       name: 'Default',
-      config_path: 'C:/Repo/config/config.yaml',
+      config_path: 'C:/Users/Test/.lmz/default/config.yaml',
       active: true,
       exists: true,
       managed: false,
@@ -215,25 +218,9 @@ async function installMockVaultApi(
       item_count: 2
     }
   ];
-  const appConfig = {
-    _runtime: {
-      config_path: 'C:/ObsidianVault/lmz/config.yaml',
-      config_root: 'C:/ObsidianVault/lmz',
-      topic_root: 'C:/ObsidianVault/lmz/data/topics',
-      workspace_mode: 'lmz',
-      workspace_label: 'LMZ workspace',
-      active_vault: 'default',
-      active_vault_name: 'Default',
-      active_vault_root: 'C:/ObsidianVault/lmz/data/vaults/default'
-    },
-    ui: {
-      vault_layout_mode: 'masonry',
-      vault_tile_min_width: 190,
-      inspector_width: 360,
-      inspector_visible: true,
-      ram_track_enabled: true
-    }
-  };
+  const appSettings = makeAppSettings('masonry');
+  appSettings.ui.inspector_width = 360;
+  appSettings.ui.ram_tracking_enabled = true;
 
   await page.route('**/api/items**', async (route) => {
     const request = route.request();
@@ -281,10 +268,18 @@ async function installMockVaultApi(
     });
   });
 
-  await page.route('**/api/config', async (route) => fulfillJson(route, appConfig));
+  await installAppStateRoutes(page, appSettings, { putStatus: options.appSettingsPutStatus });
   await page.route('**/api/workspaces**', async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    if (/\/api\/workspaces\/[^/]+\/load$/.test(url.pathname) && request.method() === 'POST') {
+      if (options.workspaceLoadLegacy) {
+        return fulfillJson(route, {
+          detail: { code: 'unsupported_workspace_config', message: 'unknown fields: tagging, ui' }
+        }, 422);
+      }
+      return fulfillJson(route, { status: 'success', active_workspace: 'default', active_vault: 'default' });
+    }
     if (url.pathname === '/api/workspaces' && request.method() === 'GET') {
       return fulfillJson(route, { active: workspaceActive, items: workspaceItems });
     }
@@ -851,6 +846,8 @@ async function openMockVault(
     logClearFails?: boolean;
     onLogStream?: (url: URL) => Promise<void> | void;
     logEntriesForStream?: (url: URL) => MockLogEntry[];
+    appSettingsPutStatus?: number;
+    workspaceLoadLegacy?: boolean;
   } = {}
 ) {
   await installMockVaultApi(page, options);
@@ -1339,14 +1336,61 @@ test('settings maintenance actions call existing endpoints and show compact stat
   expect(calls).toEqual(['auth', 'metadata', 'review']);
 });
 
-test('settings shows workspace paths from config runtime metadata', async ({ page }) => {
+test('launcher reports legacy workspace configs as an explicit adoption case', async ({ page }) => {
+  await installMockVaultApi(page, { workspaceLoadLegacy: true });
+  await page.goto('/');
+  await page.locator('.launcher-workspace-row').first().click();
+  await expect(page.getByText(/Unsupported legacy workspace config/)).toBeVisible();
+  await expect(page.getByText(/explicit content adoption/)).toBeVisible();
+});
+
+test('general settings persist webview controls and gate the context menu', async ({ page }) => {
+  await openMockVault(page);
+  const contextMenuAllowedBefore = await page.evaluate(() =>
+    window.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+  );
+  expect(contextMenuAllowedBefore).toBe(false);
+  const printAllowed = await page.evaluate(() =>
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', ctrlKey: true, bubbles: true, cancelable: true }))
+  );
+  const navigationAllowed = await page.evaluate(() =>
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', altKey: true, bubbles: true, cancelable: true }))
+  );
+  expect(printAllowed).toBe(false);
+  expect(navigationAllowed).toBe(false);
+
+  await page.getByRole('button', { name: /Settings/ }).click();
+  await page.getByLabel('Enable developer tools').check();
+  await page.getByLabel('Enable right-click context menu').check();
+  await page.getByRole('button', { name: 'Save Settings' }).click();
+  await expect(page.getByText('All system configurations are up-to-date.')).toBeVisible();
+
+  const contextMenuAllowedAfter = await page.evaluate(() =>
+    window.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+  );
+  expect(contextMenuAllowedAfter).toBe(true);
+});
+
+test('failed app-settings saves retain the dirty draft and show the conflict', async ({ page }) => {
+  await openMockVault(page, { appSettingsPutStatus: 412 });
+  await page.getByRole('button', { name: /Settings/ }).click();
+  await page.getByLabel('Enable developer tools').check();
+  await page.getByRole('button', { name: 'Save Settings' }).click();
+
+  await expect(page.getByRole('alert')).toContainText('App settings changed since they were loaded');
+  await expect(page.getByText('You have unsaved changes.')).toBeVisible();
+  await expect(page.getByLabel('Enable developer tools')).toBeChecked();
+});
+
+test('settings shows the active workspace and vault from the runtime session', async ({ page }) => {
   await openMockVault(page);
   await page.getByRole('button', { name: /Settings/ }).click();
   await page.getByRole('button', { name: 'Workspace' }).click();
 
-  await expect(page.getByText('LMZ workspace', { exact: true })).toBeVisible();
-  await expect(page.getByText('C:/ObsidianVault/lmz/config.yaml').first()).toBeVisible();
+  await expect(page.getByText('Active Workspace Session')).toBeVisible();
+  await expect(page.getByText('C:/ObsidianVault/lmz', { exact: true }).first()).toBeVisible();
   await expect(page.getByText('C:/ObsidianVault/lmz/data/topics')).toBeVisible();
+  await expect(page.getByText('C:/ObsidianVault/lmz/data/vaults/default')).toBeVisible();
 });
 
 test('settings registers and activates workspaces for next restart', async ({ page }) => {

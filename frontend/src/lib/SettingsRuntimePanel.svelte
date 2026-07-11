@@ -3,7 +3,7 @@
   export let runtime: any;
 </script>
 
-{#if runtime}
+{#if runtime?.loaded && runtime.workspace && runtime.vault}
   <div class="workspace-panel">
     <div class="settings-panel-header">
       <h4 class="settings-section-title settings-title-inline">
@@ -15,23 +15,17 @@
       <span class="active-badge">Online</span>
     </div>
     <div class="workspace-grid">
-      <span>Session Mode</span>
-      <strong>{runtime.workspace_label || runtime.workspace_mode || 'Default Workspace'}</strong>
-      
-      <span>Config File</span>
-      <code class="settings-code">{runtime.config_path}</code>
-      
       <span>Root Path</span>
-      <code class="settings-code">{runtime.config_root}</code>
+      <code class="settings-code">{runtime.workspace.root}</code>
       
       <span>Topics Dir</span>
-      <code class="settings-code">{runtime.topic_root}</code>
+      <code class="settings-code">{runtime.workspace.topics_root}</code>
       
       <span>Media Vault</span>
-      <strong>{runtime.active_vault_name || runtime.active_vault || 'Default'}</strong>
+      <strong>{runtime.vault.name || runtime.vault.id || 'Default'}</strong>
       
       <span>Vault Path</span>
-      <code class="settings-code">{runtime.active_vault_root}</code>
+      <code class="settings-code">{runtime.vault.root}</code>
     </div>
     {#if runtime.env_override}
       <div class="restart-banner settings-inline-banner">

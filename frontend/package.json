@@ -8,7 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "check": "svelte-check --tsconfig ./tsconfig.app.json && tsc -p tsconfig.node.json",
-    "test:playwright": "node scripts/run-playwright.mjs",
+    "test:playwright": "cd .. && python tests/generators/generate_test_vault.py --output tests/generated/001-playwright-scale --items 800 --groups 80 --review 8 --video-ratio 0.2 --artists 30 --topics 20 --seed 101 --force && cd frontend && node scripts/run-playwright.mjs",
     "test:playwright:headed": "node scripts/run-playwright.mjs --headed",
     "test:playwright:ui": "node scripts/run-playwright.mjs --ui",
     "test:large-vault": "node scripts/run-playwright.mjs large-vault.spec.ts",

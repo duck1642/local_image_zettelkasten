@@ -3,9 +3,9 @@ import threading
 from dataclasses import dataclass
 from pathlib import Path
 
-import yaml
-
-from config_migrations import migrate_workspace_config
+from app_paths import get_app_paths
+from config_repository import WorkspaceConfigRepository
+from config_schema import VaultEntry
 
 
 import sys
@@ -62,37 +62,27 @@ def _slug_vault_id(value: str) -> str:
 
 
 def _resolve_config_path(config_path: str | Path | None = None) -> Path:
+    data_root = get_app_paths().data_root
     if config_path is not None:
         candidate = Path(config_path).expanduser()
-        return (candidate if candidate.is_absolute() else PROJECT_ROOT / candidate).resolve()
+        return (candidate if candidate.is_absolute() else data_root / candidate).resolve()
 
     env_path = os.environ.get("LMZ_CONFIG_PATH")
     if env_path:
         candidate = Path(env_path).expanduser()
-        return (candidate if candidate.is_absolute() else PROJECT_ROOT / candidate).resolve()
+        return (candidate if candidate.is_absolute() else data_root / candidate).resolve()
 
-    try:
-        from workspaces import active_workspace_config_path
+    from workspaces import active_workspace_config_path
 
-        return active_workspace_config_path()
-    except Exception:
-        return PROJECT_ROOT / "config" / "config.yaml"
+    return active_workspace_config_path()
 
 
 def _config_root_for(config_path: Path) -> Path:
-    if config_path.parent == PROJECT_ROOT / "config":
-        return PROJECT_ROOT
     return config_path.parent
 
 
-def _load_config(config_path: Path) -> dict:
-    if not config_path.exists():
-        return {}
-    try:
-        data = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
-    except Exception:
-        return {}
-    return data if isinstance(data, dict) else {}
+def _load_config(config_path: Path):
+    return WorkspaceConfigRepository(config_path).read().value
 
 
 def _resolve_from_root(root: Path, path_str: str | Path) -> Path:
@@ -100,9 +90,11 @@ def _resolve_from_root(root: Path, path_str: str | Path) -> Path:
     return value.resolve() if value.is_absolute() else (root / value).resolve()
 
 
-def _vault_context(root: Path, vault_id: str, entry: dict) -> VaultContext:
-    name = str(entry.get("name") or vault_id)
-    vault_root = _resolve_from_root(root, str(entry.get("root") or f"data/vaults/{vault_id}"))
+def _vault_context(root: Path, vault_id: str, entry: VaultEntry) -> VaultContext:
+    name = entry.name
+    vault_root = _resolve_from_root(root, entry.root)
+    if vault_root == root or not vault_root.is_relative_to(root):
+        raise ValueError(f"vault root escapes workspace: {entry.root}")
     vault_dir = vault_root / "vault"
     return VaultContext(
         id=vault_id,
@@ -127,25 +119,18 @@ def _vault_context(root: Path, vault_id: str, entry: dict) -> VaultContext:
 def build_runtime_context(config_path: str | Path | None = None, active_vault_id: str | None = None) -> WorkspaceContext:
     resolved_config_path = _resolve_config_path(config_path)
     root = _config_root_for(resolved_config_path)
-    migrate_workspace_config(resolved_config_path)
     config = _load_config(resolved_config_path)
-    paths = config.get("paths", {}) if isinstance(config.get("paths"), dict) else {}
-    if "models" in paths:
-        raise ValueError("paths.models is no longer supported; models are stored in app data/models")
-    vaults = config.get("vaults", {}) if isinstance(config.get("vaults"), dict) else {}
-    if not vaults:
-        raise RuntimeError("config.yaml must define vaults")
-
-    active_id = _slug_vault_id(str(active_vault_id or config.get("active_vault") or "default"))
+    vaults = config.vaults
+    active_id = _slug_vault_id(str(active_vault_id or config.active_vault))
     if active_id not in vaults:
-        active_id = "default" if "default" in vaults else sorted(vaults.keys())[0]
-    active_vault = _vault_context(root, active_id, vaults.get(active_id) or {})
+        raise ValueError(f"unknown vault: {active_id}")
+    active_vault = _vault_context(root, active_id, vaults[active_id])
 
     return WorkspaceContext(
         config_path=resolved_config_path,
         root=root,
         topics_dir=(root / "data" / "topics").resolve(),
-        models_dir=(PROJECT_ROOT / "data" / "models").resolve(),
+        models_dir=get_app_paths().models_dir,
         workspace_db_path=root / "data" / "workspace.db",
         active_vault=active_vault,
         vaults_configured=bool(vaults),

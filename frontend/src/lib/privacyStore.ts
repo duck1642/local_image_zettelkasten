@@ -1,16 +1,7 @@
-import { writable } from 'svelte/store';
+import { derived } from 'svelte/store';
+import { appSettings } from './appSettingsStore';
 
-const STORAGE_KEY = 'lmz:privacy-blur';
-
-function readInitialPrivacyBlur() {
-  if (typeof localStorage === 'undefined') return false;
-  return localStorage.getItem(STORAGE_KEY) === '1';
-}
-
-export const privacyBlur = writable(readInitialPrivacyBlur());
-
-if (typeof localStorage !== 'undefined') {
-  privacyBlur.subscribe((enabled) => {
-    localStorage.setItem(STORAGE_KEY, enabled ? '1' : '0');
-  });
-}
+export const privacyBlur = derived(
+  appSettings,
+  ($settings) => Boolean($settings?.ui?.privacy_blur)
+);

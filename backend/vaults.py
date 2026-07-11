@@ -6,8 +6,8 @@ import tempfile
 import zipfile
 from pathlib import Path
 
-import yaml
-
+from config_repository import WorkspaceConfigRepository
+from config_schema import WorkspaceConfig
 from db.sqlite_operator import allocate_storage_id, init_database
 from media_lifecycle import remove_stale_derived_files, storage_lifecycle_lock
 from path_policy import vault_root_is_inside_workspace, vault_root_is_usable
@@ -68,15 +68,14 @@ def _config_root(ctx: WorkspaceContext | None = None) -> Path:
 
 
 def _read_config(ctx: WorkspaceContext | None = None) -> dict:
-    config_path = _config_path(ctx)
-    if not config_path.exists():
-        return {}
-    data = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
-    return data if isinstance(data, dict) else {}
+    return WorkspaceConfigRepository(_config_path(ctx)).read().value.model_dump(mode="json")
 
 
 def _write_config(config: dict, ctx: WorkspaceContext | None = None):
-    atomic_write_text(_config_path(ctx), yaml.safe_dump(config, sort_keys=False, allow_unicode=True))
+    repository = WorkspaceConfigRepository(_config_path(ctx))
+    current = repository.read()
+    value = WorkspaceConfig.model_validate(config)
+    repository.replace(value, expected_etag=current.etag)
 
 
 def _resolve_config_path(path: str | Path, ctx: WorkspaceContext | None = None) -> Path:
@@ -814,7 +813,7 @@ def _repair_missing_wd_cache(conn: sqlite3.Connection, ctx: WorkspaceContext, li
     from md_generator import generate_markdown
     from metadata_index import safe_reindex_item_metadata
     from tagging.service import tag_media
-    from utils import asset_path_for, atomic_write_text, get_config, note_path_for, wd_tag_cache_path_for
+    from utils import asset_path_for, atomic_write_text, get_app_settings, note_path_for, wd_tag_cache_path_for
 
     checked = 0
     tagged = 0
@@ -854,7 +853,7 @@ def _repair_missing_wd_cache(conn: sqlite3.Connection, ctx: WorkspaceContext, li
                 skipped_missing_asset += 1
                 continue
             try:
-                result = tag_media(asset_path, item_hash=item_hash, config=get_config(), storage_id=storage_id, ctx=ctx)
+                result = tag_media(asset_path, item_hash=item_hash, config=get_app_settings(), storage_id=storage_id, ctx=ctx)
                 atomic_write_text(cache_path, json.dumps(result.to_dict(), indent=2, ensure_ascii=False))
                 if result.status == "ok":
                     tagged += 1

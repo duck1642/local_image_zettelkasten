@@ -35,19 +35,24 @@ async function waitFor(url, timeoutMs = 30000) {
 
 async function ensureBackend() {
   try {
-    await waitFor(`${apiBase}/api/config`, 1000);
+    await waitFor(`${apiBase}/api/app/settings`, 1000);
     return;
   } catch {
     const out = fs.openSync(path.join(workspace, 'backend-smoke.out.log'), 'a');
     const err = fs.openSync(path.join(workspace, 'backend-smoke.err.log'), 'a');
     backendProc = spawn(process.platform === 'win32' ? 'python' : 'python3', ['web_api.py'], {
       cwd: path.join(root, 'backend'),
-      env: { ...process.env, LMZ_CONFIG_PATH: path.join(workspace, 'config.yaml'), LMZ_AUTH_ROOT: path.join(workspace, 'app-auth'), LMZ_DISABLE_RELOAD: '1' },
+      env: {
+        ...process.env,
+        LMZ_CONFIG_PATH: path.join(workspace, 'config.yaml'),
+        LMZ_DATA_ROOT: path.join(workspace, '.lmz-app'),
+        LMZ_DISABLE_RELOAD: '1'
+      },
       stdio: ['ignore', out, err],
       windowsHide: true
     });
     fs.writeFileSync(path.join(workspace, 'backend-smoke.pid'), String(backendProc.pid));
-    await waitFor(`${apiBase}/api/config`, 30000);
+    await waitFor(`${apiBase}/api/app/settings`, 30000);
   }
 }
 
@@ -80,7 +85,7 @@ async function apiKey() {
 
 async function apiJson(endpoint, init = {}) {
   const headers = new Headers(init.headers || {});
-  if (['POST', 'PATCH', 'DELETE'].includes(String(init.method || 'GET').toUpperCase())) {
+  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(String(init.method || 'GET').toUpperCase())) {
     headers.set('X-LMZ-API-KEY', await apiKey());
   }
   if (init.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');

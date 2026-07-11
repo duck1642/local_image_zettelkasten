@@ -6,7 +6,7 @@ from urllib.parse import urlparse
 
 from downloaders.media_filter import valid_media_files
 from runtime_context import get_runtime_context
-from utils import get_config, get_pixiv_refresh_token, get_platform_cookie_path
+from utils import get_app_settings, get_pixiv_refresh_token, get_platform_cookie_path
 
 
 _AUTH_STATUS_LOGGED = set()
@@ -14,8 +14,7 @@ _AUTH_STATUS_LOGGED = set()
 
 def _timeout(name: str, default: int) -> int:
     try:
-        value = get_config().get("external_tools", {}).get("timeouts", {}).get(name, default)
-        return max(1, int(value))
+        return max(1, int(default))
     except (TypeError, ValueError):
         return default
 
@@ -39,8 +38,8 @@ def _platform_for_url(url: str) -> str:
 
 
 def _base_args(url: str) -> list:
-    config = get_config()
-    ext_tools = config.get('external_tools', {})
+    config = get_app_settings()
+    ext_tools = config.get('network', {})
     args = []
     platform = _platform_for_url(url)
     cookie_info = get_platform_cookie_path(platform)
@@ -223,7 +222,7 @@ def _minimal_download_info(url: str) -> dict:
 
 
 def download_gallery(url: str, metadata_info: dict = None) -> tuple[bool, dict]:
-    config = get_config()
+    config = get_app_settings()
     url_hash = hashlib.sha256(url.encode()).hexdigest()[:16]
     session_dir = get_runtime_context().active_vault.online_ingest_dir / url_hash
     session_dir.mkdir(parents=True, exist_ok=True)

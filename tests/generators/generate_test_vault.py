@@ -222,53 +222,13 @@ def _frontmatter(item: dict, topics: list[str], wd_tags: dict) -> str:
 
 def _config() -> dict:
     return {
-        "external_tools": {
-            "proxy": "",
-            "user_agent": "LMZ generated test vault",
-        },
-        "firewall": {
-            "allowed_extensions": [".jpg", ".jpeg", ".png", ".gif", ".webp", ".jfif", ".mp4", ".webm", ".ogv"],
-            "allowed_mimes": ["image/jpeg", "image/png", "image/gif", "image/webp", "video/mp4", "video/webm", "video/ogg"],
-        },
-        "hash_algorithm": "sha256",
+        "schema_version": 1,
         "active_vault": "default",
         "vaults": {
             "default": {
                 "name": "Default",
                 "root": "data/vaults/default",
             },
-        },
-        "ingestion_concurrency": {
-            "global_max_workers": 2,
-            "platforms": {"default": {"workers": 1, "jitter_range": [0, 0]}},
-        },
-        "log_level": "INFO",
-        "processing": {
-            "background_preset": "white",
-            "custom_color": [255, 255, 255],
-            "flatten_transparency": True,
-        },
-        "tagging": {
-            "device": "cpu",
-            "display_source": "yaml",
-            "enabled": False,
-            "fail_ingestion_on_error": False,
-            "max_tags": 5,
-            "model_repo": "mock/model",
-            "threshold": 0.35,
-            "video": {
-                "enabled": False,
-                "frame_count": 1,
-                "merge_high_confidence": 0.75,
-                "merge_min_frames": 1,
-            },
-        },
-        "ui": {
-            "inspector_visible": True,
-            "inspector_width": 360,
-            "ram_track_enabled": False,
-            "vault_layout_mode": "masonry",
-            "vault_tile_min_width": 190,
         },
     }
 

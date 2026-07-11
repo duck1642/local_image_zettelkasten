@@ -14,6 +14,8 @@
   import { queueStats, reviewCount, reviewStats, startSharedStatsPolling } from './lib/statsStore';
   import { apiFetch } from './lib/api';
   import { privacyBlur } from './lib/privacyStore';
+  import { appSettings, loadAppSettings } from './lib/appSettingsStore';
+  import { refreshRuntimeSession } from './lib/runtimeStore';
   import { applyMainWindowLayout, safeConfirm } from './lib/windowLayout';
   import {
     IconFolder,
@@ -46,6 +48,7 @@
     activeWorkspaceId = event.detail.workspace_id;
     activeVaultId = event.detail.vault_id || '';
     workspaceLoaded = true;
+    void refreshRuntimeSession().catch((error) => uiLog('WARNING', 'Runtime session refresh failed', { error: String(error) }));
     uiLog('INFO', `Workspace loaded: ${activeWorkspaceId}, vault: ${activeVaultId}`);
     void applyMainWindowLayout();
   }
@@ -80,6 +83,19 @@
   }
 
   function handleGlobalKeydown(event: KeyboardEvent) {
+    const key = event.key.toLowerCase();
+    const blockedBrowserShortcut = event.ctrlKey && ['l', 'o', 'p', 'r', 's', 'u'].includes(key);
+    const blockedNavigationShortcut = event.altKey && ['arrowleft', 'arrowright'].includes(key);
+    if (blockedBrowserShortcut || blockedNavigationShortcut) {
+      event.preventDefault();
+      return;
+    }
+    const devtoolsShortcut = event.key === 'F12' || (event.ctrlKey && event.shiftKey && key === 'i');
+    if (devtoolsShortcut) {
+      event.preventDefault();
+      if ($appSettings?.webview.devtools_enabled) void toggleNativeDevtools();
+      return;
+    }
     if (event.key !== 'F5') return;
     event.preventDefault();
     if (event.ctrlKey) {
@@ -89,6 +105,20 @@
     }
     uiLog('INFO', 'F5 pressed: refreshing active view', { tab: activeTab });
     window.dispatchEvent(new CustomEvent('lmz:refresh', { detail: { tab: activeTab } }));
+  }
+
+  function handleContextMenu(event: MouseEvent) {
+    if (!$appSettings?.webview.context_menu_enabled) event.preventDefault();
+  }
+
+  async function toggleNativeDevtools() {
+    if (!(window as any).__TAURI_INTERNALS__) return;
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('toggle_devtools');
+    } catch (error) {
+      uiLog('WARNING', 'Failed to toggle developer tools', { error: String(error) });
+    }
   }
 
   function handleIngestModeChange(event: CustomEvent<{ mode: IngestMode }>) {
@@ -251,6 +281,8 @@
 
   onMount(() => {
     uiLog('INFO', 'Svelte UI initialized and mounted');
+    void loadAppSettings().catch(() => {});
+    void refreshRuntimeSession().catch((error) => uiLog('WARNING', 'Initial runtime session refresh failed', { error: String(error) }));
     let unlistenClose: (() => void) | null = null;
     let unlistenDrop: (() => void) | null = null;
     let unlistenScale: (() => void) | null = null;
@@ -370,7 +402,7 @@
   });
 </script>
 
-<svelte:window on:keydown={handleGlobalKeydown} />
+<svelte:window on:keydown={handleGlobalKeydown} on:contextmenu={handleContextMenu} />
 
 {#if !workspaceLoaded}
   <Launcher on:loaded={handleWorkspaceLoaded} />

@@ -16,6 +16,7 @@ BACKEND = ROOT / "backend"
 
 def fresh_api(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     monkeypatch.delenv("LMZ_CONFIG_PATH", raising=False)
+    monkeypatch.setenv("LMZ_DATA_ROOT", str(tmp_path / ".lmz"))
     monkeypatch.setenv("LMZ_AUTH_ROOT", str(tmp_path / "app-auth"))
     if str(ROOT) not in sys.path:
         sys.path.insert(0, str(ROOT))
@@ -48,13 +49,20 @@ def fresh_api(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
             del sys.modules[name]
     app_module = importlib.import_module("api.app")
     common = importlib.import_module("api.common")
+    from app_paths import get_app_paths
+    from config_repository import bootstrap_data_home
+
+    bootstrap_data_home(get_app_paths())
     monkeypatch.setattr(common, "_api_key_path", lambda: tmp_path / "secrets" / ".api_key")
     return app_module
 
 
 def write_registry(path: Path, active: str, workspaces: dict):
+    for entry in workspaces.values():
+        if entry.get("config_path") == "config/config.yaml":
+            entry["config_path"] = "default/config.yaml"
     path.write_text(
-        yaml.safe_dump({"active": active, "workspaces": workspaces}, sort_keys=False),
+        yaml.safe_dump({"schema_version": 1, "active_workspace": active, "workspaces": workspaces}, sort_keys=False),
         encoding="utf-8",
     )
 
@@ -63,6 +71,7 @@ def workspace_config(path: Path, vault_root: str = "data/vaults/default"):
     path.write_text(
         yaml.safe_dump(
             {
+                "schema_version": 1,
                 "active_vault": "default",
                 "vaults": {"default": {"name": "Default", "root": vault_root}},
             },
@@ -107,9 +116,9 @@ def test_launcher_mode_serves_recovery_routes_without_workspace(monkeypatch, tmp
     assert runtime_context.has_runtime_context() is False
     assert client.get("/").status_code == 200
 
-    config_response = client.get("/api/config")
-    assert config_response.status_code == 503
-    assert config_response.json()["detail"] == "Workspace not loaded"
+    settings_response = client.get("/api/app/settings")
+    assert settings_response.status_code == 200
+    assert client.get("/api/runtime/session").json() == {"loaded": False}
 
     workspace_response = client.get("/api/workspaces")
     assert workspace_response.status_code == 200
@@ -159,7 +168,7 @@ def test_launcher_mode_creates_lmz_workspace(monkeypatch, tmp_path):
         saved_config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
         assert saved_config["vaults"]["default"]["root"] == "data/vaults/default"
         assert "paths" not in saved_config
-        assert "cookies_path" not in saved_config["external_tools"]
+        assert set(saved_config) == {"schema_version", "active_vault", "vaults"}
         assert Path(payload["workspace"]["marker_path"]).exists()
         assert payload["workspace"]["managed"] is True
         assert not (parent / "lmz" / "data" / "models").exists()
@@ -233,7 +242,7 @@ def test_missing_workspace_config_load_does_not_persist_active(monkeypatch, tmp_
 
     assert response.status_code == 200
     assert response.json()["status"] == "relocate_workspace"
-    assert workspaces.load_workspace_registry()["active"] == "default"
+    assert workspaces.load_workspace_registry()["active_workspace"] == "default"
 
 
 def test_missing_vault_root_load_enables_vault_relocation(monkeypatch, tmp_path):
@@ -268,7 +277,7 @@ def test_missing_vault_root_load_enables_vault_relocation(monkeypatch, tmp_path)
     assert vaults_response.status_code == 200
     assert vaults_response.json()["items"][0]["exists"] is False
     assert client.get("/api/logs/location").json()["mode"] == "startup"
-    assert workspaces.load_workspace_registry()["active"] == "default"
+    assert workspaces.load_workspace_registry()["active_workspace"] == "default"
 
 
 def test_fresh_clone_default_workspace_initializes_missing_data(monkeypatch, tmp_path):
@@ -298,8 +307,8 @@ def test_fresh_clone_default_workspace_initializes_missing_data(monkeypatch, tmp
 
     assert response.status_code == 200
     assert response.json()["status"] == "success"
-    assert (tmp_path / "data" / "vaults" / "default" / "vault" / "assets").is_dir()
-    assert (tmp_path / "data" / "vaults" / "default" / "db" / "lmz_main.db").is_file()
+    assert (config_dir / "data" / "vaults" / "default" / "vault" / "assets").is_dir()
+    assert (config_dir / "data" / "vaults" / "default" / "db" / "lmz_main.db").is_file()
 
 
 def test_valid_workspace_load_persists_active_after_services_start(monkeypatch, tmp_path):
@@ -333,7 +342,7 @@ def test_valid_workspace_load_persists_active_after_services_start(monkeypatch, 
     assert response.json()["active_workspace"] == "ready"
     assert response.json()["active_vault"] == "default"
     assert client.get("/api/logs/location").json()["mode"] == "vault"
-    assert workspaces.load_workspace_registry()["active"] == "ready"
+    assert workspaces.load_workspace_registry()["active_workspace"] == "ready"
 
 
 def test_vault_relocation_activates_runtime_and_vault_logs(monkeypatch, tmp_path):

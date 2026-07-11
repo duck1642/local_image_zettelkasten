@@ -10,6 +10,7 @@ BACKEND = ROOT / "backend"
 
 def fresh_api(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     monkeypatch.delenv("LMZ_CONFIG_PATH", raising=False)
+    monkeypatch.setenv("LMZ_DATA_ROOT", str(tmp_path / ".lmz"))
     if str(ROOT) not in sys.path:
         sys.path.insert(0, str(ROOT))
     if str(BACKEND) not in sys.path:
@@ -41,12 +42,18 @@ def fresh_api(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
             del sys.modules[name]
     app_module = importlib.import_module("api.app")
     common = importlib.import_module("api.common")
+    from app_paths import get_app_paths
+    from config_repository import bootstrap_data_home
+    bootstrap_data_home(get_app_paths())
     monkeypatch.setattr(common, "_api_key_path", lambda: tmp_path / "secrets" / ".api_key")
     return app_module
 
 def write_registry(path: Path, active: str, workspaces: dict):
+    for entry in workspaces.values():
+        if entry.get("config_path") == "config/config.yaml":
+            entry["config_path"] = "default/config.yaml"
     path.write_text(
-        yaml.safe_dump({"active": active, "workspaces": workspaces}, sort_keys=False),
+        yaml.safe_dump({"schema_version": 1, "active_workspace": active, "workspaces": workspaces}, sort_keys=False),
         encoding="utf-8",
     )
 
@@ -54,6 +61,7 @@ def workspace_config(path: Path, vault_root: str):
     path.write_text(
         yaml.safe_dump(
             {
+                "schema_version": 1,
                 "active_vault": "default",
                 "vaults": {"default": {"name": "Default", "root": vault_root}},
             },
@@ -80,7 +88,7 @@ def test_missing_vault_root_returns_503_and_does_not_create_files(monkeypatch, t
     missing_vault_root = ws_root / "data" / "vaults" / "default"
 
     config_path = ws_root / "config.yaml"
-    workspace_config(config_path, vault_root=str(missing_vault_root))
+    workspace_config(config_path, vault_root="data/vaults/default")
 
     write_registry(
         registry_path,
@@ -125,7 +133,7 @@ def test_missing_vault_root_returns_503_and_does_not_create_files(monkeypatch, t
     assert not missing_vault_root.exists()
 
 
-def test_config_save_rejects_absolute_vault_root(monkeypatch, tmp_path):
+def test_removed_raw_config_api_is_not_available(monkeypatch, tmp_path):
     app_module = fresh_api(monkeypatch, tmp_path)
     workspaces = importlib.import_module("workspaces")
 
@@ -153,18 +161,16 @@ def test_config_save_rejects_absolute_vault_root(monkeypatch, tmp_path):
     assert load.status_code == 200
     assert load.json()["status"] == "success"
 
-    outside_root = tmp_path / "outside"
     response = client.post(
         "/api/config",
-        json={"active_vault": "default", "vaults": {"default": {"name": "Default", "root": str(outside_root)}}},
+        json={"schema_version": 1, "active_vault": "default", "vaults": {}},
         headers={"X-LMZ-API-KEY": key},
     )
 
-    assert response.status_code == 400
-    assert "vaults.default.root must be relative" in response.text
+    assert response.status_code == 404
 
 
-def test_config_save_rejects_legacy_models_path(monkeypatch, tmp_path):
+def test_workspace_schema_rejects_legacy_models_path(monkeypatch, tmp_path):
     app_module = fresh_api(monkeypatch, tmp_path)
     workspaces = importlib.import_module("workspaces")
 
@@ -192,21 +198,17 @@ def test_config_save_rejects_legacy_models_path(monkeypatch, tmp_path):
     assert load.status_code == 200
     assert load.json()["status"] == "success"
 
-    response = client.post(
-        "/api/config",
-        json={
+    from config_schema import WorkspaceConfig
+    with pytest.raises(ValueError, match="paths"):
+        WorkspaceConfig.model_validate({
+            "schema_version": 1,
             "active_vault": "default",
             "vaults": {"default": {"name": "Default", "root": "data/vaults/default"}},
             "paths": {"models": "data/models", "secrets": "data/secrets"},
-        },
-        headers={"X-LMZ-API-KEY": key},
-    )
-
-    assert response.status_code == 400
-    assert "paths.models is no longer supported" in response.text
+        })
 
 
-def test_delete_vault_refuses_outside_workspace_root(monkeypatch, tmp_path):
+def test_workspace_load_rejects_vault_outside_workspace_root(monkeypatch, tmp_path):
     app_module = fresh_api(monkeypatch, tmp_path)
     workspaces = importlib.import_module("workspaces")
 
@@ -221,6 +223,7 @@ def test_delete_vault_refuses_outside_workspace_root(monkeypatch, tmp_path):
     config_path.write_text(
         yaml.safe_dump(
             {
+                "schema_version": 1,
                 "active_vault": "default",
                 "vaults": {
                     "default": {"name": "Default", "root": "data/vaults/default"},
@@ -245,12 +248,8 @@ def test_delete_vault_refuses_outside_workspace_root(monkeypatch, tmp_path):
     client = TestClient(app_module.app)
     key = api_key(client)
     load = client.post("/api/workspaces/ready/load", headers={"X-LMZ-API-KEY": key})
-    assert load.status_code == 200
-    assert load.json()["status"] == "success"
-
-    response = client.delete("/api/vaults/bad?confirm=true", headers={"X-LMZ-API-KEY": key})
-
-    assert response.status_code == 400
+    assert load.status_code == 422
+    assert load.json()["detail"]["code"] == "unsupported_workspace_config"
     assert outside_root.exists()
 
 def test_vault_merge_safety_and_defaults(monkeypatch, tmp_path):
@@ -273,6 +272,7 @@ def test_vault_merge_safety_and_defaults(monkeypatch, tmp_path):
     config_path.write_text(
         yaml.safe_dump(
             {
+                "schema_version": 1,
                 "active_vault": "active",
                 "vaults": {
                     "active": {"name": "Active", "root": "data/vaults/active"},

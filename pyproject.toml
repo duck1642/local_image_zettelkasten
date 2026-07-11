@@ -18,6 +18,7 @@ dependencies = [
     "onnxruntime>=1.17.0",
     "pillow>=9.0.0",
     "playwright",
+    "pydantic>=2",
     "psutil",
     "python-multipart",
     "pyyaml",
@@ -44,6 +45,7 @@ tauri = [
 
 [project.scripts]
 lmz = "core:main"
+lmz-adopt-content = "content_adoption:main"
 
 [tool.setuptools]
 package-dir = {"" = "backend"}
@@ -56,6 +58,10 @@ py-modules = [
     "processor",
     "utils",
     "validators",
+    "app_paths",
+    "config_repository",
+    "config_schema",
+    "content_adoption",
 ]
 
 [tool.setuptools.packages.find]

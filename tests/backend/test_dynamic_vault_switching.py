@@ -13,7 +13,20 @@ FIXTURE = ROOT / "tests" / "fixtures" / "mock-vault"
 def fresh_backend(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *module_names: str):
     work = tmp_path / "mock-vault"
     shutil.copytree(FIXTURE, work)
+    legacy = yaml.safe_load((work / "config.yaml").read_text(encoding="utf-8"))
+    (work / "config.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "schema_version": 1,
+                "active_vault": legacy.get("active_vault", "default"),
+                "vaults": legacy["vaults"],
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
     monkeypatch.setenv("LMZ_CONFIG_PATH", str(work / "config.yaml"))
+    monkeypatch.setenv("LMZ_DATA_ROOT", str(tmp_path / ".lmz"))
     monkeypatch.setenv("LMZ_AUTH_ROOT", str(tmp_path / "app-auth"))
     if str(ROOT) not in sys.path:
         sys.path.insert(0, str(ROOT))
@@ -43,6 +56,10 @@ def fresh_backend(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *module_names
             "workspaces",
         } or name.startswith(("api.", "logger", "db.", "tagging", "downloaders")):
             del sys.modules[name]
+    from app_paths import get_app_paths
+    from config_repository import bootstrap_data_home
+
+    bootstrap_data_home(get_app_paths())
     return [importlib.import_module(name) for name in module_names]
 
 
@@ -110,6 +127,11 @@ def test_dynamic_workspace_switching(monkeypatch, tmp_path):
 
     # Patch the registry path
     monkeypatch.setattr(workspaces, "REGISTRY_PATH", mock_registry_yaml)
+    workspaces.save_workspace_registry({
+        "schema_version": 1,
+        "active_workspace": "default",
+        "workspaces": {"default": {"name": "Default", "config_path": str(tmp_path / "mock-vault" / "config.yaml")}},
+    })
 
     # Create two workspace config directories and files
     ws1_dir = tmp_path / "workspace_1"
@@ -121,6 +143,7 @@ def test_dynamic_workspace_switching(monkeypatch, tmp_path):
     ws2_config = ws2_dir / "config.yaml"
 
     default_config = {
+        "schema_version": 1,
         "active_vault": "default",
         "vaults": {
             "default": {
@@ -181,6 +204,11 @@ def test_vault_list_uses_current_runtime_workspace_after_switch(monkeypatch, tmp
     )
     monkeypatch.delenv("LMZ_CONFIG_PATH", raising=False)
     monkeypatch.setattr(workspaces, "REGISTRY_PATH", mock_registry_yaml)
+    workspaces.save_workspace_registry({
+        "schema_version": 1,
+        "active_workspace": "default",
+        "workspaces": {"default": {"name": "Default", "config_path": str(tmp_path / "mock-vault" / "config.yaml")}},
+    })
 
     ws1_dir = tmp_path / "workspace_1"
     ws2_dir = tmp_path / "workspace_2"
@@ -190,6 +218,7 @@ def test_vault_list_uses_current_runtime_workspace_after_switch(monkeypatch, tmp
     ws2_config = ws2_dir / "config.yaml"
     ws1_config.write_text(
         yaml.safe_dump({
+            "schema_version": 1,
             "active_vault": "default",
             "vaults": {"default": {"name": "Default", "root": "data/vaults/default"}},
         }),
@@ -197,6 +226,7 @@ def test_vault_list_uses_current_runtime_workspace_after_switch(monkeypatch, tmp
     )
     ws2_config.write_text(
         yaml.safe_dump({
+            "schema_version": 1,
             "active_vault": "default",
             "vaults": {
                 "default": {"name": "Default", "root": "data/vaults/default"},

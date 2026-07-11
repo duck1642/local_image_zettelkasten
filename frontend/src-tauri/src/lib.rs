@@ -13,6 +13,23 @@ fn copy_file_to_clipboard(path: String) -> Result<(), String> {
     formats::FileList.write_clipboard(&paths.as_slice()).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn toggle_devtools(webview: tauri::WebviewWindow) {
+    if webview.is_devtools_open() {
+        webview.close_devtools();
+    } else {
+        webview.open_devtools();
+    }
+}
+
+fn app_logs_dir() -> Option<std::path::PathBuf> {
+    let data_root = std::env::var_os("LMZ_DATA_ROOT")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("USERPROFILE").map(|home| std::path::PathBuf::from(home).join(".lmz")))
+        .or_else(|| std::env::var_os("HOME").map(|home| std::path::PathBuf::from(home).join(".lmz")))?;
+    Some(data_root.join("app").join("logs"))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   let skip_sidecar = std::env::var("LMZ_SKIP_SIDECAR").ok().as_deref() == Some("1");
@@ -20,10 +37,12 @@ pub fn run() {
       tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
   ];
   if !skip_sidecar {
-      log_targets.push(tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Folder {
-          path: std::path::PathBuf::from("../../logs"),
-          file_name: Some("tauri".to_string()),
-      }));
+      if let Some(path) = app_logs_dir().filter(|path| path.is_dir()) {
+          log_targets.push(tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Folder {
+              path,
+              file_name: Some("tauri".to_string()),
+          }));
+      }
   }
 
   tauri::Builder::default()
@@ -43,7 +62,7 @@ pub fn run() {
         }
       }
     })
-    .invoke_handler(tauri::generate_handler![copy_file_to_clipboard])
+    .invoke_handler(tauri::generate_handler![copy_file_to_clipboard, toggle_devtools])
     .plugin(tauri_plugin_dialog::init())
     .plugin(tauri_plugin_shell::init())
     .plugin(tauri_plugin_log::Builder::default()

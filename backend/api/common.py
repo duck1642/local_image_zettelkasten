@@ -24,7 +24,7 @@ from pydantic import BaseModel
 from db.sqlite_operator import connect_database, init_database, normalize_source_url
 from db.search_manager import search_manager
 from utils import (
-    get_config, note_path_for,
+    get_app_settings, note_path_for,
     asset_path_for, calculate_file_hash, asset_url_for, wd_tag_cache_path_for
 )
 from runtime_context import RuntimeNotLoadedError, WorkspaceContext, get_runtime_context
@@ -52,7 +52,7 @@ from tagging import load_tag_cache, tag_media
 from thumbnails import ThumbnailBusyError, get_or_generate_thumbnail, thumbnail_path_for, video_thumbnail_path_for
 from utils import (
     atomic_write_text, get_cookie_auth_status,
-    get_pixiv_refresh_token, invalidate_config_cache, utc_now, utc_now_str
+    get_pixiv_refresh_token, utc_now, utc_now_str
 )
 from ingest_control import local_stop_event, online_stop_event
 from artists import (
@@ -133,9 +133,6 @@ def configure_terminal_logging():
     sys.stderr = TerminalLogger("console.log", original_stderr)
     _terminal_logging_configured = True
 
-configure_terminal_logging()
-
-
 ALLOWED_ORIGINS = {
     "http://localhost:5173",
     "http://127.0.0.1:5173",
@@ -146,7 +143,7 @@ ALLOWED_ORIGINS = {
 EXTENSION_ORIGIN_REGEX = r"^(?:chrome-extension://[a-z]{32}|moz-extension://[0-9a-f-]+)$"
 EXTENSION_ORIGIN_RE = re.compile(EXTENSION_ORIGIN_REGEX)
 
-MUTATING_METHODS = {"POST", "PATCH", "DELETE"}
+MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 LOG_FILE_NAMES = {
     "system.jsonl": ("structured", "system.jsonl"),
     "svelte.jsonl": ("structured", "svelte.jsonl"),
@@ -313,7 +310,9 @@ def _scan_auth_status_sync(reason: str = "manual") -> dict:
 
 
 def _api_key_path() -> Path:
-    return Path(__file__).resolve().parents[2] / "secrets" / ".api_key"
+    from app_paths import get_app_paths
+
+    return get_app_paths().secrets_dir / ".api_key"
 
 def _api_key() -> str:
     path = _api_key_path()

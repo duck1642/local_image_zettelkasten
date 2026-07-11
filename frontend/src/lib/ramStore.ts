@@ -1,6 +1,6 @@
 import { get, writable } from 'svelte/store';
 import { apiFetch } from './api';
-import { config, loadConfig, setRamTrackEnabled } from './configStore';
+import { appSettings, loadAppSettings, setRamTrackingEnabled } from './appSettingsStore';
 import { log as uiLog } from './logger';
 
 type RamStats = {
@@ -105,11 +105,11 @@ function stopPolling() {
 
 export function startRamTracker() {
   if (unsubscribeConfig) return unsubscribeConfig;
-  unsubscribeConfig = config.subscribe((value) => {
-    if (value?.ui?.ram_track_enabled) startPolling();
+  unsubscribeConfig = appSettings.subscribe((value) => {
+    if (value?.ui?.ram_tracking_enabled) startPolling();
     else stopPolling();
   });
-  loadConfig().catch((error) => uiLog('ERROR', 'RAM tracker failed to load config', { error: String(error) }));
+  loadAppSettings().catch((error) => uiLog('ERROR', 'RAM tracker failed to load app settings', { error: String(error) }));
   return () => {
     unsubscribeConfig?.();
     unsubscribeConfig = null;
@@ -118,9 +118,9 @@ export function startRamTracker() {
 }
 
 export async function toggleRamTracking() {
-  const loaded = get(config) || await loadConfig();
-  const enabled = !Boolean(loaded?.ui?.ram_track_enabled);
-  await setRamTrackEnabled(enabled);
+  const loaded = get(appSettings) || await loadAppSettings();
+  const enabled = !Boolean(loaded?.ui?.ram_tracking_enabled);
+  await setRamTrackingEnabled(enabled);
   uiLog('INFO', `RAM tracker ${enabled ? 'enabled' : 'disabled'}`);
   return enabled;
 }

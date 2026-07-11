@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Callable, Iterable
 
 import yaml
+from config_repository import WorkspaceConfigRepository
 
 from db.sqlite_operator import init_database
 from media_lifecycle import storage_lifecycle_lock
@@ -63,11 +64,7 @@ def _topic_norm(value: str) -> str:
 
 
 def _read_config(ctx: WorkspaceContext | None = None) -> dict:
-    path = _ctx(ctx).config_path
-    if not path.exists():
-        return {}
-    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    return data if isinstance(data, dict) else {}
+    return WorkspaceConfigRepository(_ctx(ctx).config_path).read().value.model_dump(mode="json")
 
 
 def _resolve_from_root(root: Path, value: str | Path) -> Path:

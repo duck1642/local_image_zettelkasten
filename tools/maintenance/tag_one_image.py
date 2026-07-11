@@ -8,7 +8,7 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 from tagging import tag_media
-from utils import get_config
+from utils import get_app_settings
 import utils
 
 
@@ -35,7 +35,7 @@ def main():
         print("[ERROR] No image found.")
         return 1
 
-    config = get_config()
+    config = get_app_settings()
     if args.device:
         config.setdefault("tagging", {})["device"] = args.device
 

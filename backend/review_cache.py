@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from runtime_context import WorkspaceContext, get_runtime_context
-from utils import get_config
+from utils import get_app_settings
 
 REVIEW_RESOLVED_STATES = {"resolved_variant", "resolved_delete", "resolved_replace"}
 REVIEW_PENDING_STATES = {"pending", "deferred"}
@@ -97,12 +97,12 @@ def _entry_for(path: Path, sidecar: dict | None = None, ctx: WorkspaceContext | 
     guessed, _ = mimetypes.guess_type(path.name)
     allowed = {
         f".{ext.lstrip('.').lower()}"
-        for ext in get_config(ctx).get("firewall", {}).get("allowed_extensions", [])
+        for ext in get_app_settings().get("ingestion", {}).get("accepted_media", {}).get("extensions", [])
     }
     validation_warning = ""
     ext = path.suffix.lower()
     if allowed and ext not in allowed:
-        validation_warning = f"File extension '{ext}' violates firewall allowed extensions."
+        validation_warning = f"File extension '{ext}' violates the accepted-media policy."
     return {
         "path": path,
         "sidecar": sidecar,

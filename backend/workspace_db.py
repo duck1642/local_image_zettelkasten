@@ -2,9 +2,8 @@ import sqlite3
 import threading
 from pathlib import Path
 
-import yaml
-
 from artists import is_placeholder_artist, normalize_artist_name
+from config_repository import WorkspaceConfigRepository
 from platforms import _seed_known_aliases, _upsert_platform, normalize_platform_key
 from utils import utc_now_str
 from runtime_context import WorkspaceContext, get_runtime_context
@@ -19,16 +18,10 @@ def _ctx(ctx: WorkspaceContext | None = None) -> WorkspaceContext:
 
 def _workspace_vault_db_paths(ctx: WorkspaceContext | None = None) -> list[Path]:
     runtime = _ctx(ctx)
-    try:
-        config = yaml.safe_load(runtime.config_path.read_text(encoding="utf-8")) or {}
-    except OSError:
-        config = {}
-    vaults = config.get("vaults") if isinstance(config.get("vaults"), dict) else {}
+    vaults = WorkspaceConfigRepository(runtime.config_path).read().value.vaults
     paths: list[Path] = []
     for entry in vaults.values():
-        if not isinstance(entry, dict):
-            continue
-        root_value = str(entry.get("root") or "").strip()
+        root_value = entry.root.strip()
         if not root_value:
             continue
         root = Path(root_value)

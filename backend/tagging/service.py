@@ -12,7 +12,7 @@ from fingerprint import extract_sampled_video_frames
 from logger import log_system
 from media_lifecycle import storage_lifecycle_lock
 from runtime_context import WorkspaceContext, get_runtime_context
-from utils import atomic_write_text, calculate_file_hash, get_config, utc_now_str, wd_tag_cache_path_for
+from utils import atomic_write_text, calculate_file_hash, get_app_settings, utc_now_str, wd_tag_cache_path_for
 from validators import get_mime_type
 
 
@@ -59,7 +59,7 @@ class TagResult:
 
 
 def tag_media(media_path: str | Path, item_hash: str = None, config: dict = None, storage_id: str = None, ctx: WorkspaceContext | None = None) -> TagResult:
-    config = config or get_config()
+    config = config or get_app_settings()
     tag_config = config.get("tagging", {})
     media_path = Path(media_path)
     model_repo = tag_config.get("model_repo", "SmilingWolf/wd-vit-tagger-v3")

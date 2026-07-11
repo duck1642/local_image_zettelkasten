@@ -8,10 +8,12 @@ from fastapi.responses import JSONResponse
 
 from db.sqlite_operator import init_database
 from db.search_manager import search_manager
-from logger import log_system
+from logger import log_system, reconfigure_logging
 from metadata_index import start_metadata_repair_worker, start_metadata_watchdog
 from runtime_activation import activate_runtime_context
 from runtime_context import RuntimeNotLoadedError, build_runtime_context, has_runtime_context
+from app_paths import get_app_paths
+from config_repository import bootstrap_data_home
 
 from api.common import (
     ALLOWED_ORIGINS,
@@ -25,13 +27,15 @@ from api.common import (
     _validate_origin,
     configure_terminal_logging,
 )
-from api import capture, ingestion, library, logs, review, runtime
+from api import app_settings, capture, ingestion, library, logs, review, runtime
 
 # These paths must work before workspace/vault runtime exists. Vault/data
 # routes stay blocked here and use api.guards for route-specific validation.
 PRE_RUNTIME_PUBLIC_PATHS = {
     "/",
     "/api/session-key",
+    "/api/app/settings",
+    "/api/runtime/session",
 }
 PRE_RUNTIME_LOG_PATHS = {
     "/api/logs",
@@ -107,6 +111,9 @@ async def startup_search_index():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    await asyncio.to_thread(bootstrap_data_home, get_app_paths())
+    reconfigure_logging()
+    configure_terminal_logging()
     await startup_env_workspace()
     await startup_auth_scan()
     yield
@@ -155,6 +162,7 @@ async def serve_review_asset(asset_path: str):
 
 
 app.include_router(runtime.router)
+app.include_router(app_settings.router)
 app.include_router(library.router)
 app.include_router(logs.router)
 app.include_router(ingestion.router)

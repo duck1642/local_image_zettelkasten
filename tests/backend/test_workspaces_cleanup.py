@@ -18,6 +18,7 @@ def workspace_case(monkeypatch, tmp_path):
     workspaces = importlib.import_module("workspaces")
     registry_path = tmp_path / "workspaces.yaml"
     monkeypatch.setattr(workspaces, "REGISTRY_PATH", registry_path)
+    monkeypatch.setattr(workspaces, "PROJECT_ROOT", tmp_path / "runtime-install")
 
     workspace_root = tmp_path / "external" / "lmz"
     workspace_root.mkdir(parents=True)
@@ -25,6 +26,7 @@ def workspace_case(monkeypatch, tmp_path):
     config_path.write_text(
         yaml.safe_dump(
             {
+                "schema_version": 1,
                 "active_vault": "default",
                 "vaults": {
                     "default": {"name": "Default", "root": "data/vaults/default"},
@@ -36,9 +38,10 @@ def workspace_case(monkeypatch, tmp_path):
         encoding="utf-8",
     )
     registry = {
-        "active": "default",
+        "schema_version": 1,
+        "active_workspace": "default",
         "workspaces": {
-            "default": {"name": "Default", "config_path": "config/config.yaml"},
+            "default": {"name": "Default", "config_path": "default/config.yaml"},
             "external": {"name": "External", "config_path": str(config_path)},
         },
     }
@@ -206,7 +209,7 @@ def test_purge_failure_returns_recoverable_cleanup_path(workspace_case, monkeypa
 def test_active_workspace_cannot_be_deleted(workspace_case):
     workspaces, registry_path, _, _ = workspace_case
     registry = read_registry(registry_path)
-    registry["active"] = "external"
+    registry["active_workspace"] = "external"
     registry_path.write_text(yaml.safe_dump(registry, sort_keys=False), encoding="utf-8")
 
     with pytest.raises(ValueError, match="active workspace"):
@@ -216,13 +219,14 @@ def test_active_workspace_cannot_be_deleted(workspace_case):
 
 
 def test_generated_cleanup_rejects_vault_root_outside_workspace(workspace_case, tmp_path):
+    from config_repository import ConfigReadError
     workspaces, registry_path, _, config_path = workspace_case
     outside = tmp_path / "outside-vault"
     config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     config["vaults"]["default"]["root"] = str(outside)
     config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
 
-    with pytest.raises(ValueError, match="escapes workspace root"):
+    with pytest.raises(ConfigReadError, match="workspace-relative"):
         workspaces.delete_workspace("external", mode="generated")
 
     assert "external" in read_registry(registry_path)["workspaces"]
