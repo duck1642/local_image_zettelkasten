@@ -329,7 +329,9 @@ Vault roots remain workspace-relative and cannot escape the workspace.
 ### Known gaps
 
 - Workspace switching now uses one process-wide lock/preflight path for both load APIs, stages the candidate before activation, and fully rehydrates the previous runtime on rollback. Focused failure-injection coverage is in `test_startup_refactor.py`.
-- Vault create/delete/activate/relocate operations can commit filesystem or config changes before all later steps succeed.
+- Vault create/delete/activate/relocate now share the A1 lock/preflight and
+  transaction snapshot. Failed config, hydration, promotion, or cleanup paths
+  restore the prior vault state; delete cleanup can remain explicitly pending.
 
 ### Work items
 
@@ -338,8 +340,22 @@ Vault roots remain workspace-relative and cannot escape the workspace.
 - [x] Define and document the workspace registry, environment, runtime, search, metadata, and logging commit order.
 - [x] Restore environment state, runtime context, search/index/watchdog services, and logging on workspace-load rollback.
 - [x] Add workspace-load failure-injection and concurrent-switch tests; Goal A2 retains relocation/create/delete coverage.
-- [ ] Extend the same transaction protocol to vault transitions.
+- [x] Extend the same transaction protocol to active-vault, create, delete, and relocation transitions.
 - [ ] Persist recoverable cleanup work instead of returning a one-time pending path only.
+
+### A2 commit protocol
+
+1. Acquire the shared process-wide transition lock and run ingestion/metadata
+   preflight.
+2. Snapshot the exact workspace config bytes, registry, environment, runtime
+   context, and affected filesystem paths.
+3. Stage and validate candidate config/filesystem state.
+4. Hydrate candidate runtime services before replacing durable config when the
+   transition changes the active vault.
+5. Commit config, registry, and environment in a documented order; purge delete
+   staging only after config commit, otherwise retain an explicit pending path.
+6. On failure, restore filesystem/config first, then fully rehydrate the prior
+   runtime and logging state.
 
 ## 9. Desktop sidecar hardening
 
@@ -464,10 +480,11 @@ not turn the five goals into only a sidecar/extension checklist.
 - **Terms:** relocation changes a physical path; a filesystem commit is the point
   where files/directories move; a config commit records the new path; partial state
   means only some of those changes succeeded.
-- **Confirmed failures:** relocation can write config before the complete operation
-  is safe; runtime reload can fail afterward; create/delete can change the
-  filesystem before later validation or registry work fails; active-vault changes
-  do not yet share one complete transition protocol.
+- **Previously confirmed failures, resolved by A2:** relocation no longer writes
+  durable config before candidate validation/hydration; create stages a new tree;
+  delete moves the old tree to rollback staging; active-vault switching hydrates
+  from a same-directory staged config; all paths share the A1 lock and restore
+  config, registry, filesystem, environment, and services on failure.
 - **Expected behavior:** stage and validate the candidate, keep the old path until
   commit, then update config/runtime; restore the prior path, config, services, and
   registry if any step fails.
@@ -556,13 +573,15 @@ database/schema changes unrelated to transition safety.
 
 #### Goal A2 — transactional vault/filesystem transitions
 
-- [ ] Apply the same preflight and process-wide lock to active-vault switching.
-- [ ] Make vault relocation stage the candidate config/filesystem state before commit.
-- [ ] Define rollback behavior for vault create/delete/relocate failures.
-- [ ] Add focused failure-injection tests; do not refactor workspace switching again.
+- [x] Apply the same preflight and process-wide lock to active-vault, create, delete, and relocation transitions.
+- [x] Stage candidate config/filesystem state before durable commit; retain rollback staging for deletion cleanup failures.
+- [x] Define rollback behavior for vault create/delete/relocate and active-vault hydration/config failures.
+- [x] Add focused failure-injection and shared-lock tests without rewriting A1 workspace switching.
 
 Acceptance evidence: a forced vault transition failure leaves the previous vault,
-config, files, services, and registry usable with no partial target state.
+config, files, services, and registry usable with no partial target state. Verified
+with 8 focused A2 tests, 214 relevant backend tests (1 skipped), and the full
+backend suite (285 passed, 1 skipped) on 2026-07-12.
 
 #### Goal B — fixed-port desktop sidecar ownership and readiness
 
@@ -635,3 +654,4 @@ packaging.
 | 2026-07-12 | v1 uses a fixed backend port with one LMZ owner. | decided | Keep port `8000`; prevent a second LMZ sidecar, verify backend identity/readiness, reject unrelated listeners, and terminate the owned child on shutdown. |
 | 2026-07-12 | The personal browser extension ships in v1 with narrow API-key access. | decided | Keep the persistent `.lmz/app/secrets/.api_key`; allow one exact extension origin; defer pairing UI and key rotation. |
 | 2026-07-12 | Goal A1 workspace switching is transactional. | done | Direct and active load APIs share the process-wide preflight/lock; candidate activation, registry commit, environment handling, full rollback rehydration, and failure/concurrency tests pass. Vault/filesystem transitions remain Goal A2. |
+| 2026-07-12 | Goal A2 vault/filesystem transitions are transactional. | done | Active-vault switching, create, delete, and relocation share A1 locking/preflight; staged config/filesystem changes roll back exact config, registry, environment, runtime services, and newly-created target files on forced failures. |

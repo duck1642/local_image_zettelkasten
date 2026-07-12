@@ -1,17 +1,22 @@
 import hashlib
+import copy
 import json
+import os
 import shutil
 import sqlite3
 import tempfile
+import uuid
 import zipfile
+from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
 
-from config_repository import WorkspaceConfigRepository
+from config_repository import WorkspaceConfigRepository, _atomic_write
 from config_schema import WorkspaceConfig
 from db.sqlite_operator import allocate_storage_id, init_database
 from media_lifecycle import remove_stale_derived_files, storage_lifecycle_lock
 from path_policy import vault_root_is_inside_workspace, vault_root_is_usable
-from runtime_context import VaultContext, WorkspaceContext, get_runtime_context
+from runtime_context import VaultContext, WorkspaceContext, build_runtime_context, get_runtime_context
 from utils import atomic_write_text
 from vault_packages import (
     BACKUP_PACKAGE_TYPE,
@@ -76,6 +81,104 @@ def _write_config(config: dict, ctx: WorkspaceContext | None = None):
     current = repository.read()
     value = WorkspaceConfig.model_validate(config)
     repository.replace(value, expected_etag=current.etag)
+
+
+@contextmanager
+def _vault_transition():
+    """Use A1's process-wide lock and preflight for every vault transition."""
+    from api.runtime import _ensure_runtime_switch_allowed, runtime_transition_lock
+
+    with runtime_transition_lock():
+        _ensure_runtime_switch_allowed()
+        yield
+
+
+def _capture_transition_snapshot(ctx: WorkspaceContext) -> dict:
+    from api.runtime import _MISSING_ENV
+    from workspaces import load_workspace_registry
+
+    return {
+        "config_path": ctx.config_path,
+        "config_bytes": ctx.config_path.read_bytes(),
+        "registry": copy.deepcopy(load_workspace_registry()),
+        "env": os.environ.get("LMZ_CONFIG_PATH", _MISSING_ENV),
+        "context": ctx,
+    }
+
+
+def _restore_transition_snapshot(snapshot: dict) -> list[str]:
+    from api.runtime import _restore_workspace_switch_state
+
+    errors: list[str] = []
+    try:
+        _atomic_write(snapshot["config_path"], snapshot["config_bytes"])
+    except Exception as exc:
+        errors.append(f"workspace config rollback failed: {exc}")
+    errors.extend(
+        _restore_workspace_switch_state(
+            snapshot["registry"],
+            snapshot["env"],
+            snapshot["context"],
+        )
+    )
+    return errors
+
+
+def _record_rollback_errors(exc: BaseException, errors: list[str]) -> None:
+    if not errors:
+        return
+    detail = "; ".join(errors)
+    try:
+        exc.add_note(f"Vault transition rollback errors: {detail}")
+    except AttributeError:
+        pass
+    from logger import log_system
+
+    log_system("ERROR", "Vault transition rollback incomplete", error=str(exc), rollback_errors=errors)
+
+
+def _stage_workspace_config(config_path: Path, config: dict) -> Path:
+    stage = config_path.parent / f".{config_path.name}.lmz-transition-{uuid.uuid4().hex}.tmp"
+    WorkspaceConfigRepository(stage).create(WorkspaceConfig.model_validate(config))
+    return stage
+
+
+def _cleanup_staged_config(stage: Path | None) -> None:
+    if stage is None:
+        return
+    stage.unlink(missing_ok=True)
+    stage.with_name(f".{stage.name}.lock").unlink(missing_ok=True)
+
+
+def _capture_filesystem_files(root: Path) -> set[Path]:
+    if not root.exists():
+        return set()
+    return {
+        path.relative_to(root)
+        for path in root.rglob("*")
+        if path.is_file()
+    }
+
+
+def _remove_new_files(root: Path, before: set[Path]) -> list[str]:
+    errors: list[str] = []
+    if not root.exists():
+        return errors
+    for path in sorted(root.rglob("*"), key=lambda item: len(item.parts), reverse=True):
+        if not path.is_file() or path.relative_to(root) in before:
+            continue
+        try:
+            path.unlink()
+        except OSError as exc:
+            errors.append(f"{path}: {exc}")
+    for path in sorted(root.rglob("*"), key=lambda item: len(item.parts), reverse=True):
+        if not path.is_dir() or path == root:
+            continue
+        try:
+            path.rmdir()
+        except OSError:
+            pass
+    return errors
 
 
 def _resolve_config_path(path: str | Path, ctx: WorkspaceContext | None = None) -> Path:
@@ -209,17 +312,53 @@ def active_vault_id(ctx: WorkspaceContext | None = None) -> str:
 
 
 def create_vault(name: str, vault_id: str | None = None, ctx: WorkspaceContext | None = None) -> dict:
-    config = _ensure_vault_registry(_read_config(ctx))
-    vaults = config["vaults"]
-    clean_id = vault_id_slug(vault_id or name)
-    if clean_id in vaults:
-        raise ValueError(f"vault already exists: {clean_id}")
-    entry = {"name": str(name or clean_id).strip() or clean_id, "root": f"data/vaults/{clean_id}"}
-    root = vault_root(entry, ctx)
-    create_vault_layout(root, initialize_db=True)
-    vaults[clean_id] = entry
-    _write_config(config, ctx)
-    return {"status": "success", "vault": clean_id, "items": vault_list(ctx)}
+    runtime = _ctx(ctx)
+    with _vault_transition():
+        snapshot = _capture_transition_snapshot(runtime)
+        stage_root: Path | None = None
+        root: Path | None = None
+        promoted = False
+        try:
+            config = _ensure_vault_registry(_read_config(runtime))
+            vaults = config["vaults"]
+            clean_id = vault_id_slug(vault_id or name)
+            if clean_id in vaults:
+                raise ValueError(f"vault already exists: {clean_id}")
+            entry = {"name": str(name or clean_id).strip() or clean_id, "root": f"data/vaults/{clean_id}"}
+            root = vault_root(entry, runtime)
+            if root.exists():
+                raise ValueError(f"vault root already exists: {root}")
+
+            stage_root = root.parent / f".lmz-vault-create-{uuid.uuid4().hex}"
+            stage_root.parent.mkdir(parents=True, exist_ok=True)
+            create_vault_layout(stage_root, initialize_db=True)
+
+            candidate = copy.deepcopy(config)
+            candidate["vaults"][clean_id] = entry
+            WorkspaceConfig.model_validate(candidate)
+
+            # Promote the staged tree before the config commit. The new tree has
+            # no previous user data, so a failed config commit can remove it.
+            stage_root.replace(root)
+            promoted = True
+            _write_config(candidate, runtime)
+            return {"status": "success", "vault": clean_id, "items": vault_list(runtime)}
+        except Exception as exc:
+            if promoted and root is not None and root.exists():
+                try:
+                    shutil.rmtree(root)
+                except Exception as cleanup_exc:
+                    exc.add_note(f"created-vault cleanup failed: {cleanup_exc}")
+            elif stage_root is not None and stage_root.exists():
+                try:
+                    shutil.rmtree(stage_root)
+                except Exception as cleanup_exc:
+                    exc.add_note(f"created-vault staging cleanup failed: {cleanup_exc}")
+            _record_rollback_errors(exc, _restore_transition_snapshot(snapshot))
+            raise
+        finally:
+            if stage_root is not None and stage_root.exists():
+                shutil.rmtree(stage_root, ignore_errors=True)
 
 
 def rename_vault(vault_id: str, name: str, ctx: WorkspaceContext | None = None) -> dict:
@@ -237,24 +376,40 @@ def rename_vault(vault_id: str, name: str, ctx: WorkspaceContext | None = None) 
 
 def set_active_vault(vault_id: str, ctx: WorkspaceContext | None = None) -> dict:
     runtime = _ctx(ctx)
-    config = _ensure_vault_registry(_read_config(ctx))
-    vault_id = vault_id_slug(vault_id)
-    if vault_id not in config["vaults"]:
-        raise KeyError(f"vault not found: {vault_id}")
-    root = vault_root(config["vaults"][vault_id], ctx)
-    if not vault_root_is_usable(root, runtime.root):
-        raise ValueError(f"vault root is missing or outside workspace: {root}")
-    config["active_vault"] = vault_id
-    _write_config(config, ctx)
+    with _vault_transition():
+        snapshot = _capture_transition_snapshot(runtime)
+        staged_config: Path | None = None
+        try:
+            config = _ensure_vault_registry(_read_config(runtime))
+            clean_id = vault_id_slug(vault_id)
+            if clean_id not in config["vaults"]:
+                raise KeyError(f"vault not found: {clean_id}")
+            root = vault_root(config["vaults"][clean_id], runtime)
+            if not vault_root_is_usable(root, runtime.root):
+                raise ValueError(f"vault root is missing or outside workspace: {root}")
 
-    # Dynamic dynamic-vault switching runtime updates
-    from runtime_context import reload_runtime_context
-    from runtime_activation import activate_runtime_context
+            candidate = copy.deepcopy(config)
+            candidate["active_vault"] = clean_id
+            WorkspaceConfig.model_validate(candidate)
+            staged_config = _stage_workspace_config(runtime.config_path, candidate)
 
-    new_ctx = reload_runtime_context(runtime.config_path)
-    activate_runtime_context(new_ctx)
+            # Hydrate the candidate from a same-directory staged config before
+            # replacing the durable config. The path is then normalized back to
+            # the real config so logging and future reloads remain canonical.
+            staged_ctx = build_runtime_context(staged_config)
+            candidate_ctx = replace(staged_ctx, config_path=runtime.config_path)
+            from api.common import configure_terminal_logging
+            from runtime_activation import activate_runtime_context
 
-    return {"status": "success", "active": vault_id, "restart_required": False, "items": vault_list()}
+            activate_runtime_context(candidate_ctx, hydrate=True)
+            configure_terminal_logging()
+            _write_config(candidate, runtime)
+            return {"status": "success", "active": clean_id, "restart_required": False, "items": vault_list(runtime)}
+        except Exception as exc:
+            _record_rollback_errors(exc, _restore_transition_snapshot(snapshot))
+            raise
+        finally:
+            _cleanup_staged_config(staged_config)
 
 
 def _vault_non_empty(root: Path) -> bool:
@@ -318,22 +473,64 @@ def _rename_import_stage(stage_root: Path, final_root: Path) -> None:
 
 
 def delete_vault(vault_id: str, confirm: bool = False, ctx: WorkspaceContext | None = None) -> dict:
-    config = _ensure_vault_registry(_read_config(ctx))
-    vault_id = vault_id_slug(vault_id)
-    if vault_id == str(config.get("active_vault") or "default"):
-        raise ValueError("cannot delete active vault")
-    if vault_id not in config["vaults"]:
-        raise KeyError(f"vault not found: {vault_id}")
-    root = vault_root(config["vaults"][vault_id], ctx)
-    if not vault_root_is_inside_workspace(root, _config_root(ctx)):
-        raise ValueError(f"vault root is outside workspace: {root}")
-    if root.exists() and _vault_non_empty(root) and not confirm:
-        raise ValueError("vault is not empty; pass confirm=true")
-    if root.exists():
-        shutil.rmtree(root)
-    del config["vaults"][vault_id]
-    _write_config(config, ctx)
-    return {"status": "success", "items": vault_list(ctx)}
+    runtime = _ctx(ctx)
+    with _vault_transition():
+        snapshot = _capture_transition_snapshot(runtime)
+        stage_root: Path | None = None
+        root: Path | None = None
+        moved = False
+        preserve_stage = False
+        try:
+            config = _ensure_vault_registry(_read_config(runtime))
+            clean_id = vault_id_slug(vault_id)
+            if clean_id == str(config.get("active_vault") or "default"):
+                raise ValueError("cannot delete active vault")
+            if clean_id not in config["vaults"]:
+                raise KeyError(f"vault not found: {clean_id}")
+            root = vault_root(config["vaults"][clean_id], runtime)
+            if not vault_root_is_inside_workspace(root, _config_root(runtime)):
+                raise ValueError(f"vault root is outside workspace: {root}")
+            if root.exists() and _vault_non_empty(root) and not confirm:
+                raise ValueError("vault is not empty; pass confirm=true")
+
+            if root.exists():
+                stage_root = root.parent / f".lmz-vault-delete-{uuid.uuid4().hex}"
+                root.replace(stage_root)
+                moved = True
+
+            candidate = copy.deepcopy(config)
+            del candidate["vaults"][clean_id]
+            WorkspaceConfig.model_validate(candidate)
+            _write_config(candidate, runtime)
+
+            cleanup_status = "complete"
+            cleanup_path = ""
+            if stage_root is not None and stage_root.exists():
+                try:
+                    shutil.rmtree(stage_root)
+                except OSError:
+                    cleanup_status = "pending"
+                    cleanup_path = str(stage_root)
+                    preserve_stage = True
+            return {
+                "status": "success",
+                "items": vault_list(runtime),
+                "cleanup_status": cleanup_status,
+                "cleanup_path": cleanup_path,
+            }
+        except Exception as exc:
+            if moved and stage_root is not None and stage_root.exists() and root is not None and not root.exists():
+                try:
+                    stage_root.replace(root)
+                except Exception as restore_exc:
+                    preserve_stage = True
+                    exc.add_note(f"deleted-vault filesystem rollback failed: {restore_exc}")
+            _record_rollback_errors(exc, _restore_transition_snapshot(snapshot))
+            raise
+        finally:
+            if stage_root is not None and stage_root.exists() and not preserve_stage and root is not None and not root.exists():
+                # Keep a pending deletion stage only when config commit succeeded.
+                shutil.rmtree(stage_root, ignore_errors=True)
 
 
 def _copy_if_exists(source: Path, target: Path) -> bool:

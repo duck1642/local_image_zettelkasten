@@ -2,7 +2,11 @@ from typing import Literal
 
 import copy
 import os
+import shutil
 import threading
+import uuid
+from contextlib import contextmanager
+from dataclasses import replace
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
@@ -31,6 +35,13 @@ router = APIRouter()
 # than an asyncio-only lock. The lock covers preflight through commit/rollback.
 _WORKSPACE_SWITCH_LOCK = threading.Lock()
 _MISSING_ENV = object()
+
+
+@contextmanager
+def runtime_transition_lock():
+    """Serialize workspace and vault transitions in this backend process."""
+    with _WORKSPACE_SWITCH_LOCK:
+        yield
 
 
 @router.get("/api/session-key")
@@ -508,16 +519,12 @@ def _rename_vault_sync(vault_id: str, body: dict):
 @router.post("/api/vaults/active")
 async def set_vault_active(body: dict):
     require_workspace_context()
-    blocked = await asyncio.to_thread(_runtime_switch_blocker)
-    if blocked:
-        return blocked
     return await asyncio.to_thread(_set_vault_active_sync, body)
 
 
 def _set_vault_active_sync(body: dict):
     from vaults import set_active_vault
 
-    _ensure_runtime_switch_allowed()
     vault_id = str((body or {}).get("id") or "").strip()
     if not vault_id:
         raise HTTPException(status_code=400, detail="vault id is required")
@@ -735,7 +742,7 @@ def _restore_workspace_switch_state(
 def _load_workspace_sync(workspace_id: str):
     from workspaces import DEFAULT_WORKSPACE_ID, load_workspace_registry, save_workspace_registry, _resolve
 
-    with _WORKSPACE_SWITCH_LOCK:
+    with runtime_transition_lock():
         # One shared path is used by both workspace APIs. Preflight happens while
         # holding the same lock as the candidate load and commit.
         _ensure_runtime_switch_allowed()
@@ -860,38 +867,100 @@ async def relocate_vault(body: RelocateVaultRequest):
     return await asyncio.to_thread(_relocate_vault_sync, body.vault_id, body.new_vault_root)
 
 def _relocate_vault_sync(vault_id: str, new_vault_root: str):
-    from vaults import _read_config, _write_config, vault_id_slug
-    from runtime_context import reload_runtime_context
-    from workspaces import load_workspace_registry, set_active_workspace, _resolve
+    from vaults import (
+        _capture_transition_snapshot,
+        _capture_filesystem_files,
+        _cleanup_staged_config,
+        _read_config,
+        _record_rollback_errors,
+        _remove_new_files,
+        _restore_transition_snapshot,
+        _stage_workspace_config,
+        _write_config,
+        vault_id_slug,
+    )
+    from config_schema import WorkspaceConfig
+    from workspaces import _resolve, load_workspace_registry, save_workspace_registry
 
-    ctx = get_runtime_context()
-    config = _read_config()
-    clean_id = vault_id_slug(vault_id)
-    if "vaults" not in config or clean_id not in config["vaults"]:
-        raise HTTPException(status_code=404, detail="Vault not found")
-        
-    resolved_root = Path(new_vault_root).expanduser().resolve()
-    if not resolved_root.exists():
-        raise HTTPException(status_code=400, detail=f"Directory does not exist: {resolved_root}")
+    with runtime_transition_lock():
+        _ensure_runtime_switch_allowed()
+        ctx = get_runtime_context()
+        snapshot = _capture_transition_snapshot(ctx)
+        staged_config: Path | None = None
+        target_root: Path | None = None
+        target_files_before: set[Path] = set()
+        target_db_backup: Path | None = None
+        try:
+            config = _read_config(ctx)
+            clean_id = vault_id_slug(vault_id)
+            if "vaults" not in config or clean_id not in config["vaults"]:
+                raise HTTPException(status_code=404, detail="Vault not found")
 
-    try:
-        stored_root = workspace_relative_path(resolved_root, ctx.root, label="vault root")
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+            resolved_root = Path(new_vault_root).expanduser().resolve()
+            target_root = resolved_root
+            if not target_root.exists():
+                raise HTTPException(status_code=400, detail=f"Directory does not exist: {target_root}")
 
-    config["vaults"][clean_id]["root"] = stored_root
-    _write_config(config)
-    
-    new_ctx = reload_runtime_context(ctx.config_path)
-    activate_runtime_context(new_ctx)
-    configure_terminal_logging()
+            try:
+                stored_root = workspace_relative_path(target_root, ctx.root, label="vault root")
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    registry = load_workspace_registry()
-    for candidate_id, entry in registry.get("workspaces", {}).items():
-        if _resolve(entry.get("config_path") or "") == new_ctx.config_path:
-            set_active_workspace(candidate_id)
-            break
-    return {"status": "success", "vault_root": str(resolved_root)}
+            candidate = copy.deepcopy(config)
+            candidate["vaults"][clean_id]["root"] = stored_root
+            WorkspaceConfig.model_validate(candidate)
+            target_files_before = _capture_filesystem_files(target_root)
+            target_db = target_root / "db" / "lmz_main.db"
+            if target_db.exists():
+                target_db_backup = target_root.parent / f".lmz-relocate-db-{uuid.uuid4().hex}.bak"
+                shutil.copy2(target_db, target_db_backup)
+            staged_config = _stage_workspace_config(ctx.config_path, candidate)
+
+            # Validate and hydrate the candidate while the durable config still
+            # points at the old path. The old path remains untouched until the
+            # candidate and all services are ready.
+            staged_ctx = build_runtime_context(staged_config)
+            candidate_ctx = replace(staged_ctx, config_path=ctx.config_path)
+            activate_runtime_context(candidate_ctx, hydrate=True)
+            configure_terminal_logging()
+
+            _write_config(candidate, ctx)
+            registry = load_workspace_registry()
+            candidate_registry = copy.deepcopy(registry)
+            matched_workspace = None
+            for candidate_id, entry in registry.get("workspaces", {}).items():
+                if _resolve(entry.get("config_path") or "") == ctx.config_path:
+                    matched_workspace = candidate_id
+                    break
+            if matched_workspace is not None:
+                candidate_registry["active_workspace"] = matched_workspace
+                save_workspace_registry(candidate_registry)
+            os.environ.pop("LMZ_CONFIG_PATH", None)
+            return {"status": "success", "vault_root": str(target_root)}
+        except HTTPException as exc:
+            rollback_errors = _restore_transition_snapshot(snapshot)
+            rollback_errors.extend(_remove_new_files(target_root, target_files_before) if target_root is not None else [])
+            if target_db_backup is not None and target_db_backup.exists() and target_root is not None:
+                try:
+                    shutil.copy2(target_db_backup, target_root / "db" / "lmz_main.db")
+                except OSError as restore_exc:
+                    rollback_errors.append(f"target database rollback failed: {restore_exc}")
+            _record_rollback_errors(exc, rollback_errors)
+            raise
+        except Exception as exc:
+            rollback_errors = _restore_transition_snapshot(snapshot)
+            rollback_errors.extend(_remove_new_files(target_root, target_files_before) if target_root is not None else [])
+            if target_db_backup is not None and target_db_backup.exists() and target_root is not None:
+                try:
+                    shutil.copy2(target_db_backup, target_root / "db" / "lmz_main.db")
+                except OSError as restore_exc:
+                    rollback_errors.append(f"target database rollback failed: {restore_exc}")
+            _record_rollback_errors(exc, rollback_errors)
+            raise HTTPException(status_code=500, detail=f"Vault relocation failed: {exc}") from exc
+        finally:
+            _cleanup_staged_config(staged_config)
+            if target_db_backup is not None:
+                target_db_backup.unlink(missing_ok=True)
 
 
 @router.post("/api/vaults/import")

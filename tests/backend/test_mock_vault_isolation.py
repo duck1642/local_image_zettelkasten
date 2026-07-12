@@ -51,7 +51,7 @@ def fresh_backend(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *module_names
     if str(BACKEND) not in sys.path:
         sys.path.insert(0, str(BACKEND))
     for name in list(sys.modules):
-        if name in {"api", "utils", "runtime_context", "runtime_activation", "web_api", "queue_service", "md_generator", "media_lifecycle", "metadata_index", "metadata_maintenance", "processor", "external_ingestion", "thumbnails", "fingerprint", "artists", "platforms", "review_cache", "topics", "vaults", "vault_packages", "workspace_db", "ingest_control"} or name.startswith(("api.", "logger", "db.", "tagging", "downloaders")):
+        if name in {"api", "utils", "runtime_context", "runtime_activation", "web_api", "queue_service", "md_generator", "media_lifecycle", "metadata_index", "metadata_maintenance", "processor", "external_ingestion", "thumbnails", "fingerprint", "artists", "platforms", "review_cache", "topics", "vaults", "vault_packages", "workspace_db", "ingest_control", "workspaces"} or name.startswith(("api.", "logger", "db.", "tagging", "downloaders")):
             del sys.modules[name]
     from app_paths import get_app_paths
     from config_repository import SettingsRepository, bootstrap_data_home
@@ -71,6 +71,14 @@ def fresh_backend(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *module_names
     if isinstance(legacy.get("ingestion_concurrency"), dict):
         settings.ingestion.concurrency = settings.ingestion.concurrency.model_validate(legacy["ingestion_concurrency"])
     repository.replace(settings, expected_etag=current.etag)
+    workspaces = importlib.import_module("workspaces")
+    registry_path = tmp_path / "workspaces.yaml"
+    monkeypatch.setattr(workspaces, "REGISTRY_PATH", registry_path)
+    workspaces.save_workspace_registry({
+        "schema_version": 1,
+        "active_workspace": "default",
+        "workspaces": {"default": {"name": "Default", "config_path": str(work / "config.yaml")}},
+    })
     return [importlib.import_module(name) for name in module_names]
 
 
@@ -954,6 +962,13 @@ def test_vault_rename_delete_confirm_and_missing_errors(monkeypatch, tmp_path):
     with pytest.raises(HTTPException) as needs_confirm:
         web_api._delete_vault_sync("temporary-vault", confirm=False)
     assert needs_confirm.value.status_code == 400
+
+    metadata_index = importlib.import_module("metadata_index")
+    state = metadata_index._runtime_state(vaults._ctx())
+    deadline = time.monotonic() + 5
+    while state.repair_running and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert state.repair_running is False
 
     deleted = web_api._delete_vault_sync("temporary-vault", confirm=True)
     assert all(item["id"] != "temporary-vault" for item in deleted["items"])
@@ -5716,3 +5731,171 @@ def test_artist_used_scope_filters_before_limit(monkeypatch, tmp_path):
 
     used_artists = web_api._get_artists_sync("", 20, "used")["items"]
     assert [artist["name"] for artist in used_artists] == ["Zzz Used Artist"]
+
+
+def test_vault_transition_preflight_rejects_before_mutation(monkeypatch, tmp_path):
+    vaults, web_api = fresh_backend(monkeypatch, tmp_path, "vaults", "web_api")
+    ctx = vaults._ctx()
+    before_config = ctx.config_path.read_bytes()
+    ingestion = importlib.import_module("api.ingestion")
+    monkeypatch.setattr(
+        ingestion,
+        "runtime_switch_preflight",
+        lambda *args, **kwargs: {"allowed": False, "blockers": ["test_transition_blocked"]},
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        vaults.create_vault("Blocked Vault")
+
+    assert exc.value.status_code == 409
+    assert ctx.config_path.read_bytes() == before_config
+    assert not (ctx.root / "data" / "vaults" / "blocked-vault").exists()
+
+
+def test_active_vault_hydration_failure_restores_config_and_runtime(monkeypatch, tmp_path):
+    vaults, runtime_context = fresh_backend(monkeypatch, tmp_path, "vaults", "runtime_context")
+    vaults.create_vault("Hydration Target")
+    ctx = vaults._ctx()
+    before_config = ctx.config_path.read_bytes()
+    search_manager_module = importlib.import_module("db.search_manager")
+    original_hydrate = search_manager_module.search_manager.hydrate
+
+    def fail_target_hydration(conn):
+        current = runtime_context.try_get_runtime_context()
+        if current is not None and current.active_vault.id == "hydration-target":
+            raise RuntimeError("candidate vault hydration failed")
+        return original_hydrate(conn)
+
+    monkeypatch.setattr(search_manager_module.search_manager, "hydrate", fail_target_hydration)
+    with pytest.raises(RuntimeError, match="candidate vault hydration failed"):
+        vaults.set_active_vault("hydration-target")
+
+    assert ctx.config_path.read_bytes() == before_config
+    assert runtime_context.get_runtime_context().active_vault.id == "default"
+    assert vaults.active_vault_id() == "default"
+
+
+def test_active_vault_config_failure_restores_exact_config(monkeypatch, tmp_path):
+    vaults, runtime_context = fresh_backend(monkeypatch, tmp_path, "vaults", "runtime_context")
+    vaults.create_vault("Config Failure Target")
+    ctx = vaults._ctx()
+    before_config = ctx.config_path.read_bytes()
+
+    def fail_config_write(config, ctx=None):
+        raise RuntimeError("active-vault config write failed")
+
+    monkeypatch.setattr(vaults, "_write_config", fail_config_write)
+    with pytest.raises(RuntimeError, match="active-vault config write failed"):
+        vaults.set_active_vault("config-failure-target")
+
+    assert ctx.config_path.read_bytes() == before_config
+    assert runtime_context.get_runtime_context().active_vault.id == "default"
+    assert vaults.active_vault_id() == "default"
+
+
+def test_create_vault_config_failure_removes_staged_tree(monkeypatch, tmp_path):
+    vaults = fresh_backend(monkeypatch, tmp_path, "vaults")[0]
+    ctx = vaults._ctx()
+    before_config = ctx.config_path.read_bytes()
+    target_root = ctx.root / "data" / "vaults" / "create-failure"
+
+    def fail_config_write(config, ctx=None):
+        raise RuntimeError("create config failed")
+
+    monkeypatch.setattr(vaults, "_write_config", fail_config_write)
+    with pytest.raises(RuntimeError, match="create config failed"):
+        vaults.create_vault("Create Failure")
+
+    assert ctx.config_path.read_bytes() == before_config
+    assert not target_root.exists()
+    assert "create-failure" not in vaults._read_config()["vaults"]
+
+
+def test_delete_vault_config_failure_restores_tree_and_config(monkeypatch, tmp_path):
+    vaults = fresh_backend(monkeypatch, tmp_path, "vaults")[0]
+    created = vaults.create_vault("Delete Failure")
+    target_root = Path(next(item["root"] for item in created["items"] if item["id"] == "delete-failure"))
+    marker = target_root / "vault" / "notes" / "marker.md"
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text("must survive", encoding="utf-8")
+    ctx = vaults._ctx()
+    before_config = ctx.config_path.read_bytes()
+
+    def fail_config_write(config, ctx=None):
+        raise RuntimeError("delete config failed")
+
+    monkeypatch.setattr(vaults, "_write_config", fail_config_write)
+    with pytest.raises(RuntimeError, match="delete config failed"):
+        vaults.delete_vault("delete-failure", confirm=True)
+
+    assert ctx.config_path.read_bytes() == before_config
+    assert marker.read_text(encoding="utf-8") == "must survive"
+    assert "delete-failure" in vaults._read_config()["vaults"]
+
+
+def test_relocation_activation_failure_restores_old_path_and_removes_new_files(monkeypatch, tmp_path):
+    vaults, web_api, runtime_context = fresh_backend(monkeypatch, tmp_path, "vaults", "web_api", "runtime_context")
+    ctx = vaults._ctx()
+    old_root = ctx.active_vault.root
+    target_root = ctx.root / "data" / "vaults" / "relocation-failure"
+    target_root.mkdir(parents=True)
+    before_config = ctx.config_path.read_bytes()
+    search_manager_module = importlib.import_module("db.search_manager")
+    original_hydrate = search_manager_module.search_manager.hydrate
+
+    def fail_target_hydration(conn):
+        current = runtime_context.try_get_runtime_context()
+        if current is not None and current.active_vault.root == target_root:
+            raise RuntimeError("relocation hydration failed")
+        return original_hydrate(conn)
+
+    monkeypatch.setattr(search_manager_module.search_manager, "hydrate", fail_target_hydration)
+    with pytest.raises(HTTPException) as exc:
+        web_api._relocate_vault_sync("default", str(target_root))
+
+    assert exc.value.status_code == 500
+    assert ctx.config_path.read_bytes() == before_config
+    assert runtime_context.get_runtime_context().active_vault.root == old_root
+    assert not any(target_root.rglob("*"))
+
+
+def test_relocation_config_failure_restores_old_path_and_config(monkeypatch, tmp_path):
+    vaults, web_api, runtime_context = fresh_backend(monkeypatch, tmp_path, "vaults", "web_api", "runtime_context")
+    ctx = vaults._ctx()
+    old_root = ctx.active_vault.root
+    target_root = ctx.root / "data" / "vaults" / "relocation-config-failure"
+    target_root.mkdir(parents=True)
+    before_config = ctx.config_path.read_bytes()
+
+    def fail_config_write(config, ctx=None):
+        raise RuntimeError("relocation config failed")
+
+    monkeypatch.setattr(vaults, "_write_config", fail_config_write)
+    with pytest.raises(HTTPException) as exc:
+        web_api._relocate_vault_sync("default", str(target_root))
+
+    assert exc.value.status_code == 500
+    assert ctx.config_path.read_bytes() == before_config
+    assert runtime_context.get_runtime_context().active_vault.root == old_root
+    assert not any(target_root.rglob("*"))
+
+
+def test_vault_transition_uses_a1_lock(monkeypatch, tmp_path):
+    vaults, runtime_api = fresh_backend(monkeypatch, tmp_path, "vaults", "api.runtime")
+    result = {}
+    started = threading.Event()
+
+    def run_create():
+        started.set()
+        result["value"] = vaults.create_vault("Serialized Vault")
+
+    with runtime_api.runtime_transition_lock():
+        worker = threading.Thread(target=run_create)
+        worker.start()
+        assert started.wait(2)
+        time.sleep(0.1)
+        assert "value" not in result
+    worker.join(timeout=10)
+
+    assert not worker.is_alive()
+    assert result["value"]["status"] == "success"
