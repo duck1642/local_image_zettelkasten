@@ -19,7 +19,7 @@ Release priority is separate from difficulty: the `.lmz` data home and bootstrap
 | Hard | P0 | Release bootstrap validation | in progress | A clean installed build creates and opens a usable default workspace without relying on writable files in the app bundle. |
 | Hard | P0 | Config and API boundary refactor | done | App-wide and workspace config have explicit schemas, storage, APIs, strict legacy rejection, and reliable frontend error handling. |
 | Hard | P0 | Transactional runtime switching | in progress | Workspace switches use one preflight and lock, commit consistently, and completely restore services on failure; vault transitions remain for Goal A2. |
-| Hard | P0 | Desktop sidecar hardening | done | The desktop owns and identifies its backend; startup, shutdown, and port conflicts are safe. Extension authentication remains Goals C1/C2. |
+| Hard | P0 | Desktop sidecar hardening | done | The desktop owns and identifies its backend; startup, shutdown, and port conflicts are safe. Browser-extension work is deferred to `docs/deferred_works.md`. |
 | Very hard | P0 | `.lmz` data-home and content adoption | done | The data-root contract, fresh-install bootstrap, content-only importer, and test plan are implemented and verified. |
 | Hardest | P1 | Similarity-review architecture | not started | Model roles, persistence, candidate retrieval, review semantics, and migration path are specified. |
 
@@ -34,11 +34,14 @@ building new settings and release fixes on the current mixed config boundary.
 4. Build the packaged app and validate first launch with a clean user profile.
 5. Implement Webview developer controls as the first vertical use of app-wide settings.
 6. Make workspace and vault transitions transactional.
-7. Harden desktop-sidecar startup, identity, ownership, shutdown, and extension authentication.
+7. Harden desktop-sidecar startup, identity, ownership, and shutdown.
 8. Complete storage lifecycle regressions and the real-vault Windows smoke gate.
 9. Polish Settings and logs after their persistence and API boundaries are stable.
 10. Run the final install, first-launch, restart, update, and reinstall release gate.
 11. Continue similarity-review architecture after the first-release foundation is stable.
+
+Browser-extension work is intentionally outside this active release sequence;
+track it in `docs/deferred_works.md`.
 
 ## 1. Application icon
 
@@ -363,14 +366,12 @@ Vault roots remain workspace-relative and cannot escape the workspace.
 
 - The packaged sidecar now carries a per-launch nonce and exposes a local identity/readiness response at `GET /api/runtime/health`.
 - Tauri claims one fixed-port desktop owner, retains the sidecar child, verifies the exact nonce before frontend API use, and terminates the owned process tree on exit.
-- Extension-origin/key exposure remains Goals C1/C2 and is intentionally unchanged here.
 
 ### Work items
 
 - [x] Choose and document singleton plus verified fixed-port ownership; dynamic ports remain deferred.
 - [x] Pass backend identity/readiness state from Tauri to the frontend and align API base, Vite proxy, and CSP rules.
 - [x] Add readiness timeout, clear launcher error reporting, crash detection, and explicit shutdown behavior.
-- [ ] Restrict extension access to paired/approved clients and define key rotation/re-pairing behavior.
 - [x] Add deterministic first-launch, identity, occupied-port, stale-identity, crash, timeout, second-owner, and shutdown-state tests.
 - [x] Run the packaged GUI first/second-launch, occupied-listener, crash, and shutdown smoke gate.
 
@@ -427,15 +428,15 @@ Source: `F:\ARCHIVE\main\software\python\snippets\media_similarity_checker`
 This section is intentionally narrower than the historical roadmap. v1.0.0 is a
 stability release. Do not add CLIP/ResNet/DINO/ANN/cluster-review behavior, new
 metadata features, or broad UI polish while these gates are open. Prototype work
-continues outside LMZ and is not part of this release.
+continues outside LMZ and is not part of this release. Browser-extension work is
+also deferred and tracked in `docs/deferred_works.md`.
 
 ### Findings to resolve
 
 | Finding | Evidence status | v1 disposition |
 | --- | --- | --- |
 | Vault/filesystem transitions are not fully transactional. | Goals A1/A2 now cover workspace and vault transitions with shared preflight, staging, commit, and rollback tests. | Keep the existing release smoke gate; no new transition implementation is planned. |
-| Desktop sidecar has no verified identity/readiness/ownership lifecycle. | The former gap is implemented: nonce handshake, fixed-port owner mutex, retained child, bounded readiness probe, launcher states, process-tree shutdown, and packaged GUI smoke evidence are covered by native/backend/packaged tests. | Keep the release gates and Goals C1/C2 extension work separate. |
-| Extension session-key exposure is broader than the intended personal client. | Confirmed in `api/common.py` and `api/runtime.py`: any syntactically valid extension origin may request the key. | Ship the personal extension in v1 with exact-origin allowlisting and persistent API-key authentication; no pairing UI. |
+| Desktop sidecar has no verified identity/readiness/ownership lifecycle. | The former gap is implemented: nonce handshake, fixed-port owner mutex, retained child, bounded readiness probe, launcher states, process-tree shutdown, and packaged GUI smoke evidence are covered by native/backend/packaged tests. | Keep the desktop lifecycle release gate focused; browser-extension work is deferred separately. |
 | WD stale wrong-shard cleanup lacks a direct regression test. | Cleanup mechanism exists and reports locked-file errors; the missing coverage is WD-specific. | Add the focused test. |
 | Real-vault behavior is not fully release-tested. | Migrated-vault health audit is clean, but normal ingest/review/log/package workflows remain unverified. | Run the focused Windows smoke gate. |
 | MSI ICE failure. | Reproduced as a Windows Installer/WiX environment limitation; NSIS succeeds. | Ship NSIS-only unless MSI is a hard requirement; do not expand app scope for this. |
@@ -449,7 +450,8 @@ do not combine goals into one open-ended refactor.
 
 The following definitions, failure modes, expectations, and rationale are part of
 the plan. They are deliberately recorded here so a later context reduction does
-not turn the five goals into only a sidecar/extension checklist.
+not turn the four release goals into only a sidecar checklist. Extension context
+is maintained in `docs/deferred_works.md`.
 
 #### A1 context — workspace switching
 
@@ -513,33 +515,6 @@ not turn the five goals into only a sidecar/extension checklist.
   deferred.
 - **Why it matters:** connecting to the wrong listener is equivalent to connecting
   to the wrong database, and an unowned child can remain running after shutdown.
-
-#### C context — personal browser-extension access
-
-- **Terms:** CORS governs which origins may call the backend; an origin identifies
-  the requesting app; the API key authorizes mutation requests; an allowlist names
-  approved origins; pairing is explicit approval of a client.
-- **Confirmed failure:** the current extension-origin pattern accepts any
-  syntactically valid Chrome/Firefox extension origin, so any such extension can
-  request the session key.
-- **Locked C1 decision:** the personal Chromium extension is included in v1, but
-  only one exact approved origin may use the persistent
-  `.lmz/app/secrets/.api_key`. The currently observed Chrome origin is
-  `chrome-extension://ccpkdmcgagkelbfmbakapnminicjmmlk`.
-- **C2 decision:** Extend the shared personal-use integration to Edge and Firefox
-  without duplicating the endpoint implementation. Edge needs its actual
-  `chrome-extension://` installation/catalog ID verified and allowlisted if it
-  differs from Chrome. Firefox needs a persistent/signed installation and
-  restart-stability verification before its exact `moz-extension://` origin can
-  be allowlisted. Pairing UI and key rotation/re-pairing remain deferred.
-- **Origin handling:** every supported browser installation gets its own exact
-  verified origin entry; no structural extension-origin regex is allowed. The
-  shared source and endpoint/payload contract are browser-neutral, but origin
-  stability and allowlisting are browser-specific. Unverified browser builds
-  remain disallowed.
-- **Why it matters:** the key protects ingestion, deletion, settings, and other
-  local mutations; broad origin access would let a malicious or compromised
-  extension operate on the vault.
 
 #### D context — release validation closure
 
@@ -616,62 +591,58 @@ the native wait regression plus process-tree cleanup tests pass.
 
 Non-goals: dynamic ports, unrelated Tauri/UI features, and dynamic model loading.
 
-#### Goal C1 — Chromium browser-extension connection
-
-- [x] Keep the Chrome/Edge extension as a personal-use v1 integration.
-- [x] Allow only the exact approved Chrome origin `chrome-extension://ccpkdmcgagkelbfmbakapnminicjmmlk`.
-- [x] Remove the broad extension-origin regex from the active CORS/auth path.
-- [x] Preserve manual API-key entry using `.lmz/app/secrets/.api_key`.
-- [x] Correct stale key-path text and verify all extension endpoint/payload contracts.
-- [x] Synchronize Chrome, Edge, and Firefox copies from the shared extension source.
-- [x] Add approved-origin, disallowed-origin, invalid/stale-key, CORS, and endpoint contract tests.
-
-Acceptance evidence: the selected Chromium extension can use the persistent key;
-other extension origins cannot obtain a key or mutate the API; existing Tauri/web
-origins continue to work; and all synchronized extension copies pass contract checks.
-Implemented on 2026-07-12. The focused browser-capture and extension-contract
-suite passes (32 tests); the full backend suite passes (294 passed, 1 skipped).
-The approved-origin test covers stage, preview, delete, commit, and queue append
-with the persistent key. Rejected Chrome/Firefox-shaped origins and a disallowed
-web origin receive 403 for key retrieval/mutation; rejected CORS preflight
-receives 400. The active backend no longer contains a structural extension-origin
-regex. The shared popup source and Chrome, Edge, and Firefox generated copies use
-the `.lmz/app/secrets/.api_key` path and retain the fixed endpoint/payload
-contract. Edge origin verification and Firefox persistence remain C2; no
-additional browser origin was allowlisted during C1.
-
-#### Goal C2 — Edge and Firefox browser enablement
-
-- [ ] Verify the Edge sideloaded/catalog extension ID and its `chrome-extension://` origin; add an exact allowlist entry if it differs from Chrome.
-- [ ] Package/install the Firefox extension persistently instead of relying on a temporary add-on.
-- [ ] Record Firefox's exact `moz-extension://` runtime origin after persistent installation.
-- [ ] Verify each browser origin survives restart, extension reload, and normal updates where applicable.
-- [ ] Run the shared stage, preview, delete, commit, and queue endpoint smoke flow in Edge and Firefox.
-- [ ] Add browser-specific loading/origin compatibility evidence without broadening C1's exact-origin security model.
-
-Acceptance evidence: Edge and Firefox use the synchronized extension behavior and
-the persistent key only from their verified exact origins; the origins remain
-stable through the supported installation lifecycle; all shared endpoint flows
-pass; and unverified or temporary origins remain rejected. C1's approved Chrome
-origin and no-regex policy remain unchanged.
-
 #### Goal D — release validation closure
 
-- [ ] Add the WD wrong-shard locked-file regression test.
-- [ ] Run the migrated default-vault smoke flow: launch, ingest, review, metadata, thumbnails/tags, logs, restart.
-- [ ] Run the external `obsidian-main` open/switch smoke flow without moving its data.
-- [ ] Validate clean install, upgrade, and uninstall data preservation with the chosen NSIS/MSI scope.
-- [ ] Bump release metadata consistently to `1.0.0` (`tauri.conf.json`/Cargo are `0.1.0`; `frontend/package.json` is `0.0.0`) and verify packaged metadata.
-- [ ] Run the full backend/frontend/package gates once after Goals A–C.
+Goal D depends on A1, A2, and B only. Browser-extension work is deferred to
+`docs/deferred_works.md` and must not block this goal. v1 uses the successful NSIS installer;
+the current MSI/WiX limitation is recorded as a known non-blocker.
 
-Acceptance evidence: all release-gate checks are recorded with command output and
-known non-blockers are explicitly documented.
+Validation must not mutate the real `%USERPROFILE%\.lmz` data home or inspect
+secrets. Use an isolated data root and staged migrated content where possible.
+Opening the registered external workspace may write expected logs or indexes, but
+must never relocate its data or change its configured path.
+
+- [x] **D1 — WD wrong-shard locked-file regression:** create a canonical WD
+  cache in the correct shard and a stale copy in another shard; inject an
+  `OSError` only for stale-file deletion; run repair; assert the canonical file
+  is retained, the stale file remains, `stale_removed == 0`, and
+  `cleanup_errors` identifies the stale path. A second run without the injected
+  error must remove the stale copy.
+- [x] **D2 — migrated default-vault smoke:** run against a staged copy of the
+  migrated default workspace, excluding secrets and preflighting required model
+  files. Verify launch, one controlled ingest, a deterministic review action,
+  metadata/index consistency, thumbnail generation, WD tagging, app/vault log
+  evidence, SQLite integrity, restart, and persisted state. Missing required
+  models are a validation failure, not a silent skip.
+- [x] **D3 — external workspace smoke:** capture the initial active workspace;
+  open and switch through the registered `obsidian-main` workspace and back;
+  assert runtime roots and config paths remain unchanged, no relocation occurs,
+  and the initial active selection is restored.
+- [x] **D4 — NSIS lifecycle:** in a dedicated Windows test profile or isolated
+  data root, validate clean install, upgrade from the available `0.1.0` build,
+  and uninstall. Assert the install directory is removed while `.lmz`, workspace
+  data, and external registration remain; verify the installer/product metadata
+  reports `1.0.0`. MSI remains documented as an environment limitation.
+- [x] **D5 — release metadata, documentation, and gates:** bump all shipped
+  release-facing versions to `1.0.0` (Tauri config, Cargo, frontend package and
+  lockfile, and Python metadata); rebuild and verify packaged metadata. Run the
+  backend, Rust, frontend, sidecar, packaged first-launch/restart, and NSIS gates,
+  recording commands, outputs, artifacts, and known non-blockers. Correct stale
+  release paths and legacy-migration wording in `README.md` and
+  `docs/lmz_architecture.md`.
+
+Acceptance evidence: each D1–D5 check has reproducible command output and
+assertions in `tests/release_validation_evidence_1.0.0.md` and
+`tests/release_validation_smoke_report_1.0.0.json`. The real-vault flows were isolated and
+reversible, the final NSIS artifact identifies version `1.0.0`, and MSI plus the
+deferred extension scope are explicitly recorded.
 
 ### First goal recommendation
 
-**Goals A1, A2, and B completed on 2026-07-12.** Their defects are covered by
-focused failure-injection, rollback, identity, ownership, and shutdown tests.
-Goal C1 is the current extension-authentication focus; C2 and Goal D remain open.
+**Goals A1, A2, B, and D are complete.** Their known defects are covered by
+focused failure-injection, rollback, identity, ownership, shutdown, and release
+validation tests. Goal C is deferred to `1.1.0` and is tracked in
+`docs/deferred_works.md`.
 
 ## Decisions log
 
@@ -697,8 +668,11 @@ Goal C1 is the current extension-authentication focus; C2 and Goal D remain open
 | 2026-07-12 | Real legacy project data is adopted into the existing `.lmz` home. | done | `data/` content and models were staged into `.lmz`; app settings, registry, logs/cache, and secrets were preserved; source deletion was false; the receipt records the rollback backup and `config/data` as ambiguous/ignored. |
 | 2026-07-12 | External `obsidian-main` remains external under the new registry. | done | Its config now contains topology only; the legacy YAML has a sibling backup; both external vault databases pass integrity checks (164 and 28 items); the workspace remains inactive. |
 | 2026-07-12 | v1 uses a fixed backend port with one LMZ owner. | decided | Keep port `8000`; prevent a second LMZ sidecar, verify backend identity/readiness, reject unrelated listeners, and terminate the owned child on shutdown. |
-| 2026-07-12 | The personal browser extension ships in v1 with narrow API-key access. | decided | Keep the persistent `.lmz/app/secrets/.api_key`; allow one exact extension origin; defer pairing UI and key rotation. |
+| 2026-07-12 | The personal browser extension ships in v1 with narrow API-key access. | superseded | The C1 hardening remains in the working tree, but all extension release work is deferred to `1.1.0`; see `docs/deferred_works.md`. |
 | 2026-07-12 | Goal A1 workspace switching is transactional. | done | Direct and active load APIs share the process-wide preflight/lock; candidate activation, registry commit, environment handling, full rollback rehydration, and failure/concurrency tests pass. Vault/filesystem transitions remain Goal A2. |
 | 2026-07-12 | Goal A2 vault/filesystem transitions are transactional. | done | Active-vault switching, create, delete, and relocation share A1 locking/preflight; staged config/filesystem changes roll back exact config, registry, environment, runtime services, and newly-created target files on forced failures. |
 | 2026-07-12 | Goal B sidecar ownership/readiness completed. | done | Fixed port `8000`, Windows owner mutex, per-launch nonce health handshake, retained child lifecycle, process-tree shutdown, launcher error states, aligned API/CSP, and packaged GUI smoke checks pass. A pre-existing orphan process was intentionally not killed. |
-| 2026-07-12 | Goal C split into shared browser behavior and browser-specific enablement. | decided | C1 hardens the synchronized Chrome/Edge/Firefox source and allowlists only the observed Chrome origin `chrome-extension://ccpkdmcgagkelbfmbakapnminicjmmlk`; C2 verifies Edge's exact origin and persistent Firefox origin before adding exact entries. |
+| 2026-07-12 | Goal C split into shared browser behavior and browser-specific enablement. | superseded | The C1/C2 work is preserved in `docs/deferred_works.md` as the `1.1.0` extension workstream. |
+| 2026-07-13 | All browser-extension work is deferred from v1.0.0. | decided | Do not make extension artifacts, origin allowlists, or extension-contract checks v1 acceptance criteria; retain the source and tests for v1.1.0. |
+| 2026-07-13 | Goal D release closure scope. | decided | Depends on A1/A2/B only; uses NSIS for v1; validates WD cleanup, staged migrated-vault behavior, external workspace switching without relocation, install/upgrade/uninstall preservation, full `1.0.0` metadata, release documentation, and final evidence. Browser-extension work and MSI are non-blocking. |
+| 2026-07-13 | Goal D release validation completed. | done | D1–D5 pass. Evidence is recorded in `tests/release_validation_evidence_1.0.0.md`; MSI/WiX and deferred extension work remain outside the v1 gate. |

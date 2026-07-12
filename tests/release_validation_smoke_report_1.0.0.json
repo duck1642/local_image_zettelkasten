@@ -1,0 +1,331 @@
+{
+  "version": 1,
+  "data_root": "F:\\ARCHIVE\\main\\software\\python\\projects\\local_media_zettelkasten\\tests\\.goal-d-runs-migrated3\\.goal-d-smoke-1783895331050-9c559f2fc7ea98",
+  "source_default": "F:\\ARCHIVE\\main\\software\\python\\projects\\local_media_zettelkasten\\tests\\.goal-d-source-20260713",
+  "external_config": "F:\\ARCHIVE\\main\\lmz\\config.yaml",
+  "steps": [
+    {
+      "step": "launch and default workspace",
+      "initial_workspace": "default",
+      "item_count": 166,
+      "health_before_repair": {
+        "status": "success",
+        "vault": "default",
+        "root": "F:\\ARCHIVE\\main\\software\\python\\projects\\local_media_zettelkasten\\tests\\.goal-d-runs-migrated3\\.goal-d-smoke-1783895331050-9c559f2fc7ea98\\default\\data\\vaults\\default",
+        "item_count": 166,
+        "issue_count": 1,
+        "missing_files": {
+          "asset": [],
+          "note": [],
+          "wd": [],
+          "thumb": []
+        },
+        "failed_thumbnails": [],
+        "details": {
+          "missing_files": {
+            "asset": [],
+            "note": [],
+            "wd": [],
+            "thumb": []
+          },
+          "failed_thumbnails": []
+        },
+        "orphans": {
+          "assets": [],
+          "notes": [],
+          "wd_cache": [],
+          "thumbnails": [
+            "F:\\ARCHIVE\\main\\software\\python\\projects\\local_media_zettelkasten\\tests\\.goal-d-runs-migrated3\\.goal-d-smoke-1783895331050-9c559f2fc7ea98\\default\\data\\vaults\\default\\ui_cache\\thumbnails\\f8\\00000000004m.jpg"
+          ]
+        },
+        "stale_index_rows": {
+          "topics": 0,
+          "wd_tags": 0,
+          "metadata_files": 0
+        },
+        "bad_storage_ids": [],
+        "hash_mismatches": [],
+        "facet_drift": [],
+        "broken_topic_links": [],
+        "unused_topic_files": [],
+        "review_mismatches": {
+          "media_without_sidecar": [],
+          "sidecar_without_media": []
+        },
+        "workspace_dictionary_drift": {
+          "missing_in_dictionary": 0,
+          "unused_in_vault": 0
+        }
+      },
+      "repair": {
+        "status": "success",
+        "vault": "default",
+        "actions": [
+          "derived_cache",
+          "thumbnails"
+        ],
+        "before_issue_count": 1,
+        "before_counts": {
+          "missing_files": 0,
+          "missing_required_files": 0,
+          "missing_wd_cache": 0,
+          "missing_thumbnails": 0,
+          "orphan_assets_notes": 0,
+          "orphan_derived_cache": 1,
+          "stale_index_rows": 0,
+          "facet_drift": 0,
+          "bad_storage_ids": 0,
+          "hash_mismatches": 0,
+          "broken_topic_links": 0,
+          "unused_topic_files": 0,
+          "review_mismatches": 0,
+          "workspace_dictionary_drift": 0
+        },
+        "thumbnails": {
+          "checked": 166,
+          "generated": 0,
+          "skipped": 166,
+          "failed": 0,
+          "stale_removed": 0,
+          "cleanup_errors": []
+        },
+        "derived_cache": {
+          "removed": 1
+        },
+        "destructive_confirmed": true,
+        "after": {
+          "status": "success",
+          "vault": "default",
+          "root": "F:\\ARCHIVE\\main\\software\\python\\projects\\local_media_zettelkasten\\tests\\.goal-d-runs-migrated3\\.goal-d-smoke-1783895331050-9c559f2fc7ea98\\default\\data\\vaults\\default",
+          "item_count": 166,
+          "issue_count": 0,
+          "missing_files": {
+            "asset": [],
+            "note": [],
+            "wd": [],
+            "thumb": []
+          },
+          "failed_thumbnails": [],
+          "details": {
+            "missing_files": {
+              "asset": [],
+              "note": [],
+              "wd": [],
+              "thumb": []
+            },
+            "failed_thumbnails": []
+          },
+          "orphans": {
+            "assets": [],
+            "notes": [],
+            "wd_cache": [],
+            "thumbnails": []
+          },
+          "stale_index_rows": {
+            "topics": 0,
+            "wd_tags": 0,
+            "metadata_files": 0
+          },
+          "bad_storage_ids": [],
+          "hash_mismatches": [],
+          "facet_drift": [],
+          "broken_topic_links": [],
+          "unused_topic_files": [],
+          "review_mismatches": {
+            "media_without_sidecar": [],
+            "sidecar_without_media": []
+          },
+          "workspace_dictionary_drift": {
+            "missing_in_dictionary": 0,
+            "unused_in_vault": 0
+          }
+        },
+        "after_issue_count": 0,
+        "after_counts": {
+          "missing_files": 0,
+          "missing_required_files": 0,
+          "missing_wd_cache": 0,
+          "missing_thumbnails": 0,
+          "orphan_assets_notes": 0,
+          "orphan_derived_cache": 0,
+          "stale_index_rows": 0,
+          "facet_drift": 0,
+          "bad_storage_ids": 0,
+          "hash_mismatches": 0,
+          "broken_topic_links": 0,
+          "unused_topic_files": 0,
+          "review_mismatches": 0,
+          "workspace_dictionary_drift": 0
+        },
+        "fixed_issue_count": 1,
+        "repairable_before": 1,
+        "repairable_after": 0,
+        "manual_remaining": {},
+        "message": "Fixed 1 issues"
+      },
+      "health_after_repair": {
+        "status": "success",
+        "vault": "default",
+        "root": "F:\\ARCHIVE\\main\\software\\python\\projects\\local_media_zettelkasten\\tests\\.goal-d-runs-migrated3\\.goal-d-smoke-1783895331050-9c559f2fc7ea98\\default\\data\\vaults\\default",
+        "item_count": 166,
+        "issue_count": 0,
+        "missing_files": {
+          "asset": [],
+          "note": [],
+          "wd": [],
+          "thumb": []
+        },
+        "failed_thumbnails": [],
+        "details": {
+          "missing_files": {
+            "asset": [],
+            "note": [],
+            "wd": [],
+            "thumb": []
+          },
+          "failed_thumbnails": []
+        },
+        "orphans": {
+          "assets": [],
+          "notes": [],
+          "wd_cache": [],
+          "thumbnails": []
+        },
+        "stale_index_rows": {
+          "topics": 0,
+          "wd_tags": 0,
+          "metadata_files": 0
+        },
+        "bad_storage_ids": [],
+        "hash_mismatches": [],
+        "facet_drift": [],
+        "broken_topic_links": [],
+        "unused_topic_files": [],
+        "review_mismatches": {
+          "media_without_sidecar": [],
+          "sidecar_without_media": []
+        },
+        "workspace_dictionary_drift": {
+          "missing_in_dictionary": 0,
+          "unused_in_vault": 0
+        }
+      }
+    },
+    {
+      "step": "controlled ingest",
+      "run_id": "20260712_222905_22e06c4c",
+      "summary": {
+        "ingested": 1,
+        "review": 0,
+        "failed": 0,
+        "duplicate": 0
+      },
+      "hash": "7cd9249f08c1928a560bd8aaf382ee6dcd11a31b8ea72ad1617ad5136c6fdb24"
+    },
+    {
+      "step": "deterministic review action",
+      "action": "variant",
+      "result": {
+        "status": "success",
+        "action": "variant",
+        "message": "Review item ingested as variant."
+      }
+    },
+    {
+      "step": "metadata update and index",
+      "hash": "f5bc9ec2785874e6a8739c63f0c242a603ea9c83056ab4959cf0375d364bc257",
+      "rebuild": {
+        "status": "started",
+        "full": true,
+        "maintenance_rebuild": {
+          "running": true,
+          "status": "running",
+          "mode": "full",
+          "stage": "starting",
+          "items_total": 0,
+          "items_done": 0,
+          "errors": 0,
+          "started_at": "2026-07-12 22:29:10",
+          "finished_at": "",
+          "duration_ms": 0,
+          "message": ""
+        }
+      },
+      "status": {
+        "ready": true,
+        "repair_running": false,
+        "items": 168,
+        "indexed": 168,
+        "stale": null,
+        "stale_deep": false,
+        "errors": 0,
+        "topics": 1,
+        "wd_tags": 3306,
+        "facet_counts": 727,
+        "dirty": 0,
+        "maintenance_rebuild": {
+          "running": false,
+          "status": "completed",
+          "mode": "full",
+          "stage": "completed",
+          "items_total": 168,
+          "items_done": 168,
+          "errors": 0,
+          "started_at": "2026-07-12 22:29:10",
+          "finished_at": "2026-07-12 22:29:11",
+          "duration_ms": 1000,
+          "message": "",
+          "indexed": 168
+        }
+      }
+    },
+    {
+      "step": "thumbnail and WD tagging",
+      "thumbnail_status": 200,
+      "wd_cache": "F:\\ARCHIVE\\main\\software\\python\\projects\\local_media_zettelkasten\\tests\\.goal-d-runs-migrated3\\.goal-d-smoke-1783895331050-9c559f2fc7ea98\\default\\data\\vaults\\default\\wd-tags\\7c\\00000000004o.json"
+    },
+    {
+      "step": "health and SQLite integrity",
+      "issue_count": 0,
+      "integrity": "ok"
+    },
+    {
+      "step": "external workspace open and restore",
+      "initial_workspace": "default",
+      "restored_workspace": "default",
+      "config_unchanged": true
+    },
+    {
+      "step": "restart and persistence",
+      "item_count": 168,
+      "integrity": "ok"
+    }
+  ],
+  "artifacts": {
+    "backend_log": "F:\\ARCHIVE\\main\\software\\python\\projects\\local_media_zettelkasten\\tests\\.goal-d-runs-migrated3\\.goal-d-smoke-1783895331050-9c559f2fc7ea98\\backend.log",
+    "app_logs": [
+      "F:\\ARCHIVE\\main\\software\\python\\projects\\local_media_zettelkasten\\tests\\.goal-d-runs-migrated3\\.goal-d-smoke-1783895331050-9c559f2fc7ea98\\app\\logs\\startup\\raw\\console.log",
+      "F:\\ARCHIVE\\main\\software\\python\\projects\\local_media_zettelkasten\\tests\\.goal-d-runs-migrated3\\.goal-d-smoke-1783895331050-9c559f2fc7ea98\\app\\logs\\startup\\structured\\auth.jsonl",
+      "F:\\ARCHIVE\\main\\software\\python\\projects\\local_media_zettelkasten\\tests\\.goal-d-runs-migrated3\\.goal-d-smoke-1783895331050-9c559f2fc7ea98\\app\\logs\\startup\\structured\\ingestion_audit.jsonl",
+      "F:\\ARCHIVE\\main\\software\\python\\projects\\local_media_zettelkasten\\tests\\.goal-d-runs-migrated3\\.goal-d-smoke-1783895331050-9c559f2fc7ea98\\app\\logs\\startup\\structured\\ingest_local.jsonl",
+      "F:\\ARCHIVE\\main\\software\\python\\projects\\local_media_zettelkasten\\tests\\.goal-d-runs-migrated3\\.goal-d-smoke-1783895331050-9c559f2fc7ea98\\app\\logs\\startup\\structured\\ingest_online.jsonl",
+      "F:\\ARCHIVE\\main\\software\\python\\projects\\local_media_zettelkasten\\tests\\.goal-d-runs-migrated3\\.goal-d-smoke-1783895331050-9c559f2fc7ea98\\app\\logs\\startup\\structured\\review.jsonl",
+      "F:\\ARCHIVE\\main\\software\\python\\projects\\local_media_zettelkasten\\tests\\.goal-d-runs-migrated3\\.goal-d-smoke-1783895331050-9c559f2fc7ea98\\app\\logs\\startup\\structured\\svelte.jsonl",
+      "F:\\ARCHIVE\\main\\software\\python\\projects\\local_media_zettelkasten\\tests\\.goal-d-runs-migrated3\\.goal-d-smoke-1783895331050-9c559f2fc7ea98\\app\\logs\\startup\\structured\\system.jsonl"
+    ],
+    "vault_logs": [
+      "F:\\ARCHIVE\\main\\software\\python\\projects\\local_media_zettelkasten\\tests\\.goal-d-runs-migrated3\\.goal-d-smoke-1783895331050-9c559f2fc7ea98\\default\\data\\vaults\\default\\logs\\raw\\console.log",
+      "F:\\ARCHIVE\\main\\software\\python\\projects\\local_media_zettelkasten\\tests\\.goal-d-runs-migrated3\\.goal-d-smoke-1783895331050-9c559f2fc7ea98\\default\\data\\vaults\\default\\logs\\raw\\terminal.log",
+      "F:\\ARCHIVE\\main\\software\\python\\projects\\local_media_zettelkasten\\tests\\.goal-d-runs-migrated3\\.goal-d-smoke-1783895331050-9c559f2fc7ea98\\default\\data\\vaults\\default\\logs\\structured\\auth.jsonl",
+      "F:\\ARCHIVE\\main\\software\\python\\projects\\local_media_zettelkasten\\tests\\.goal-d-runs-migrated3\\.goal-d-smoke-1783895331050-9c559f2fc7ea98\\default\\data\\vaults\\default\\logs\\structured\\ingestion_audit.jsonl",
+      "F:\\ARCHIVE\\main\\software\\python\\projects\\local_media_zettelkasten\\tests\\.goal-d-runs-migrated3\\.goal-d-smoke-1783895331050-9c559f2fc7ea98\\default\\data\\vaults\\default\\logs\\structured\\ingest_local.jsonl",
+      "F:\\ARCHIVE\\main\\software\\python\\projects\\local_media_zettelkasten\\tests\\.goal-d-runs-migrated3\\.goal-d-smoke-1783895331050-9c559f2fc7ea98\\default\\data\\vaults\\default\\logs\\structured\\ingest_online.jsonl",
+      "F:\\ARCHIVE\\main\\software\\python\\projects\\local_media_zettelkasten\\tests\\.goal-d-runs-migrated3\\.goal-d-smoke-1783895331050-9c559f2fc7ea98\\default\\data\\vaults\\default\\logs\\structured\\review.jsonl",
+      "F:\\ARCHIVE\\main\\software\\python\\projects\\local_media_zettelkasten\\tests\\.goal-d-runs-migrated3\\.goal-d-smoke-1783895331050-9c559f2fc7ea98\\default\\data\\vaults\\default\\logs\\structured\\svelte.jsonl",
+      "F:\\ARCHIVE\\main\\software\\python\\projects\\local_media_zettelkasten\\tests\\.goal-d-runs-migrated3\\.goal-d-smoke-1783895331050-9c559f2fc7ea98\\default\\data\\vaults\\default\\logs\\structured\\system.jsonl",
+      "F:\\ARCHIVE\\main\\software\\python\\projects\\local_media_zettelkasten\\tests\\.goal-d-runs-migrated3\\.goal-d-smoke-1783895331050-9c559f2fc7ea98\\default\\data\\vaults\\default\\logs\\tauri.log"
+    ],
+    "database": "F:\\ARCHIVE\\main\\software\\python\\projects\\local_media_zettelkasten\\tests\\.goal-d-runs-migrated3\\.goal-d-smoke-1783895331050-9c559f2fc7ea98\\default\\data\\vaults\\default\\db\\lmz_main.db"
+  },
+  "completed_at": "2026-07-12T22:29:15.405Z"
+}

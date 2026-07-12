@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "local-media-zettelkasten"
-version = "0.1.0"
+version = "1.0.0"
 description = "Local image and media zettelkasten ingestion, deduplication, and Tauri/Svelte UI."
 readme = "README.md"
 requires-python = ">=3.11"

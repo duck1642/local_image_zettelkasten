@@ -1048,6 +1048,64 @@ def test_vault_repair_wd_tagging_creates_cache_and_reindexes(monkeypatch, tmp_pa
     assert ("character", "character one") in rows
 
 
+def test_vault_wd_repair_reports_locked_wrong_shard_and_cleans_after_retry(monkeypatch, tmp_path):
+    utils, sqlite_operator, vaults = fresh_backend(
+        monkeypatch,
+        tmp_path,
+        "utils",
+        "db.sqlite_operator",
+        "vaults",
+    )
+    item_hash = "c5" * 32
+    conn = insert_mock_item(sqlite_operator, item_hash)
+    storage_id = storage_id_for(conn, item_hash)
+    conn.close()
+
+    asset = utils.asset_path_for(item_hash, ".jpg", "image/jpeg", storage_id=storage_id)
+    asset.parent.mkdir(parents=True, exist_ok=True)
+    asset.write_bytes(b"asset")
+
+    canonical = utils.wd_tag_cache_path_for(item_hash, storage_id)
+    stale = canonical.parent.parent / "dd" / canonical.name
+    canonical.parent.mkdir(parents=True, exist_ok=True)
+    stale.parent.mkdir(parents=True, exist_ok=True)
+    canonical.write_text("{}", encoding="utf-8")
+    stale.write_text("{}", encoding="utf-8")
+
+    real_unlink = Path.unlink
+
+    def fail_stale_unlink(self, *args, **kwargs):
+        if self == stale:
+            raise OSError("stale WD cache locked")
+        return real_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", fail_stale_unlink)
+    ctx = vaults._ctx_for_vault("default")
+    conn = sqlite_operator.init_database()
+    try:
+        first = vaults._repair_missing_wd_cache(conn, ctx)
+    finally:
+        conn.close()
+
+    assert canonical.exists()
+    assert stale.exists()
+    assert first["stale_removed"] == 0
+    assert first["cleanup_errors"]
+    assert first["cleanup_errors"][0]["path"] == str(stale)
+
+    monkeypatch.setattr(Path, "unlink", real_unlink)
+    conn = sqlite_operator.init_database()
+    try:
+        second = vaults._repair_missing_wd_cache(conn, ctx)
+    finally:
+        conn.close()
+
+    assert second["stale_removed"] == 1
+    assert second["cleanup_errors"] == []
+    assert canonical.exists()
+    assert not stale.exists()
+
+
 def test_vault_backup_export_and_import_package(monkeypatch, tmp_path):
     vaults = fresh_backend(monkeypatch, tmp_path, "vaults")[0]
     source = vaults.create_vault("Portable Vault")

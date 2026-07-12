@@ -147,8 +147,8 @@ A **workspace** is an independent LMZ library root. It contains its own configur
 
 LMZ has two workspace forms:
 
-- **Default workspace**: stored inside the application/repository root during development.
-- **External workspace**: created as an `lmz/` directory under a parent folder selected by the user.
+- **Default workspace**: stored at `%USERPROFILE%\.lmz\default` (or the `LMZ_DATA_ROOT` override).
+- **External workspace**: registered from a user-selected location; LMZ does not relocate its data.
 
 An external workspace resembles:
 
@@ -180,9 +180,9 @@ Assets, notes, WD caches, and thumbnails use sharded subdirectories to avoid pla
 
 ### Shared application data
 
-Authentication is intentionally application-scoped rather than workspace-scoped. All workspaces share credentials from `<project-root>/secrets/auth/` during development. AI models are also shared from `<project-root>/data/models/`.
+Authentication is intentionally application-scoped rather than workspace-scoped. All workspaces share credentials from `%USERPROFILE%\.lmz\app\secrets\auth\` (or the `LMZ_AUTH_ROOT` override). AI models are shared from `%USERPROFILE%\.lmz\app\models\`.
 
-External workspace configuration is migrated automatically to remove obsolete workspace-local secret paths and legacy authentication keys. Existing legacy folders are not deleted automatically.
+Legacy mixed-scope configurations are rejected during normal loading with a launcher error. Content adoption is explicit and content-only: fresh configs are generated, durable workspace data is staged and verified, and the source is never deleted or merged into an existing target automatically.
 
 ### Workspace deletion safety
 
@@ -232,7 +232,7 @@ Backups are written to `<workspace>/backups/vaults/<vault-id>/`. Portable export
 Downloader credentials are global to the application:
 
 ```text
-secrets/auth/
+%USERPROFILE%\.lmz\app\secrets\auth\
 |-- x/cookies.txt
 |-- instagram/cookies.txt
 |-- pinterest/cookies.txt
@@ -256,7 +256,7 @@ The optional extension can stage images and append page URLs to the LMZ online q
 
 Development versions exist for Edge, Chrome, and Firefox. See [Browser Extension](tools/browser_extension/README.md) for loading and synchronization instructions.
 
-The extension and Tauri frontend authenticate mutating API requests with the local `secrets/.api_key`. The backend creates this key automatically. Deleting it rotates the key on the next backend start; extension settings must then be updated.
+The extension and Tauri frontend authenticate mutating API requests with `%USERPROFILE%\.lmz\app\secrets\.api_key`. The backend creates this key automatically. Deleting it rotates the key on the next backend start; extension settings must then be updated.
 
 ## Logs and Diagnostics
 

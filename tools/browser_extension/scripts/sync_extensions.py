@@ -15,7 +15,7 @@ def chromium_manifest() -> dict:
     return {
         "manifest_version": 3,
         "name": "LMZ Capture",
-        "version": "0.1.0",
+        "version": "1.0.0",
         "description": "Capture images and supported page URLs into Local Media Zettelkasten.",
         "permissions": ["contextMenus", "storage", "activeTab", "downloads"],
         "host_permissions": ["http://127.0.0.1:8000/*", "http://localhost:8000/*", "*://*/*"],
