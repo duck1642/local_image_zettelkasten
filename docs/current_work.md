@@ -18,7 +18,7 @@ Release priority is separate from difficulty: the `.lmz` data home and bootstrap
 | Moderate | P1 | Storage lifecycle follow-up | not started | Missing regression coverage and Windows lifecycle behavior are verified. |
 | Hard | P0 | Release bootstrap validation | in progress | A clean installed build creates and opens a usable default workspace without relying on writable files in the app bundle. |
 | Hard | P0 | Config and API boundary refactor | done | App-wide and workspace config have explicit schemas, storage, APIs, strict legacy rejection, and reliable frontend error handling. |
-| Hard | P0 | Transactional runtime switching | not started | Workspace/vault switches use one preflight and lock, commit consistently, and completely restore services on failure. |
+| Hard | P0 | Transactional runtime switching | in progress | Workspace switches use one preflight and lock, commit consistently, and completely restore services on failure; vault transitions remain for Goal A2. |
 | Hard | P0 | Desktop sidecar hardening | not started | The desktop owns and identifies its backend; startup, shutdown, port conflicts, and extension authentication are safe. |
 | Very hard | P0 | `.lmz` data-home and content adoption | done | The data-root contract, fresh-install bootstrap, content-only importer, and test plan are implemented and verified. |
 | Hardest | P1 | Similarity-review architecture | not started | Model roles, persistence, candidate retrieval, review semantics, and migration path are specified. |
@@ -328,18 +328,17 @@ Vault roots remain workspace-relative and cannot escape the workspace.
 
 ### Known gaps
 
-- Direct `/api/workspaces/{id}/load` bypasses the switch preflight used by the active-workspace endpoint.
-- Runtime services can activate before the registry commit; rollback restores the previous context without fully rehydrating its services.
-- `LMZ_CONFIG_PATH` is removed before a switch succeeds.
+- Workspace switching now uses one process-wide lock/preflight path for both load APIs, stages the candidate before activation, and fully rehydrates the previous runtime on rollback. Focused failure-injection coverage is in `test_startup_refactor.py`.
 - Vault create/delete/activate/relocate operations can commit filesystem or config changes before all later steps succeed.
 
 ### Work items
 
-- [ ] Use one process-wide switch lock and one preflight path for every workspace/vault transition.
-- [ ] Stage and validate the candidate context before exposing it globally.
-- [ ] Define the registry, config, filesystem, and service commit order.
-- [ ] Restore environment state, runtime context, search/index/watchdog services, and logging on every rollback path.
-- [ ] Add failure-injection tests for registry/config writes, service hydration, relocation, create/delete, and concurrent switch/ingestion attempts.
+- [x] Use one process-wide switch lock and one preflight path for every workspace load API.
+- [x] Stage and validate the candidate workspace context before activation.
+- [x] Define and document the workspace registry, environment, runtime, search, metadata, and logging commit order.
+- [x] Restore environment state, runtime context, search/index/watchdog services, and logging on workspace-load rollback.
+- [x] Add workspace-load failure-injection and concurrent-switch tests; Goal A2 retains relocation/create/delete coverage.
+- [ ] Extend the same transaction protocol to vault transitions.
 - [ ] Persist recoverable cleanup work instead of returning a one-time pending path only.
 
 ## 9. Desktop sidecar hardening
@@ -407,6 +406,209 @@ Source: `F:\ARCHIVE\main\software\python\snippets\media_similarity_checker`
 - [ ] The execution layer continues to block conflicting file intents.
 - [ ] Semantic and duplicate-oriented clusters are visibly separated in the UI.
 
+## 11. v1.0.0 release-hardening plan (feature freeze)
+
+This section is intentionally narrower than the historical roadmap. v1.0.0 is a
+stability release. Do not add CLIP/ResNet/DINO/ANN/cluster-review behavior, new
+metadata features, or broad UI polish while these gates are open. Prototype work
+continues outside LMZ and is not part of this release.
+
+### Findings to resolve
+
+| Finding | Evidence status | v1 disposition |
+| --- | --- | --- |
+| Vault/filesystem transitions are not fully transactional. | Goal A1 resolved workspace-load preflight/lock/rollback gaps; vault relocation/create/delete still write filesystem or config state before all later steps succeed. | Resolve as Goal A2 before release. |
+| Desktop sidecar has no verified identity/readiness/ownership lifecycle. | Confirmed in `web_api.py`, `frontend/src/lib/api.ts`, and `frontend/src-tauri/src/lib.rs`: fixed port, discarded child handle, no handshake. | Resolve with a fixed-port LMZ singleton before release. |
+| Extension session-key exposure is broader than the intended personal client. | Confirmed in `api/common.py` and `api/runtime.py`: any syntactically valid extension origin may request the key. | Ship the personal extension in v1 with exact-origin allowlisting and persistent API-key authentication; no pairing UI. |
+| WD stale wrong-shard cleanup lacks a direct regression test. | Cleanup mechanism exists and reports locked-file errors; the missing coverage is WD-specific. | Add the focused test. |
+| Real-vault behavior is not fully release-tested. | Migrated-vault health audit is clean, but normal ingest/review/log/package workflows remain unverified. | Run the focused Windows smoke gate. |
+| MSI ICE failure. | Reproduced as a Windows Installer/WiX environment limitation; NSIS succeeds. | Ship NSIS-only unless MSI is a hard requirement; do not expand app scope for this. |
+
+### Goal sequence
+
+Each goal below is independently testable. Stop after its acceptance checks pass;
+do not combine goals into one open-ended refactor.
+
+### Context retained from the release analysis
+
+The following definitions, failure modes, expectations, and rationale are part of
+the plan. They are deliberately recorded here so a later context reduction does
+not turn the five goals into only a sidecar/extension checklist.
+
+#### A1 context — workspace switching
+
+- **Achieves:** switching between `default` and `obsidian-main` is all-or-nothing;
+  either the new workspace is fully active or the old one remains usable. Direct
+  and active-workspace routes share the same safety path.
+- **Terms:** a workspace is a registered LMZ project location; a vault is a media
+  collection inside it; the runtime context is the in-memory active workspace,
+  vault, databases, models, logs, and services; preflight is the set of checks
+  before a switch; a transaction completes fully or preserves the prior state;
+  rollback restores that prior state.
+- **Previously confirmed failures, resolved by A1:** direct workspace load no
+  longer bypasses preflight; candidate activation, registry commit, and
+  environment handling now have one documented order; registry failure triggers
+  full previous-service rehydration; rollback no longer uses `hydrate=False`; and
+  `LMZ_CONFIG_PATH` is changed only after commit and restored on failure.
+- **Expected behavior:** acquire one process-wide lock, preflight, stage and
+  validate the candidate, commit registry/config/environment in a defined order,
+  hydrate services, and fully restore context, environment, indexes, metadata
+  workers, and logging on every failure.
+- **Why it matters:** a mixed state can write ingestion to the wrong vault, return
+  search results from the wrong workspace, misroute logs, or require a restart.
+
+#### A2 context — vault and filesystem transitions
+
+- **Achieves:** active-vault switching, relocation, creation, and deletion do not
+  leave config, files, databases, or services pointing at different locations.
+- **Terms:** relocation changes a physical path; a filesystem commit is the point
+  where files/directories move; a config commit records the new path; partial state
+  means only some of those changes succeeded.
+- **Confirmed failures:** relocation can write config before the complete operation
+  is safe; runtime reload can fail afterward; create/delete can change the
+  filesystem before later validation or registry work fails; active-vault changes
+  do not yet share one complete transition protocol.
+- **Expected behavior:** stage and validate the candidate, keep the old path until
+  commit, then update config/runtime; restore the prior path, config, services, and
+  registry if any step fails.
+- **Why it matters:** media is not trivially reconstructible. Partial relocation
+  can disconnect database rows, thumbnails, WD tags, or review files from the
+  actual media and look like data loss.
+
+#### B context — desktop sidecar ownership and readiness
+
+- **Terms:** Tauri is the native desktop shell; the sidecar is the packaged
+  Python/FastAPI backend launched beside it; a fixed port is always `8000`; a
+  readiness handshake proves initialization; backend identity proves the listener
+  belongs to this LMZ instance; a singleton means one LMZ desktop owner.
+- **Confirmed failures:** the frontend assumes `http://localhost:8000`; Tauri
+  discards the child handle; there is no identity/readiness handshake; a second
+  instance or unrelated listener can occupy the port.
+- **Planned handshake contract:** Tauri generates a per-launch nonce and passes it
+  only to the child. A local unauthenticated readiness endpoint such as
+  `GET /api/runtime/health` returns the LMZ service name, `ready` status, protocol
+  version, and a nonce-derived identity. Tauri accepts port `8000` only after the
+  response matches; the frontend starts only after that check succeeds.
+- **Locked v1 decision:** use the fixed-port singleton route. Only one LMZ owns
+  port `8000`; a second LMZ launch must not create another backend; an unrelated
+  listener must be rejected rather than silently trusted. Dynamic ports are
+  deferred.
+- **Why it matters:** connecting to the wrong listener is equivalent to connecting
+  to the wrong database, and an unowned child can remain running after shutdown.
+
+#### C context — personal browser-extension access
+
+- **Terms:** CORS governs which origins may call the backend; an origin identifies
+  the requesting app; the API key authorizes mutation requests; an allowlist names
+  approved origins; pairing is explicit approval of a client.
+- **Confirmed failure:** the current extension-origin pattern accepts any
+  syntactically valid Chrome/Firefox extension origin, so any such extension can
+  request the session key.
+- **Locked v1 decision:** the personal extension is included, but only one exact
+  approved extension origin may obtain/use the persistent
+  `.lmz/app/secrets/.api_key`. Invalid keys and disallowed origins are rejected.
+  Pairing UI and key rotation/re-pairing are deferred; this is not a general
+  extension marketplace integration.
+- **Origin handling:** choose one supported browser build for v1, make its build
+  or installation ID stable (or record it explicitly), and add that one exact
+  origin to the allowlist. Other browser builds remain disallowed until separately
+  approved. The backend must never fall back to a structural extension-origin
+  regex.
+- **Why it matters:** the key protects ingestion, deletion, settings, and other
+  local mutations; broad origin access would let a malicious or compromised
+  extension operate on the vault.
+
+#### D context — release validation closure
+
+- **Achieves:** v1 is proven against migrated real data, not only synthetic
+  fixtures, and known non-blockers are documented.
+- **Terms:** a shard is a hash/storage bucket; a wrong-shard file is a derived file
+  under the wrong bucket; derived data includes thumbnails, WD-tag JSON, and
+  indexes; a real-vault smoke test is a short end-to-end test on migrated data; a
+  synthetic fixture is generated test data; NSIS is the currently successful
+  Windows installer format; MSI is blocked by the current WiX/Windows Installer
+  environment.
+- **WD status:** cleanup already scans all shards, preserves the canonical file,
+  and reports locked stale files. The remaining gap is direct WD-specific locked
+  wrong-shard regression coverage, not evidence that cleanup is broken.
+- **Required proof:** run the migrated default-vault launch/ingest/review/
+  metadata/thumbnail/tag/log/restart flow; open and switch to external
+  `obsidian-main` without moving data; validate install/upgrade/uninstall `.lmz`
+  preservation; run final backend, frontend, and packaged gates. Prefer NSIS for
+  v1 unless MSI becomes a hard requirement.
+
+#### Goal A1 — transactional workspace switching
+
+- [x] Route every workspace load through one preflight and process-wide switch lock.
+- [x] Stage and validate the candidate context before activation.
+- [x] Commit registry/config/environment changes in one documented order.
+- [x] Restore `LMZ_CONFIG_PATH`, runtime context, search indexes, metadata workers, and logging on every failure path.
+- [x] Add failure-injection tests for preflight rejection, candidate hydration failure, registry failure, service activation failure, rollback rehydration, and concurrent switches.
+
+Acceptance evidence: direct and active workspace APIs behave identically; a forced
+failure leaves the prior workspace usable and its services active; no environment
+variable or registry entry is lost; focused tests pass. Verified with 14 startup
+tests, the full relevant switching set (206 passed, 1 skipped), and the full
+backend suite (277 passed, 1 skipped) on 2026-07-12.
+
+Non-goals: dynamic sidecar ports, new similarity algorithms, UI redesign, and
+database/schema changes unrelated to transition safety.
+
+#### Goal A2 — transactional vault/filesystem transitions
+
+- [ ] Apply the same preflight and process-wide lock to active-vault switching.
+- [ ] Make vault relocation stage the candidate config/filesystem state before commit.
+- [ ] Define rollback behavior for vault create/delete/relocate failures.
+- [ ] Add focused failure-injection tests; do not refactor workspace switching again.
+
+Acceptance evidence: a forced vault transition failure leaves the previous vault,
+config, files, services, and registry usable with no partial target state.
+
+#### Goal B — fixed-port desktop sidecar ownership and readiness
+
+- [ ] Enforce one LMZ desktop instance for the fixed backend port `8000`.
+- [ ] Retain and explicitly terminate the child process.
+- [ ] Add backend identity/readiness verification before the frontend accepts port `8000`.
+- [ ] Report occupied-port, crash, timeout, second-instance, and shutdown states clearly in the launcher.
+- [ ] Keep the frontend API base and CSP aligned with the fixed-port contract.
+- [ ] Add the local readiness/identity endpoint and verify its per-launch nonce before frontend startup.
+
+Acceptance evidence: clean launch, second instance, occupied port, unrelated listener,
+sidecar crash, and shutdown tests all produce deterministic outcomes; the frontend
+never silently connects to an unknown backend.
+
+Non-goals: dynamic ports, unrelated Tauri/UI features, and dynamic model loading.
+
+#### Goal C — personal browser-extension connection
+
+- [ ] Keep the browser extension in v1 as a personal-use integration.
+- [ ] Allow only the exact approved extension origin; remove the broad extension-origin regex for the v1 path.
+- [ ] Keep the persistent `.lmz/app/secrets/.api_key` connection and reject invalid keys.
+- [ ] Add extension connection, disallowed-origin, and invalid/stale-key tests.
+
+Acceptance evidence: the approved extension can obtain and use the persistent key;
+other extension origins cannot obtain it or mutate the API. Pairing UI and key
+rotation are explicitly deferred.
+
+#### Goal D — release validation closure
+
+- [ ] Add the WD wrong-shard locked-file regression test.
+- [ ] Run the migrated default-vault smoke flow: launch, ingest, review, metadata, thumbnails/tags, logs, restart.
+- [ ] Run the external `obsidian-main` open/switch smoke flow without moving its data.
+- [ ] Validate clean install, upgrade, and uninstall data preservation with the chosen NSIS/MSI scope.
+- [ ] Bump release metadata consistently to `1.0.0` (`tauri.conf.json`/Cargo are `0.1.0`; `frontend/package.json` is `0.0.0`) and verify packaged metadata.
+- [ ] Run the full backend/frontend/package gates once after Goals A–C.
+
+Acceptance evidence: all release-gate checks are recorded with command output and
+known non-blockers are explicitly documented.
+
+### First goal recommendation
+
+**Goal A1 completed on 2026-07-12.** Its defects were local to
+`backend/api/runtime.py` and runtime activation and are covered by focused
+failure-injection tests. Continue with **Goal A2** before touching the sidecar or
+packaging.
+
 ## Decisions log
 
 | Date | Decision | Status | Notes |
@@ -430,3 +632,6 @@ Source: `F:\ARCHIVE\main\software\python\snippets\media_similarity_checker`
 | 2026-07-11 | Clean packaged `.lmz` first launch and restart pass. | done | Final debug desktop validation created the canonical data home in an isolated user-profile root, opened the default workspace twice, preserved data, and left the binary directory unchanged. |
 | 2026-07-12 | Real legacy project data is adopted into the existing `.lmz` home. | done | `data/` content and models were staged into `.lmz`; app settings, registry, logs/cache, and secrets were preserved; source deletion was false; the receipt records the rollback backup and `config/data` as ambiguous/ignored. |
 | 2026-07-12 | External `obsidian-main` remains external under the new registry. | done | Its config now contains topology only; the legacy YAML has a sibling backup; both external vault databases pass integrity checks (164 and 28 items); the workspace remains inactive. |
+| 2026-07-12 | v1 uses a fixed backend port with one LMZ owner. | decided | Keep port `8000`; prevent a second LMZ sidecar, verify backend identity/readiness, reject unrelated listeners, and terminate the owned child on shutdown. |
+| 2026-07-12 | The personal browser extension ships in v1 with narrow API-key access. | decided | Keep the persistent `.lmz/app/secrets/.api_key`; allow one exact extension origin; defer pairing UI and key rotation. |
+| 2026-07-12 | Goal A1 workspace switching is transactional. | done | Direct and active load APIs share the process-wide preflight/lock; candidate activation, registry commit, environment handling, full rollback rehydration, and failure/concurrency tests pass. Vault/filesystem transitions remain Goal A2. |

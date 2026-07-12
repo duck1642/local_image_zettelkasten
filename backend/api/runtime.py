@@ -1,5 +1,9 @@
 from typing import Literal
 
+import copy
+import os
+import threading
+
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
@@ -21,6 +25,12 @@ from api.guards import (
 )
 
 router = APIRouter()
+
+
+# Workspace loads run in worker threads, so the lock must be process-wide rather
+# than an asyncio-only lock. The lock covers preflight through commit/rollback.
+_WORKSPACE_SWITCH_LOCK = threading.Lock()
+_MISSING_ENV = object()
 
 
 @router.get("/api/session-key")
@@ -335,9 +345,6 @@ def _get_workspaces_sync():
 
 @router.post("/api/workspaces/active")
 async def set_workspace_active(body: dict):
-    blocked = await asyncio.to_thread(_runtime_switch_blocker)
-    if blocked:
-        return blocked
     return await asyncio.to_thread(_set_workspace_active_sync, body)
 
 
@@ -369,7 +376,6 @@ def _ensure_runtime_switch_allowed():
 
 
 def _set_workspace_active_sync(body: dict):
-    _ensure_runtime_switch_allowed()
     workspace_id = str((body or {}).get("id") or "").strip()
     if not workspace_id:
         raise HTTPException(status_code=400, detail="workspace id is required")
@@ -668,91 +674,157 @@ class RelocateVaultRequest(BaseModel):
 async def load_workspace(workspace_id: str):
     return await asyncio.to_thread(_load_workspace_sync, workspace_id)
 
-def _load_workspace_sync(workspace_id: str):
-    from workspaces import DEFAULT_WORKSPACE_ID, load_workspace_registry, set_active_workspace, _resolve
-    
-    registry = load_workspace_registry()
-    if workspace_id not in registry["workspaces"]:
-        raise HTTPException(status_code=404, detail="Workspace not found")
-        
-    entry = registry["workspaces"][workspace_id]
-    config_path = _resolve(entry.get("config_path") or "")
-    if not config_path.exists():
-        return {
-            "status": "relocate_workspace",
-            "message": f"Workspace configuration file not found at {config_path}",
-            "config_path": str(config_path)
-        }
 
-    previous_ctx = try_get_runtime_context()
+def _restore_workspace_registry_snapshot(registry: dict) -> None:
+    """Restore a registry snapshot without going through the public save helper.
+
+    The direct repository path keeps rollback testable even when the normal save
+    helper is injected to fail after a simulated commit.
+    """
+    from config_repository import WorkspaceRegistryRepository
+    from config_schema import WorkspaceRegistry
+    import workspaces
+
+    repository = WorkspaceRegistryRepository(workspaces.REGISTRY_PATH)
+    value = WorkspaceRegistry.model_validate(registry)
+    if not workspaces.REGISTRY_PATH.exists():
+        repository.create(value)
+        return
+    current = repository.read()
+    repository.replace(value, expected_etag=current.etag)
+
+
+def _restore_workspace_switch_state(
+    previous_registry: dict,
+    previous_env: object,
+    previous_ctx,
+) -> list[str]:
+    """Best-effort full rollback; return errors so the caller can report them."""
+    errors: list[str] = []
+
     try:
-        import os
-        os.environ.pop("LMZ_CONFIG_PATH", None)
-        new_ctx = build_runtime_context(config_path)
+        _restore_workspace_registry_snapshot(previous_registry)
+    except Exception as exc:
+        errors.append(f"registry rollback failed: {exc}")
 
-        vaults_root = new_ctx.root / "data" / "vaults"
-        if workspace_id == DEFAULT_WORKSPACE_ID and not new_ctx.active_vault.root.exists() and not vaults_root.exists():
-            from utils import setup_directories
+    try:
+        if previous_env is _MISSING_ENV:
+            os.environ.pop("LMZ_CONFIG_PATH", None)
+        else:
+            os.environ["LMZ_CONFIG_PATH"] = str(previous_env)
+    except Exception as exc:
+        errors.append(f"environment rollback failed: {exc}")
 
-            setup_directories(new_ctx)
-        
-        active_vault = new_ctx.active_vault
-        if active_vault and active_vault.root and not active_vault_is_usable(new_ctx):
-            vault_root = Path(active_vault.root)
-            activate_runtime_context(new_ctx, hydrate=False)
-            configure_terminal_logging()
-            return {
-                "status": "relocate_vault",
-                "message": f"Vault directory is missing or outside the workspace at {vault_root}",
-                "vault_id": active_vault.id,
-                "vault_name": active_vault.name,
-                "vault_root": str(vault_root)
-            }
-        
-        activate_runtime_context(new_ctx)
+    try:
+        if previous_ctx is None:
+            clear_runtime_context()
+            from logger import reconfigure_logging
+
+            reconfigure_logging(None)
+        else:
+            # Rollback must rehydrate all runtime services, not merely restore the
+            # pointer to the previous context.
+            activate_runtime_context(previous_ctx, hydrate=True)
         configure_terminal_logging()
+    except Exception as exc:
+        errors.append(f"runtime-service rollback failed: {exc}")
 
-        set_active_workspace(workspace_id)
-            
-        return {
-            "status": "success",
-            "active_workspace": workspace_id,
-            "active_vault": active_vault.id if active_vault else None
-        }
-    except ConfigReadError as e:
-        if previous_ctx is not None:
-            activate_runtime_context(previous_ctx, hydrate=False)
+    return errors
+
+
+def _load_workspace_sync(workspace_id: str):
+    from workspaces import DEFAULT_WORKSPACE_ID, load_workspace_registry, save_workspace_registry, _resolve
+
+    with _WORKSPACE_SWITCH_LOCK:
+        # One shared path is used by both workspace APIs. Preflight happens while
+        # holding the same lock as the candidate load and commit.
+        _ensure_runtime_switch_allowed()
+        registry = load_workspace_registry()
+        if workspace_id not in registry["workspaces"]:
+            raise HTTPException(status_code=404, detail="Workspace not found")
+
+        entry = registry["workspaces"][workspace_id]
+        config_path = _resolve(entry.get("config_path") or "")
+        if not config_path.exists():
+            return {
+                "status": "relocate_workspace",
+                "message": f"Workspace configuration file not found at {config_path}",
+                "config_path": str(config_path),
+            }
+
+        previous_registry = copy.deepcopy(registry)
+        previous_ctx = try_get_runtime_context()
+        previous_env = os.environ.get("LMZ_CONFIG_PATH", _MISSING_ENV)
+        activation_started = False
+
+        try:
+            # Stage and validate the candidate without mutating global runtime
+            # state. The explicit path prevents the old environment override from
+            # influencing candidate construction.
+            new_ctx = build_runtime_context(config_path)
+            vaults_root = new_ctx.root / "data" / "vaults"
+            if workspace_id == DEFAULT_WORKSPACE_ID and not new_ctx.active_vault.root.exists() and not vaults_root.exists():
+                from utils import setup_directories
+
+                setup_directories(new_ctx)
+
+            active_vault = new_ctx.active_vault
+            recovery = not active_vault_is_usable(new_ctx)
+
+            # Commit order:
+            # 1) activate the fully staged candidate (context, logging, search,
+            #    metadata services); 2) persist the active registry; 3) clear the
+            #    one-shot LMZ_CONFIG_PATH override. Any later failure rolls back
+            #    all three plus a full service rehydration of the old context.
+            activation_started = True
+            activate_runtime_context(new_ctx, hydrate=not recovery)
             configure_terminal_logging()
-        else:
-            clear_runtime_context()
-            from logger import reconfigure_logging
-            reconfigure_logging(None)
-            configure_terminal_logging()
-        raise HTTPException(
-            status_code=422,
-            detail={"code": "unsupported_workspace_config", "message": str(e)},
-        )
-    except ValueError as e:
-        if previous_ctx is not None:
-            activate_runtime_context(previous_ctx, hydrate=False)
-            configure_terminal_logging()
-        else:
-            clear_runtime_context()
-            from logger import reconfigure_logging
-            reconfigure_logging(None)
-            configure_terminal_logging()
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        if previous_ctx is not None:
-            activate_runtime_context(previous_ctx, hydrate=False)
-            configure_terminal_logging()
-        else:
-            clear_runtime_context()
-            from logger import reconfigure_logging
-            reconfigure_logging(None)
-            configure_terminal_logging()
-        log_system("ERROR", "Failed to load workspace", workspace_id=workspace_id, error=str(e))
-        raise HTTPException(status_code=500, detail=f"Failed to load workspace: {e}")
+
+            candidate_registry = copy.deepcopy(registry)
+            candidate_registry["active_workspace"] = workspace_id
+            save_workspace_registry(candidate_registry)
+            os.environ.pop("LMZ_CONFIG_PATH", None)
+
+            if recovery:
+                vault_root = Path(active_vault.root)
+                return {
+                    "status": "relocate_vault",
+                    "message": f"Vault directory is missing or outside the workspace at {vault_root}",
+                    "vault_id": active_vault.id,
+                    "vault_name": active_vault.name,
+                    "vault_root": str(vault_root),
+                }
+
+            return {
+                "status": "success",
+                "active_workspace": workspace_id,
+                "active_vault": active_vault.id if active_vault else None,
+            }
+        except ConfigReadError as exc:
+            rollback_errors = _restore_workspace_switch_state(previous_registry, previous_env, previous_ctx) if activation_started else []
+            detail = {"code": "unsupported_workspace_config", "message": str(exc)}
+            if rollback_errors:
+                detail["rollback_errors"] = rollback_errors
+            raise HTTPException(status_code=422, detail=detail) from exc
+        except ValueError as exc:
+            rollback_errors = _restore_workspace_switch_state(previous_registry, previous_env, previous_ctx) if activation_started else []
+            detail: object = str(exc)
+            if rollback_errors:
+                detail = {"message": str(exc), "rollback_errors": rollback_errors}
+            raise HTTPException(status_code=400, detail=detail) from exc
+        except Exception as exc:
+            rollback_errors = _restore_workspace_switch_state(previous_registry, previous_env, previous_ctx) if activation_started else []
+            log_system(
+                "ERROR",
+                "Failed to load workspace",
+                workspace_id=workspace_id,
+                error=str(exc),
+                rollback_errors=rollback_errors,
+            )
+            detail = f"Failed to load workspace: {exc}"
+            if rollback_errors:
+                detail = {"message": detail, "rollback_errors": rollback_errors}
+            raise HTTPException(status_code=500, detail=detail) from exc
 
 @router.post("/api/workspaces/relocate")
 async def relocate_workspace(body: RelocateWorkspaceRequest):

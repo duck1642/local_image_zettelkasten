@@ -1,7 +1,9 @@
 import importlib
+import os
 import shutil
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 
@@ -94,6 +96,188 @@ def patch_runtime_services(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(metadata_index, "start_metadata_repair_worker", lambda *args, **kwargs: None)
     monkeypatch.setattr(search_manager_module.search_manager, "reset_all", lambda *args, **kwargs: None)
     monkeypatch.setattr(search_manager_module.search_manager, "hydrate", lambda *args, **kwargs: None)
+
+
+def _prepare_workspace_switch_fixture(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    app_module = fresh_api(monkeypatch, tmp_path)
+    from app_paths import get_app_paths
+
+    runtime_context = importlib.import_module("runtime_context")
+    runtime_api = importlib.import_module("api.runtime")
+    workspaces = importlib.import_module("workspaces")
+    registry_path = tmp_path / "workspaces.yaml"
+
+    ready_root = tmp_path / "ready-workspace"
+    ready_root.mkdir()
+    ready_config = ready_root / "config.yaml"
+    workspace_config(ready_config)
+    (ready_root / "data" / "vaults" / "default").mkdir(parents=True)
+
+    write_registry(
+        registry_path,
+        "default",
+        {
+            "default": {"name": "Default", "config_path": "config/config.yaml"},
+            "ready": {"name": "Ready", "config_path": str(ready_config)},
+        },
+    )
+    monkeypatch.setattr(workspaces, "REGISTRY_PATH", registry_path)
+    patch_runtime_services(monkeypatch)
+
+    client = TestClient(app_module.app)
+    key = api_key(client)
+    loaded = client.post("/api/workspaces/default/load", headers={"X-LMZ-API-KEY": key})
+    assert loaded.status_code == 200
+    assert loaded.json()["status"] == "success"
+    assert runtime_context.get_runtime_context().config_path == get_app_paths().default_workspace_config
+    return client, key, runtime_api, runtime_context, workspaces, ready_config
+
+
+def test_direct_and_active_workspace_loads_share_preflight(monkeypatch, tmp_path):
+    client, key, runtime_api, runtime_context, workspaces, ready_config = _prepare_workspace_switch_fixture(monkeypatch, tmp_path)
+    ingestion = importlib.import_module("api.ingestion")
+    previous_ctx = runtime_context.get_runtime_context()
+    sentinel = str(tmp_path / "override-config.yaml")
+    monkeypatch.setenv("LMZ_CONFIG_PATH", sentinel)
+    monkeypatch.setattr(
+        ingestion,
+        "runtime_switch_preflight",
+        lambda *args, **kwargs: {"allowed": False, "blockers": ["test_switch_blocked"]},
+    )
+
+    direct = client.post("/api/workspaces/ready/load", headers={"X-LMZ-API-KEY": key})
+    active = client.post(
+        "/api/workspaces/active",
+        json={"id": "ready"},
+        headers={"X-LMZ-API-KEY": key},
+    )
+
+    assert direct.status_code == 409
+    assert active.status_code == 409
+    assert runtime_context.get_runtime_context() == previous_ctx
+    assert workspaces.load_workspace_registry()["active_workspace"] == "default"
+    assert os.environ["LMZ_CONFIG_PATH"] == sentinel
+    assert ready_config.exists()
+
+
+def test_candidate_hydration_failure_restores_previous_context_registry_and_env(monkeypatch, tmp_path):
+    client, key, runtime_api, runtime_context, workspaces, ready_config = _prepare_workspace_switch_fixture(monkeypatch, tmp_path)
+    search_manager_module = importlib.import_module("db.search_manager")
+    original_hydrate = search_manager_module.search_manager.hydrate
+    previous_ctx = runtime_context.get_runtime_context()
+    sentinel = str(tmp_path / "override-config.yaml")
+    monkeypatch.setenv("LMZ_CONFIG_PATH", sentinel)
+
+    def fail_candidate_hydration(conn):
+        current = runtime_context.try_get_runtime_context()
+        if current is not None and current.config_path == ready_config:
+            raise RuntimeError("candidate hydration failed")
+        return original_hydrate(conn)
+
+    monkeypatch.setattr(search_manager_module.search_manager, "hydrate", fail_candidate_hydration)
+    response = client.post("/api/workspaces/ready/load", headers={"X-LMZ-API-KEY": key})
+
+    assert response.status_code == 500
+    assert runtime_context.get_runtime_context() == previous_ctx
+    assert workspaces.load_workspace_registry()["active_workspace"] == "default"
+    assert os.environ["LMZ_CONFIG_PATH"] == sentinel
+
+
+def test_service_activation_failure_restores_previous_runtime(monkeypatch, tmp_path):
+    client, key, runtime_api, runtime_context, workspaces, ready_config = _prepare_workspace_switch_fixture(monkeypatch, tmp_path)
+    metadata_index = importlib.import_module("metadata_index")
+    original_restart = metadata_index.restart_metadata_watchdog
+    previous_ctx = runtime_context.get_runtime_context()
+
+    def fail_candidate_watchdog(ctx):
+        if ctx.config_path == ready_config:
+            raise RuntimeError("candidate watchdog activation failed")
+        return original_restart(ctx)
+
+    monkeypatch.setattr(metadata_index, "restart_metadata_watchdog", fail_candidate_watchdog)
+    response = client.post("/api/workspaces/ready/load", headers={"X-LMZ-API-KEY": key})
+
+    assert response.status_code == 500
+    assert runtime_context.get_runtime_context() == previous_ctx
+    assert workspaces.load_workspace_registry()["active_workspace"] == "default"
+
+
+def test_registry_commit_failure_restores_registry_env_and_rehydrates_previous_services(monkeypatch, tmp_path):
+    client, key, runtime_api, runtime_context, workspaces, ready_config = _prepare_workspace_switch_fixture(monkeypatch, tmp_path)
+    original_save = workspaces.save_workspace_registry
+    original_activate = runtime_api.activate_runtime_context
+    previous_ctx = runtime_context.get_runtime_context()
+    sentinel = str(tmp_path / "override-config.yaml")
+    calls = []
+    monkeypatch.setenv("LMZ_CONFIG_PATH", sentinel)
+
+    def fail_candidate_registry_save(registry):
+        if registry.get("active_workspace") == "ready":
+            raise OSError("registry write failed")
+        return original_save(registry)
+
+    def record_activation(ctx, *args, **kwargs):
+        calls.append((ctx.config_path, kwargs.get("hydrate", True)))
+        return original_activate(ctx, *args, **kwargs)
+
+    monkeypatch.setattr(workspaces, "save_workspace_registry", fail_candidate_registry_save)
+    monkeypatch.setattr(runtime_api, "activate_runtime_context", record_activation)
+    response = client.post("/api/workspaces/ready/load", headers={"X-LMZ-API-KEY": key})
+
+    assert response.status_code == 500
+    assert runtime_context.get_runtime_context() == previous_ctx
+    assert workspaces.load_workspace_registry()["active_workspace"] == "default"
+    assert os.environ["LMZ_CONFIG_PATH"] == sentinel
+    assert (previous_ctx.config_path, True) in calls
+
+
+def test_workspace_switches_are_serialized_by_process_wide_lock(monkeypatch, tmp_path):
+    client, key, runtime_api, runtime_context, workspaces, ready_config = _prepare_workspace_switch_fixture(monkeypatch, tmp_path)
+    other_root = tmp_path / "other-workspace"
+    other_root.mkdir()
+    other_config = other_root / "config.yaml"
+    workspace_config(other_config)
+    (other_root / "data" / "vaults" / "default").mkdir(parents=True)
+    registry = workspaces.load_workspace_registry()
+    registry["workspaces"]["other"] = {"name": "Other", "config_path": str(other_config)}
+    workspaces.save_workspace_registry(registry)
+
+    original_activate = runtime_api.activate_runtime_context
+    entered = threading.Event()
+    release = threading.Event()
+    call_count = 0
+    call_guard = threading.Lock()
+
+    def block_first_activation(ctx, *args, **kwargs):
+        nonlocal call_count
+        with call_guard:
+            call_count += 1
+            first = call_count == 1
+        if first:
+            entered.set()
+            assert release.wait(5), "first workspace switch did not release"
+        return original_activate(ctx, *args, **kwargs)
+
+    monkeypatch.setattr(runtime_api, "activate_runtime_context", block_first_activation)
+    results = {}
+
+    first = threading.Thread(target=lambda: results.setdefault("first", runtime_api._load_workspace_sync("ready")))
+    second = threading.Thread(target=lambda: results.setdefault("second", runtime_api._load_workspace_sync("other")))
+    first.start()
+    assert entered.wait(5), "first switch did not enter activation"
+    second.start()
+    time.sleep(0.2)
+    assert "second" not in results
+    release.set()
+    first.join(timeout=10)
+    second.join(timeout=10)
+
+    assert not first.is_alive()
+    assert not second.is_alive()
+    assert results["first"]["status"] == "success"
+    assert results["second"]["status"] == "success"
+    assert workspaces.load_workspace_registry()["active_workspace"] == "other"
+    assert runtime_context.get_runtime_context().config_path == other_config
 
 
 def test_launcher_mode_serves_recovery_routes_without_workspace(monkeypatch, tmp_path):
@@ -277,7 +461,9 @@ def test_missing_vault_root_load_enables_vault_relocation(monkeypatch, tmp_path)
     assert vaults_response.status_code == 200
     assert vaults_response.json()["items"][0]["exists"] is False
     assert client.get("/api/logs/location").json()["mode"] == "startup"
-    assert workspaces.load_workspace_registry()["active_workspace"] == "default"
+    # Recovery mode is a committed workspace transition: the runtime context and
+    # registry must agree even while the active vault path is offline.
+    assert workspaces.load_workspace_registry()["active_workspace"] == "offline-vault"
 
 
 def test_fresh_clone_default_workspace_initializes_missing_data(monkeypatch, tmp_path):
