@@ -6,7 +6,6 @@ import base64
 import mimetypes
 import asyncio
 import inspect
-import re
 import time
 import traceback
 import secrets
@@ -139,9 +138,8 @@ ALLOWED_ORIGINS = {
     "tauri://localhost",
     "http://tauri.localhost",
     "https://tauri.localhost",
+    "chrome-extension://ccpkdmcgagkelbfmbakapnminicjmmlk",
 }
-EXTENSION_ORIGIN_REGEX = r"^(?:chrome-extension://[a-z]{32}|moz-extension://[0-9a-f-]+)$"
-EXTENSION_ORIGIN_RE = re.compile(EXTENSION_ORIGIN_REGEX)
 
 MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 LOG_FILE_NAMES = {
@@ -332,8 +330,6 @@ def require_runtime_loaded():
         raise HTTPException(status_code=503, detail="Workspace not loaded") from exc
 
 def _validate_origin(origin: str | None):
-    if origin and EXTENSION_ORIGIN_RE.match(origin):
-        return
     if origin and origin not in ALLOWED_ORIGINS:
         raise HTTPException(status_code=403, detail="Origin not allowed")
 

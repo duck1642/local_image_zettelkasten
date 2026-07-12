@@ -14,6 +14,8 @@ PNG_BYTES = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
 )
 
+APPROVED_EXTENSION_ORIGIN = "chrome-extension://ccpkdmcgagkelbfmbakapnminicjmmlk"
+
 
 def _client(monkeypatch, tmp_path):
     app_module, common = fresh_backend(monkeypatch, tmp_path, "api.app", "api.common")
@@ -97,6 +99,52 @@ def test_capture_delete_removes_staged_artifacts(monkeypatch, tmp_path):
     assert response.status_code == 200
     leftovers = list(client.capture_module._capture_stage_dir(client.runtime_context()).glob(f"{staged['staged_id']}.*"))
     assert leftovers == []
+
+
+def test_approved_extension_can_use_capture_and_queue_endpoints(monkeypatch, tmp_path):
+    client, api_key = _client(monkeypatch, tmp_path)
+    headers = {"Origin": APPROVED_EXTENSION_ORIGIN, "X-LMZ-API-KEY": api_key}
+
+    staged_response = client.post(
+        "/api/capture/stage",
+        headers=headers,
+        files={"file": ("sample.png", PNG_BYTES, "image/png")},
+        data={"source_url": "https://example.com"},
+    )
+    assert staged_response.status_code == 200
+    staged_id = staged_response.json()["staged_id"]
+
+    preview = client.get(f"/api/capture/preview/{staged_id}", headers=headers)
+    assert preview.status_code == 200
+    assert preview.content
+
+    disposable = client.post(
+        "/api/capture/stage",
+        headers=headers,
+        files={"file": ("discard.png", PNG_BYTES, "image/png")},
+        data={"source_url": "https://example.com/discard"},
+    ).json()["staged_id"]
+    deleted = client.delete(f"/api/capture/stage/{disposable}", headers=headers)
+    assert deleted.status_code == 200
+
+    monkeypatch.setattr(
+        client.capture_module,
+        "process_file",
+        lambda *args, **kwargs: (True, "Success: sample.png -> 000001.png", {"tagging_status": "not_run"}),
+    )
+    committed = client.post(
+        "/api/capture/commit",
+        headers=headers,
+        json={"staged_id": staged_id, "artist": "Alice", "platform": "General Web"},
+    )
+    assert committed.status_code == 200
+
+    queued = client.post(
+        "/api/queue/normal/append",
+        headers={**headers, "Content-Type": "application/json"},
+        json={"url": "https://www.pixiv.net/artworks/123", "artist": "Alice", "platform": "Pixiv"},
+    )
+    assert queued.status_code == 200
 
 
 def test_capture_invalid_staged_id_rejected(monkeypatch, tmp_path):
@@ -301,8 +349,7 @@ def test_queue_append_rejects_non_ingestible_youtube_urls(monkeypatch, tmp_path,
 @pytest.mark.parametrize(
     "origin",
     [
-        "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "moz-extension://123e4567-e89b-12d3-a456-426614174000",
+        "chrome-extension://ccpkdmcgagkelbfmbakapnminicjmmlk",
     ],
 )
 def test_extension_origin_requires_valid_api_key(monkeypatch, tmp_path, origin):
@@ -335,8 +382,7 @@ def test_extension_origin_requires_valid_api_key(monkeypatch, tmp_path, origin):
 @pytest.mark.parametrize(
     "origin",
     [
-        "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "moz-extension://123e4567-e89b-12d3-a456-426614174000",
+        "chrome-extension://ccpkdmcgagkelbfmbakapnminicjmmlk",
     ],
 )
 def test_extension_origin_cors_preflight_allowed(monkeypatch, tmp_path, origin):
@@ -353,3 +399,67 @@ def test_extension_origin_cors_preflight_allowed(monkeypatch, tmp_path, origin):
 
     assert response.status_code == 200
     assert response.headers["access-control-allow-origin"] == origin
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "moz-extension://123e4567-e89b-12d3-a456-426614174000",
+        "https://evil.example",
+    ],
+)
+def test_unapproved_origins_cannot_get_key_or_mutate(monkeypatch, tmp_path, origin):
+    client, api_key = _client(monkeypatch, tmp_path)
+
+    session_key = client.get("/api/session-key", headers={"Origin": origin})
+    staged = client.post(
+        "/api/capture/stage",
+        headers={"Origin": origin, "X-LMZ-API-KEY": api_key},
+        files={"file": ("sample.png", PNG_BYTES, "image/png")},
+        data={"source_url": "https://example.com"},
+    )
+
+    assert session_key.status_code == 403
+    assert staged.status_code == 403
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "tauri://localhost",
+        "http://tauri.localhost",
+        "https://tauri.localhost",
+    ],
+)
+def test_existing_local_origins_remain_allowed(monkeypatch, tmp_path, origin):
+    client, api_key = _client(monkeypatch, tmp_path)
+
+    session_key = client.get("/api/session-key", headers={"Origin": origin})
+    staged = client.post(
+        "/api/capture/stage",
+        headers={"Origin": origin, "X-LMZ-API-KEY": api_key},
+        files={"file": ("sample.png", PNG_BYTES, "image/png")},
+        data={"source_url": "https://example.com"},
+    )
+
+    assert session_key.status_code == 200
+    assert staged.status_code == 200
+
+
+def test_unapproved_origin_cors_preflight_is_rejected(monkeypatch, tmp_path):
+    client, _api_key = _client(monkeypatch, tmp_path)
+
+    response = client.options(
+        "/api/capture/stage",
+        headers={
+            "Origin": "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "X-LMZ-API-KEY",
+        },
+    )
+
+    assert response.status_code == 400
+    assert "access-control-allow-origin" not in response.headers

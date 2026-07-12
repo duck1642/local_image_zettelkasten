@@ -17,7 +17,6 @@ from config_repository import bootstrap_data_home
 
 from api.common import (
     ALLOWED_ORIGINS,
-    EXTENSION_ORIGIN_REGEX,
     MUTATING_METHODS,
     _assets_dir,
     _file_response_under,
@@ -125,7 +124,6 @@ app = FastAPI(title="LMZ API", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=sorted(ALLOWED_ORIGINS),
-    allow_origin_regex=EXTENSION_ORIGIN_REGEX,
     allow_methods=["*"],
     allow_headers=["*"],
 )
