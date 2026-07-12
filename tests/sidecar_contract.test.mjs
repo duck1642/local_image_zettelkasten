@@ -36,4 +36,13 @@ test('launcher gates API calls on the native readiness command', () => {
   assert.match(rust, /fn stop_sidecar_command\(/);
 });
 
+test('shutdown terminates the owned sidecar process tree', () => {
+  const rust = read('frontend/src-tauri/src/lib.rs');
+
+  assert.match(rust, /let pid = child\.pid\(\)/);
+  assert.match(rust, /fn terminate_process_tree\(pid: u32\)/);
+  assert.match(rust, /taskkill\.exe/);
+  assert.match(rust, /"\/T", "\/F"/);
+});
+
 console.log('Sidecar contract checks passed.');

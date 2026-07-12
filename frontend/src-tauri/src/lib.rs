@@ -2,7 +2,10 @@ use serde::{Deserialize, Serialize};
 use std::{
     io::{Read, Write},
     net::{SocketAddr, TcpStream},
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -42,9 +45,11 @@ impl SidecarStatus {
     }
 }
 
+#[cfg_attr(dev, allow(dead_code))]
 #[derive(Clone)]
 struct SidecarState {
     child: Arc<Mutex<Option<CommandChild>>>,
+    child_running: Arc<AtomicBool>,
     nonce: String,
     status: Arc<Mutex<SidecarStatus>>,
     owner: Arc<Mutex<Option<DesktopOwnerGuard>>>,
@@ -63,6 +68,7 @@ impl SidecarState {
         };
         Self {
             child: Arc::new(Mutex::new(None)),
+            child_running: Arc::new(AtomicBool::new(false)),
             nonce: fresh_nonce(),
             status: Arc::new(Mutex::new(status)),
             owner: Arc::new(Mutex::new(None)),
@@ -70,6 +76,7 @@ impl SidecarState {
     }
 }
 
+#[cfg_attr(dev, allow(dead_code))]
 #[derive(Debug)]
 enum OwnerError {
     AlreadyRunning,
@@ -89,18 +96,21 @@ impl std::fmt::Display for OwnerError {
 }
 
 #[cfg(windows)]
+#[cfg_attr(dev, allow(dead_code))]
 #[derive(Debug)]
 struct DesktopOwnerGuard {
     handle: isize,
 }
 
 #[cfg(not(windows))]
+#[cfg_attr(dev, allow(dead_code))]
 #[derive(Debug)]
 struct DesktopOwnerGuard {
     path: PathBuf,
     _file: File,
 }
 
+#[cfg_attr(dev, allow(dead_code))]
 impl DesktopOwnerGuard {
     fn acquire() -> Result<Self, OwnerError> {
         #[cfg(windows)]
@@ -273,6 +283,7 @@ fn status_for_probe(result: ProbeResult) -> Option<SidecarStatus> {
     }
 }
 
+#[cfg_attr(dev, allow(dead_code))]
 fn status_for_termination(current: &SidecarStatus, code: Option<i32>) -> Option<SidecarStatus> {
     let code = code
         .map(|value| value.to_string())
@@ -389,11 +400,14 @@ fn stop_sidecar(state: &SidecarState) {
     };
     let child = state.child.lock().ok().and_then(|mut child| child.take());
     if let Some(child) = child {
+        let pid = child.pid();
+        #[cfg(windows)]
+        terminate_process_tree(pid);
         let _ = child.kill();
     }
     if should_wait {
         let deadline = Instant::now() + Duration::from_secs(5);
-        while child_is_present(state) && Instant::now() < deadline {
+        while state.child_running.load(Ordering::Acquire) && Instant::now() < deadline {
             thread::sleep(Duration::from_millis(25));
         }
         set_status(
@@ -403,6 +417,23 @@ fn stop_sidecar(state: &SidecarState) {
     }
 }
 
+#[cfg(windows)]
+fn terminate_process_tree(pid: u32) {
+    use std::{
+        os::windows::process::CommandExt,
+        process::{Command, Stdio},
+    };
+
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let _ = Command::new("taskkill.exe")
+        .args(["/PID", &pid.to_string(), "/T", "/F"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+}
+
+#[cfg_attr(dev, allow(dead_code))]
 fn spawn_sidecar(app: &tauri::AppHandle, state: &SidecarState) {
     use tauri_plugin_shell::process::CommandEvent;
 
@@ -436,6 +467,7 @@ fn spawn_sidecar(app: &tauri::AppHandle, state: &SidecarState) {
     };
     if let Ok(mut stored_child) = state.child.lock() {
         *stored_child = Some(child);
+        state.child_running.store(true, Ordering::Release);
     }
     let event_state = state.clone();
     tauri::async_runtime::spawn(async move {
@@ -449,6 +481,7 @@ fn spawn_sidecar(app: &tauri::AppHandle, state: &SidecarState) {
                 }
                 CommandEvent::Error(error) => eprintln!("Sidecar error: {error}"),
                 CommandEvent::Terminated(payload) => {
+                    event_state.child_running.store(false, Ordering::Release);
                     if let Ok(mut child) = event_state.child.lock() {
                         *child = None;
                     }
@@ -692,6 +725,26 @@ mod tests {
         let status = status_snapshot(&state);
         assert_eq!(status.state, "skipped");
         assert!(status.ready);
+    }
+
+    #[test]
+    fn shutdown_waits_for_child_termination_signal() {
+        let state = SidecarState::new(false);
+        set_status(&state, SidecarStatus::new("ready", true, "ready"));
+        state.child_running.store(true, Ordering::Release);
+        let running = Arc::clone(&state.child_running);
+        let released = Arc::new(AtomicBool::new(false));
+        let released_signal = Arc::clone(&released);
+        thread::spawn(move || {
+            thread::sleep(Duration::from_millis(50));
+            released_signal.store(true, Ordering::Release);
+            running.store(false, Ordering::Release);
+        });
+
+        stop_sidecar(&state);
+
+        assert!(released.load(Ordering::Acquire));
+        assert_eq!(status_snapshot(&state).state, "stopped");
     }
 
     #[cfg(windows)]
