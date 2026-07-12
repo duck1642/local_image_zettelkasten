@@ -1,4 +1,4 @@
-const DEFAULT_API_BASE = 'http://localhost:8000';
+export const DEFAULT_API_BASE = 'http://127.0.0.1:8000';
 const configuredApiBase = import.meta.env.VITE_API_BASE;
 const API_BASE = import.meta.env.DEV && configuredApiBase === undefined ? '' : (configuredApiBase || DEFAULT_API_BASE);
 const STARTUP_RETRY_MS = 60000;
@@ -6,6 +6,50 @@ const STARTUP_RETRY_INITIAL_DELAY_MS = 250;
 const STARTUP_RETRY_MAX_DELAY_MS = 1000;
 
 let apiKeyPromise: Promise<string> | null = null;
+
+export type SidecarStatus = {
+  state: string;
+  ready: boolean;
+  message: string;
+  port: number;
+};
+
+export class SidecarStartupError extends Error {
+  readonly state: string;
+  readonly port: number;
+
+  constructor(status: SidecarStatus) {
+    super(status.message || `LMZ backend startup failed (${status.state})`);
+    this.name = 'SidecarStartupError';
+    this.state = status.state;
+    this.port = status.port;
+  }
+}
+
+export async function waitForSidecarReady(): Promise<SidecarStatus> {
+  if (!(window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__) {
+    return {
+      state: 'dev',
+      ready: true,
+      message: 'Development backend is managed externally.',
+      port: 8000,
+    };
+  }
+  const { invoke } = await import('@tauri-apps/api/core');
+  let status: SidecarStatus;
+  try {
+    status = await invoke<SidecarStatus>('wait_for_sidecar_ready');
+  } catch (error) {
+    throw new SidecarStartupError({
+      state: 'startup_failed',
+      ready: false,
+      message: `Native LMZ readiness check failed: ${String(error)}`,
+      port: 8000,
+    });
+  }
+  if (!status.ready) throw new SidecarStartupError(status);
+  return status;
+}
 
 export function apiUrl(path: string) {
   return `${API_BASE}${path}`;

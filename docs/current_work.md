@@ -19,7 +19,7 @@ Release priority is separate from difficulty: the `.lmz` data home and bootstrap
 | Hard | P0 | Release bootstrap validation | in progress | A clean installed build creates and opens a usable default workspace without relying on writable files in the app bundle. |
 | Hard | P0 | Config and API boundary refactor | done | App-wide and workspace config have explicit schemas, storage, APIs, strict legacy rejection, and reliable frontend error handling. |
 | Hard | P0 | Transactional runtime switching | in progress | Workspace switches use one preflight and lock, commit consistently, and completely restore services on failure; vault transitions remain for Goal A2. |
-| Hard | P0 | Desktop sidecar hardening | not started | The desktop owns and identifies its backend; startup, shutdown, port conflicts, and extension authentication are safe. |
+| Hard | P0 | Desktop sidecar hardening | in progress | The desktop owns and identifies its backend; startup, shutdown, port conflicts, and extension authentication are safe. Sidecar ownership/readiness is implemented; the GUI smoke gate remains. |
 | Very hard | P0 | `.lmz` data-home and content adoption | done | The data-root contract, fresh-install bootstrap, content-only importer, and test plan are implemented and verified. |
 | Hardest | P1 | Similarity-review architecture | not started | Model roles, persistence, candidate retrieval, review semantics, and migration path are specified. |
 
@@ -359,20 +359,20 @@ Vault roots remain workspace-relative and cannot escape the workspace.
 
 ## 9. Desktop sidecar hardening
 
-### Known gaps
+### Current status
 
-- The packaged sidecar and frontend assume fixed port `8000` without a backend identity/readiness handshake.
-- The spawned child handle is not retained for explicit lifecycle ownership.
-- A second app instance or unrelated listener can cause the frontend to connect to the wrong backend.
-- CORS accepts every syntactically valid browser-extension origin, while the session-key endpoint exposes the mutation key.
+- The packaged sidecar now carries a per-launch nonce and exposes a local identity/readiness response at `GET /api/runtime/health`.
+- Tauri claims one fixed-port desktop owner, retains the sidecar child, verifies the exact nonce before frontend API use, and terminates the owned child on exit.
+- Extension-origin/key exposure remains Goal C and is intentionally unchanged here.
 
 ### Work items
 
-- [ ] Choose and document either singleton plus verified fixed-port ownership or a dynamic-port startup handshake.
-- [ ] Pass backend identity/API-base information from Tauri to the frontend and align CSP rules.
-- [ ] Add readiness timeout, clear launcher error reporting, crash detection, and explicit shutdown behavior.
+- [x] Choose and document singleton plus verified fixed-port ownership; dynamic ports remain deferred.
+- [x] Pass backend identity/readiness state from Tauri to the frontend and align API base, Vite proxy, and CSP rules.
+- [x] Add readiness timeout, clear launcher error reporting, crash detection, and explicit shutdown behavior.
 - [ ] Restrict extension access to paired/approved clients and define key rotation/re-pairing behavior.
-- [ ] Test first launch, second instance, occupied port, sidecar crash, stale API key, and app shutdown.
+- [x] Add deterministic first-launch, identity, occupied-port, stale-identity, crash, timeout, second-owner, and shutdown-state tests.
+- [ ] Run the packaged GUI first/second-launch, occupied-listener, crash, and shutdown smoke gate.
 
 ## 10. Similarity review system
 
@@ -433,8 +433,8 @@ continues outside LMZ and is not part of this release.
 
 | Finding | Evidence status | v1 disposition |
 | --- | --- | --- |
-| Vault/filesystem transitions are not fully transactional. | Goal A1 resolved workspace-load preflight/lock/rollback gaps; vault relocation/create/delete still write filesystem or config state before all later steps succeed. | Resolve as Goal A2 before release. |
-| Desktop sidecar has no verified identity/readiness/ownership lifecycle. | Confirmed in `web_api.py`, `frontend/src/lib/api.ts`, and `frontend/src-tauri/src/lib.rs`: fixed port, discarded child handle, no handshake. | Resolve with a fixed-port LMZ singleton before release. |
+| Vault/filesystem transitions are not fully transactional. | Goals A1/A2 now cover workspace and vault transitions with shared preflight, staging, commit, and rollback tests. | Keep the existing release smoke gate; no new transition implementation is planned. |
+| Desktop sidecar has no verified identity/readiness/ownership lifecycle. | The former gap is implemented: nonce handshake, fixed-port owner mutex, retained child, bounded readiness probe, launcher states, and shutdown handling are covered by native/backend/packaged tests. | Keep the GUI second-instance/occupied-port/crash smoke gate before release. |
 | Extension session-key exposure is broader than the intended personal client. | Confirmed in `api/common.py` and `api/runtime.py`: any syntactically valid extension origin may request the key. | Ship the personal extension in v1 with exact-origin allowlisting and persistent API-key authentication; no pairing UI. |
 | WD stale wrong-shard cleanup lacks a direct regression test. | Cleanup mechanism exists and reports locked-file errors; the missing coverage is WD-specific. | Add the focused test. |
 | Real-vault behavior is not fully release-tested. | Migrated-vault health audit is clean, but normal ingest/review/log/package workflows remain unverified. | Run the focused Windows smoke gate. |
@@ -498,9 +498,10 @@ not turn the five goals into only a sidecar/extension checklist.
   Python/FastAPI backend launched beside it; a fixed port is always `8000`; a
   readiness handshake proves initialization; backend identity proves the listener
   belongs to this LMZ instance; a singleton means one LMZ desktop owner.
-- **Confirmed failures:** the frontend assumes `http://localhost:8000`; Tauri
-  discards the child handle; there is no identity/readiness handshake; a second
-  instance or unrelated listener can occupy the port.
+- **Previously confirmed failures, now addressed:** the frontend had assumed
+  `http://localhost:8000`; Tauri discarded the child handle; there was no
+  identity/readiness handshake; and a second instance or unrelated listener
+  could occupy the port.
 - **Planned handshake contract:** Tauri generates a per-launch nonce and passes it
   only to the child. A local unauthenticated readiness endpoint such as
   `GET /api/runtime/health` returns the LMZ service name, `ready` status, protocol
@@ -585,16 +586,26 @@ backend suite (285 passed, 1 skipped) on 2026-07-12.
 
 #### Goal B — fixed-port desktop sidecar ownership and readiness
 
-- [ ] Enforce one LMZ desktop instance for the fixed backend port `8000`.
-- [ ] Retain and explicitly terminate the child process.
-- [ ] Add backend identity/readiness verification before the frontend accepts port `8000`.
-- [ ] Report occupied-port, crash, timeout, second-instance, and shutdown states clearly in the launcher.
-- [ ] Keep the frontend API base and CSP aligned with the fixed-port contract.
-- [ ] Add the local readiness/identity endpoint and verify its per-launch nonce before frontend startup.
+- [x] Enforce one LMZ desktop owner for the fixed backend port `8000`.
+- [x] Retain and explicitly terminate the child process.
+- [x] Add backend identity/readiness verification before the frontend accepts port `8000`.
+- [x] Report occupied-port, crash, timeout, second-instance, and shutdown states clearly in the launcher.
+- [x] Keep the frontend API base, Vite proxy, and CSP aligned with the fixed-port contract.
+- [x] Add the local readiness/identity endpoint and verify its per-launch nonce before frontend startup.
+- [ ] Run the packaged GUI second-launch/occupied-listener/crash/shutdown smoke gate.
 
-Acceptance evidence: clean launch, second instance, occupied port, unrelated listener,
-sidecar crash, and shutdown tests all produce deterministic outcomes; the frontend
-never silently connects to an unknown backend.
+Acceptance evidence: the backend health contract test passes; native Tauri tests cover
+exact nonce matching, unrelated/stale identities, second owner claims, startup
+failure, timeout, crash, and shutdown state transitions; frontend checks/build and
+fixed-base contract tests pass; and the rebuilt packaged sidecar completes two
+nonce-verified first-launch/restart cycles with shutdown cleanup. An actual packaged
+GUI run also kept the same nonce and created no new sidecar tree on the second launch.
+An occupied-port GUI run also started zero sidecar processes while a loopback listener
+held port `8000`. The automated close request was intercepted by the existing frontend
+close guard and did not complete under this WebView2 session, so the final GUI close
+and owned-child shutdown smoke remains a manual gate. The Tauri log also reported
+WebView2 `0x800700AA` (resource in use), so this is recorded as an environment
+limitation rather than a sidecar identity result.
 
 Non-goals: dynamic ports, unrelated Tauri/UI features, and dynamic model loading.
 
@@ -623,10 +634,9 @@ known non-blockers are explicitly documented.
 
 ### First goal recommendation
 
-**Goal A1 completed on 2026-07-12.** Its defects were local to
-`backend/api/runtime.py` and runtime activation and are covered by focused
-failure-injection tests. Continue with **Goal A2** before touching the sidecar or
-packaging.
+**Goals A1 and A2 completed on 2026-07-12.** Their defects are covered by
+focused failure-injection and rollback tests. Goal B sidecar ownership/readiness
+is the current implementation focus; the GUI smoke gate must pass before release.
 
 ## Decisions log
 
@@ -655,3 +665,4 @@ packaging.
 | 2026-07-12 | The personal browser extension ships in v1 with narrow API-key access. | decided | Keep the persistent `.lmz/app/secrets/.api_key`; allow one exact extension origin; defer pairing UI and key rotation. |
 | 2026-07-12 | Goal A1 workspace switching is transactional. | done | Direct and active load APIs share the process-wide preflight/lock; candidate activation, registry commit, environment handling, full rollback rehydration, and failure/concurrency tests pass. Vault/filesystem transitions remain Goal A2. |
 | 2026-07-12 | Goal A2 vault/filesystem transitions are transactional. | done | Active-vault switching, create, delete, and relocation share A1 locking/preflight; staged config/filesystem changes roll back exact config, registry, environment, runtime services, and newly-created target files on forced failures. |
+| 2026-07-12 | Goal B sidecar ownership/readiness implementation is complete pending GUI smoke. | in progress | Fixed port `8000`, Windows owner mutex, per-launch nonce health handshake, retained child lifecycle, launcher error states, and aligned API/CSP are implemented. Backend, native, frontend, contract, packaged sidecar first-launch/restart, and shutdown checks pass; GUI second-instance/occupied-listener validation remains manual. |

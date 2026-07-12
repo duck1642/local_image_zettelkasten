@@ -315,6 +315,14 @@
 
           async function closeNow() {
             forceClosing = true;
+            if ((window as any).__TAURI_INTERNALS__) {
+              try {
+                const { invoke } = await import('@tauri-apps/api/core');
+                await invoke('stop_sidecar_command');
+              } catch (error) {
+                uiLog('WARNING', 'Native sidecar shutdown command failed', { error: String(error) });
+              }
+            }
             await appWindow.destroy();
           }
 

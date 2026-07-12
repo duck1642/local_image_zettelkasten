@@ -609,3 +609,28 @@ def test_vault_relocation_rejects_outside_workspace(monkeypatch, tmp_path):
     assert relocate.status_code == 400
     saved_config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     assert saved_config["vaults"]["default"]["root"] == "data/vaults/default"
+
+
+def test_sidecar_health_requires_and_echoes_launch_nonce(monkeypatch, tmp_path):
+    app_module = fresh_api(monkeypatch, tmp_path)
+
+    with TestClient(app_module.app) as client:
+        monkeypatch.delenv("LMZ_STARTUP_NONCE", raising=False)
+        not_ready = client.get("/api/runtime/health")
+        assert not_ready.status_code == 200
+        assert not_ready.json() == {
+            "service": "lmz-api",
+            "ready": False,
+            "protocol_version": 1,
+            "nonce": "",
+        }
+
+        monkeypatch.setenv("LMZ_STARTUP_NONCE", "test-launch-nonce")
+        ready = client.get("/api/runtime/health")
+        assert ready.status_code == 200
+        assert ready.json() == {
+            "service": "lmz-api",
+            "ready": True,
+            "protocol_version": 1,
+            "nonce": "test-launch-nonce",
+        }

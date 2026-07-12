@@ -18,30 +18,64 @@ async function apiJson(endpoint, init = {}) {
   return payload;
 }
 
-async function waitForApi(timeoutMs = 120_000) {
+async function waitForApi(expectedNonce, timeoutMs = 120_000) {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
     try {
-      const response = await fetch(`${apiBase}/api/app/settings`);
-      if (response.ok) return;
+      const response = await fetch(`${apiBase}/api/runtime/health`);
+      const payload = await response.json().catch(() => ({}));
+      if (
+        response.ok
+        && payload.service === 'lmz-api'
+        && payload.ready === true
+        && payload.protocol_version === 1
+        && payload.nonce === expectedNonce
+      ) return;
     } catch {}
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
   throw new Error('Timed out waiting for the packaged sidecar');
 }
 
-async function stop(child) {
-  if (!child || child.exitCode !== null) return;
+function runningSidecarPids() {
+  if (process.platform !== 'win32') return [];
+  const processName = path.basename(sidecar, path.extname(sidecar));
+  const result = spawnSync(
+    'powershell.exe',
+    [
+      '-NoProfile',
+      '-Command',
+      `(Get-Process -Name '${processName}' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id) -join ','`
+    ],
+    { windowsHide: true, encoding: 'utf8' }
+  );
+  return String(result.stdout || '')
+    .split(',')
+    .map((value) => Number(value.trim()))
+    .filter((value) => Number.isInteger(value) && value > 0);
+}
+
+async function stop(child, baselinePids = new Set()) {
+  const candidates = new Set(runningSidecarPids().filter((pid) => !baselinePids.has(pid)));
+  if (child?.pid) candidates.add(child.pid);
   if (process.platform === 'win32') {
-    spawnSync('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
-  } else {
+    for (const pid of candidates) {
+      spawnSync('taskkill.exe', ['/PID', String(pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
+      spawnSync('powershell.exe', ['-NoProfile', '-Command', `Stop-Process -Id ${pid} -Force -ErrorAction SilentlyContinue`], { windowsHide: true, stdio: 'ignore' });
+      try { process.kill(pid, 'SIGKILL'); } catch {}
+    }
+  } else if (child && child.exitCode === null) {
     child.kill('SIGTERM');
   }
-  await Promise.race([
-    new Promise((resolve) => child.once('exit', resolve)),
-    new Promise((resolve) => setTimeout(resolve, 10_000))
-  ]);
-  if (child.exitCode === null) child.kill('SIGKILL');
+  if (child && child.exitCode === null) {
+    await Promise.race([
+      new Promise((resolve) => child.once('exit', resolve)),
+      new Promise((resolve) => setTimeout(resolve, 10_000))
+    ]);
+  }
+  if (child?.exitCode === null) {
+    try { child.kill('SIGKILL'); } catch {}
+  }
   child.stdout?.destroy();
   child.stderr?.destroy();
   const started = Date.now();
@@ -58,16 +92,23 @@ async function stop(child) {
 
 async function runCycle(label) {
   const output = [];
+  const baselinePids = new Set(runningSidecarPids());
+  const launchNonce = `packaged-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const child = spawn(sidecar, [], {
     cwd: path.dirname(sidecar),
-    env: { ...process.env, LMZ_DATA_ROOT: dataRoot, LMZ_DISABLE_RELOAD: '1' },
+    env: {
+      ...process.env,
+      LMZ_DATA_ROOT: dataRoot,
+      LMZ_DISABLE_RELOAD: '1',
+      LMZ_STARTUP_NONCE: launchNonce
+    },
     windowsHide: true,
     stdio: ['ignore', 'pipe', 'pipe']
   });
   child.stdout.on('data', (chunk) => output.push(String(chunk)));
   child.stderr.on('data', (chunk) => output.push(String(chunk)));
   try {
-    await waitForApi();
+    await waitForApi(launchNonce);
     const settings = await apiJson('/api/app/settings');
     assert(settings.schema_version === 1, `${label}: invalid settings schema`);
     const workspaces = await apiJson('/api/workspaces');
@@ -86,7 +127,7 @@ async function runCycle(label) {
   } catch (error) {
     throw new Error(`${error.message}\nPackaged ${mode} output:\n${output.join('')}`);
   } finally {
-    await stop(child);
+    await stop(child, baselinePids);
   }
 }
 

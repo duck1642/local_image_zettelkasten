@@ -9,9 +9,9 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      '/api': 'http://localhost:8000',
-      '/vault': 'http://localhost:8000',
-      '/review-assets': 'http://localhost:8000'
+      '/api': 'http://127.0.0.1:8000',
+      '/vault': 'http://127.0.0.1:8000',
+      '/review-assets': 'http://127.0.0.1:8000'
     }
   }
 })

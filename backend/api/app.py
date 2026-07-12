@@ -36,6 +36,7 @@ PRE_RUNTIME_PUBLIC_PATHS = {
     "/api/session-key",
     "/api/app/settings",
     "/api/runtime/session",
+    "/api/runtime/health",
 }
 PRE_RUNTIME_LOG_PATHS = {
     "/api/logs",
@@ -168,6 +169,18 @@ app.include_router(logs.router)
 app.include_router(ingestion.router)
 app.include_router(review.router)
 app.include_router(capture.router)
+
+
+@app.get("/api/runtime/health")
+async def runtime_health():
+    """Return the local sidecar identity used by the desktop startup handshake."""
+    nonce = os.environ.get("LMZ_STARTUP_NONCE", "").strip()
+    return {
+        "service": "lmz-api",
+        "ready": bool(nonce),
+        "protocol_version": 1,
+        "nonce": nonce,
+    }
 
 
 @app.get("/")

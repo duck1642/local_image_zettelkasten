@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, createEventDispatcher } from 'svelte';
   import { open as openDialog } from '@tauri-apps/plugin-dialog';
-  import { apiFetch } from './api';
+  import { apiFetch, SidecarStartupError, waitForSidecarReady } from './api';
   import { log as uiLog } from './logger';
   import {
     IconFolder,
@@ -44,6 +44,8 @@
   let loading = true;
   let loadingVaults = false;
   let actionBusy = false;
+  let sidecarReady = false;
+  let startupState = 'starting';
   let statusMessage = '';
   let errorMessage = '';
   let nameDialog: 'workspace' | 'vault' | null = null;
@@ -69,10 +71,21 @@
     current_path?: string;
   } = { type: null, id: '' };
 
+  async function ensureSidecarReady() {
+    if (sidecarReady) return;
+    startupState = 'starting';
+    statusMessage = 'Starting LMZ backend...';
+    const status = await waitForSidecarReady();
+    startupState = status.state;
+    sidecarReady = true;
+    statusMessage = '';
+  }
+
   async function fetchWorkspaces() {
     try {
       loading = true;
       errorMessage = '';
+      await ensureSidecarReady();
       const startTime = Date.now();
       const res = await apiFetch('/api/workspaces');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -86,7 +99,13 @@
       }
     } catch (e) {
       uiLog('ERROR', 'Failed to fetch workspaces in launcher', { error: String(e) });
-      errorMessage = 'Could not load workspaces. Make sure backend is running.';
+      if (e instanceof SidecarStartupError) {
+        startupState = e.state;
+        errorMessage = e.message;
+        statusMessage = '';
+      } else {
+        errorMessage = 'Could not load workspaces after the LMZ backend reported ready.';
+      }
     } finally {
       loading = false;
     }
@@ -431,7 +450,7 @@
     {#if loading}
       <div class="spinner-area">
         <div class="spinner"></div>
-        <div class="loading-text">Scanning local workspaces...</div>
+        <div class="loading-text">{startupState === 'starting' ? 'Starting LMZ backend...' : 'Scanning local workspaces...'}</div>
       </div>
     {:else}
       <div class="launcher-body sleek-scrollbar">
