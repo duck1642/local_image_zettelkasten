@@ -56,6 +56,7 @@ tests/.drivers/
 tests/generated/
 tests/perf-results/
 tests/perf/tauri_webview_perf/node_modules/
+tests/.goal-*/
 /test-results/*
 !/test-results/.last-run.json
 pytest-cache-files-*/
@@ -238,6 +239,7 @@ tests/fixtures/**/logs/
 # Browser extension local/package artifacts
 tools/browser_extension/**/*.crx
 tools/browser_extension/**/*.pem
+tools/browser_extension/**/*.xpi
 tools/browser_extension/**/web-ext-artifacts/
 tools/browser_extension/**/node_modules/
 tools/browser_extension/**/dist/
