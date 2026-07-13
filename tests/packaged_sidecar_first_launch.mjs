@@ -109,7 +109,18 @@ async function runCycle(label) {
   child.stderr.on('data', (chunk) => output.push(String(chunk)));
   try {
     await waitForApi(launchNonce);
-    const settings = await apiJson('/api/app/settings');
+    const settingsResponse = await fetch(`${apiBase}/api/app/settings`, {
+      headers: { Origin: 'http://tauri.localhost' }
+    });
+    assert(settingsResponse.ok, `${label}: app settings request failed ${settingsResponse.status}`);
+    const exposedHeaders = new Set(
+      (settingsResponse.headers.get('access-control-expose-headers') || '')
+        .split(',')
+        .map((value) => value.trim().toLowerCase())
+        .filter(Boolean)
+    );
+    assert(exposedHeaders.has('etag'), `${label}: packaged API does not expose ETag to the Tauri origin`);
+    const settings = await settingsResponse.json();
     assert(settings.schema_version === 1, `${label}: invalid settings schema`);
     const workspaces = await apiJson('/api/workspaces');
     assert(workspaces.active === 'default', `${label}: default workspace is not active`);

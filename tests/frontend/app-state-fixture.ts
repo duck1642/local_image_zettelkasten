@@ -54,7 +54,7 @@ async function fulfillJson(route: Route, body: unknown, headers: Record<string, 
 export async function installAppStateRoutes(
   page: Page,
   initialSettings = makeAppSettings(),
-  options: { putStatus?: number } = {}
+  options: { putStatus?: number; includeEtag?: boolean } = {}
 ) {
   let settings = structuredClone(initialSettings);
   let version = 1;
@@ -70,7 +70,8 @@ export async function installAppStateRoutes(
       settings = JSON.parse(route.request().postData() || '{}');
       version += 1;
     }
-    return fulfillJson(route, settings, { ETag: `"test-settings-${version}"` });
+    const headers = options.includeEtag === false ? {} : { ETag: `"test-settings-${version}"` };
+    return fulfillJson(route, settings, headers);
   });
   await page.route('**/api/runtime/session', async (route) => fulfillJson(route, loadedRuntimeSession));
 }

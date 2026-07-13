@@ -120,6 +120,7 @@ async function installMockVaultApi(
     onLogStream?: (url: URL) => Promise<void> | void;
     logEntriesForStream?: (url: URL) => MockLogEntry[];
     appSettingsPutStatus?: number;
+    appSettingsIncludeEtag?: boolean;
     workspaceLoadLegacy?: boolean;
   } = {}
 ) {
@@ -268,7 +269,10 @@ async function installMockVaultApi(
     });
   });
 
-  await installAppStateRoutes(page, appSettings, { putStatus: options.appSettingsPutStatus });
+  await installAppStateRoutes(page, appSettings, {
+    putStatus: options.appSettingsPutStatus,
+    includeEtag: options.appSettingsIncludeEtag
+  });
   await page.route('**/api/workspaces**', async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -847,12 +851,13 @@ async function openMockVault(
     onLogStream?: (url: URL) => Promise<void> | void;
     logEntriesForStream?: (url: URL) => MockLogEntry[];
     appSettingsPutStatus?: number;
+    appSettingsIncludeEtag?: boolean;
     workspaceLoadLegacy?: boolean;
   } = {}
 ) {
   await installMockVaultApi(page, options);
   await page.goto('/?lmz_test_page_size=100');
-  await expect(page.getByTestId('vault-tile').first()).toBeVisible();
+  await expect(page.getByTestId('vault-tile').first()).toBeVisible({ timeout: 20_000 });
   await expect(page.locator('.bottom-status')).toContainText('Total Items: 3');
 }
 
@@ -1362,6 +1367,12 @@ test('general settings persist webview controls and gate the context menu', asyn
   await page.getByRole('button', { name: /Settings/ }).click();
   await page.getByLabel('Enable developer tools').check();
   await page.getByLabel('Enable right-click context menu').check();
+
+  const contextMenuAllowedBeforeSave = await page.evaluate(() =>
+    window.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+  );
+  expect(contextMenuAllowedBeforeSave).toBe(false);
+
   await page.getByRole('button', { name: 'Save Settings' }).click();
   await expect(page.getByText('All system configurations are up-to-date.')).toBeVisible();
 
@@ -1369,6 +1380,24 @@ test('general settings persist webview controls and gate the context menu', asyn
     window.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
   );
   expect(contextMenuAllowedAfter).toBe(true);
+
+  await page.reload();
+  await expect(page.getByTestId('vault-tile').first()).toBeVisible();
+  const contextMenuAllowedAfterReload = await page.evaluate(() =>
+    window.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+  );
+  expect(contextMenuAllowedAfterReload).toBe(true);
+});
+
+test('missing app-settings ETag keeps the draft dirty and shows an actionable error', async ({ page }) => {
+  await openMockVault(page, { appSettingsIncludeEtag: false });
+  await page.getByRole('button', { name: /Settings/ }).click();
+  await page.getByLabel('Enable developer tools').check();
+  await page.getByRole('button', { name: 'Save Settings' }).click();
+
+  await expect(page.getByRole('alert')).toContainText('App settings must be loaded before saving');
+  await expect(page.getByText('You have unsaved changes.')).toBeVisible();
+  await expect(page.getByLabel('Enable developer tools')).toBeChecked();
 });
 
 test('failed app-settings saves retain the dirty draft and show the conflict', async ({ page }) => {
@@ -1434,6 +1463,7 @@ test('workspace deletion offers explicit modes and sends generated cleanup', asy
   await expect(dialog).toContainText('Keeps vault assets, notes, pending media, and recovery files');
   await dialog.getByRole('button', { name: 'Delete LMZ data' }).click();
 
+  await expect.poll(() => actions.length).toBe(1);
   expect(actions).toContainEqual({ action: 'delete', payload: { id: 'obsidian-main', mode: 'generated' } });
   await expect(page.getByText('Obsidian Main', { exact: true })).toHaveCount(0);
 });

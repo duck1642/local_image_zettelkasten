@@ -282,23 +282,24 @@ python tools/maintenance/maintenance_cli.py update-downloaders
 
 ## Configuration
 
-The built-in workspace uses `config/config.yaml`. External workspaces use `<workspace>/config.yaml`. Important sections include:
+LMZ separates app-wide behavior from workspace topology:
 
-- `vaults`: display names and vault roots.
-- `active_vault`: active vault ID.
-- `firewall`: allowed media extensions and MIME types.
-- `processing`: transparency flattening and background color.
-- `tagging`: WD model, device, threshold, tag count, and video settings.
-- `ingestion_concurrency`: worker and jitter settings per platform.
-- `ui`: layout, tile size, inspector, and RAM tracking preferences.
-- `external_tools`: proxy and user-agent settings. Credentials do not belong here.
+- `%USERPROFILE%\.lmz\app\settings.yaml` stores UI, Webview, logging,
+  network, ingestion, media-processing, and tagging behavior.
+- `%USERPROFILE%\.lmz\app\workspaces.yaml` registers workspace locations and
+  the active workspace.
+- `%USERPROFILE%\.lmz\default\config.yaml` is the built-in workspace config.
+  External workspaces use `<workspace>/config.yaml`.
 
-Most routine settings should be changed through the application UI.
+Workspace configs contain only `schema_version`, `active_vault`, and `vaults`
+(display names and vault roots). Credentials never belong in workspace configs.
+Most app-wide settings should be changed through the application UI.
 
 Supported environment variables:
 
 | Variable | Purpose |
 | --- | --- |
+| `LMZ_DATA_ROOT` | Override `%USERPROFILE%\.lmz` for development and isolated tests. |
 | `LMZ_CONFIG_PATH` | Load a specific workspace config when the backend starts. |
 | `LMZ_AUTH_ROOT` | Override the global authentication directory. |
 | `LMZ_DISABLE_RELOAD=1` | Disable Uvicorn auto-reload, useful for automation or isolated runs. |

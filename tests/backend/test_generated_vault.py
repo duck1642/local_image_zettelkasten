@@ -235,3 +235,36 @@ def test_generated_vault_auto_numbers_outputs(tmp_path):
 
     assert (generated_root / "001-small").exists()
     assert (generated_root / "002-video-mix").exists()
+
+
+def test_generated_vault_force_retries_windows_directory_reuse(monkeypatch, tmp_path):
+    generator = load_generator()
+    generated_root = tmp_path / "generated"
+    output = generated_root / "existing"
+    output.mkdir(parents=True)
+    (output / "old.txt").write_text("old", encoding="utf-8")
+    original_mkdir = Path.mkdir
+    delayed = {"raised": False}
+    sleeps = []
+
+    def delayed_mkdir(path, *args, **kwargs):
+        if path == output and not delayed["raised"]:
+            delayed["raised"] = True
+            raise PermissionError("directory name is still pending deletion")
+        return original_mkdir(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "mkdir", delayed_mkdir)
+    monkeypatch.setattr(generator.time, "sleep", lambda seconds: sleeps.append(seconds))
+
+    generator.main([
+        "--generated-root", str(generated_root),
+        "--output", str(output),
+        "--items", "1",
+        "--review", "0",
+        "--force",
+    ])
+
+    assert delayed["raised"] is True
+    assert sleeps == [0.05]
+    assert not (output / "old.txt").exists()
+    assert (output / "manifest.json").exists()

@@ -105,6 +105,12 @@ class TerminalLogger:
         with self._lock:
             self._handle.close()
 
+    def __del__(self):
+        try:
+            self.close()
+        except Exception:
+            pass
+
     def __getattr__(self, attr):
         return getattr(self.terminal, attr)
 
@@ -131,6 +137,19 @@ def configure_terminal_logging():
     sys.stdout = TerminalLogger("console.log", original_stdout)
     sys.stderr = TerminalLogger("console.log", original_stderr)
     _terminal_logging_configured = True
+
+
+def restore_terminal_logging():
+    global _terminal_logging_configured
+    if isinstance(sys.stdout, TerminalLogger):
+        original_stdout = sys.stdout.terminal
+        sys.stdout.close()
+        sys.stdout = original_stdout
+    if isinstance(sys.stderr, TerminalLogger):
+        original_stderr = sys.stderr.terminal
+        sys.stderr.close()
+        sys.stderr = original_stderr
+    _terminal_logging_configured = False
 
 ALLOWED_ORIGINS = {
     "http://localhost:5173",
@@ -253,7 +272,7 @@ class _LocalIngestLockProxy:
         self._lock.acquire()
         return self._lock
 
-    def __exit__(self, exc_type, exc, tb):
+    def __exit__(self, _exc_type, _exc, _tb):
         self._lock.release()
 
 

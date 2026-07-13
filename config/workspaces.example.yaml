@@ -1,5 +1,6 @@
-active: default
+schema_version: 1
+active_workspace: default
 workspaces:
   default:
     name: Default
-    config_path: config/config.yaml
+    config_path: default/config.yaml

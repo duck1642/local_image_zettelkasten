@@ -24,7 +24,7 @@ def main():
     finally:
         conn.close()
 
-    log_ingest_online('INFO', f"\nLMZ Unified System - Starting")
+    log_ingest_online('INFO', "\nLMZ Unified System - Starting")
     log_ingest_online('INFO', f"Input: {ctx.active_vault.input_dir}")
     log_ingest_online('INFO', f"Vault: {ctx.active_vault.vault_dir}")
     log_ingest_online('INFO', f"DB: {ctx.active_vault.db_path}\n")
@@ -51,7 +51,7 @@ def main():
         else:
             log_ingest_online('INFO', f"  No {filename} found. Skipping.")
 
-    log_ingest_local('INFO', f"\nScanning local input folder for remaining files...")
+    log_ingest_local('INFO', "\nScanning local input folder for remaining files...")
 
     input_dir = ctx.active_vault.input_dir
     review_dir = ctx.active_vault.review_dir

@@ -17,7 +17,6 @@ from db.sqlite_operator import allocate_storage_id, init_database
 from media_lifecycle import remove_stale_derived_files, storage_lifecycle_lock
 from path_policy import vault_root_is_inside_workspace, vault_root_is_usable
 from runtime_context import VaultContext, WorkspaceContext, build_runtime_context, get_runtime_context
-from utils import atomic_write_text
 from vault_packages import (
     BACKUP_PACKAGE_TYPE,
     EXPORT_PACKAGE_TYPE,

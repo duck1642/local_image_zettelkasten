@@ -234,9 +234,17 @@ def test_app_settings_api_is_available_without_runtime_and_rejects_stale_put(
     app = _fresh_app(monkeypatch, tmp_path)
     with TestClient(app) as client:
         session_key = client.get("/api/session-key").json()["key"]
-        initial = client.get("/api/app/settings")
+        initial = client.get(
+            "/api/app/settings",
+            headers={"Origin": "http://tauri.localhost"},
+        )
         assert initial.status_code == 200
         assert initial.headers["etag"]
+        exposed_headers = {
+            value.strip().lower()
+            for value in initial.headers.get("access-control-expose-headers", "").split(",")
+        }
+        assert "etag" in exposed_headers
 
         body = initial.json()
         body["ui"]["privacy_blur"] = True

@@ -17,7 +17,7 @@ _api_ingestion = importlib.reload(_api_ingestion)
 _api_review = importlib.reload(_api_review)
 _api_app = importlib.reload(_api_app)
 
-from api.app import app, startup_search_index, startup_metadata_index, startup_auth_scan
+from api.app import app
 from api.common import *
 from api.runtime import *
 from api.library import *

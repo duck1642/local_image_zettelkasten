@@ -13,13 +13,12 @@ from utils import (
 from runtime_context import get_runtime_context, WorkspaceContext
 from fingerprint import (
     get_audio_fingerprint, get_visual_embedding,
-    compare_embeddings, compare_audio_fingerprints,
     get_video_duration
 )
 from validators import get_mime_type, is_allowed_mime
 from db.sqlite_operator import (
     connect_database, check_duplicate_hash, insert_to_database, allocate_storage_id,
-    get_all_video_signatures, insert_tiles
+    insert_tiles
 )
 from db.search_manager import search_manager
 from md_generator import generate_markdown
@@ -277,7 +276,7 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
 
     mime_type = get_mime_type(filepath) or "unknown"
     if not is_allowed_mime(mime_type, allowed_mimes):
-        log_system("WARNING", f"Skipped: Invalid MIME type", file=filepath.name, mime=mime_type)
+        log_system("WARNING", "Skipped: Invalid MIME type", file=filepath.name, mime=mime_type)
         return False, f"Invalid MIME: {mime_type}", None
 
 
@@ -285,7 +284,7 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
     allowed_exts = {ext.lstrip('.').lower() for ext in allowed_exts_config}
 
     if filepath.suffix.lstrip('.').lower() not in allowed_exts:
-        log_system("WARNING", f"Skipped: Invalid extension", file=filepath.name, extension=filepath.suffix)
+        log_system("WARNING", "Skipped: Invalid extension", file=filepath.name, extension=filepath.suffix)
         return False, f"Invalid extension: {filepath.suffix}", None
 
     file_hash = calculate_file_hash(filepath)
@@ -306,7 +305,7 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
     conn = connect_database(ctx=ctx)  # connect_database()
     if check_duplicate_hash(conn, file_hash):
         conn.close()
-        log_system("INFO", f"Skipped: Duplicate hash", hash=file_hash, file=filepath.name)
+        log_system("INFO", "Skipped: Duplicate hash", hash=file_hash, file=filepath.name)
         return False, f"Duplicate ignored: {file_hash[:8]}...", None
 
 
@@ -583,7 +582,7 @@ def process_file(filepath: Path, config: dict, metadata: dict = None, delete_sou
         except Exception:
             pass
 
-        log_system("ERROR", f"Pipeline crash during processing", file=filepath.name, error=str(e))
+        log_system("ERROR", "Pipeline crash during processing", file=filepath.name, error=str(e))
         return False, f"System Error (Rolled back): {str(e)}", None
 
     finally:

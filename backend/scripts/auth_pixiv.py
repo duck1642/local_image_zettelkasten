@@ -32,14 +32,14 @@ def run_auth():
 
     login_url = f"https://app-api.pixiv.net/web/v1/login?code_challenge={challenge}&code_challenge_method=S256&client=pixiv-android"
 
-    print(f"\n[INFO] 1. Open this secure login link in your browser:")
+    print("\n[INFO] 1. Open this secure login link in your browser:")
     print(f"\n    {login_url}\n")
     print("2. BEFORE logging in, press F12 to open Developer Tools and go to the 'Network' tab.")
     print("3. Log in to your Pixiv account.")
     print("4. After logging in, your browser may say 'Link not recognized' or 'Address was not understood' because of the pixiv:// protocol. This is normal.")
     print("5. Look at the F12 Network tab. Find a request that starts with 'callback?state=...'")
     print("6. Click that request, look at its URL or Payload, and find the 'code=' parameter.")
-    print(f"    Copy the code (or the entire URL) and paste it below.\n")
+    print("    Copy the code (or the entire URL) and paste it below.\n")
 
     try:
         url_input = input("Paste the URL or code here: ").strip()

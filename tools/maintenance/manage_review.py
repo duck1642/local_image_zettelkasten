@@ -96,7 +96,7 @@ def manage_single_item(item_path):
         except Exception:
             pass
 
-    print(f"\n" + "-"*60)
+    print("\n" + "-"*60)
     print(f"[INFO] REVIEWING: {item_path.name}")
     print(f"[INFO] New pHash:      {new_phash}")
     print(f"[INFO] Best Match:     {best_match}")

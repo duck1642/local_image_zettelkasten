@@ -2480,7 +2480,7 @@ def test_review_multi_match_and_safe_specific_replace(monkeypatch, tmp_path):
 
     # 2. Test api.review._get_review_items_sync resolving multiple matches
     conn = insert_mock_item(sqlite_operator, "hash-a", artist="Artist A")
-    insert_mock_item(sqlite_operator, "hash-b", artist="Artist B")
+    insert_mock_item(sqlite_operator, "hash-b", artist="Artist B").close()
     conn.close()
 
     review_file = utils.REVIEW_DIR / "staged.jpg"

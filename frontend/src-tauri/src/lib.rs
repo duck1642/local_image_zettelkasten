@@ -132,9 +132,9 @@ impl DesktopOwnerGuard {
                 unsafe { CloseHandle(handle) };
                 return Err(OwnerError::AlreadyRunning);
             }
-            return Ok(Self {
+            Ok(Self {
                 handle: handle as isize,
-            });
+            })
         }
 
         #[cfg(not(windows))]
@@ -515,17 +515,35 @@ fn copy_file_to_clipboard(path: String) -> Result<(), String> {
     let paths = vec![path];
     let _clip = Clipboard::new_attempts(10).map_err(|e| e.to_string())?;
     formats::FileList
-        .write_clipboard(&paths.as_slice())
+        .write_clipboard(paths.as_slice())
         .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn toggle_devtools(webview: tauri::WebviewWindow) {
-    if webview.is_devtools_open() {
-        webview.close_devtools();
-    } else {
-        webview.open_devtools();
-    }
+fn open_devtools(webview: tauri::WebviewWindow) {
+    webview.open_devtools();
+}
+
+#[cfg(windows)]
+fn disable_native_browser_accelerators(webview: &tauri::Webview) -> tauri::Result<()> {
+    use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Settings3;
+    use windows_core::Interface;
+
+    // WebView2 consumes shortcuts such as Ctrl+Shift+I before DOM key handlers.
+    // Disable its accelerator layer so LMZ's app-wide setting owns those keys.
+    webview.with_webview(|platform_webview| {
+        let result = unsafe {
+            platform_webview
+                .controller()
+                .CoreWebView2()
+                .and_then(|core| core.Settings())
+                .and_then(|settings| settings.cast::<ICoreWebView2Settings3>())
+                .and_then(|settings| settings.SetAreBrowserAcceleratorKeysEnabled(false))
+        };
+        if let Err(error) = result {
+            eprintln!("Failed to disable native WebView2 browser accelerators: {error}");
+        }
+    })
 }
 
 #[tauri::command]
@@ -567,6 +585,10 @@ pub fn run() {
     .manage(SidecarState::new(skip_sidecar))
     .on_page_load(|webview, payload| {
         if matches!(payload.event(), tauri::webview::PageLoadEvent::Started) {
+            #[cfg(windows)]
+            if let Err(error) = disable_native_browser_accelerators(webview) {
+                eprintln!("Failed to schedule the native WebView2 accelerator gate: {error}");
+            }
             let window = webview.window();
             let reset_layout = || -> tauri::Result<()> {
                 window.set_fullscreen(false)?;
@@ -587,7 +609,7 @@ pub fn run() {
             stop_sidecar(&state);
         }
     })
-    .invoke_handler(tauri::generate_handler![copy_file_to_clipboard, toggle_devtools, wait_for_sidecar_ready, stop_sidecar_command])
+    .invoke_handler(tauri::generate_handler![copy_file_to_clipboard, open_devtools, wait_for_sidecar_ready, stop_sidecar_command])
     .plugin(tauri_plugin_dialog::init())
     .plugin(tauri_plugin_shell::init())
     .plugin(tauri_plugin_log::Builder::default()

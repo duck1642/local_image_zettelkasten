@@ -47,6 +47,7 @@ export type AppSettings = {
 };
 
 export const appSettings = writable<AppSettings | null>(null);
+export const persistedAppSettings = writable<AppSettings | null>(null);
 export const appSettingsLoading = writable(false);
 export const appSettingsSaving = writable(false);
 export const appSettingsError = writable('');
@@ -102,6 +103,7 @@ export async function loadAppSettings(force = false): Promise<AppSettings> {
       currentEtag = response.headers.get('etag') || '';
       const next = normalize(await response.json());
       appSettings.set(next);
+      persistedAppSettings.set(next);
       savedSettingsText.set(JSON.stringify(next));
       return next;
     })
@@ -119,11 +121,11 @@ export async function loadAppSettings(force = false): Promise<AppSettings> {
 
 export async function saveAppSettings(nextValue: AppSettings | null = get(appSettings)) {
   if (!nextValue) return null;
-  if (!currentEtag) throw new Error('App settings must be loaded before saving');
   const next = normalize(nextValue);
   appSettingsSaving.set(true);
   appSettingsError.set('');
   try {
+    if (!currentEtag) throw new Error('App settings must be loaded before saving');
     const response = await requireOk(await apiFetch('/api/app/settings', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', 'If-Match': currentEtag },
@@ -132,6 +134,7 @@ export async function saveAppSettings(nextValue: AppSettings | null = get(appSet
     const saved = normalize(await response.json());
     currentEtag = response.headers.get('etag') || currentEtag;
     appSettings.set(saved);
+    persistedAppSettings.set(saved);
     savedSettingsText.set(JSON.stringify(saved));
     return saved;
   } catch (error) {

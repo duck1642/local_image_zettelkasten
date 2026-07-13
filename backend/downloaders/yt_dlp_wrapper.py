@@ -344,7 +344,7 @@ def download_video(url: str, metadata_info: dict = None) -> tuple[bool, dict]:
             meta_cmd.extend(["--user-agent", ext_tools['user_agent']])
         meta_cmd.append(url)
 
-        print(f"   [INFO] Fetching YouTube metadata...")
+        print("   [INFO] Fetching YouTube metadata...")
         meta_res = subprocess.run(meta_cmd, capture_output=True, text=True, timeout=_timeout("yt_dlp_metadata", 120))
 
         expected_size = None
@@ -367,7 +367,7 @@ def download_video(url: str, metadata_info: dict = None) -> tuple[bool, dict]:
             dl_cmd.extend(["--user-agent", ext_tools['user_agent']])
         dl_cmd.append(url)
 
-        print(f"   [INFO] Running yt-dlp for YouTube...")
+        print("   [INFO] Running yt-dlp for YouTube...")
         dl_res = subprocess.run(dl_cmd, capture_output=True, text=True, timeout=_timeout("yt_dlp_download", 600))
 
         if dl_res.returncode != 0:

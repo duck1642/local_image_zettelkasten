@@ -14,7 +14,7 @@
   import { queueStats, reviewCount, reviewStats, startSharedStatsPolling } from './lib/statsStore';
   import { apiFetch } from './lib/api';
   import { privacyBlur } from './lib/privacyStore';
-  import { appSettings, loadAppSettings } from './lib/appSettingsStore';
+  import { loadAppSettings, persistedAppSettings } from './lib/appSettingsStore';
   import { refreshRuntimeSession } from './lib/runtimeStore';
   import { applyMainWindowLayout, safeConfirm } from './lib/windowLayout';
   import {
@@ -93,7 +93,7 @@
     const devtoolsShortcut = event.key === 'F12' || (event.ctrlKey && event.shiftKey && key === 'i');
     if (devtoolsShortcut) {
       event.preventDefault();
-      if ($appSettings?.webview.devtools_enabled) void toggleNativeDevtools();
+      if ($persistedAppSettings?.webview.devtools_enabled) void openNativeDevtools();
       return;
     }
     if (event.key !== 'F5') return;
@@ -108,16 +108,16 @@
   }
 
   function handleContextMenu(event: MouseEvent) {
-    if (!$appSettings?.webview.context_menu_enabled) event.preventDefault();
+    if (!$persistedAppSettings?.webview.context_menu_enabled) event.preventDefault();
   }
 
-  async function toggleNativeDevtools() {
+  async function openNativeDevtools() {
     if (!(window as any).__TAURI_INTERNALS__) return;
     try {
       const { invoke } = await import('@tauri-apps/api/core');
-      await invoke('toggle_devtools');
+      await invoke('open_devtools');
     } catch (error) {
-      uiLog('WARNING', 'Failed to toggle developer tools', { error: String(error) });
+      uiLog('WARNING', 'Failed to open developer tools', { error: String(error) });
     }
   }
 

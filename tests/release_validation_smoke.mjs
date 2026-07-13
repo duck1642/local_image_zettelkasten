@@ -171,31 +171,74 @@ async function waitForMetadata() {
 
 function startBackend(dataRoot, outputPath) {
   const output = fs.openSync(outputPath, 'a');
-  return spawn('python', ['web_api.py'], {
-    cwd: backendRoot,
-    env: {
-      ...process.env,
-      PYTHONPATH: backendRoot,
-      LMZ_DATA_ROOT: dataRoot,
-      LMZ_CONFIG_PATH: path.join(dataRoot, 'default', 'config.yaml'),
-      LMZ_DISABLE_RELOAD: '1',
-    },
-    stdio: ['ignore', output, output],
-    windowsHide: true,
+  const nonce = `goal-e-smoke-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  try {
+    const child = spawn('python', ['web_api.py'], {
+      cwd: backendRoot,
+      env: {
+        ...process.env,
+        PYTHONPATH: backendRoot,
+        LMZ_DATA_ROOT: dataRoot,
+        LMZ_CONFIG_PATH: path.join(dataRoot, 'default', 'config.yaml'),
+        LMZ_DISABLE_RELOAD: '1',
+        LMZ_STARTUP_NONCE: nonce,
+      },
+      stdio: ['ignore', output, output],
+      windowsHide: true,
+    });
+    child.lmzNonce = nonce;
+    return child;
+  } finally {
+    fs.closeSync(output);
+  }
+}
+
+async function waitForBackend(child) {
+  await waitFor(`${apiBase}/api/runtime/health`, async (response) => {
+    const payload = await response.json().catch(() => ({}));
+    return response.ok
+      && payload.service === 'lmz-api'
+      && payload.ready === true
+      && payload.protocol_version === 1
+      && payload.nonce === child.lmzNonce;
   });
 }
 
-async function stopBackend(child) {
-  if (!child || child.exitCode !== null) return;
-  if (process.platform === 'win32' && child.pid) {
-    spawnSync('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
-  } else {
-    child.kill('SIGTERM');
+async function waitForProcessExit(child, timeoutMs) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    if (child.exitCode !== null || child.signalCode !== null) return true;
+    await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  await Promise.race([
-    new Promise((resolve) => child.once('exit', resolve)),
-    new Promise((resolve) => setTimeout(resolve, 15_000)),
-  ]);
+  return child.exitCode !== null || child.signalCode !== null;
+}
+
+async function stopBackend(child) {
+  if (!child) return;
+  if (child.exitCode === null && child.signalCode === null) {
+    if (process.platform === 'win32' && child.pid) {
+      const result = spawnSync('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
+      if (result.status !== 0 && child.exitCode === null) child.kill('SIGTERM');
+    } else {
+      child.kill('SIGTERM');
+    }
+  }
+  let exited = await waitForProcessExit(child, 15_000);
+  if (!exited) {
+    child.kill('SIGKILL');
+    exited = await waitForProcessExit(child, 5_000);
+  }
+  assert(exited, `backend process ${child.pid} did not exit`);
+  const started = Date.now();
+  while (Date.now() - started < 15_000) {
+    try {
+      await fetch(`${apiBase}/api/runtime/health`);
+    } catch {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  throw new Error(`backend port remained reachable after stopping process ${child.pid}`);
 }
 
 function pngFixture(suffix = '') {
@@ -235,7 +278,7 @@ async function main() {
 
   try {
     backend = startBackend(dataRoot, outputPath);
-    await waitFor(`${apiBase}/api/app/settings`);
+    await waitForBackend(backend);
     await refreshSessionKey();
 
     const settingsResponse = await fetch(`${apiBase}/api/app/settings`);
@@ -352,7 +395,7 @@ async function main() {
     backend = null;
     sessionKey = '';
     backend = startBackend(dataRoot, outputPath);
-    await waitFor(`${apiBase}/api/app/settings`);
+    await waitForBackend(backend);
     const restartWorkspaces = await apiJson('/api/workspaces');
     assert(restartWorkspaces.active === initialWorkspace, `restart changed active workspace: ${restartWorkspaces.active}`);
     const restartRuntime = await apiJson('/api/runtime/session');

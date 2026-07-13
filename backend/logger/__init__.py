@@ -14,4 +14,5 @@ from .logger import (
     log_system,
     startup_log_dirs,
     reconfigure_logging,
+    shutdown_logging,
 )

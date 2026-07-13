@@ -8,8 +8,8 @@ from fastapi.responses import JSONResponse
 
 from db.sqlite_operator import init_database
 from db.search_manager import search_manager
-from logger import log_system, reconfigure_logging
-from metadata_index import start_metadata_repair_worker, start_metadata_watchdog
+from logger import log_system, reconfigure_logging, shutdown_logging
+from metadata_index import start_metadata_repair_worker, start_metadata_watchdog, stop_metadata_watchdog
 from runtime_activation import activate_runtime_context
 from runtime_context import RuntimeNotLoadedError, build_runtime_context, has_runtime_context
 from app_paths import get_app_paths
@@ -25,6 +25,7 @@ from api.common import (
     _scan_auth_status_sync,
     _validate_origin,
     configure_terminal_logging,
+    restore_terminal_logging,
 )
 from api import app_settings, capture, ingestion, library, logs, review, runtime
 
@@ -116,7 +117,12 @@ async def lifespan(app: FastAPI):
     configure_terminal_logging()
     await startup_env_workspace()
     await startup_auth_scan()
-    yield
+    try:
+        yield
+    finally:
+        await asyncio.to_thread(stop_metadata_watchdog)
+        restore_terminal_logging()
+        shutdown_logging()
 
 
 app = FastAPI(title="LMZ API", lifespan=lifespan)
@@ -126,6 +132,7 @@ app.add_middleware(
     allow_origins=sorted(ALLOWED_ORIGINS),
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["ETag"],
 )
 
 

@@ -71,7 +71,7 @@
 
     <label for="settings-devtools-enabled">
       Developer tools
-      <div class="micro-desc">Allow Ctrl+Shift+I or F12 to toggle the native web inspector.</div>
+      <div class="micro-desc">Allow Ctrl+Shift+I or F12 to open the native web inspector.</div>
     </label>
     <div class="checkbox-group">
       <label class="check-label" id="settings-devtools-enabled">

@@ -28,4 +28,6 @@ tauri-plugin-shell = "2"
 clipboard-win = "5.4"
 
 [target.'cfg(windows)'.dependencies]
+webview2-com = "=0.38.2"
+windows-core = "=0.61.2"
 windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_Threading"] }

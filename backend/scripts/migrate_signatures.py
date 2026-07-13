@@ -61,7 +61,7 @@ def migrate():
     conn.commit()
     conn.close()
 
-    print(f"\n[OK] Migration Complete!")
+    print("\n[OK] Migration Complete!")
     print(f"   - Updated: {updates}")
     print(f"   - Errors/Missing: {errors}")
     print(f"   - Total Processed: {len(videos)}")

@@ -128,6 +128,11 @@ def reconfigure_logging(ctx: WorkspaceContext | None = None):
     configure_logging(ctx, force=True)
 
 
+def shutdown_logging():
+    for logger in _LOGGER_SPECS:
+        _remove_owned_handlers(logger)
+
+
 def _log(logger, level, message, **kwargs):
     exc_info = kwargs.pop("exc_info", None)
     level_name = str(level or "INFO").upper()

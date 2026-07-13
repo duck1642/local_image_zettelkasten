@@ -7,6 +7,7 @@ import random
 import shutil
 import sqlite3
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -340,8 +341,18 @@ def generate_vault(args: argparse.Namespace) -> Path:
     if output.exists():
         if not args.force:
             raise SystemExit(f"Output exists; pass --force to overwrite: {output}")
-        shutil.rmtree(output)
-    output.mkdir(parents=True)
+        tombstone = output.with_name(f".{output.name}.delete-{os.getpid()}-{time.time_ns()}")
+        output.replace(tombstone)
+        shutil.rmtree(tombstone)
+    for attempt in range(20):
+        try:
+            output.mkdir(parents=True)
+            break
+        except PermissionError:
+            if attempt == 19:
+                raise
+            # Windows can briefly retain a removed directory name.
+            time.sleep(0.05)
 
     config_path = output / "config.yaml"
     _write_yaml(config_path, _config())

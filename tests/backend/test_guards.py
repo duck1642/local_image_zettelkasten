@@ -8,6 +8,25 @@ from fastapi.testclient import TestClient
 ROOT = Path(__file__).resolve().parents[2]
 BACKEND = ROOT / "backend"
 
+
+def _shutdown_loaded_runtime():
+    previous_metadata_index = sys.modules.get("metadata_index")
+    if previous_metadata_index is not None:
+        previous_metadata_index.stop_metadata_watchdog()
+    previous_common = sys.modules.get("api.common")
+    if previous_common is not None:
+        previous_common.restore_terminal_logging()
+    previous_logger = sys.modules.get("logger")
+    if previous_logger is not None:
+        previous_logger.shutdown_logging()
+
+
+@pytest.fixture(autouse=True)
+def cleanup_loaded_runtime():
+    yield
+    _shutdown_loaded_runtime()
+
+
 def fresh_api(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     monkeypatch.delenv("LMZ_CONFIG_PATH", raising=False)
     monkeypatch.setenv("LMZ_DATA_ROOT", str(tmp_path / ".lmz"))
@@ -15,6 +34,7 @@ def fresh_api(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
         sys.path.insert(0, str(ROOT))
     if str(BACKEND) not in sys.path:
         sys.path.insert(0, str(BACKEND))
+    _shutdown_loaded_runtime()
     for name in list(sys.modules):
         if name in {
             "api",
@@ -318,8 +338,8 @@ def test_vault_merge_safety_and_defaults(monkeypatch, tmp_path):
     assert "source database is missing" in merge_res.json()["detail"]
 
     # Initialize source DBs
-    db_sqlite.init_database(target_root / "db" / "lmz_main.db")
-    db_sqlite.init_database(source_root / "db" / "lmz_main.db")
+    db_sqlite.init_database(target_root / "db" / "lmz_main.db").close()
+    db_sqlite.init_database(source_root / "db" / "lmz_main.db").close()
 
     # 2. New merged-vault endpoints create a separate vault from selected sources
     preview_res = client.post(
@@ -351,7 +371,7 @@ def test_vault_repair_safety(monkeypatch, tmp_path):
 
     default_root = ws_root / "data" / "vaults" / "default"
     default_root.mkdir(parents=True)
-    db_sqlite.init_database(default_root / "db" / "lmz_main.db")
+    db_sqlite.init_database(default_root / "db" / "lmz_main.db").close()
 
     config_path = ws_root / "config.yaml"
     workspace_config(config_path, vault_root="data/vaults/default")

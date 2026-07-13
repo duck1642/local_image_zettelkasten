@@ -169,7 +169,6 @@ def parse_queue(text: str) -> dict:
             continue
 
         processed = _strip_list_marker(raw)
-        lower = processed.lower()
         artist_match = re.match(r"^@artist:\s*(.+)$", processed, re.IGNORECASE)
         if artist_match:
             current_artist = artist_match.group(1).strip()
