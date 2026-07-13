@@ -4,7 +4,7 @@ Local Media Zettelkasten (LMZ) is a desktop application for collecting, organizi
 
 LMZ stores media as ordinary files, keeps metadata in SQLite and Markdown, detects duplicate or similar media, and provides a compact Tauri/Svelte interface for daily management. Library operations run locally. Internet access is only needed for online ingestion, downloader authentication, dependency installation, and downloading AI model weights.
 
-> LMZ is currently a development-oriented desktop application. Windows is the primary tested platform. Keep independent backups of important libraries.
+> LMZ v1.0.0 is a Windows-focused desktop release. Keep independent backups of important libraries.
 
 ## What LMZ Does
 
@@ -21,7 +21,7 @@ LMZ stores media as ordinary files, keeps metadata in SQLite and Markdown, detec
 - Audits and repairs vault consistency.
 - Imports, exports, backs up, restores, and merges vaults.
 - Streams structured application logs and raw console output in the UI.
-- Includes a browser extension for staging images and online queue URLs.
+- Includes an optional browser-capture prototype for staging images and online queue URLs; browser release hardening is deferred beyond v1.0.0.
 
 ## Application Layout
 
@@ -252,7 +252,7 @@ See [Downloader Authentication Guide](docs/auth_guide.md) for extraction and Pix
 
 ## Browser Extension
 
-The optional extension can stage images and append page URLs to the LMZ online queue. Pending captures are retained in browser IndexedDB while LMZ is closed and synchronized when the backend is available.
+The optional browser-capture prototype can stage images and append page URLs to the LMZ online queue. It is not part of the v1.0.0 release acceptance scope. Pending captures are retained in browser IndexedDB while LMZ is closed and synchronized when the backend is available.
 
 Development versions exist for Edge, Chrome, and Firefox. See [Browser Extension](tools/browser_extension/README.md) for loading and synchronization instructions.
 
@@ -387,15 +387,13 @@ Generated frontend, Cargo, package, runtime data, logs, backups, exports, and se
 
 ```text
 backend/                 FastAPI, ingestion, storage, maintenance, and downloaders
-config/                  Built-in workspace and workspace registry
+config/                  Example configuration files only; not runtime storage
 docs/                    Focused user and developer guides
 frontend/                Svelte UI and Tauri desktop shell
 tests/                   Backend and Playwright regression coverage
 tools/browser_extension/ Browser capture and online-queue extension
 tools/maintenance/       Readiness, build, fixture, and maintenance utilities
-data/                    Built-in runtime data and shared model cache (ignored)
-logs/                    Startup/runtime logs (ignored)
-secrets/                 API key and global downloader credentials (ignored)
+%USERPROFILE%\.lmz/      Default app, workspace, model, log, and credential data home
 ```
 
 ## Privacy and Data Safety
