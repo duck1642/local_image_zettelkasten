@@ -193,7 +193,6 @@ cython_debug/
 
 # LMZ runtime/private state
 docs/*
-!docs/current_work.md
 !docs/auth_guide.md
 data/
 /logs/
