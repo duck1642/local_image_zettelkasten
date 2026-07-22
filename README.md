@@ -10,7 +10,7 @@ LMZ stores media as ordinary files, keeps metadata in SQLite and Markdown, detec
 
 - Imports local files and folders through drag-and-drop or file pickers.
 - Downloads media from supported URLs with `gallery-dl` and `yt-dlp`.
-- Supports X, Instagram, Pinterest, Pixiv, YouTube, Fanbox, and generic/local sources where the underlying downloader supports them.
+- Supports X, Instagram, Pinterest, Pixiv, YouTube, and generic/local sources where the underlying downloader supports them.
 - Deduplicates media using cryptographic and perceptual fingerprints.
 - Generates sharded asset, Markdown note, thumbnail, and WD-tag cache files.
 - Adds optional local WD image tags using `SmilingWolf/wd-vit-tagger-v3`.
