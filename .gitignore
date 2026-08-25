@@ -192,6 +192,7 @@ cython_debug/
 .cursorindexingignore
 
 # LMZ runtime/private state
+WALKTHROUGH.md
 docs/*
 !docs/auth_guide.md
 data/
