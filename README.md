@@ -52,13 +52,15 @@ From PowerShell in the repository root:
 py -3 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install --upgrade pip
 .\.venv\Scripts\python.exe -m pip install -e ".[windows,tauri]"
+.\.venv\Scripts\python.exe -m pip install pytest
 
 cd frontend
 npm install
+npm exec playwright install chromium
 cd ..
 ```
 
-For Linux or macOS, replace the Python extras with `.[unix,tauri]`. Platform-specific Tauri packages are also required.
+The commands above use Windows PowerShell. For Linux or macOS, use the equivalent virtual-environment commands, replace the Python extras with `.[unix,tauri]`, and install the platform-specific Tauri packages.
 
 ## Quick Start
 
@@ -169,26 +171,28 @@ Run frontend checks and builds from the repository root:
 cd frontend
 npm run check
 npm run build
+cd ..
 ```
 
-Run backend tests from the repository root. `pytest` must be installed in the project environment:
+Run backend tests from the repository root:
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest tests\backend
 ```
 
-Before running frontend tests or the sidecar build, activate the project virtual environment because these npm scripts call `python` internally:
+Before running frontend Playwright tests or the sidecar build, activate the project virtual environment because those npm scripts call `python` internally:
 
 ```powershell
 .\.venv\Scripts\Activate.ps1
 ```
 
-Run frontend tests from the repository root:
+Run frontend checks and tests from the repository root:
 
 ```powershell
 cd frontend
 npm run test:mock-vault
 npm run test:playwright
+cd ..
 ```
 
 From the repository root, build the production desktop application:
